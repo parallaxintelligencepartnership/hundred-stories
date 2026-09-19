@@ -9,7 +9,7 @@ Requirements: Node 26 (pinned in `.nvmrc`). No environment variables.
 ```bash
 npm ci
 npm run dev       # landing on http://localhost:5173/, game on http://localhost:5173/play/
-npm test          # vitest run: 470 tests, 27 files
+npm test          # vitest run: 553 tests, 31 files
 npm run build     # tsc --noEmit then vite build, output in dist/ (landing, how-to-play, play, 404)
 npm run preview   # serve the production build on http://localhost:4173 (does NOT send public/_headers)
 ```
@@ -43,6 +43,9 @@ No finding was accepted; the accepted risks list is empty. Every finding in `.it
 - Backups: there is no server-side data. The player's tower lives in their browser (IndexedDB, localStorage fallback) and their own exported JSON files; export and import are test-covered and were driven live in Chrome, and clearing browser data with no export loses the tower.
 - Phone framing: the camera now measures the top strip, the palette sheet and the ticker and keeps the street and floor 1 in the free band; proven in headless Chrome at 390x844 and in the unit tests, not yet on a physical phone. The palette collapses on every screen and auto-collapses on a phone after a pick.
 - No GPU: with neither WebGL nor WebGPU the game shows "This browser cannot draw the tower. WebGL is required." (proven over CDP at this closeout with both contexts stubbed out); a software WebGL still plays, slowly.
+- Touch placement: a tap parks an outline with the name and price and a bar nudges it; proven with emulated touch at 390x844 over CDP, not yet under a thumb on a physical phone.
+- Share: the share sheet with the image attached needs a real phone browser; headless Chrome proved the panel, the 1200 px preview, the message and the link. The link preview image is the static og.png; a per-share image would need a server.
+- Theme: the choice is per browser under localStorage hs.theme; a browser that blocks storage falls back to the system setting every load.
 
 ## What breaks first and how you'd know
 A PixiJS upgrade that changes how it compiles shaders, first. The site's Content Security Policy forbids eval, and the renderer only starts because `src/render/renderer.ts` loads `pixi.js/unsafe-eval` before anything else; if an upgrade moves that requirement, `/play/` shows "The page's security policy blocked the tower renderer" and the browser console logs `unsafe-eval`. The pre-deploy nginx container check catches it before it is live. Second, elevator wait under load: sims leave when their wait passes the black threshold, visible as population and evaluation falling while rooms sit vacant, with event log lines naming the wait. Third, the display fonts come from Google Fonts under the CSP; a host change renders the game in system fonts with a CSP violation in the console.

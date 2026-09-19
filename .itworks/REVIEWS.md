@@ -148,3 +148,15 @@ Scope: diff d71cff5..7347d01, 14 lines: button label, two disabled titles, a not
 - production-readiness: no headers, deploy or storage change; the guide page is static copy.
 ### Findings
 none
+
+## Closeout - 2026-09-19 - fourth ship: touch placement bar, shaft extension, see-through shafts, stairs stacking, ride cost, share, theme, 0.2.1
+Scope: closeout sweep, dc55fa2, five lens runbooks + history audit + dependency vetting. Not covered: application logic (audit tier). Last audit: 2026-09-19 @047d32b.
+### Evidence
+- security-auth: secret-pattern grep over the tree, no matches; gitleaks 130 commits, no leaks; git log -p history grep, no output; only deploy/.env.example tracked, .env ignored. Protected-route probe not applicable: PROJECT.md "auth needed: no". Injection and XSS greps: template map keys and one innerHTML clear, no user data.
+- llm-security: not applicable; the only grep hit is renderer.generateTexture.
+- real-data: no server store; saves live in the player's browser (src/game/storage.ts); the share link carries three validated integers rendered with textContent.
+- testing: 31 files, 553 passed; every Verification expectations row has a test or a logged live check. Mutations in a scratch copy: people.ts give-up threshold disabled → 5 red; share.ts integer guard widened → 1 red; both restored, 553 green.
+- production-readiness: live https://hundredstories.xyz sends the full CSP, HSTS, nosniff, referrer and permissions headers; http redirects 301 to https. Fresh dist under nginx:1.29.4-alpine with deploy/nginx.conf on :8099 sends identical headers; / and /play/ over CDP show zero Refused or unsafe-eval; --disable-3d-apis shows exactly "This browser cannot draw the tower. WebGL is required." public/_headers covers assets, sw.js, registerSW.js, theme.js, manifest and the three html pages. `npx wrangler versions list` read-only works, latest upload dfc88fb6 at 18:13Z.
+- dependency vetting: six packages, all exact, present, not deprecated, active repos; npm audit 0 with and without dev; install scripts only esbuild and workerd.
+### Findings
+- [x] ADVISORY | testing | PROJECT.md's Rendering row asks for a live reduced-motion pass and none was logged; only tests/render/camera.test.ts covers setReducedMotion (.itworks/PROJECT.md:51) | Closed 2026-09-19: CDP pass with prefers-reduced-motion emulated: landing #hero-view has 0 canvases and the still image shows (1 canvas without the emulation); the game's Menu panel shows the Reduced motion box checked on load; zero console errors
