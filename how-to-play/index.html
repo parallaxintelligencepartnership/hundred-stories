@@ -45,153 +45,192 @@
         <a class="site-wordmark" href="/" aria-label="Hundred Stories home"><picture><source srcset="/wordmark-line-light.svg" media="(prefers-color-scheme: light)"><img src="/wordmark-line-dark.svg" alt="Hundred Stories" width="1032" height="112"></picture></a>
         <nav class="site-nav" aria-label="Main">
           <a href="/how-to-play/">How to play</a>
-          <a href="/play/">Play</a>
+          <a class="nav-play" href="/play/">Play</a>
           <a href="https://github.com/parallaxintelligencepartnership/hundred-stories">Source</a>
         </nav>
       </div>
     </header>
 
     <main>
-      <div class="wrap">
-        <section class="guide">
-          <h1>How to play</h1>
-          <p>
-            You own a bare lot and a little cash. Everything else is up to you: what you build, who
-            you rent it to, and whether the elevators can carry the people you invited in.
-          </p>
+      <div class="page-head">
+        <div class="wrap">
+          <div class="hero-panel">
+            <h1>How to play</h1>
+            <p>
+              You own a bare lot and a little cash. Everything else is up to you: what you build, who
+              you rent it to, and whether the elevators can carry the people you invited in.
+            </p>
+          </div>
+        </div>
+      </div>
 
-          <h2>Rooms</h2>
-          <p>
-            Floor 1 is the ground floor and holds the lobby, which every tower must have. Floors
-            climb from 2 to 100 above ground, and there are ten levels underground, numbered down
-            from minus 1. There is no floor 0.
-          </p>
-          <p>
-            The lot is 375 tiles wide. A room takes a fixed number of tiles across and one or more
-            floors up, starting from the floor you place it on. Underground rooms grow upward from
-            their floor in the same way.
-          </p>
-          <p>
-            A floor only exists where you have built on it. There is no empty slab waiting for you:
-            the tower is exactly the rooms and shafts you paid for.
-          </p>
-          <p>
-            Stairs and escalators are two floors tall and join a floor to the one above it. An
-            elevator shaft takes its own columns for its whole span, and no room may overlap it.
-          </p>
+      <div class="underground">
+        <section class="floor guide" aria-labelledby="rooms">
+          <div class="wrap">
+            <p class="floor-tag">B1 &middot; ROOMS</p>
+            <h2 id="rooms">Rooms</h2>
+            <p>
+              Floor 1 is the ground floor and holds the lobby, which every tower must have. Floors
+              climb from 2 to 100 above ground, and there are ten levels underground, numbered down
+              from minus 1. There is no floor 0.
+            </p>
+            <p>
+              The lot is 375 tiles wide. A room takes a fixed number of tiles across and one or more
+              floors up, starting from the floor you place it on. Underground rooms grow upward from
+              their floor in the same way.
+            </p>
+            <p>
+              A floor only exists where you have built on it. There is no empty slab waiting for you:
+              the tower is exactly the rooms and shafts you paid for.
+            </p>
+            <p>
+              Stairs and escalators are two floors tall and join a floor to the one above it. An
+              elevator shaft takes its own columns for its whole span, and no room may overlap it.
+            </p>
+          </div>
+        </section>
 
-          <h2>Elevators</h2>
-          <p>
-            There are three kinds of shaft: standard, service and express. An express shaft is for
-            the long haul only, stopping at the lobby and the sky lobbies rather than at every
-            floor. Each shaft covers a range of floors, stops where you tell it to, and runs one or
-            more cars.
-          </p>
-          <p>
-            A car keeps going in the direction it is already travelling while anyone ahead of it has
-            called or is waiting to get off, then turns around. A car with nothing to do returns to
-            its home floor after a while.
-          </p>
-          <p>
-            When somebody needs to move between floors, the game sends them to the nearest shaft
-            that stops at both ends of the trip. Cars have a capacity: a full car passes a waiting
-            crowd by, and those people keep waiting, which is where most of your trouble will start.
-          </p>
+        <section class="floor guide" aria-labelledby="elevators">
+          <div class="wrap">
+            <p class="floor-tag">B2 &middot; ELEVATORS</p>
+            <h2 id="elevators">Elevators</h2>
+            <p>
+              There are three kinds of shaft: standard, service and express. An express shaft is for
+              the long haul only, stopping at the lobby and the sky lobbies rather than at every
+              floor. Each shaft covers a range of floors, stops where you tell it to, and runs one or
+              more cars.
+            </p>
+            <p>
+              A car keeps going in the direction it is already travelling while anyone ahead of it has
+              called or is waiting to get off, then turns around. A car with nothing to do returns to
+              its home floor after a while.
+            </p>
+            <p>
+              When somebody needs to move between floors, the game sends them to the nearest shaft
+              that stops at both ends of the trip. Cars have a capacity: a full car passes a waiting
+              crowd by, and those people keep waiting, which is where most of your trouble will start.
+            </p>
+          </div>
+        </section>
 
-          <h2>Tenants and stress</h2>
-          <p>
-            Every person in the tower carries a stress value. It rises for each minute they stand
-            waiting for an elevator and falls again once they are settled in a room.
-          </p>
-          <p>
-            You can see it in their color. Calm people look normal, then they turn pink, then red,
-            then black. At black they give up on the trip entirely, and the reason is written to
-            your log. If that person was a tenant, their room is marked for leaving at the next
-            evaluation.
-          </p>
-          <p>
-            Noise matters too. Offices, condos and hotel rooms want quiet. Fast food, restaurants,
-            shops, cinemas and party halls are noisy, and a quiet room loses rating for every noisy
-            room near it on the same floor, or directly above or below it.
-          </p>
-          <p>
-            A room's rating combines the stress of its tenants, the noise around it and whether it
-            has been left dirty. If a room sits below the leaving threshold for a full day, the
-            tenants go and tell you why: an office falls vacant, a condo goes back on sale, and a
-            hotel room simply stays empty until the next guest.
-          </p>
+        <section class="floor guide" aria-labelledby="tenants-and-stress">
+          <div class="wrap">
+            <p class="floor-tag">B3 &middot; TENANTS AND STRESS</p>
+            <h2 id="tenants-and-stress">Tenants and stress</h2>
+            <p>
+              Every person in the tower carries a stress value. It rises for each minute they stand
+              waiting for an elevator and falls again once they are settled in a room.
+            </p>
+            <p>
+              You can see it in their color. Calm people look normal, then they turn pink, then red,
+              then black. At black they give up on the trip entirely, and the reason is written to
+              your log. If that person was a tenant, their room is marked for leaving at the next
+              evaluation.
+            </p>
+            <p>
+              Noise matters too. Offices, condos and hotel rooms want quiet. Fast food, restaurants,
+              shops, cinemas and party halls are noisy, and a quiet room loses rating for every noisy
+              room near it on the same floor, or directly above or below it.
+            </p>
+            <p>
+              A room's rating combines the stress of its tenants, the noise around it and whether it
+              has been left dirty. If a room sits below the leaving threshold for a full day, the
+              tenants go and tell you why: an office falls vacant, a condo goes back on sale, and a
+              hotel room simply stays empty until the next guest.
+            </p>
+          </div>
+        </section>
 
-          <h2>Money and the quarter</h2>
-          <p>
-            One tick of the simulation is one minute in the tower, and the clock shows hours 0 to
-            23. A quarter is three days: two weekdays and one weekend day. Four quarters make a
-            year.
-          </p>
-          <p>
-            At the start of each quarter, at five in the morning, rent comes in and upkeep goes out,
-            and every room is evaluated. There is a smaller daily charge at the same hour on the
-            other days.
-          </p>
-          <p>
-            The rest of your income arrives as it is earned: hotel rooms pay when the guest checks
-            out, shops and restaurants take money per customer, and a condo pays once when it is
-            sold. Spend faster than the tower earns and you go bankrupt.
-          </p>
-          <p>
-            Time runs at one, two or four times speed, and between 23:00 and 06:00 the tower runs
-            itself at eight times speed unless you have paused it.
-          </p>
+        <section class="floor guide" aria-labelledby="money-and-the-quarter">
+          <div class="wrap">
+            <p class="floor-tag">B4 &middot; MONEY AND THE QUARTER</p>
+            <h2 id="money-and-the-quarter">Money and the quarter</h2>
+            <p>
+              One tick of the simulation is one minute in the tower, and the clock shows hours 0 to
+              23. A quarter is three days: two weekdays and one weekend day. Four quarters make a
+              year.
+            </p>
+            <p>
+              At the start of each quarter, at five in the morning, rent comes in and upkeep goes out,
+              and every room is evaluated. There is a smaller daily charge at the same hour on the
+              other days.
+            </p>
+            <p>
+              The rest of your income arrives as it is earned: hotel rooms pay when the guest checks
+              out, shops and restaurants take money per customer, and a condo pays once when it is
+              sold. Spend faster than the tower earns and you go bankrupt.
+            </p>
+            <p>
+              Time runs at one, two or four times speed, and between 23:00 and 06:00 the tower runs
+              itself at eight times speed unless you have paused it.
+            </p>
+          </div>
+        </section>
 
-          <h2>Stars</h2>
-          <p>
-            Your rating is a ladder of stars. It is driven mostly by the number of people in the
-            tower, with a few gates that population alone will not open.
-          </p>
-          <p>
-            Stars are what unlock the rest of the build palette. Anything you have not earned yet is
-            shown locked, with the star it needs, so you always know what the next rung buys you.
-          </p>
+        <section class="floor guide" aria-labelledby="stars">
+          <div class="wrap">
+            <p class="floor-tag">B5 &middot; STARS</p>
+            <h2 id="stars">Stars</h2>
+            <p>
+              Your rating is a ladder of stars. It is driven mostly by the number of people in the
+              tower, with a few gates that population alone will not open.
+            </p>
+            <p>
+              Stars are what unlock the rest of the build palette. Anything you have not earned yet is
+              shown locked, with the star it needs, so you always know what the next rung buys you.
+            </p>
+          </div>
+        </section>
 
-          <h2>Saving and exporting</h2>
-          <p>
-            The game saves to a slot in your own browser as you play. Nothing leaves your device and
-            there is nothing to sign in to.
-          </p>
-          <p>
-            You can also export the tower to a file and import it again later, here or on another
-            machine. An import is checked first: a file from somewhere else, or a damaged one, is
-            refused with a plain reason and your running tower is left exactly as it was.
-          </p>
-          <p>
-            A new game can be started from a seed. The simulation is deterministic, so the same seed
-            and the same moves always produce the same tower.
-          </p>
+        <section class="floor guide" aria-labelledby="saving-and-exporting">
+          <div class="wrap">
+            <p class="floor-tag">B6 &middot; SAVING AND EXPORTING</p>
+            <h2 id="saving-and-exporting">Saving and exporting</h2>
+            <p>
+              The game saves to a slot in your own browser as you play. Nothing leaves your device and
+              there is nothing to sign in to.
+            </p>
+            <p>
+              You can also export the tower to a file and import it again later, here or on another
+              machine. An import is checked first: a file from somewhere else, or a damaged one, is
+              refused with a plain reason and your running tower is left exactly as it was.
+            </p>
+            <p>
+              A new game can be started from a seed. The simulation is deterministic, so the same seed
+              and the same moves always produce the same tower.
+            </p>
+          </div>
+        </section>
 
-          <h2>Controls</h2>
-          <ul>
-            <li>Move around: drag anywhere with the mouse, even with most build tools selected. The lobby and elevator tools drag to size, so pan with the right button, scroll, or keys while they are active. Scroll
-              the wheel to move up and down, hold shift to move sideways. On a trackpad, two-finger
-              scroll moves the view.</li>
-            <li>Zoom: hold ctrl and scroll, or pinch on a trackpad. Plus and minus keys also
-              zoom.</li>
-            <li>Keys: <span class="key">W</span> <span class="key">A</span>
-              <span class="key">S</span> <span class="key">D</span> or the arrow keys move the
-              view.</li>
-            <li>Touch: one finger moves the view, pinch zooms, tap places, two fingers drag to
-              pan while sizing a lobby or an elevator.</li>
-            <li>Place a room: pick it from the palette, then click where it goes. A click that does
-              not move places; a press that moves pans.</li>
-            <li>Speed: <span class="key">1</span>, <span class="key">2</span>,
-              <span class="key">3</span> set the clock speed, <span class="key">Space</span>
-              pauses.</li>
-            <li><span class="key">Escape</span> drops the current tool.</li>
-          </ul>
-          <p>
-            If you have asked your system for reduced motion, the game honors it: no inertia on the
-            camera and no drifting particles.
-          </p>
+        <section class="floor guide" aria-labelledby="controls">
+          <div class="wrap">
+            <p class="floor-tag">B7 &middot; CONTROLS</p>
+            <h2 id="controls">Controls</h2>
+            <ul>
+              <li>Move around: drag anywhere with the mouse, even with most build tools selected. The lobby and elevator tools drag to size, so pan with the right button, scroll, or keys while they are active. Scroll
+                the wheel to move up and down, hold shift to move sideways. On a trackpad, two-finger
+                scroll moves the view.</li>
+              <li>Zoom: hold ctrl and scroll, or pinch on a trackpad. Plus and minus keys also
+                zoom.</li>
+              <li>Keys: <span class="key">W</span> <span class="key">A</span>
+                <span class="key">S</span> <span class="key">D</span> or the arrow keys move the
+                view.</li>
+              <li>Touch: one finger moves the view, pinch zooms, tap places, two fingers drag to
+                pan while sizing a lobby or an elevator.</li>
+              <li>Place a room: pick it from the palette, then click where it goes. A click that does
+                not move places; a press that moves pans.</li>
+              <li>Speed: <span class="key">1</span>, <span class="key">2</span>,
+                <span class="key">3</span> set the clock speed, <span class="key">Space</span>
+                pauses.</li>
+              <li><span class="key">Escape</span> drops the current tool.</li>
+            </ul>
+            <p>
+              If you have asked your system for reduced motion, the game honors it: no inertia on the
+              camera and no drifting particles.
+            </p>
 
-          <p><a class="button" href="/play/">Play in your browser</a></p>
+            <p><a class="button" href="/play/">Play in your browser</a></p>
+          </div>
         </section>
       </div>
     </main>
@@ -206,8 +245,9 @@
           · <a href="https://www.gnu.org/licenses/agpl-3.0.html">AGPL-3.0</a>
         </p>
         <p class="small">
-          This is original work. It is not affiliated with, endorsed by, or connected to Electronic
-          Arts, Maxis, or OPeNBooK.
+          Hundred Stories is a from-scratch homage to SimTower, the 1994 tower sim. The code and
+          art are original; the game design is not, and does not claim to be. It is not affiliated
+          with, endorsed by, or connected to Electronic Arts, Maxis, or OPeNBooK.
         </p>
       </div>
     </footer>

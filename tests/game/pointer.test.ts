@@ -3,7 +3,6 @@
 // whole gesture to the camera. The renderer and the browser are faked, so this runs in node.
 import { describe, expect, it, vi } from 'vitest';
 import { createGame } from '../../src/game/game';
-import { DEFAULT_GROUND_LINE } from '../../src/render/camera';
 import type { Renderer } from '../../src/render/renderer';
 
 vi.mock('../../src/game/storage', () => ({
@@ -32,16 +31,20 @@ function fakeHost(): { el: HTMLElement; fire(type: string, event: unknown): void
 }
 
 /** Eight screen pixels to the tile, everything on floor 2: enough to place a room by hand. */
-function fakeRenderer(): { renderer: Renderer; followed: number[]; toolDrag: boolean[]; groundLines: number[] } {
+function fakeRenderer(): { renderer: Renderer; followed: number[]; toolDrag: boolean[]; frames: number } {
   const followed: number[] = [];
   const toolDrag: boolean[] = [];
-  const groundLines: number[] = [];
+  const parts = { frames: 0 };
   const renderer = {
     render: () => {},
     camera: {
       centerOn: () => {},
       ensureFloorVisible: (floor: number) => followed.push(floor),
-      setGroundLine: (fraction: number) => groundLines.push(fraction),
+      setGroundLine: () => {},
+      setObstruction: () => {},
+      reset: () => {
+        parts.frames += 1;
+      },
     },
     screenToTile: (sx: number) => ({ floor: 2, x: Math.floor(sx / 8) }),
     setGhost: () => {},
@@ -50,9 +53,17 @@ function fakeRenderer(): { renderer: Renderer; followed: number[]; toolDrag: boo
     setPanEnabled: () => {},
     setToolOwnsDrag: (on: boolean) => toolDrag.push(on),
     setReducedMotion: () => {},
+    setChrome: () => {},
     destroy: () => {},
   } as unknown as Renderer;
-  return { renderer, followed, toolDrag, groundLines };
+  return {
+    renderer,
+    followed,
+    toolDrag,
+    get frames() {
+      return parts.frames;
+    },
+  };
 }
 
 const press = (x: number, y = 50): Record<string, number> => ({
@@ -121,9 +132,9 @@ describe('press on the tower view', () => {
     expect(game.world.rooms.size).toBe(rooms + 1);
   });
 
-  it('opens on the street, at the line the screen it is on asks for', () => {
+  it('opens on the street, framed inside whatever band the chrome leaves free', () => {
     const { parts } = started();
-    expect(parts.groundLines).toEqual([DEFAULT_GROUND_LINE]); // a viewport with no width is a desktop
+    expect(parts.frames).toBe(1); // the opening shot is the camera's own reset, chrome and all
   });
 
   it('follows the build with the camera and leaves the drag tools their drag', () => {

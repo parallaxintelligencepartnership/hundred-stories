@@ -10,13 +10,10 @@ import {
   floorBandFloat,
   floorBaseY,
   floorTopY,
-  groundLineFor,
   DEFAULT_ZOOM,
   MAX_ZOOM,
   MIN_ZOOM,
   nearestSnap,
-  PHONE_GROUND_LINE,
-  PHONE_MAX_WIDTH_PX,
   xToTile,
   yToFloor,
 } from '../../src/render/camera';
@@ -334,20 +331,49 @@ describe('sky', () => {
   });
 });
 
-describe('groundLineFor', () => {
-  it('keeps the street two thirds down on a desktop', () => {
-    expect(groundLineFor(1440)).toBe(DEFAULT_GROUND_LINE);
-    expect(groundLineFor(PHONE_MAX_WIDTH_PX + 1)).toBe(DEFAULT_GROUND_LINE);
+describe('camera chrome obstruction', () => {
+  it('frames the street inside the band the phone chrome leaves free', () => {
+    const cam = createCamera();
+    cam.setViewport(390, 844);
+    cam.setObstruction(120, 400);
+    cam.setGroundLine(DEFAULT_GROUND_LINE);
+
+    const ground = cam.worldToScreen(0, 0).y;
+    expect(Math.abs(ground - (120 + DEFAULT_GROUND_LINE * (844 - 520)))).toBeLessThanOrEqual(0.5);
+
+    // Floor 1, the only place a lobby can go, has to be whole and clear of the sheet.
+    const floorTop = ground - FLOOR_PX * cam.zoom;
+    expect(ground).toBeLessThanOrEqual(844 - 400);
+    expect(floorTop).toBeGreaterThanOrEqual(120);
   });
 
-  it('treats a viewport nobody has measured as a desktop, not as a phone', () => {
-    expect(groundLineFor(0)).toBe(DEFAULT_GROUND_LINE);
-    expect(groundLineFor(Number.NaN)).toBe(DEFAULT_GROUND_LINE);
+  it('lifts a floor hidden behind the sheet back into the free band', () => {
+    const cam = createCamera();
+    cam.setViewport(390, 844);
+    cam.setReducedMotion(true); // no easing, so the move lands in one call
+    cam.setObstruction(0, 400);
+    cam.zoom = 1;
+    cam.centerOn(1, 100);
+    cam.panBy(0, -200); // floor 1 slides down behind the sheet
+
+    expect(cam.worldToScreen(0, floorBaseY(1)).y).toBeGreaterThan(844 - 400);
+    cam.ensureFloorVisible(1);
+
+    const base = cam.worldToScreen(0, floorBaseY(1)).y;
+    const top = cam.worldToScreen(0, floorTopY(1)).y;
+    expect(base).toBeLessThanOrEqual(844 - 400 + 0.5);
+    expect(top).toBeGreaterThanOrEqual(0);
   });
 
-  it('lifts it on a phone, where the palette sheet owns the bottom of the screen', () => {
-    expect(groundLineFor(390)).toBe(PHONE_GROUND_LINE);
-    expect(groundLineFor(PHONE_MAX_WIDTH_PX)).toBe(PHONE_GROUND_LINE);
-    expect(PHONE_GROUND_LINE).toBeLessThan(DEFAULT_GROUND_LINE);
+  it('treats an unmeasured, negative or oversized obstruction as no obstruction', () => {
+    const cam = createCamera();
+    cam.setViewport(390, 844);
+    cam.setObstruction(Number.NaN, -50);
+    cam.setGroundLine(DEFAULT_GROUND_LINE);
+    expect(Math.abs(cam.worldToScreen(0, 0).y - DEFAULT_GROUND_LINE * 844)).toBeLessThanOrEqual(0.5);
+
+    cam.setObstruction(Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY);
+    cam.setGroundLine(DEFAULT_GROUND_LINE);
+    expect(Math.abs(cam.worldToScreen(0, 0).y - DEFAULT_GROUND_LINE * 844)).toBeLessThanOrEqual(0.5);
   });
 });

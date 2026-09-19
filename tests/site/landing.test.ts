@@ -52,6 +52,42 @@ describe('landing page', () => {
   });
 });
 
+describe('the page is the building in cross section', () => {
+  it('sends the landing page underground below the hero, one floor per section', () => {
+    expect(landing).toContain('<div class="underground">');
+    expect(landing.match(/<section class="floor"/g)).toHaveLength(3);
+    for (const tag of [
+      'B1 &middot; WHAT IT IS',
+      'B2 &middot; HOW IT PLAYS',
+      'B3 &middot; PHONE, TABLET OR DESKTOP',
+    ]) {
+      expect(landing).toContain(`<p class="floor-tag">${tag}</p>`);
+    }
+    // The floors carry the sections; no bare .wrap column of copy is left behind.
+    expect(flat(landing)).not.toContain('<div class="wrap"> <section aria-labelledby="features">');
+  });
+
+  it('numbers the elevator steps in the markup, not with list bullets', () => {
+    expect(landing.match(/<span class="step-num">/g)).toHaveLength(3);
+    expect(landing).toContain('<span class="step-num">01</span>');
+    expect(landing).toContain('<span class="step-num">03</span>');
+  });
+
+  it('lights the Play link in the nav on both pages', () => {
+    expect(landing).toContain('<a class="nav-play" href="/play/">Play</a>');
+    expect(guide).toContain('<a class="nav-play" href="/play/">Play</a>');
+  });
+
+  it('gives the guide the same shell, numbered B1 upward', () => {
+    expect(guide).toContain('<div class="underground">');
+    expect(guide.match(/<section class="floor guide"/g)).toHaveLength(7);
+    expect(guide).toContain('<p class="floor-tag">B1 &middot; ROOMS</p>');
+    expect(guide).toContain('<p class="floor-tag">B7 &middot; CONTROLS</p>');
+    // Heading order survives the rebuild: one h1, then the topic h2s.
+    expect(guide.match(/<h1>/g)).toHaveLength(1);
+  });
+});
+
 describe('guide page', () => {
   it('covers every topic', () => {
     for (const topic of [

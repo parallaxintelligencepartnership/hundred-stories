@@ -30,24 +30,14 @@ const MAX_INERTIA_SPEED = 4; // screen px per ms
 const PAN_MARGIN_PX = 240;
 const FOLLOW_EASE_MS = 140; // how fast the view catches up with a room it had to follow
 const KEY_ZOOM_DELTA = 120; // one wheel notch, so the plus and minus keys feel like the wheel
-/** Where the street sits in the opening shot, as a fraction down the viewport. */
-export const DEFAULT_GROUND_LINE = 0.68;
-/** On a phone the palette is a bottom sheet, so the street starts above it, not behind it. */
-export const PHONE_GROUND_LINE = 0.4;
-/** The width ui.css turns the palette into a bottom sheet at. */
-export const PHONE_MAX_WIDTH_PX = 720;
-
 /**
- * Where to put the street when the game opens, for a viewport this wide.
+ * Where the street sits in the opening shot, as a fraction down the free band.
  *
- * Two thirds down is the right stage for a tower on a desktop. On a phone the lower half of
- * the screen belongs to the palette sheet and the ticker, so an empty lot framed that way puts
- * the ground the player has to build on behind the sheet, with nothing but sky in the gap.
+ * The free band is the viewport minus whatever chrome covers it: on a phone the palette
+ * sheet and the ticker own the lower part of the screen, so the same fraction still puts
+ * the street two thirds down the part of the screen the player can actually see.
  */
-export function groundLineFor(viewportWidth: number): number {
-  if (!(viewportWidth > 0)) return DEFAULT_GROUND_LINE; // a viewport nobody has measured is not a phone
-  return viewportWidth <= PHONE_MAX_WIDTH_PX ? PHONE_GROUND_LINE : DEFAULT_GROUND_LINE;
-}
+export const DEFAULT_GROUND_LINE = 0.68;
 
 const PAN_KEYS: Record<string, { dx: number; dy: number }> = {
   KeyW: { dx: 0, dy: -1 },
@@ -107,8 +97,15 @@ export interface Camera {
   /** Multiply the zoom, holding the world point under (sx, sy) still. */
   zoomAt(factor: number, sx: number, sy: number): void;
   centerOn(floor: number, x: number): void;
-  /** Put the ground line (world y = 0) at this fraction down the viewport. */
+  /** Put the ground line (world y = 0) at this fraction down the unobstructed band. */
   setGroundLine(fraction: number): void;
+  /**
+   * How many screen pixels of chrome cover the top and the bottom of the viewport.
+   *
+   * The camera still draws the whole viewport; this only moves what it aims at, so the
+   * street and a freshly built floor land where the player can see them.
+   */
+  setObstruction(topPx: number, bottomPx: number): void;
   /** Back to the opening shot: zoom 1, tower center, street at DEFAULT_GROUND_LINE. */
   reset(): void;
   setViewport(width: number, height: number): void;
@@ -147,6 +144,8 @@ class TowerCamera implements Camera {
 
   private viewW = 800;
   private viewH = 600;
+  private obstructTop = 0;
+  private obstructBottom = 0;
   private reducedMotion = false;
   private panEnabled = true;
 
@@ -171,6 +170,23 @@ class TowerCamera implements Camera {
     this.viewW = Math.max(1, width);
     this.viewH = Math.max(1, height);
     this.clampPosition();
+  }
+
+  setObstruction(topPx: number, bottomPx: number): void {
+    this.obstructTop = Number.isFinite(topPx) ? clamp(topPx, 0, this.viewH) : 0;
+    this.obstructBottom = Number.isFinite(bottomPx) ? clamp(bottomPx, 0, this.viewH) : 0;
+  }
+
+  /**
+   * The band of the viewport no chrome covers, in screen pixels.
+   *
+   * Chrome taller than the screen would leave a band with no height, or a negative one,
+   * so the bottom gives way to the top and the band is never less than nothing.
+   */
+  private band(): { top: number; bottom: number } {
+    const top = clamp(this.obstructTop, 0, this.viewH);
+    const bottom = clamp(this.obstructBottom, 0, this.viewH - top);
+    return { top, bottom: this.viewH - bottom };
   }
 
   setReducedMotion(on: boolean): void {
@@ -210,8 +226,10 @@ class TowerCamera implements Camera {
 
   setGroundLine(fraction: number): void {
     this.easeY = null;
+    const { top, bottom } = this.band();
+    const screenY = top + fraction * (bottom - top);
     // screenY(0) = viewH / 2 - y * zoom, solved for y.
-    this.y = (this.viewH / 2 - fraction * this.viewH) / this.zoom;
+    this.y = (this.viewH / 2 - screenY) / this.zoom;
     this.vx = 0;
     this.vy = 0;
     this.clampPosition();
@@ -311,14 +329,18 @@ class TowerCamera implements Camera {
   }
 
   ensureFloorVisible(floor: number): void {
-    const half = this.viewH / 2 / this.zoom;
+    // The band the chrome leaves free, as world offsets from the camera center.
+    const band = this.band();
+    const offTop = (band.top - this.viewH / 2) / this.zoom;
+    const offBottom = (band.bottom - this.viewH / 2) / this.zoom;
     const top = floorTopY(floor);
     const base = floorBaseY(floor);
     let target: number;
-    if (base - top >= 2 * half) target = (top + base) / 2; // deeper than the viewport: center it
-    else if (top < this.y - half) target = top + half;
-    else if (base > this.y + half) target = base - half;
-    else return; // the whole floor is already on screen
+    // deeper than the free band: center it in the band
+    if (base - top >= offBottom - offTop) target = (top + base) / 2 - (offTop + offBottom) / 2;
+    else if (top < this.y + offTop) target = top - offTop;
+    else if (base > this.y + offBottom) target = base - offBottom;
+    else return; // the whole floor is already in the free band
     target = clampY(target);
     if (this.reducedMotion) {
       this.easeY = null;

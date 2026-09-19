@@ -17,6 +17,7 @@ import {
   starsGlyphs,
   starsTitle,
 } from './format';
+import { chromeInsets, isSheetLayout } from './layout';
 import {
   button,
   createFinancesPanel,
@@ -39,13 +40,29 @@ interface PaletteRow {
   cost: HTMLSpanElement;
   tool: Tool;
   star: Star;
+  label: string;
   costText: string;
+}
+
+/** The palette's own parts: the tool rows, and the header row that folds them away. */
+interface PaletteParts {
+  rows: PaletteRow[];
+  toggle: HTMLButtonElement;
+  current: HTMLSpanElement;
+  chevron: HTMLSpanElement;
+}
+
+/** The live measurement of the chrome: stop it, or ask it to measure again. */
+interface ChromeWatch {
+  measure(): void;
+  disconnect(): void;
 }
 
 const FONT_LINK_ID = 'hs-google-fonts';
 const FONT_HREF =
   'https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600&family=Share+Tech+Mono&display=swap';
 const REDUCED_MOTION_KEY = 'hundredStories.reducedMotion';
+const PALETTE_COLLAPSED_KEY = 'hs.palette.collapsed';
 const HINT_KEY = 'hs.hintSeen';
 /** The controls hint rides along for the first three loads, then gets out of the way. */
 const HINT_LOADS = 3;
@@ -147,13 +164,25 @@ export function createUi(root: HTMLElement, game: GameApi): Ui {
   );
   actions.append(speedBar, menuButton);
 
-  // Palette: a building directory board.
+  // Palette: a building directory board, with a header row that folds it away.
   const palette = el('nav', 'hs-palette');
   palette.setAttribute('aria-label', 'Build palette');
-  const rows: PaletteRow[] = buildPalette(palette, (tool) => {
-    game.setTool(sameTool(tool, game.getTool()) ? { kind: 'none' } : tool);
-    update();
-  });
+  let paletteCollapsed = readPaletteCollapsed();
+  let chromeWatch: ChromeWatch | null = null;
+  const paletteParts = buildPalette(
+    palette,
+    (tool) => {
+      game.setTool(sameTool(tool, game.getTool()) ? { kind: 'none' } : tool);
+      // A sheet sits over the tower. Once a tool is in hand there is nothing left to pick,
+      // so the board folds away and the player can see where they are placing it. Their own
+      // choice of collapsed or not is not overwritten: this one is not remembered.
+      if (game.getTool().kind !== 'none' && inSheetLayout()) setPaletteCollapsed(true, false);
+      update();
+    },
+    () => setPaletteCollapsed(!paletteCollapsed, true),
+  );
+  const rows = paletteParts.rows;
+  applyPaletteCollapsed();
 
   const panelSlot = el('div', 'hs-panel-slot');
 
@@ -209,8 +238,11 @@ export function createUi(root: HTMLElement, game: GameApi): Ui {
 
   applyReducedMotion(reducedMotion);
   // The top strip wraps on a narrow screen, so nothing below it can assume one row: the
-  // measured height goes into a variable the palette, the panel and the hint sit under.
-  const stripSize = watchStripHeight(top, shell);
+  // measured height goes into a variable the palette, the panel and the hint sit under, and
+  // into the band the camera frames the street in.
+  chromeWatch = watchChrome({ strip: top, palette, ticker, shell }, (topPx, bottomPx) => {
+    game.setChrome(topPx, bottomPx);
+  });
   lastLogLength = game.world.log.length;
   const unsubscribe = game.subscribe(() => update());
   window.addEventListener('keydown', onKeyDown);
@@ -241,6 +273,7 @@ export function createUi(root: HTMLElement, game: GameApi): Ui {
     }
 
     const tool = game.getTool();
+    let held = '';
     for (const row of rows) {
       const locked = world.stars < row.star;
       if (row.node.disabled !== locked) row.node.disabled = locked;
@@ -249,7 +282,10 @@ export function createUi(root: HTMLElement, game: GameApi): Ui {
       const active = !locked && sameTool(row.tool, tool);
       row.node.classList.toggle('is-active', active);
       setPressed(row.node, active);
+      if (active) held = row.label;
     }
+    // Collapsed, the header row is the only thing left to say what is in hand.
+    setText(paletteParts.current, held);
 
     refreshPanel();
     refreshTicker();
@@ -389,6 +425,25 @@ export function createUi(root: HTMLElement, game: GameApi): Ui {
     writeReducedMotion(on);
   }
 
+  /** The palette spans the shell: it is the phone sheet, not the desktop rail. */
+  function inSheetLayout(): boolean {
+    return isSheetLayout(palette.getBoundingClientRect().width, shell.getBoundingClientRect().width);
+  }
+
+  function setPaletteCollapsed(on: boolean, remember: boolean): void {
+    if (paletteCollapsed === on) return;
+    paletteCollapsed = on;
+    if (remember) writePaletteCollapsed(on);
+    applyPaletteCollapsed();
+  }
+
+  function applyPaletteCollapsed(): void {
+    palette.classList.toggle('is-collapsed', paletteCollapsed);
+    paletteParts.toggle.setAttribute('aria-expanded', paletteCollapsed ? 'false' : 'true');
+    setText(paletteParts.chevron, paletteCollapsed ? '\u25b8' : '\u25be');
+    chromeWatch?.measure(); // the board just changed height, so the camera's band did too
+  }
+
   function onKeyDown(event: KeyboardEvent): void {
     if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
     if (isTyping(event.target)) return;
@@ -416,7 +471,7 @@ export function createUi(root: HTMLElement, game: GameApi): Ui {
       destroyed = true;
       unsubscribe();
       window.removeEventListener('keydown', onKeyDown);
-      stripSize?.disconnect();
+      chromeWatch?.disconnect();
       for (const timer of timers) clearTimeout(timer);
       timers.clear();
       mountedPanel?.remove();
@@ -428,7 +483,26 @@ export function createUi(root: HTMLElement, game: GameApi): Ui {
 
 // ------------------------------------------------------------------ parts
 
-function buildPalette(palette: HTMLElement, onPick: (tool: Tool) => void): PaletteRow[] {
+/**
+ * Fill the palette: a header row that folds the board away, then a row per tool.
+ *
+ * The header is the whole board when it is collapsed, so it carries the tool in hand as
+ * well as its own name; update() keeps that text current.
+ */
+function buildPalette(
+  palette: HTMLElement,
+  onPick: (tool: Tool) => void,
+  onToggle: () => void,
+): PaletteParts {
+  const current = el('span', 'hs-palette-current');
+  const chevron = el('span', 'hs-palette-chevron', '\u25be');
+  chevron.setAttribute('aria-hidden', 'true');
+  const toggle = button('', 'hs-palette-toggle', onToggle);
+  toggle.replaceChildren(el('span', 'hs-palette-title', 'Build'), current, chevron);
+  toggle.setAttribute('aria-expanded', 'true');
+  toggle.title = 'Show or hide the build tools';
+  palette.append(toggle);
+
   const rows: PaletteRow[] = [];
   for (const group of GROUPS) {
     palette.append(el('h2', 'hs-group-title', group.title));
@@ -452,7 +526,7 @@ function buildPalette(palette: HTMLElement, onPick: (tool: Tool) => void): Palet
       rows.push(addRow(palette, 'Query', '', 1, { kind: 'query' }, onPick));
     }
   }
-  return rows;
+  return { rows, toggle, current, chevron };
 }
 
 function addRow(
@@ -469,7 +543,7 @@ function addRow(
   node.replaceChildren(el('span', 'hs-tool-label', label), cost);
   node.setAttribute('aria-pressed', 'false');
   palette.append(node);
-  return { node, cost, tool, star, costText };
+  return { node, cost, tool, star, label, costText };
 }
 
 function needsStars(star: Star): string {
@@ -513,18 +587,51 @@ function ensureFonts(): void {
 }
 
 /**
- * Keep --top-actual on the shell equal to the height the top strip really takes.
+ * Keep --top-actual on the shell equal to the height the top strip really takes, and tell
+ * the caller how much of the view the chrome covers whenever that changes.
  *
- * Returns null where there is no ResizeObserver: the css falls back to one strip row, which
- * is what every screen wide enough not to wrap gets anyway.
+ * The strip wraps, the palette folds and turns into a sheet, and the ticker sits on a safe
+ * area that rotates: one observer watches all three. Where there is no ResizeObserver the
+ * window resize alone keeps it roughly honest, which is what the css falls back to anyway.
  */
-function watchStripHeight(strip: HTMLElement, shell: HTMLElement): ResizeObserver | null {
-  if (typeof ResizeObserver === 'undefined') return null;
-  const observer = new ResizeObserver(() => {
-    shell.style.setProperty('--top-actual', `${Math.round(strip.getBoundingClientRect().height)}px`);
-  });
-  observer.observe(strip);
-  return observer;
+function watchChrome(
+  parts: { strip: HTMLElement; palette: HTMLElement; ticker: HTMLElement; shell: HTMLElement },
+  onChrome: (topPx: number, bottomPx: number) => void,
+): ChromeWatch {
+  let lastTop = -1;
+  let lastBottom = -1;
+  const measure = (): void => {
+    const strip = parts.strip.getBoundingClientRect();
+    parts.shell.style.setProperty('--top-actual', `${Math.round(strip.height)}px`);
+    const shell = parts.shell.getBoundingClientRect();
+    const paletteRect = parts.palette.getBoundingClientRect();
+    const insets = chromeInsets({
+      shellHeight: shell.height,
+      stripHeight: strip.height,
+      tickerTop: parts.ticker.getBoundingClientRect().top,
+      paletteTop: paletteRect.top,
+      sheet: isSheetLayout(paletteRect.width, shell.width),
+    });
+    if (insets.top === lastTop && insets.bottom === lastBottom) return;
+    lastTop = insets.top;
+    lastBottom = insets.bottom;
+    onChrome(insets.top, insets.bottom);
+  };
+  const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => measure());
+  if (observer) {
+    observer.observe(parts.strip);
+    observer.observe(parts.palette);
+    observer.observe(parts.ticker);
+  }
+  window.addEventListener('resize', measure);
+  measure();
+  return {
+    measure,
+    disconnect(): void {
+      observer?.disconnect();
+      window.removeEventListener('resize', measure);
+    },
+  };
 }
 
 /** True on a touch screen. A browser that will not answer is treated as a mouse. */
@@ -548,6 +655,26 @@ function readReducedMotion(): boolean {
     return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   } catch {
     return false;
+  }
+}
+
+/** Was the board left folded away? A store that will not answer means expanded. */
+function readPaletteCollapsed(): boolean {
+  try {
+    const stored = window.localStorage.getItem(PALETTE_COLLAPSED_KEY);
+    if (stored === 'true') return true;
+    if (stored === 'false') return false;
+  } catch {
+    // Private browsing or a blocked store: the board opens expanded, as it does by default.
+  }
+  return false;
+}
+
+function writePaletteCollapsed(on: boolean): void {
+  try {
+    window.localStorage.setItem(PALETTE_COLLAPSED_KEY, on ? 'true' : 'false');
+  } catch {
+    // Nothing to do: the choice stays for this session only.
   }
 }
 

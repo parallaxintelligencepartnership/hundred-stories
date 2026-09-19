@@ -1,6 +1,12 @@
-/* Hundred Stories landing and guide. Same tokens and font stack as src/ui/ui.css,
-   so the front door and the game read as one thing. Flat surfaces, hairline
-   structure, no shadows, no gradients. No JavaScript is needed for any of it. */
+/* Hundred Stories landing and guide. The page is the building in cross section:
+   the nav is the HUD top strip, the hero is the tower above the street, every
+   section below it is a basement floor built out of bright room cells with 1px
+   dark outlines, and the footer is bedrock. Chrome (nav, footer) uses the steel
+   tokens from src/ui/ui.css; everything between hero and footer uses the world
+   colours from docs/VISUAL.md, which are fixed, because the game world has no
+   dark mode. Flat surfaces, hairline structure, no radius, no blur, no shadows
+   except the pixel drop under a button, no gradients except pixel patterns.
+   No JavaScript is needed for any of it. */
 
 :root {
   --steel: #1c232e;
@@ -17,9 +23,26 @@
   --font-readout: 'Share Tech Mono', ui-monospace, 'SFMono-Regular', monospace;
   --size-12: 12px;
   --size-14: 14px;
+  --size-15: 15px;
   --size-16: 16px;
   --size-20: 20px;
   --size-28: 28px;
+
+  /* World, per docs/VISUAL.md. Never remapped by a colour scheme. */
+  --w-outline: #222222;
+  --w-slab: #e6e6e6;
+  --w-slab-edge: #333333;
+  --w-concrete: #6b6f78;
+  --w-concrete-line: #4c5058;
+  --w-lobby: #f8f8f6;
+  --w-condo: #f2e8d8;
+  --w-security: #e4e8ee;
+  --w-window: #7fb6e0;
+  --w-shaft: #3b3f47;
+  --w-rail: #d8dbe0;
+  --w-car: #f0c419;
+  --w-text: #151c25;
+  --w-text-dim: #3a3a3a;
 
   --page: #0b1020;
   --gutter: 16px;
@@ -46,6 +69,8 @@
 *::before,
 *::after {
   box-sizing: border-box;
+  /* The world is drawn on a pixel grid: nothing on this page is ever rounded. */
+  border-radius: 0;
 }
 
 html {
@@ -91,7 +116,8 @@ h2,
 h3 {
   line-height: 1.15;
   margin: 0 0 12px 0;
-  font-weight: 600;
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
 
 h1 {
@@ -117,11 +143,11 @@ p {
   padding: 0 var(--gutter);
 }
 
-/* Header -------------------------------------------------------------- */
+/* Nav: the HUD top strip --------------------------------------------- */
 
 .site-head {
-  border-bottom: 1px solid var(--line);
   background: var(--steel);
+  border-bottom: 1px solid var(--line);
 }
 
 .site-head .wrap {
@@ -151,14 +177,31 @@ p {
   flex-shrink: 0;
   align-items: center;
   gap: 16px;
-  font-size: var(--size-14);
 }
 
-/* Hero ---------------------------------------------------------------- */
+.site-nav a {
+  font-family: var(--font-readout);
+  font-size: var(--size-12);
+  line-height: 1.1;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink);
+}
+
+/* The one lit sign on the strip, the same amber as the app icon. */
+.nav-play {
+  padding: 4px 10px;
+  background: var(--amber);
+  color: var(--on-amber);
+  border: 1px solid #222222;
+  text-decoration: none;
+}
+
+/* Hero: the tower above the street ------------------------------------ */
 
 .hero {
   position: relative;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid #222222;
   padding: 0 0 28px 0;
 }
 
@@ -173,7 +216,7 @@ p {
   width: 100%;
   height: 320px;
   background: #070b1a;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid #222222;
   /* The demo tower is decoration: it never takes a pointer or the scroll wheel. */
   pointer-events: none;
 }
@@ -186,146 +229,359 @@ p {
 
 #hero-shot {
   width: 100%;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid #222222;
 }
 
+/* The copy sits in a lobby cell: white marble, outlined, on its own slab. */
 .hero-panel {
   position: relative;
   margin-top: 20px;
+  margin-bottom: 5px;
   padding: 16px;
-  border: 1px solid var(--line);
-  background: rgba(11, 16, 32, 0.82);
+  background: var(--w-lobby);
+  border: 1px solid var(--w-outline);
+  border-bottom: 4px solid var(--w-slab);
+  box-shadow: 0 5px 0 var(--w-slab-edge);
+  color: var(--w-text);
 }
 
-@media (prefers-color-scheme: light) {
-  .hero-panel {
-    background: rgba(255, 255, 255, 0.9);
-  }
-}
-
-@supports (backdrop-filter: blur(6px)) {
-  .hero-panel {
-    backdrop-filter: blur(6px);
-  }
+.hero-panel h1 {
+  color: var(--w-text);
 }
 
 .hero-panel p {
   max-width: 62ch;
-  color: var(--ink-dim);
+  color: var(--w-text);
 }
 
+.hero-panel .fineprint {
+  margin-top: 8px;
+  margin-bottom: 0;
+  font-family: var(--font-readout);
+  font-size: var(--size-12);
+  letter-spacing: 0.06em;
+  color: var(--w-text-dim);
+}
+
+/* The guide has no tower, so its title sits against flat daytime sky. */
+.page-head {
+  background: #dcefff;
+  border-bottom: 1px solid #222222;
+  padding: 24px 0 28px;
+}
+
+/* Buttons: a pixel slab with a hard drop, the way the game draws a placed room. */
 .button {
   display: inline-block;
   margin-top: 4px;
-  padding: 12px 22px;
-  background: var(--amber);
-  color: var(--on-amber);
-  border: 1px solid var(--amber);
-  font-size: var(--size-20);
+  padding: 12px 20px;
+  background: var(--w-car);
+  color: #14181f;
+  border: 2px solid var(--w-outline);
+  box-shadow: 3px 3px 0 var(--w-outline);
+  font-family: var(--font-ui);
+  font-size: var(--size-16);
   font-weight: 600;
   text-decoration: none;
 }
 
 .button:hover {
-  background: var(--on-amber);
-  color: var(--amber);
+  transform: translate(1px, 1px);
+  box-shadow: 2px 2px 0 var(--w-outline);
 }
 
-.fineprint {
-  margin-top: 8px;
+.button:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
+
+.button-secondary {
+  background: var(--w-lobby);
+  color: var(--w-text);
+}
+
+/* Underground: concrete with floor lines ------------------------------ */
+
+.underground {
+  background: var(--w-concrete);
+  background-image: repeating-linear-gradient(
+    180deg,
+    transparent 0 35px,
+    var(--w-concrete-line) 35px 36px
+  );
+  /* One floor line of concrete before the first slab. */
+  padding-top: 36px;
+  padding-bottom: 36px;
+}
+
+.floor {
+  position: relative;
+  background: var(--w-condo);
+  border-top: 1px solid var(--w-outline);
+  border-bottom: 1px solid var(--w-outline);
+  padding: 28px 0 36px;
+  color: var(--w-text);
+}
+
+/* The slab the floor is poured on: 4px of concrete slab with a 1px edge. */
+.floor::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -6px;
+  height: 6px;
+  background: var(--w-slab);
+  border-top: 1px solid var(--w-slab-edge);
+  border-bottom: 1px solid var(--w-slab-edge);
+}
+
+.floor + .floor {
+  margin-top: 36px;
+}
+
+/* The floor number, drawn as an elevator indicator readout. */
+.floor-tag {
+  display: inline-block;
+  margin: 0 0 12px 0;
+  padding: 4px 8px;
+  background: #1c232e;
+  color: #8ff0c0;
+  border: 1px solid #3a4556;
+  font-family: var(--font-readout);
   font-size: var(--size-12);
-  color: var(--ink-dim);
+  line-height: 1.1;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
-/* Sections ------------------------------------------------------------ */
+/* No blanket `.floor p` rule: it would outrank .floor-tag and put dark text on
+   the dark chip. The floor sets the colour once and its children inherit. */
 
-main section {
-  padding: 28px 0;
-}
-
-main section + section {
-  border-top: 1px solid var(--line);
-}
+/* Cards: rooms with a window strip ------------------------------------ */
 
 .cards {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 16px;
+  gap: 12px;
 }
 
 .card {
-  padding: 16px;
-  border: 1px solid var(--line);
-  background: var(--steel);
+  padding: 0;
+  background: var(--w-lobby);
+  border: 1px solid var(--w-outline);
+}
+
+/* Daytime glass, mullions every 6px, exactly as the renderer draws windows. */
+.card::before {
+  content: '';
+  display: block;
+  height: 8px;
+  background: repeating-linear-gradient(90deg, var(--w-window) 0 6px, var(--w-outline) 6px 8px);
+  border-bottom: 1px solid var(--w-outline);
+}
+
+.card h3 {
+  margin: 0 0 8px 0;
+  padding: 16px 18px 0;
+  font-size: var(--size-20);
+  font-weight: 700;
+  color: var(--w-text);
 }
 
 .card p {
   margin: 0;
-  color: var(--ink-dim);
+  padding: 0 18px 20px;
+  font-size: var(--size-15);
+  color: var(--w-text-dim);
 }
 
+/* Steps: an elevator shaft with a car per stop ------------------------ */
+
 .steps {
-  margin: 0 0 12px 0;
-  padding-left: 22px;
+  position: relative;
+  margin: 0 0 16px 0;
+  padding: 0;
   max-width: 68ch;
+  list-style: none;
+}
+
+.steps::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 24px;
+  background: linear-gradient(
+    90deg,
+    var(--w-shaft) 0 4px,
+    var(--w-rail) 4px 6px,
+    var(--w-shaft) 6px 18px,
+    var(--w-rail) 18px 20px,
+    var(--w-shaft) 20px 24px
+  );
 }
 
 .steps li {
-  margin-bottom: 8px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 6px 0 6px 48px;
+  border-bottom: 1px solid var(--w-slab-edge);
+  font-family: var(--font-ui);
+  font-size: var(--size-16);
+  color: var(--w-text);
 }
 
-.note {
-  padding: 12px 16px;
-  border: 1px solid var(--line);
-  background: var(--steel-2);
-  color: var(--ink-dim);
+.steps li:last-child {
+  border-bottom: 0;
+}
+
+/* The car, with its door line down the middle. */
+.steps li::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 50%;
+  margin-top: -10px;
+  width: 16px;
+  height: 20px;
+  background: linear-gradient(
+    90deg,
+    var(--w-car) 0 7px,
+    var(--w-outline) 7px 8px,
+    var(--w-car) 8px 14px
+  );
+  border: 1px solid var(--w-outline);
+}
+
+.step-num {
+  flex: 0 0 auto;
+  margin-right: 10px;
+  font-family: var(--font-readout);
   font-size: var(--size-14);
+  line-height: 1.1;
+  color: var(--w-text-dim);
+}
+
+/* The security office note -------------------------------------------- */
+
+.note {
+  padding: 14px 16px;
+  background: var(--w-security);
+  border: 1px solid var(--w-outline);
+  color: var(--w-outline);
+  font-size: var(--size-15);
 }
 
 .note p {
   margin: 0;
+  color: var(--w-outline);
 }
 
 /* Guide --------------------------------------------------------------- */
 
-.guide {
+.guide .wrap > p,
+.guide .wrap > ul,
+.guide .wrap > ol {
   max-width: 72ch;
 }
 
-.guide h2 {
-  margin-top: 28px;
-  font-size: var(--size-28);
-}
-
-.guide ul {
+.guide ul,
+.guide ol {
+  margin: 0 0 12px 0;
   padding-left: 22px;
+  color: var(--w-text);
 }
 
 .guide li {
   margin-bottom: 6px;
 }
 
+/* Key caps, drawn like the buttons: outline plus a hard 2px drop. */
 .guide .key {
+  display: inline-block;
+  padding: 1px 6px;
+  background: var(--w-lobby);
+  border: 1px solid var(--w-outline);
+  box-shadow: 2px 2px 0 var(--w-outline);
   font-family: var(--font-readout);
-  color: var(--ink);
+  font-size: var(--size-12);
+  line-height: 1.4;
+  color: var(--w-text);
 }
 
-/* Footer -------------------------------------------------------------- */
+/* Anything else the guide grows later gets the same outline treatment. */
+.floor table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--w-lobby);
+  border: 1px solid var(--w-outline);
+  font-size: var(--size-15);
+  color: var(--w-text);
+}
+
+.floor th,
+.floor td {
+  padding: 8px 10px;
+  border: 1px solid var(--w-outline);
+  text-align: left;
+}
+
+.floor th {
+  background: var(--w-security);
+  font-weight: 700;
+}
+
+.floor blockquote {
+  margin: 0 0 12px 0;
+  padding: 14px 16px;
+  background: var(--w-security);
+  border: 1px solid var(--w-outline);
+  color: var(--w-outline);
+}
+
+.floor a {
+  color: var(--w-text);
+  text-decoration-color: var(--w-text-dim);
+}
+
+.floor a:hover {
+  text-decoration-color: var(--w-outline);
+}
+
+.floor a.button,
+.floor a.button:hover {
+  text-decoration: none;
+}
+
+/* Footer: bedrock, dark steel in either scheme ------------------------- */
 
 .site-foot {
-  border-top: 1px solid var(--line);
-  background: var(--steel);
-  padding: 20px 0;
-  font-size: var(--size-14);
-  color: var(--ink-dim);
+  background: #1c232e;
+  border-top: 2px solid #222222;
+  padding: 24px 0 40px;
+  font-family: var(--font-readout);
+  font-size: var(--size-12);
+  line-height: 1.5;
+  color: #98a3b3;
 }
 
 .site-foot p {
-  margin: 0 0 6px 0;
+  margin: 0 0 8px 0;
+  max-width: 80ch;
 }
 
-.site-foot .small {
-  font-size: var(--size-12);
+.site-foot a {
+  color: #e8ecf2;
+  text-decoration: underline;
+  text-decoration-color: #3a4556;
+}
+
+.site-foot a:hover {
+  text-decoration-color: #f4b942;
 }
 
 /* Wider screens ------------------------------------------------------- */

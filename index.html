@@ -45,7 +45,7 @@
         <a class="site-wordmark" href="/" aria-label="Hundred Stories home"><picture><source srcset="/wordmark-line-light.svg" media="(prefers-color-scheme: light)"><img src="/wordmark-line-dark.svg" alt="Hundred Stories" width="1032" height="112"></picture></a>
         <nav class="site-nav" aria-label="Main">
           <a href="/how-to-play/">How to play</a>
-          <a href="/play/">Play</a>
+          <a class="nav-play" href="/play/">Play</a>
           <a href="https://github.com/parallaxintelligencepartnership/hundred-stories">Source</a>
         </nav>
       </div>
@@ -65,7 +65,7 @@
           <div class="hero-panel">
             <h1>Build a tower. Run it well.</h1>
             <p>
-              Hundred Stories is a free tower-building simulation with hand-drawn pixel art. Place
+              Hundred Stories is a free tower-building simulation with pixel art drawn in code. Place
               offices, condos, shops and elevators, keep your tenants happy, and climb from one
               star to TOWER.
             </p>
@@ -75,52 +75,68 @@
         </div>
       </section>
 
-      <div class="wrap">
-        <section aria-labelledby="features">
-          <h2 id="features">What it is</h2>
-          <div class="cards">
-            <article class="card">
-              <h3>Rules with teeth</h3>
-              <p>
-                Every room, price, elevator limit and stress rule is tuned so a tower can fail.
-                Tenants notice slow elevators, noisy neighbours and dirty rooms, and they leave.
-              </p>
-            </article>
-            <article class="card">
-              <h3>Plays offline</h3>
-              <p>
-                Install it once from your browser and it runs with no connection. Your tower is
-                saved on your device as you play, and you can export it as a file whenever you like.
-              </p>
-            </article>
-            <article class="card">
-              <h3>Yours, and open</h3>
-              <p>
-                There is no account, no server and nothing tracked. The source is public under the
-                AGPL, so you can read exactly how the tower thinks.
-              </p>
-            </article>
+      <div class="underground">
+        <section class="floor" aria-labelledby="features">
+          <div class="wrap">
+            <p class="floor-tag">B1 &middot; WHAT IT IS</p>
+            <h2 id="features">What it is</h2>
+            <div class="cards">
+              <article class="card">
+                <h3>Rules with teeth</h3>
+                <p>
+                  Every room, price, elevator limit and stress rule is tuned so a tower can fail.
+                  Tenants notice slow elevators, noisy neighbours and dirty rooms, and they leave.
+                </p>
+              </article>
+              <article class="card">
+                <h3>Plays offline</h3>
+                <p>
+                  Install it once from your browser and it runs with no connection. Your tower is
+                  saved on your device as you play, and you can export it as a file whenever you
+                  like.
+                </p>
+              </article>
+              <article class="card">
+                <h3>Yours, and open</h3>
+                <p>
+                  There is no account, no server and nothing tracked. The source is public under
+                  the AGPL, so you can read exactly how the tower thinks.
+                </p>
+              </article>
+            </div>
           </div>
         </section>
 
-        <section aria-labelledby="how-it-plays">
-          <h2 id="how-it-plays">How it plays</h2>
-          <ol class="steps">
-            <li>Start with a lobby and a little cash.</li>
-            <li>Rent floors to tenants and give them elevators that do not make them wait.</li>
-            <li>Earn stars as the tower grows. One hundred stories is the ceiling.</li>
-          </ol>
-          <p><a href="/how-to-play/">Read the full guide</a></p>
+        <section class="floor" aria-labelledby="how-it-plays">
+          <div class="wrap">
+            <p class="floor-tag">B2 &middot; HOW IT PLAYS</p>
+            <h2 id="how-it-plays">How it plays</h2>
+            <ol class="steps">
+              <li><span class="step-num">01</span>Start with a lobby and a little cash.</li>
+              <li>
+                <span class="step-num">02</span>Rent floors to tenants and give them elevators that
+                do not make them wait.
+              </li>
+              <li>
+                <span class="step-num">03</span>Earn stars as the tower grows. One hundred stories
+                is the ceiling.
+              </li>
+            </ol>
+            <p><a class="button button-secondary" href="/how-to-play/">Read the full guide</a></p>
+          </div>
         </section>
 
-        <section aria-labelledby="platforms">
-          <h2 id="platforms">Phone, tablet or desktop</h2>
-          <div class="note">
-            <p>
-              Play in a desktop browser with a mouse, or on a phone or tablet with touch: one
-              finger moves, pinch zooms, tap to place. Install it from the browser menu and it
-              opens like an app.
-            </p>
+        <section class="floor" aria-labelledby="platforms">
+          <div class="wrap">
+            <p class="floor-tag">B3 &middot; PHONE, TABLET OR DESKTOP</p>
+            <h2 id="platforms">Phone, tablet or desktop</h2>
+            <div class="note">
+              <p>
+                Play in a desktop browser with a mouse, or on a phone or tablet with touch: one
+                finger moves, pinch zooms, tap to place. Install it from the browser menu and it
+                opens like an app.
+              </p>
+            </div>
           </div>
         </section>
       </div>
@@ -136,8 +152,9 @@
           · <a href="https://www.gnu.org/licenses/agpl-3.0.html">AGPL-3.0</a>
         </p>
         <p class="small">
-          This is original work. It is not affiliated with, endorsed by, or connected to Electronic
-          Arts, Maxis, or OPeNBooK.
+          Hundred Stories is a from-scratch homage to SimTower, the 1994 tower sim. The code and
+          art are original; the game design is not, and does not claim to be. It is not affiliated
+          with, endorsed by, or connected to Electronic Arts, Maxis, or OPeNBooK.
         </p>
       </div>
     </footer>

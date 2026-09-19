@@ -28,5 +28,12 @@ export interface GameApi {
   importSave(text: string): CommandResult;
   newGame(seed: number): void;
   setReducedMotion(on: boolean): void;
+  /**
+   * How many screen pixels the chrome covers at the top and the bottom of the view.
+   *
+   * The ui measures its own strips; the game passes them to the renderer, and remembers
+   * them for a ui that measured before the renderer attached.
+   */
+  setChrome(topPx: number, bottomPx: number): void;
   subscribe(cb: () => void): () => void; // called after each tick batch and on any state change
 }

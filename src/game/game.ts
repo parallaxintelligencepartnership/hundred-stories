@@ -6,7 +6,6 @@ import { tick } from '../sim/tick';
 import { clockOf, type Command, type CommandResult, type Id, type World } from '../sim/types';
 import { createWorld } from '../sim/world';
 import { SCHEDULES } from '../sim/rules';
-import { groundLineFor } from '../render/camera';
 import { classifyPress, isTap, PRESS_SLOP_PX, TOUCH_SLOP_PX } from '../render/input';
 import type { Renderer } from '../render/renderer';
 import type { GameApi, Speed, Tool } from './api';
@@ -55,6 +54,8 @@ export function createGame(seed: number): Game {
   let speedBeforePause: Speed = 1;
   let selection: null | { roomId?: Id; simId?: Id; shaftId?: Id } = null;
   let reducedMotion = false;
+  /** The chrome the ui last measured, kept for a renderer that attaches after the ui. */
+  let chrome: { top: number; bottom: number } | null = null;
   let renderer: Renderer | null = null;
   let container: HTMLElement | null = null;
   let raf = 0;
@@ -315,13 +316,18 @@ export function createGame(seed: number): Game {
       tool = { kind: 'none' };
       renderer?.setSelection(null);
       renderer?.setGhost(null);
-      renderer?.camera.centerOn(3, LIMITS.towerWidth / 2);
+      // The opening shot again: the middle of the lot, street on the chrome's free band.
+      renderer?.camera.reset();
       notify();
       void api.save(); // the autosave slot must not resurrect the old tower on the next reload
     },
     setReducedMotion(on) {
       reducedMotion = on;
       renderer?.setReducedMotion(on);
+    },
+    setChrome(topPx, bottomPx) {
+      chrome = { top: topPx, bottom: bottomPx };
+      renderer?.setChrome(topPx, bottomPx);
     },
     subscribe(cb) {
       subscribers.add(cb);
@@ -355,12 +361,13 @@ export function createGame(seed: number): Game {
         renderer?.setGhost(null);
       });
       r.setToolOwnsDrag(toolOwnsDrag(tool));
+      // A ui that measured the chrome before the renderer existed still gets its band.
+      if (chrome) r.setChrome(chrome.top, chrome.bottom);
       // The opening shot: the middle of the lot, with the street low enough to leave the sky
-      // room to fill. Where the street sits depends on the screen. On a phone the palette is a
-      // bottom sheet across the lower half, and floor 1, the only place a lobby can go, would
-      // open behind it.
-      r.camera.centerOn(3, LIMITS.towerWidth / 2);
-      r.camera.setGroundLine(groundLineFor(el.clientWidth));
+      // room to fill, inside whatever band the chrome leaves free. On a phone the palette is
+      // a bottom sheet across the lower half, and floor 1, the only place a lobby can go,
+      // would otherwise open behind it.
+      r.camera.reset();
     },
     start() {
       if (raf) return;

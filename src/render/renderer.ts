@@ -28,11 +28,11 @@ import { roomsOnFloor, shaftAt } from '../sim/world';
 import { createArt, FLOOR_PX, OVERLAY_KINDS, TILE_PX, type Art } from './art';
 import {
   createCamera,
+  DEFAULT_GROUND_LINE,
   floorBand,
   floorBaseY,
   floorTopY,
   floorYFloat,
-  groundLineFor,
   xToTile,
   yToFloor,
   type Camera,
@@ -83,6 +83,14 @@ export interface Renderer {
   /** On while the held tool draws with the left drag (lobby paint, shaft span), so it does not pan. */
   setToolOwnsDrag(on: boolean): void;
   setReducedMotion(on: boolean): void;
+  /**
+   * How many screen pixels the chrome covers at the top and the bottom of the view.
+   *
+   * The ui measures its own strips and hands the numbers over, so the camera can aim at the
+   * part of the screen the player can see. Until the player moves the view themselves, this
+   * re-frames the opening shot around the new band.
+   */
+  setChrome(topPx: number, bottomPx: number): void;
   destroy(): void;
 }
 
@@ -460,7 +468,7 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
     camera.reset(); // zoom 1, no inertia, street at the default ground line
     const x = lastWorld.rooms.size > 0 ? averageRoomX(lastWorld) : TOWER_WIDTH / 2;
     camera.centerOn(6, Math.round(x));
-    camera.setGroundLine(groundLineFor(app.screen.width));
+    camera.setGroundLine(DEFAULT_GROUND_LINE);
     if (app.screen.width > 1 && app.screen.height > 1) framedOnce = true;
   }
 
@@ -1315,6 +1323,11 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
     },
     setToolOwnsDrag(on): void {
       toolOwnsDrag = on;
+    },
+    setChrome(topPx, bottomPx): void {
+      camera.setObstruction(topPx, bottomPx);
+      // The opening shot is still the game's to compose until the player takes the view.
+      if (!userMoved) frameInitial();
     },
     setReducedMotion(on): void {
       reducedMotion = on;

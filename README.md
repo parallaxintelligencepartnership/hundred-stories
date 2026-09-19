@@ -4,7 +4,7 @@
 
 Hundred Stories is a browser game and installable PWA. You run a skyscraper: build a lobby, offices, homes, shops, and elevators, and watch it fill with people over the years.
 
-This is original work. It is not affiliated with, endorsed by, or connected to Electronic Arts, Maxis, or OPeNBooK.
+Hundred Stories is a from-scratch homage to SimTower, the 1994 tower sim. The code and art are original; the game design is not, and does not claim to be. It is not affiliated with, endorsed by, or connected to Electronic Arts, Maxis, or OPeNBooK.
 
 ## Play
 
