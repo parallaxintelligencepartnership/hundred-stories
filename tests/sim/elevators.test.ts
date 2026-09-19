@@ -107,6 +107,23 @@ function recordStops(world: World, car: Car, minutes: number): number[] {
   return stops;
 }
 
+/** Ticks a car needs to cross that many floors and open up, with a little slack. */
+function travelTicks(shaft: Shaft, from: number, to: number): number {
+  const rule = SHAFTS[shaft.kind];
+  return Math.ceil(Math.abs(to - from) / rule.floorsPerMinute) + rule.doorOpenMinutes + 2;
+}
+
+/** A sim already aboard, so the car carries a call to toFloor. */
+function addRider(world: World, shaft: Shaft, car: Car, fromFloor: number, toFloor: number): Sim {
+  const sim = addWaiter(world, shaft, fromFloor, toFloor);
+  sim.state = 'riding';
+  sim.inCarId = car.id;
+  car.passengers.push(sim.id);
+  car.calls.add(toFloor);
+  shaft.hallCalls.delete(fromFloor);
+  return sim;
+}
+
 describe('requestHallCall', () => {
   it('registers a call in one direction at a time', () => {
     const world = createWorld(1);
@@ -154,7 +171,7 @@ describe('tickElevators: a single ride', () => {
     expect([...car.calls]).toEqual([5]);
     expect(sim.route).toHaveLength(1);
 
-    run(world, 5);
+    run(world, travelTicks(shaft, 1, 5));
     expect(sim.state).toBe('walking');
     expect(sim.inCarId).toBeNull();
     expect(sim.pos).toEqual({ floor: 5, x: shaft.x });
@@ -179,7 +196,7 @@ describe('tickElevators: a single ride', () => {
     run(world, 2);
     expect(sim.stress).toBe(0);
     expect(sim.waitStart).toBe(6 * 60);
-    run(world, 8);
+    run(world, travelTicks(shaft, 10, 1) + travelTicks(shaft, 1, 5));
     expect(sim.state).toBe('walking');
     expect(sim.stress).toBe(0);
   });
@@ -189,14 +206,14 @@ describe('tickElevators: a single ride', () => {
     const shaft = buildShaft(world);
     const car = carAt(shaft, 0);
     addWaiter(world, shaft, 1, 10);
-    expect(recordStops(world, car, 8)).toEqual([1, 10]);
+    expect(recordStops(world, car, travelTicks(shaft, 1, 10) + 2)).toEqual([1, 10]);
   });
 
   it('does not board a sim standing away from the shaft door', () => {
     const world = createWorld(2);
     const shaft = buildShaft(world);
     const sim = addWaiter(world, shaft, 1, 5, shaft.x + shaft.width + 2);
-    run(world, 3);
+    run(world, travelTicks(shaft, 1, 5));
     expect(sim.state).toBe('waiting');
     expect(sim.inCarId).toBeNull();
   });
@@ -221,7 +238,7 @@ describe('tickElevators: capacity', () => {
     const world = createWorld(3);
     const shaft = buildShaft(world);
     const sims = range(1, 22).map(() => addWaiter(world, shaft, 1, 10));
-    run(world, 30);
+    run(world, travelTicks(shaft, 1, 10) * 4);
     expect(sims.every((s) => s.state === 'walking')).toBe(true);
     expect(sims.every((s) => s.pos.floor === 10)).toBe(true);
   });
@@ -232,7 +249,9 @@ describe('tickElevators: capacity', () => {
     const car = carAt(shaft, 0);
     range(1, 21).forEach(() => addWaiter(world, shaft, 1, 10));
     const stranded = addWaiter(world, shaft, 5, 10);
-    expect(recordStops(world, car, 5)).toEqual([1, 10]);
+    // exactly long enough to open at 1, run to 10 and open there, no time to come back
+    const window = 2 + Math.ceil(9 / SHAFTS.standard.floorsPerMinute);
+    expect(recordStops(world, car, window)).toEqual([1, 10]);
     expect(stranded.state).toBe('waiting');
     expect(shaft.hallCalls.get(5)).toEqual({ up: true, down: false });
   });
@@ -243,7 +262,7 @@ describe('tickElevators: capacity', () => {
     const car = carAt(shaft, 0);
     const riders = range(1, 21).map(() => addWaiter(world, shaft, 1, 5));
     const boarder = addWaiter(world, shaft, 5, 10);
-    run(world, 3);
+    run(world, travelTicks(shaft, 1, 5));
     expect(riders.every((s) => s.state === 'walking' && s.pos.floor === 5)).toBe(true);
     expect(boarder.state).toBe('riding');
     expect(car.passengers).toEqual([boarder.id]);
@@ -259,7 +278,7 @@ describe('tickElevators: SCAN dispatch', () => {
     const dirs: number[] = [];
     const stops: number[] = [];
     let wasOpen = false;
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < travelTicks(shaft, 1, 10) * 3; i++) {
       tickElevators(world);
       world.time.minute += 1;
       dirs.push(car.dir);
@@ -278,7 +297,7 @@ describe('tickElevators: SCAN dispatch', () => {
     const car = carAt(shaft, 0);
     requestHallCall(world, shaft.id, 5, 1);
     requestHallCall(world, shaft.id, 5, -1);
-    run(world, 2);
+    run(world, Math.ceil(4 / SHAFTS.standard.floorsPerMinute) + 1);
     expect(car.state).toBe('doorsOpen');
     expect(Math.round(car.y)).toBe(5);
     expect(car.dir).toBe(1);
@@ -289,7 +308,7 @@ describe('tickElevators: SCAN dispatch', () => {
     const world = createWorld(4);
     const shaft = buildShaft(world);
     requestHallCall(world, shaft.id, 6, 1);
-    run(world, 4);
+    run(world, travelTicks(shaft, 1, 6));
     expect(shaft.hallCalls.size).toBe(0);
   });
 
@@ -299,12 +318,12 @@ describe('tickElevators: SCAN dispatch', () => {
     const car = carAt(shaft, 0);
     addWaiter(world, shaft, 1, 5);
     const states: string[] = [];
-    run(world, 8, () => {
+    const window = travelTicks(shaft, 1, 5);
+    run(world, window, () => {
       states.push(car.state);
     });
-    // states are sampled before each tick, so drop the opening sample
     const seen: string[] = [];
-    for (let i = 0; i < 8; i++) seen.push(states[i] ?? '');
+    for (let i = 0; i < window; i++) seen.push(states[i] ?? '');
     const first = seen.indexOf('doorsOpen');
     expect(first).toBeGreaterThan(-1);
     let open = 0;
@@ -353,8 +372,10 @@ describe('tickElevators: idle behavior', () => {
     expect(car.y).toBe(5);
     expect(car.state).toBe('idle');
     run(world, 1);
+    expect(car.y).toBeLessThan(5);
+    expect(car.state).toBe('moving');
+    run(world, travelTicks(shaft, 5, 1));
     expect(car.y).toBe(1);
-    run(world, 1);
     expect(car.state).toBe('idle');
     expect(car.dir).toBe(0);
   });
@@ -380,7 +401,7 @@ describe('tickElevators: express shafts', () => {
     });
     const car = carAt(shaft, 0);
     addWaiter(world, shaft, 1, 15);
-    expect(recordStops(world, car, 8)).toEqual([1, 15]);
+    expect(recordStops(world, car, travelTicks(shaft, 1, 15))).toEqual([1, 15]);
   });
 
   it('leaves a sim on a floor it does not serve', () => {
@@ -392,10 +413,146 @@ describe('tickElevators: express shafts', () => {
       stops: [1, 15, 30],
     });
     const stuck = addWaiter(world, shaft, 7, 15);
-    run(world, 12);
+    run(world, travelTicks(shaft, 1, 30));
     expect(shaft.hallCalls.size).toBe(0);
     expect(stuck.state).toBe('waiting');
     expect(stuck.inCarId).toBeNull();
+  });
+});
+
+describe('tickElevators: no bouncing', () => {
+  it('changes direction at most once per served stop', () => {
+    const world = createWorld(12);
+    const shaft = buildShaft(world, { floorMin: 1, floorMax: 8, cars: [5], homeFloor: 5 });
+    const car = carAt(shaft, 0);
+    addRider(world, shaft, car, 5, 2); // a car call below
+    addWaiter(world, shaft, 7, 8); // a standing hall call above
+
+    let lastY = car.y;
+    let lastSign = 0;
+    let flipsSinceStop = 0;
+    let stops = 0;
+    let wasOpen = false;
+    for (let t = 0; t < 200; t++) {
+      tickElevators(world);
+      world.time.minute += 1;
+      const sign = Math.sign(car.y - lastY);
+      if (sign !== 0) {
+        if (lastSign !== 0 && sign !== lastSign) flipsSinceStop += 1;
+        lastSign = sign;
+      }
+      lastY = car.y;
+      const open = car.state === 'doorsOpen';
+      if (open && !wasOpen) {
+        stops += 1;
+        expect(flipsSinceStop).toBeLessThanOrEqual(1);
+        flipsSinceStop = 0;
+      }
+      wasOpen = open;
+    }
+    expect(flipsSinceStop).toBeLessThanOrEqual(1);
+    expect(stops).toBeGreaterThanOrEqual(3);
+  });
+
+  it('lands exactly on the stop when a full step would overshoot it', () => {
+    const world = createWorld(13);
+    const step = SHAFTS.express.floorsPerMinute;
+    const target = 1 + Math.ceil(step * 2.5); // not a whole number of steps away
+    const shaft = buildShaft(world, {
+      kind: 'express',
+      floorMin: 1,
+      floorMax: 30,
+      stops: [1, target],
+      homeFloor: 1,
+    });
+    const car = carAt(shaft, 0);
+    const sim = addWaiter(world, shaft, 1, target);
+
+    const seen: number[] = [];
+    for (let t = 0; t < travelTicks(shaft, 1, target); t++) {
+      tickElevators(world);
+      world.time.minute += 1;
+      seen.push(car.y);
+      expect(car.y).toBeLessThanOrEqual(target); // never overshoots the stop
+      if (car.state === 'doorsOpen') {
+        expect(Number.isInteger(car.y)).toBe(true);
+        expect(shaft.stops.has(car.y)).toBe(true);
+      }
+    }
+    expect(seen).toContain(target);
+    expect(sim.pos).toEqual({ floor: target, x: shaft.x });
+    // the car holds the floor for the whole door cycle, it does not drift off and back
+    const settled = seen.slice(seen.indexOf(target));
+    expect(settled.every((y) => y === target)).toBe(true);
+  });
+});
+
+describe('tickElevators: a parked car holds still', () => {
+  it('sits on the home floor for 300 ticks without a door cycle', () => {
+    const world = createWorld(14);
+    const shaft = buildShaft(world, { floorMin: 1, floorMax: 8, cars: [1], homeFloor: 1 });
+    const car = carAt(shaft, 0);
+    for (let t = 0; t < 300; t++) {
+      tickElevators(world);
+      world.time.minute += 1;
+      expect(car.y).toBe(1);
+      expect(car.state).toBe('idle');
+      expect(car.dir).toBe(0);
+      expect(car.doorTimer).toBe(0);
+    }
+  });
+
+  it('re-arms the door timer once for a stale call at home, then stays idle', () => {
+    const world = createWorld(14);
+    const shaft = buildShaft(world, { floorMin: 1, floorMax: 8, cars: [1], homeFloor: 1 });
+    const car = carAt(shaft, 0);
+    requestHallCall(world, shaft.id, 1, 1);
+
+    let cycles = 0;
+    let wasOpen = false;
+    for (let t = 0; t < 300; t++) {
+      tickElevators(world);
+      world.time.minute += 1;
+      const open = car.state === 'doorsOpen';
+      if (open && !wasOpen) cycles += 1;
+      wasOpen = open;
+      expect(car.y).toBe(1);
+      expect(car.doorTimer).toBeLessThanOrEqual(SHAFTS.standard.doorOpenMinutes);
+      expect(car.doorTimer).toBeGreaterThanOrEqual(0);
+    }
+    expect(cycles).toBe(1);
+    expect(car.state).toBe('idle');
+    expect(car.dir).toBe(0);
+    expect(car.doorTimer).toBe(0);
+    expect(shaft.hallCalls.size).toBe(0);
+  });
+
+  it('never moves while the doors are open and goes idle in place afterwards', () => {
+    const world = createWorld(15);
+    const shaft = buildShaft(world, { floorMin: 1, floorMax: 8, cars: [1], homeFloor: 1 });
+    const car = carAt(shaft, 0);
+    for (const floor of [3, 5]) addWaiter(world, shaft, floor, 8);
+    addWaiter(world, shaft, 1, 6);
+
+    let lastY = car.y;
+    let lastState = car.state;
+    for (let t = 0; t < travelTicks(shaft, 1, 8) * 3; t++) {
+      tickElevators(world);
+      world.time.minute += 1;
+      if (lastState === 'doorsOpen' && car.state === 'doorsOpen') expect(car.y).toBe(lastY);
+      if (lastState === 'doorsOpen' && car.state !== 'doorsOpen') expect(car.doorTimer).toBe(0);
+      lastY = car.y;
+      lastState = car.state;
+    }
+    // last delivery done, nothing left to do: parked where it finished, doors shut
+    expect(car.state).toBe('idle');
+    expect(car.passengers).toEqual([]);
+    expect(car.calls.size).toBe(0);
+    expect(car.doorTimer).toBe(0);
+    const parked = car.y;
+    run(world, IDLE_RETURN_MINUTES - 1);
+    expect(car.y).toBe(parked);
+    expect(car.state).toBe('idle');
   });
 });
 
@@ -424,3 +581,4 @@ describe('tickElevators: determinism', () => {
     expect(new Set(a).size).toBeGreaterThan(1);
   });
 });
+
