@@ -41,6 +41,10 @@ describe('landing page', () => {
     expect(landing).toContain('id="hero-view"');
   });
 
+  it('carries a hidden challenge line for a friend arriving from a shared link', () => {
+    expect(landing).toContain('<p id="challenge" class="challenge" hidden></p>');
+  });
+
   it('invites a phone and a tablet, not a desktop only', () => {
     expect(landing).toContain('<h2 id="platforms">Phone, tablet or desktop</h2>');
     expect(landing).toContain('aria-labelledby="platforms"');

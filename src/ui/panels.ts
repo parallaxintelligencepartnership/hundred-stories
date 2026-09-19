@@ -2,6 +2,8 @@
 // Panels read the world through GameApi only and never reach into the sim modules.
 
 import type { GameApi } from '../game/api';
+import type { Renderer } from '../render/renderer';
+import { composeShareImage, shareMessage, shareStats, shareText, shareUrl } from '../share/share';
 import { EVAL, LIMITS, ROOMS, SHAFTS } from '../sim/rules';
 import type {
   Command,
@@ -513,6 +515,112 @@ export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElem
   motionField.append(motionBox, motionLabel);
   motion.append(motionField);
   body.append(motion);
+
+  return panel;
+}
+
+// ----------------------------------------------------------- share panel
+
+export function createSharePanel(game: GameApi, renderer: Renderer, ctx: PanelContext): PanelElement {
+  const { panel, body } = shell('Share', ctx);
+
+  const stats = shareStats(game.world);
+  const text = shareText(stats);
+  const url = shareUrl(stats);
+  const message = shareMessage(stats);
+
+  const preview = el('div', 'hs-share-preview');
+  body.append(preview);
+
+  const textarea = el('textarea', 'hs-share-text');
+  textarea.readOnly = true;
+  textarea.value = message;
+  textarea.rows = 4;
+  const messageField = el('div', 'hs-field');
+  messageField.append(el('label', 'hs-row-label', 'Message'), textarea);
+  body.append(messageField);
+
+  const shareActions = el('div', 'hs-actions');
+  body.append(shareActions);
+
+  let blob: Blob | null = null;
+  let previewUrl: string | null = null;
+
+  const saveButton = button('Save image', 'hs-btn', () => {
+    if (!blob) return;
+    const link = el('a');
+    const objectUrl = URL.createObjectURL(blob);
+    link.href = objectUrl;
+    link.download = 'hundred-stories-tower.png';
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(objectUrl);
+  });
+  saveButton.disabled = true;
+
+  const copyButton = button('Copy message', 'hs-btn', () => {
+    const clipboard = navigator.clipboard;
+    if (clipboard?.writeText) {
+      clipboard
+        .writeText(message)
+        .then(() => ctx.notice('Message copied.'))
+        .catch(() => {
+          textarea.select();
+          ctx.notice('Select the text and copy it.');
+        });
+    } else {
+      textarea.select();
+      ctx.notice('Select the text and copy it.');
+    }
+  });
+
+  let sendButton: HTMLButtonElement | null = null;
+  if (navigator.share) {
+    sendButton = button('Share…', 'hs-btn', () => {
+      if (!blob) return;
+      const file = new File([blob], 'hundred-stories-tower.png', { type: 'image/png' });
+      const canShareFiles = navigator.canShare?.({ files: [file] }) ?? false;
+      const payload = canShareFiles
+        ? { title: 'Hundred Stories', text, url, files: [file] }
+        : { title: 'Hundred Stories', text, url };
+      navigator.share!(payload).catch((error: unknown) => {
+        if ((error as { name?: string } | null)?.name === 'AbortError') return;
+        ctx.notice('Sharing did not work here. Save the image and copy the message instead.');
+      });
+    });
+    sendButton.disabled = true;
+  }
+
+  if (sendButton) shareActions.append(sendButton);
+  shareActions.append(saveButton, copyButton);
+
+  try {
+    const source = renderer.snapshot();
+    const composed = composeShareImage(source, stats);
+    composed.toBlob((result) => {
+      if (!result) {
+        ctx.notice('Could not capture the tower.');
+        return;
+      }
+      blob = result;
+      previewUrl = URL.createObjectURL(result);
+      const img = el('img', 'hs-share-image');
+      img.src = previewUrl;
+      img.alt = 'A preview of your tower';
+      preview.replaceChildren(img);
+      saveButton.disabled = false;
+      if (sendButton) sendButton.disabled = false;
+    }, 'image/png');
+  } catch {
+    ctx.notice('Could not capture the tower.');
+  }
+
+  const removeSelf = panel.remove.bind(panel);
+  panel.remove = () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    removeSelf();
+  };
 
   return panel;
 }

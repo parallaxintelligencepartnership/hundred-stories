@@ -8,6 +8,7 @@
 
 import { createRenderer, type Renderer } from '../render/renderer';
 import { animateDemo, buildDemoWorld } from '../render/smoke';
+import './challenge';
 
 /** One demo day every forty seconds: slower than the smoke page, it is background. */
 const MINUTES_PER_MS = 1440 / 40_000;
