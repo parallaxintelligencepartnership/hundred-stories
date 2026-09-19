@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>How to play Hundred Stories</title>
+    <meta
+      name="description"
+      content="Rooms, elevators, tenant stress, the quarterly economy and the star ladder, explained."
+    />
+    <link rel="canonical" href="https://hundredstories.xyz/how-to-play/" />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="Hundred Stories" />
+    <meta property="og:title" content="How to play Hundred Stories" />
+    <meta
+      property="og:description"
+      content="Rooms, elevators, tenant stress, the quarterly economy and the star ladder, explained."
+    />
+    <meta property="og:url" content="https://hundredstories.xyz/how-to-play/" />
+    <meta property="og:image" content="https://hundredstories.xyz/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="How to play Hundred Stories" />
+    <meta
+      name="twitter:description"
+      content="Rooms, elevators, tenant stress, the quarterly economy and the star ladder, explained."
+    />
+    <meta name="twitter:image" content="https://hundredstories.xyz/og.png" />
+    <meta name="theme-color" content="#0b1020" />
+    <link rel="icon" href="/icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600&family=Share+Tech+Mono&display=swap"
+    />
+    <link rel="stylesheet" href="/src/site/site.css" />
+  </head>
+  <body>
+    <header class="site-head">
+      <div class="wrap">
+        <a class="wordmark" href="/">Hundred Stories</a>
+        <nav class="site-nav" aria-label="Main">
+          <a href="/how-to-play/">How to play</a>
+          <a href="/play/">Play</a>
+          <a href="https://github.com/parallaxintelligencepartnership/hundred-stories">Source</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      <div class="wrap">
+        <section class="guide">
+          <h1>How to play</h1>
+          <p>
+            You own a bare lot and a little cash. Everything else is up to you: what you build, who
+            you rent it to, and whether the elevators can carry the people you invited in.
+          </p>
+
+          <h2>Rooms</h2>
+          <p>
+            Floor 1 is the ground floor and holds the lobby, which every tower must have. Floors
+            climb from 2 to 100 above ground, and there are ten levels underground, numbered down
+            from minus 1. There is no floor 0.
+          </p>
+          <p>
+            The lot is 375 tiles wide. A room takes a fixed number of tiles across and one or more
+            floors up, starting from the floor you place it on. Underground rooms grow upward from
+            their floor in the same way.
+          </p>
+          <p>
+            A floor only exists where you have built on it. There is no empty slab waiting for you:
+            the tower is exactly the rooms and shafts you paid for.
+          </p>
+          <p>
+            Stairs and escalators are two floors tall and join a floor to the one above it. An
+            elevator shaft takes its own columns for its whole span, and no room may overlap it.
+          </p>
+
+          <h2>Elevators</h2>
+          <p>
+            There are three kinds of shaft: standard, service and express. An express shaft is for
+            the long haul only, stopping at the lobby and the sky lobbies rather than at every
+            floor. Each shaft covers a range of floors, stops where you tell it to, and runs one or
+            more cars.
+          </p>
+          <p>
+            A car keeps going in the direction it is already travelling while anyone ahead of it has
+            called or is waiting to get off, then turns around. A car with nothing to do returns to
+            its home floor after a while.
+          </p>
+          <p>
+            When somebody needs to move between floors, the game sends them to the nearest shaft
+            that stops at both ends of the trip. Cars have a capacity: a full car passes a waiting
+            crowd by, and those people keep waiting, which is where most of your trouble will start.
+          </p>
+
+          <h2>Tenants and stress</h2>
+          <p>
+            Every person in the tower carries a stress value. It rises for each minute they stand
+            waiting for an elevator and falls again once they are settled in a room.
+          </p>
+          <p>
+            You can see it in their color. Calm people look normal, then they turn pink, then red,
+            then black. At black they give up on the trip entirely, and the reason is written to
+            your log. If that person was a tenant, their room is marked for leaving at the next
+            evaluation.
+          </p>
+          <p>
+            Noise matters too. Offices, condos and hotel rooms want quiet. Fast food, restaurants,
+            shops, cinemas and party halls are noisy, and a quiet room loses rating for every noisy
+            room near it on the same floor, or directly above or below it.
+          </p>
+          <p>
+            A room's rating combines the stress of its tenants, the noise around it and whether it
+            has been left dirty. If a room sits below the leaving threshold for a full day, the
+            tenants go and tell you why: an office falls vacant, a condo goes back on sale, and a
+            hotel room simply stays empty until the next guest.
+          </p>
+
+          <h2>Money and the quarter</h2>
+          <p>
+            One tick of the simulation is one minute in the tower, and the clock shows hours 0 to
+            23. A quarter is three days: two weekdays and one weekend day. Four quarters make a
+            year.
+          </p>
+          <p>
+            At the start of each quarter, at five in the morning, rent comes in and upkeep goes out,
+            and every room is evaluated. There is a smaller daily charge at the same hour on the
+            other days.
+          </p>
+          <p>
+            The rest of your income arrives as it is earned: hotel rooms pay when the guest checks
+            out, shops and restaurants take money per customer, and a condo pays once when it is
+            sold. Spend faster than the tower earns and you go bankrupt.
+          </p>
+          <p>
+            Time runs at one, two or four times speed, and between 23:00 and 06:00 the tower runs
+            itself at eight times speed unless you have paused it.
+          </p>
+
+          <h2>Stars</h2>
+          <p>
+            Your rating is a ladder of stars. It is driven mostly by the number of people in the
+            tower, with a few gates that population alone will not open.
+          </p>
+          <p>
+            Stars are what unlock the rest of the build palette. Anything you have not earned yet is
+            shown locked, with the star it needs, so you always know what the next rung buys you.
+          </p>
+
+          <h2>Saving and exporting</h2>
+          <p>
+            The game saves to a slot in your own browser as you play. Nothing leaves your device and
+            there is nothing to sign in to.
+          </p>
+          <p>
+            You can also export the tower to a file and import it again later, here or on another
+            machine. An import is checked first: a file from somewhere else, or a damaged one, is
+            refused with a plain reason and your running tower is left exactly as it was.
+          </p>
+          <p>
+            A new game can be started from a seed. The simulation is deterministic, so the same seed
+            and the same moves always produce the same tower.
+          </p>
+
+          <h2>Controls</h2>
+          <ul>
+            <li>Drag the view to pan it, or use <span class="key">W</span>,
+              <span class="key">A</span>, <span class="key">S</span>, <span class="key">D</span> and
+              the arrow keys.</li>
+            <li>Scroll the mouse wheel to zoom toward the pointer.</li>
+            <li><span class="key">Home</span> returns to the opening view of the tower.</li>
+            <li>Click a room, an elevator or a person to inspect it.</li>
+            <li><span class="key">Space</span> pauses and resumes.</li>
+            <li>
+              <span class="key">1</span>, <span class="key">2</span> and
+              <span class="key">3</span> set the speed to one, two and four times.
+            </li>
+            <li><span class="key">Escape</span> puts the current build tool away.</li>
+            <li>
+              While a build tool is active the left button places rooms, so pan with the middle
+              button or hold <span class="key">Space</span> and drag.
+            </li>
+          </ul>
+          <p>
+            If you have asked your system for reduced motion, the game honors it: no inertia on the
+            camera and no drifting particles.
+          </p>
+
+          <p><a class="button" href="/play/">Play in your browser</a></p>
+        </section>
+      </div>
+    </main>
+
+    <footer class="site-foot">
+      <div class="wrap">
+        <p>
+          Made by <a href="https://parallaxintelligence.ai">Parallax Intelligence</a> ·
+          <a href="https://github.com/parallaxintelligencepartnership/hundred-stories"
+            >Source on GitHub</a
+          >
+          · <a href="https://www.gnu.org/licenses/agpl-3.0.html">AGPL-3.0</a>
+        </p>
+        <p class="small">
+          This is original work. It is not affiliated with, endorsed by, or connected to Electronic
+          Arts, Maxis, or OPeNBooK.
+        </p>
+      </div>
+    </footer>
+  </body>
+</html>
