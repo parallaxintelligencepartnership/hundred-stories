@@ -6,3 +6,4 @@
 - 2026-09-18 | PWA with service worker so it installs and plays offline | why: Matt asked for downloadable offline play | instead of: plain static site
 - 2026-09-18 | name Hundred Stories (slug hundred-stories) | why: Matt rejected Skylobby and asked for more creative; EA owns "Sim", Saito owns the Tower lineage | instead of: Skylobby
 - 2026-09-18 | stack: TypeScript, Vite, PixiJS 8 WebGL renderer, DOM HUD, Vitest, pure deterministic sim core | why: Matt left the stack to me and asked for a showcase build; GPU sprites and filters give depth and lighting, pure sim core keeps it testable | instead of: Canvas 2D, React, a full game engine
+- 2026-09-18 | run the full itworks lifecycle: checkpoints per build wave, project audit before ship, closeout with SHIPPED.md, and publish the closeout to itworks.build for the wall and badge | why: Matt: "make sure you are running the full itworks suite. I want that badge and this tool on the wall" | instead of: kickoff only
