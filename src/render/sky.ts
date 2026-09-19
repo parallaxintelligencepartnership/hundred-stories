@@ -39,9 +39,16 @@ const CITY_RIGHT = TOWER_WIDTH * TILE_PX + 1600;
 const FAR_PARALLAX = 0.35;
 const NEAR_PARALLAX = 0.6;
 
-const EARTH_COLOR = 0x241c14;
+const EARTH_COLOR = 0x2a2016;
 const SIDEWALK_COLOR = 0x343a44;
+const STREET_EDGE_COLOR = 0x6b7482;
 const WINDOW_WARM = 0xffd27a;
+
+// The backdrop sits well under the tower: lower, softer, hazier.
+const FAR_ALPHA = 0.45;
+const NEAR_ALPHA = 0.7;
+const FAR_MAX_HEIGHT = 126; // 60 percent of the old far band
+const NEAR_MAX_HEIGHT = 247; // 75 percent of the old near band
 
 function lerpColor(a: number, b: number, t: number): number {
   const ar = (a >> 16) & 0xff;
@@ -122,19 +129,22 @@ function buildCity(
     const height = rng.int(options.minHeight, options.maxHeight);
     silhouette.rect(x, -height, width, height).fill(options.color);
     if (options.windows) {
-      const cols = Math.max(1, Math.floor((width - 6) / 10));
-      const rows = Math.max(1, Math.floor((height - 8) / 12));
-      for (let c = 0; c < cols; c++) {
-        for (let r = 0; r < rows; r++) {
-          if (rng.next() > 0.45) continue;
-          windows.rect(x + 5 + c * 10, -height + 8 + r * 12, 4, 5).fill(WINDOW_WARM);
+      // Irregular per building: the backdrop must not read as graph paper.
+      const stepX = rng.int(8, 14);
+      const stepY = rng.int(11, 17);
+      const density = 0.16 + rng.next() * 0.12;
+      const inset = rng.int(3, 6);
+      for (let wx = x + inset; wx + 2 <= x + width - inset; wx += stepX) {
+        for (let wy = -height + rng.int(7, 12); wy + 2 <= -6; wy += stepY) {
+          if (rng.next() > density) continue;
+          windows.rect(wx, wy, 2, 2).fill(WINDOW_WARM);
         }
       }
     } else {
-      const dots = Math.max(1, Math.floor(width / 26));
+      const dots = Math.max(1, Math.floor(width / 34));
       for (let d = 0; d < dots; d++) {
-        if (rng.next() > 0.5) continue;
-        windows.rect(x + rng.int(3, Math.max(4, width - 6)), -rng.int(8, Math.max(9, height - 4)), 3, 3).fill(WINDOW_WARM);
+        if (rng.next() > 0.4) continue;
+        windows.rect(x + rng.int(3, Math.max(4, width - 5)), -rng.int(8, Math.max(9, height - 4)), 2, 2).fill(WINDOW_WARM);
       }
     }
     x += width + rng.int(2, 14);
@@ -145,11 +155,43 @@ function buildCity(
   return { silhouette, windows };
 }
 
+/**
+ * The lot below the street: a sidewalk band, layered soil with a floor guide at
+ * every underground slab, and a speckle so it reads as earth rather than a void.
+ * It stays far darker than any room so the tower keeps the eye.
+ */
 function buildGround(ground: Container): Graphics {
   const g = new Graphics();
+  const left = CITY_LEFT;
+  const width = CITY_RIGHT - CITY_LEFT;
   const depth = floorBaseY(MIN_FLOOR) + FLOOR_PX * 2;
-  g.rect(CITY_LEFT, 0, CITY_RIGHT - CITY_LEFT, depth).fill(EARTH_COLOR);
-  g.rect(CITY_LEFT, 0, CITY_RIGHT - CITY_LEFT, 6).fill(SIDEWALK_COLOR);
+
+  g.rect(left, 0, width, depth).fill(EARTH_COLOR);
+  // Soil darkens with depth.
+  for (let band = 0; band * FLOOR_PX < depth; band++) {
+    const y = band * FLOOR_PX;
+    const shade = Math.min(0.28, band * 0.022);
+    g.rect(left, y, width, FLOOR_PX).fill({ color: 0x000000, alpha: shade });
+  }
+  // A guide at every underground slab line, so B1 to B10 are readable before anything is built.
+  for (let floor = -1; floor >= MIN_FLOOR; floor--) {
+    g.rect(left, floorBaseY(floor) - 1, width, 1).fill({ color: 0xffffff, alpha: 0.08 });
+  }
+  // Speckle.
+  const rng = createRng(0x50112);
+  for (let i = 0; i < 1400; i++) {
+    const sx = left + rng.next() * width;
+    const sy = rng.next() * depth;
+    const light = rng.next() > 0.5;
+    g.rect(Math.round(sx), Math.round(sy), 1, rng.next() > 0.8 ? 2 : 1).fill({
+      color: light ? 0xffffff : 0x000000,
+      alpha: light ? 0.05 : 0.12,
+    });
+  }
+
+  g.rect(left, 0, width, 6).fill(SIDEWALK_COLOR);
+  // The street edge: where the ground floor can be built, visible with an empty lot.
+  g.rect(left, 0, width, 2).fill(STREET_EDGE_COLOR);
   ground.addChild(g);
   return g;
 }
@@ -160,20 +202,28 @@ export function createSky(layers: SkyLayers): Sky {
 
   const far = buildCity(layers.cityFar, 0x5eed1, {
     color: 0x1d2740,
-    minHeight: 70,
-    maxHeight: 210,
+    minHeight: 42,
+    maxHeight: FAR_MAX_HEIGHT,
     minWidth: 40,
     maxWidth: 120,
     windows: false,
   });
+  // Haze sits on top of the far band only, so distance reads as atmosphere.
+  const haze = new Graphics();
+  haze.rect(CITY_LEFT, -FAR_MAX_HEIGHT, CITY_RIGHT - CITY_LEFT, FAR_MAX_HEIGHT).fill(0xffffff);
+  haze.alpha = 0.35;
+  layers.cityFar.addChild(haze);
+  layers.cityFar.alpha = FAR_ALPHA;
+
   const near = buildCity(layers.cityNear, 0x13a7c3, {
     color: 0x121a2b,
-    minHeight: 110,
-    maxHeight: 330,
+    minHeight: 82,
+    maxHeight: NEAR_MAX_HEIGHT,
     minWidth: 56,
     maxWidth: 150,
     windows: true,
   });
+  layers.cityNear.alpha = NEAR_ALPHA;
   const ground = buildGround(layers.ground);
 
   let lastMinute = -1;
@@ -202,11 +252,12 @@ export function createSky(layers: SkyLayers): Sky {
       if (rounded !== lastMinute || viewW !== lastW || viewH !== lastH) {
         redrawGradient(minuteOfDay, viewW, viewH);
         const lit = nightness(minuteOfDay);
-        far.windows.alpha = lit * 0.75;
-        near.windows.alpha = lit;
+        far.windows.alpha = lit * 0.6;
+        near.windows.alpha = lit * 0.9;
         const dim = 1 - lit * 0.35;
         far.silhouette.tint = lerpColor(0x000000, 0xffffff, dim);
         near.silhouette.tint = lerpColor(0x000000, 0xffffff, dim);
+        haze.tint = skyAt(minuteOfDay).bottom;
         lastMinute = rounded;
         lastW = viewW;
         lastH = viewH;
@@ -222,6 +273,7 @@ export function createSky(layers: SkyLayers): Sky {
     },
     destroy(): void {
       gradient.destroy();
+      haze.destroy();
       far.silhouette.destroy();
       far.windows.destroy();
       near.silhouette.destroy();

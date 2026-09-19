@@ -17,7 +17,7 @@ import {
   type Renderer as PixiRenderer,
 } from 'pixi.js';
 import { stressBand } from '../sim/people';
-import { clockOf, type Car, type Id, type Room, type RoomKind, type Shaft, type Sim, type SimKind, type StressBand, type World } from '../sim/types';
+import { clockOf, TOWER_WIDTH, type Car, type Id, type Room, type RoomKind, type Shaft, type Sim, type SimKind, type StressBand, type World } from '../sim/types';
 import { roomAt, shaftAt } from '../sim/world';
 import { createArt, FLOOR_PX, TILE_PX, type Art } from './art';
 import {
@@ -73,6 +73,7 @@ const TAP_SLOP_PX = 5;
 const TAP_MS = 600;
 const FIRE_FLICKER_MS = 110;
 const LOAD_FADE_MS = 900;
+const GROUND_LINE_FRACTION = 0.68;
 
 const SIM_KINDS: readonly SimKind[] = ['worker', 'resident', 'guest', 'shopper', 'diner', 'staff', 'visitor', 'vip'];
 const STRESS_BANDS: readonly StressBand[] = ['calm', 'pink', 'red'];
@@ -320,6 +321,19 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
   camera.setReducedMotion(reducedMotion);
 
   let lastWorld: World = world;
+
+  // Opening composition: the street sits about two thirds down, so the empty lot
+  // reads as a stage with room for the tower to grow into the sky.
+  let userMoved = false;
+  let framedOnce = false;
+  function frameInitial(): void {
+    camera.zoom = 1;
+    const x = lastWorld.rooms.size > 0 ? averageRoomX(lastWorld) : TOWER_WIDTH / 2;
+    camera.centerOn(6, Math.round(x));
+    camera.setGroundLine(GROUND_LINE_FRACTION);
+    if (app.screen.width > 1 && app.screen.height > 1) framedOnce = true;
+  }
+
   let ghost: Ghost | null = null;
   let selection: Selection | null = null;
   const pickListeners: ((hit: PickHit) => void)[] = [];
@@ -438,7 +452,10 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
     for (const room of w.rooms.values()) {
       seenRooms.add(room.id);
       const lit = night && room.occupancy > 0;
-      const variant = room.id % 2;
+      // Lobby segments are one tile wide: alternating the variant per id would
+      // stripe the lobby every 8 px, so narrow rooms pick their variant by x in
+      // long runs and a continuous lobby reads as one room.
+      const variant = room.width <= 2 ? Math.floor(room.x / 6) % 2 : room.id % 2;
       const topFloor = room.floor + room.height - 1;
       const px = room.x * TILE_PX;
       const py = floorTopY(topFloor);
@@ -773,6 +790,7 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
     } catch {
       // capture is a nicety, dragging still works without it
     }
+    userMoved = true;
     camera.dragStart(p.x, p.y, event.timeStamp);
   };
 
@@ -807,6 +825,7 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
     event.preventDefault();
     const p = localPoint(event);
     const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? app.screen.height : 1;
+    userMoved = true;
     camera.wheel(event.deltaY * scale, p.x, p.y);
   };
 
@@ -817,6 +836,7 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
 
   const onKeyDown = (event: KeyboardEvent): void => {
     if (typingTarget(event.target)) return;
+    if (event.code.startsWith('Key') || event.code.startsWith('Arrow')) userMoved = true;
     camera.setKey(event.code, true);
   };
   const onKeyUp = (event: KeyboardEvent): void => {
@@ -848,6 +868,8 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
       camera.setViewport(width, height);
       lastW = width;
       lastH = height;
+      // Hold the opening composition until the player takes the camera over.
+      if (!userMoved && !framedOnce) frameInitial();
     }
     camera.update(dt);
 
@@ -880,7 +902,7 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
   };
   app.ticker.add(onFrame);
 
-  camera.centerOn(1, Math.round(world.rooms.size > 0 ? averageRoomX(world) : 187));
+  frameInitial();
 
   const renderer: Renderer = {
     render(w: World, alpha: number): void {

@@ -68,6 +68,19 @@ describe('camera', () => {
     expect(screen.y).toBeCloseTo(300);
   });
 
+  it('frames the opening shot with the street about two thirds down', () => {
+    const cam = createCamera();
+    cam.setViewport(1280, 900);
+    cam.zoom = 1;
+    cam.centerOn(6, 187);
+    cam.setGroundLine(0.68);
+    expect(cam.worldToScreen(0, 0).y).toBeCloseTo(0.68 * 900, 4);
+    expect(cam.zoom).toBe(1);
+    // Sky above the street, earth below it.
+    expect(cam.screenToWorld(640, 10).y).toBeLessThan(0);
+    expect(cam.screenToWorld(640, 890).y).toBeGreaterThan(0);
+  });
+
   it('pans by screen pixels scaled by zoom', () => {
     const cam = createCamera();
     cam.setViewport(800, 600);

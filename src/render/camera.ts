@@ -84,6 +84,8 @@ export interface Camera {
   /** Multiply the zoom, holding the world point under (sx, sy) still. */
   zoomAt(factor: number, sx: number, sy: number): void;
   centerOn(floor: number, x: number): void;
+  /** Put the ground line (world y = 0) at this fraction down the viewport. */
+  setGroundLine(fraction: number): void;
   setViewport(width: number, height: number): void;
   setReducedMotion(on: boolean): void;
   dragStart(sx: number, sy: number, timeMs: number): void;
@@ -162,6 +164,14 @@ class TowerCamera implements Camera {
   centerOn(floor: number, x: number): void {
     this.x = (x + 0.5) * TILE_PX;
     this.y = floorTopY(floor) + FLOOR_PX / 2;
+    this.vx = 0;
+    this.vy = 0;
+    this.clampPosition();
+  }
+
+  setGroundLine(fraction: number): void {
+    // screenY(0) = viewH / 2 - y * zoom, solved for y.
+    this.y = (this.viewH / 2 - fraction * this.viewH) / this.zoom;
     this.vx = 0;
     this.vy = 0;
     this.clampPosition();
