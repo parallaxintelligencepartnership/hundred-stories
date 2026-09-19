@@ -1,6 +1,6 @@
 # Hundred Stories
 
-Hundred Stories is a browser game and installable PWA that recreates the ruleset of the 1994 tower simulation, with all new art. You run a skyscraper: build a lobby, offices, homes, shops, and elevators, and watch it fill with people over the years.
+Hundred Stories is a browser game and installable PWA. You run a skyscraper: build a lobby, offices, homes, shops, and elevators, and watch it fill with people over the years.
 
 This is original work. It is not affiliated with, endorsed by, or connected to Electronic Arts, Maxis, or OPeNBooK.
 
