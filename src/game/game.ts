@@ -14,6 +14,32 @@ const TICKS_PER_SECOND_AT_1X = 10;
 const NIGHT_MULTIPLIER = 8;
 const MAX_TICKS_PER_FRAME = 240;
 
+// Clock constants for the autosave schedule. rules.ts holds no clock lengths, so these live
+// here next to the only code that uses them; they match clockOf in sim/types.ts.
+const MINUTES_PER_DAY = 1440;
+const AUTOSAVE_MINUTE_OF_DAY = 6 * 60; // 06:00, the minute a new game opens on
+
+/**
+ * Should the tick loop autosave for the minutes it just ran?
+ *
+ * True when the batch crossed 06:00 on a game day, or crossed into a new quarter. A batch can
+ * be hundreds of minutes at 4x night speed, so this asks whether a boundary falls inside
+ * (prevMinute, nextMinute]: one save per burst, however many boundaries the burst swallowed.
+ */
+export function shouldAutosave(prevMinute: number, nextMinute: number): boolean {
+  if (!Number.isFinite(prevMinute) || !Number.isFinite(nextMinute)) return false;
+  if (nextMinute <= prevMinute) return false;
+  const morningsBefore = Math.floor((prevMinute - AUTOSAVE_MINUTE_OF_DAY) / MINUTES_PER_DAY);
+  const morningsAfter = Math.floor((nextMinute - AUTOSAVE_MINUTE_OF_DAY) / MINUTES_PER_DAY);
+  if (morningsAfter > morningsBefore) return true;
+  // Absolute quarter number, so the turn of a year counts too.
+  const quarterOf = (minute: number): number => {
+    const clock = clockOf(minute);
+    return (clock.year - 1) * 4 + clock.quarter;
+  };
+  return quarterOf(nextMinute) > quarterOf(prevMinute);
+}
+
 export interface Game extends GameApi {
   attach(renderer: Renderer, container: HTMLElement): void;
   start(): void;
@@ -54,6 +80,7 @@ export function createGame(seed: number): Game {
     if (speed > 0 && !world.gameOver) {
       const rate = TICKS_PER_SECOND_AT_1X * speed * (isNight() ? NIGHT_MULTIPLIER : 1);
       accumulator += dt * rate;
+      const minuteBefore = world.time.minute;
       let n = 0;
       while (accumulator >= 1 && n < MAX_TICKS_PER_FRAME) {
         tick(world);
@@ -61,7 +88,36 @@ export function createGame(seed: number): Game {
         n++;
       }
       if (accumulator > MAX_TICKS_PER_FRAME) accumulator = 0;
-      if (n > 0) notify();
+      if (n > 0) {
+        notify();
+        maybeAutosave(minuteBefore, world.time.minute);
+      }
+    }
+  }
+
+  // One save per batch of ticks, and never two at once: a burst of ticks that crosses several
+  // boundaries, or a slow write still in flight, must not pile up writes.
+  let autosaveInFlight = false;
+  function maybeAutosave(prevMinute: number, nextMinute: number): void {
+    if (autosaveInFlight) return;
+    if (!shouldAutosave(prevMinute, nextMinute)) return;
+    autosaveInFlight = true;
+    // An autosave is silent, success or failure: the player did not ask for it.
+    void saveWorld(true).finally(() => {
+      autosaveInFlight = false;
+    });
+  }
+
+  async function saveWorld(quiet: boolean): Promise<CommandResult> {
+    try {
+      await writeSave(serialize(world));
+      if (!quiet) {
+        world.log.push({ minute: world.time.minute, text: 'Game saved.', level: 'info' });
+        notify();
+      }
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, reason: e instanceof Error ? e.message : 'Could not save.' };
     }
   }
 
@@ -172,15 +228,8 @@ export function createGame(seed: number): Game {
     },
     getSelection: () => selection,
     getHover: () => hover,
-    async save() {
-      try {
-        await writeSave(serialize(world));
-        world.log.push({ minute: world.time.minute, text: 'Game saved.', level: 'info' });
-        notify();
-        return { ok: true };
-      } catch (e) {
-        return { ok: false, reason: e instanceof Error ? e.message : 'Could not save.' };
-      }
+    save() {
+      return saveWorld(false); // the player pressed Save, so this one logs
     },
     async load() {
       const text = await readSave();

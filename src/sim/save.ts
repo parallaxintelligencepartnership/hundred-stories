@@ -10,8 +10,10 @@
 // which we are not allowed to touch.
 
 import { createRng } from './rng';
+import { ROOMS, SHAFTS } from './rules';
 import { createWorld, rebuildFloorIndex } from './world';
-import type { Car, LogEntry, Room, Shaft, Sim, World } from './types';
+import { MAX_FLOOR, MIN_FLOOR, TOWER_WIDTH } from './types';
+import type { Car, LogEntry, Room, Shaft, Sim, SimKind, World } from './types';
 
 export const SAVE_VERSION = 1;
 
@@ -111,6 +113,32 @@ export function serialize(world: World): string {
 
 const NOT_A_SAVE_REASON = 'This file is not a Hundred Stories save.';
 const WRONG_VERSION_REASON = 'This save is from a different version of the game.';
+const DAMAGED_REASON = 'This save is damaged and was not loaded.';
+
+// Value tables for the string unions in types.ts, which only declares types.
+// `satisfies Record<..., true>` makes a new kind or state a typecheck error here.
+const SIM_KINDS = {
+  worker: true,
+  resident: true,
+  guest: true,
+  shopper: true,
+  diner: true,
+  staff: true,
+  visitor: true,
+  vip: true,
+} satisfies Record<SimKind, true>;
+
+const SIM_STATES = {
+  inRoom: true,
+  walking: true,
+  waiting: true,
+  riding: true,
+  leaving: true,
+  gone: true,
+  outside: true,
+} satisfies Record<Sim['state'], true>;
+
+const CAR_STATES = { idle: true, moving: true, doorsOpen: true } satisfies Record<Car['state'], true>;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -137,6 +165,99 @@ function hasShape(data: unknown): data is SaveData {
   return true;
 }
 
+// Deep validation. hasShape only proves the top level types; a save can be correctly
+// shaped and still be nonsense (a room on floor 0, a sim with an unknown kind, a
+// negative minute), and loading that replaces the live game with junk. Every rule below
+// returns the first field that breaks, which the reason quotes in parentheses.
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value);
+}
+
+function inRange(value: unknown, min: number, max: number): boolean {
+  return isFiniteNumber(value) && value >= min && value <= max;
+}
+
+/** Returns the first field that breaks a rule, or null when the save is sound. */
+function firstInvalidField(d: SaveData): string | null {
+  if (!isInteger(d.minute) || d.minute < 0) return 'minute';
+  if (!isFiniteNumber(d.cash)) return 'cash';
+  if (!isInteger(d.stars) || d.stars < 1 || d.stars > 6) return 'stars';
+  if (!isInteger(d.nextId)) return 'nextId';
+
+  // Ids come from one counter in world.ts, so they are unique across rooms, shafts,
+  // cars and sims alike, and nextId is always past the highest one handed out.
+  const seen = new Set<number>();
+  function takeId(value: unknown, field: string): string | null {
+    if (!isInteger(value) || value < 1) return field;
+    if (seen.has(value)) return field;
+    if (value >= d.nextId) return 'nextId';
+    seen.add(value);
+    return null;
+  }
+
+  for (let i = 0; i < d.rooms.length; i++) {
+    const at = `rooms[${i}]`;
+    const room = d.rooms[i] as unknown;
+    if (!isPlainObject(room)) return at;
+    const bad = takeId(room.id, `${at}.id`);
+    if (bad) return bad;
+    if (typeof room.kind !== 'string' || !Object.hasOwn(ROOMS, room.kind)) return `${at}.kind`;
+    if (!isInteger(room.floor) || room.floor === 0 || room.floor < MIN_FLOOR || room.floor > MAX_FLOOR) return `${at}.floor`;
+    if (!isFiniteNumber(room.x) || room.x < 0 || room.x >= TOWER_WIDTH) return `${at}.x`;
+    if (!isFiniteNumber(room.width) || room.width <= 0) return `${at}.width`;
+    if (!isFiniteNumber(room.height) || room.height <= 0) return `${at}.height`;
+    if (!inRange(room.eval, 0, 1)) return `${at}.eval`;
+  }
+
+  for (let i = 0; i < d.shafts.length; i++) {
+    const at = `shafts[${i}]`;
+    const shaft = d.shafts[i] as unknown;
+    if (!isPlainObject(shaft)) return at;
+    const bad = takeId(shaft.id, `${at}.id`);
+    if (bad) return bad;
+    if (typeof shaft.kind !== 'string' || !Object.hasOwn(SHAFTS, shaft.kind)) return `${at}.kind`;
+    if (!isInteger(shaft.floorMin) || shaft.floorMin < MIN_FLOOR || shaft.floorMin > MAX_FLOOR) return `${at}.floorMin`;
+    if (!isInteger(shaft.floorMax) || shaft.floorMax < MIN_FLOOR || shaft.floorMax > MAX_FLOOR) return `${at}.floorMax`;
+    if (shaft.floorMin > shaft.floorMax) return `${at}.floorMin`;
+    if (!isFiniteNumber(shaft.x) || shaft.x < 0 || shaft.x >= TOWER_WIDTH) return `${at}.x`;
+    if (!Array.isArray(shaft.stops)) return `${at}.stops`;
+    for (const stop of shaft.stops) {
+      if (!isInteger(stop) || stop < shaft.floorMin || stop > shaft.floorMax) return `${at}.stops`;
+    }
+    if (!Array.isArray(shaft.cars)) return `${at}.cars`;
+    for (let c = 0; c < shaft.cars.length; c++) {
+      const carAt = `${at}.cars[${c}]`;
+      const car = shaft.cars[c] as unknown;
+      if (!isPlainObject(car)) return carAt;
+      const badCar = takeId(car.id, `${carAt}.id`);
+      if (badCar) return badCar;
+      if (!inRange(car.y, shaft.floorMin, shaft.floorMax)) return `${carAt}.y`;
+      if (typeof car.state !== 'string' || !Object.hasOwn(CAR_STATES, car.state)) return `${carAt}.state`;
+    }
+  }
+
+  for (let i = 0; i < d.sims.length; i++) {
+    const at = `sims[${i}]`;
+    const sim = d.sims[i] as unknown;
+    if (!isPlainObject(sim)) return at;
+    const bad = takeId(sim.id, `${at}.id`);
+    if (bad) return bad;
+    if (typeof sim.kind !== 'string' || !Object.hasOwn(SIM_KINDS, sim.kind)) return `${at}.kind`;
+    if (typeof sim.state !== 'string' || !Object.hasOwn(SIM_STATES, sim.state)) return `${at}.state`;
+    if (!inRange(sim.stress, 0, 1)) return `${at}.stress`;
+    if (!isPlainObject(sim.pos)) return `${at}.pos`;
+    if (!isFiniteNumber(sim.pos.floor)) return `${at}.pos.floor`;
+    if (!isFiniteNumber(sim.pos.x)) return `${at}.pos.x`;
+  }
+
+  return null;
+}
+
 export function deserialize(text: string): { ok: true; world: World } | { ok: false; reason: string } {
   try {
     let parsed: unknown;
@@ -152,6 +273,11 @@ export function deserialize(text: string): { ok: true; world: World } | { ok: fa
 
     if (parsed.version !== SAVE_VERSION) {
       return { ok: false, reason: WRONG_VERSION_REASON };
+    }
+
+    const invalid = firstInvalidField(parsed);
+    if (invalid !== null) {
+      return { ok: false, reason: `${DAMAGED_REASON} (${invalid})` };
     }
 
     const world = createWorld(parsed.seed);
@@ -232,9 +358,112 @@ function fnv1a32Hex(text: string): string {
   return (hash >>> 0).toString(16).padStart(8, '0');
 }
 
+// The hash projection is written out field by field on purpose. Hashing buildSaveData
+// would be self referential: a field the serializer forgets is also missing from the
+// hash, so the round trip test would still pass. Listing every key of Room, Car, Shaft
+// and Sim here, with `satisfies Record<keyof T, unknown>`, means a field added to
+// types.ts later fails to compile until it is projected, and a field the serializer
+// drops changes the hash.
+
+function roomForHash(room: Room) {
+  return {
+    id: room.id,
+    kind: room.kind,
+    floor: room.floor,
+    x: room.x,
+    width: room.width,
+    height: room.height,
+    eval: room.eval,
+    tenants: [...room.tenants],
+    occupancy: room.occupancy,
+    builtAtMinute: room.builtAtMinute,
+    vacant: room.vacant,
+    dirty: room.dirty,
+    // optional in types.ts: normalize so an absent key and an explicit null hash alike
+    dirtySinceMinute: room.dirtySinceMinute ?? null,
+    infested: room.infested,
+    lowEvalSinceMinute: room.lowEvalSinceMinute,
+    onFire: room.onFire,
+  } satisfies Record<keyof Room, unknown>;
+}
+
+function carForHash(car: Car) {
+  return {
+    id: car.id,
+    shaftId: car.shaftId,
+    y: car.y,
+    dir: car.dir,
+    state: car.state,
+    doorTimer: car.doorTimer,
+    idleSince: car.idleSince,
+    passengers: [...car.passengers],
+    calls: Array.from(car.calls).sort((a, b) => a - b),
+  } satisfies Record<keyof Car, unknown>;
+}
+
+function shaftForHash(shaft: Shaft) {
+  return {
+    id: shaft.id,
+    kind: shaft.kind,
+    x: shaft.x,
+    width: shaft.width,
+    floorMin: shaft.floorMin,
+    floorMax: shaft.floorMax,
+    stops: Array.from(shaft.stops).sort((a, b) => a - b),
+    homeFloor: shaft.homeFloor,
+    cars: shaft.cars.map(carForHash), // creation order is meaningful, so it is kept
+    hallCalls: Array.from(shaft.hallCalls.entries()).sort((a, b) => a[0] - b[0]),
+  } satisfies Record<keyof Shaft, unknown>;
+}
+
+function simForHash(sim: Sim) {
+  return {
+    id: sim.id,
+    kind: sim.kind,
+    homeRoomId: sim.homeRoomId,
+    pos: { floor: sim.pos.floor, x: sim.pos.x },
+    inCarId: sim.inCarId,
+    inRoomId: sim.inRoomId,
+    route: sim.route.map((leg) => ({ ...leg })),
+    state: sim.state,
+    stress: sim.stress,
+    waitStart: sim.waitStart,
+    schedule: sim.schedule.map((entry) => ({ ...entry, days: [...entry.days], goal: { ...entry.goal } })),
+    nextScheduleIndex: sim.nextScheduleIndex,
+    stayUntil: sim.stayUntil,
+    wallet: sim.wallet,
+    leaveReason: sim.leaveReason,
+    // optional in types.ts: normalize so an absent key and an explicit false hash alike
+    exiting: sim.exiting ?? false,
+  } satisfies Record<keyof Sim, unknown>;
+}
+
+// World keys the hash leaves out on purpose: the log is chatter, rng is hashed as its
+// state number, floorIndex is derived from rooms and shafts, routingDirty is a cache
+// flag, and time is hashed as `minute`.
+type UnhashedWorldKey = 'log' | 'rng' | 'floorIndex' | 'routingDirty' | 'time';
+type HashedWorldKey = Exclude<keyof World, UnhashedWorldKey> | 'minute' | 'rngState';
+
+function byId<T extends { id: number }>(items: Iterable<T>): T[] {
+  return Array.from(items).sort((a, b) => a.id - b.id);
+}
+
 export function hashWorld(world: World): string {
-  const data = buildSaveData(world) as unknown as Record<string, unknown>;
-  const { log: _log, ...withoutLog } = data;
-  const canonical = canonicalize(withoutLog);
-  return fnv1a32Hex(JSON.stringify(canonical));
+  const projection = {
+    version: SAVE_VERSION,
+    seed: world.seed,
+    minute: world.time.minute,
+    cash: world.cash,
+    stars: world.stars,
+    population: world.population,
+    nextId: world.nextId,
+    rngState: world.rng.state(),
+    rooms: byId(world.rooms.values()).map(roomForHash),
+    shafts: byId(world.shafts.values()).map(shaftForHash),
+    sims: byId(world.sims.values()).map(simForHash),
+    events: world.events.map((event) => ({ ...event })),
+    stats: world.stats,
+    gameOver: world.gameOver,
+  } satisfies Record<HashedWorldKey | 'version', unknown>;
+  return fnv1a32Hex(JSON.stringify(canonicalize(projection)));
 }

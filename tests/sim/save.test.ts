@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createWorld, addRoom, addShaft, addSim, log } from '../../src/sim/world';
 import { serialize, deserialize, hashWorld, SAVE_VERSION } from '../../src/sim/save';
-import type { Room, Shaft, Sim, World } from '../../src/sim/types';
+import type { Car, Room, Shaft, Sim, World } from '../../src/sim/types';
 
 function buildRoom(overrides: Partial<Room> = {}): Room {
   return {
@@ -80,6 +80,7 @@ function richWorld(): World {
   addShaft(world, buildShaft());
   addSim(world, buildSim());
   world.events.push({ kind: 'santa', startedAt: 0, x: 0 });
+  world.nextId = 21; // ids 1, 2, 10, 11 and 20 are handed out by hand above; nextId must sit past them
   world.cash = 123456;
   world.stars = 3;
   world.population = 6;
@@ -248,5 +249,189 @@ describe('hashWorld', () => {
     const worldB = richWorld();
     log(worldB, 'An extra unrelated log line.');
     expect(hashWorld(worldA)).toBe(hashWorld(worldB));
+  });
+});
+
+// A save can be correctly shaped at the top level and still be junk inside. These cases all
+// come back refused, with the first field that broke the rules named in the reason.
+describe('deserialize deep validation', () => {
+  const DAMAGED = 'This save is damaged and was not loaded.';
+
+  /** Serialize a good world, break one thing in the JSON, and return the refusal reason. */
+  function reasonFor(breakIt: (data: Record<string, any>) => void): string {
+    const data = JSON.parse(serialize(richWorld())) as Record<string, any>;
+    breakIt(data);
+    const result = deserialize(JSON.stringify(data));
+    expect(result.ok).toBe(false);
+    return result.ok ? '' : result.reason;
+  }
+
+  it('accepts a sound save, so the cases below refuse for the field and not by accident', () => {
+    const data = JSON.parse(serialize(richWorld())) as Record<string, any>;
+    const result = deserialize(JSON.stringify(data));
+    expect(result.ok).toBe(true);
+  });
+
+  it('refuses a room with a kind that is not in ROOMS', () => {
+    expect(reasonFor((d) => (d.rooms[0].kind = 'sauna'))).toBe(`${DAMAGED} (rooms[0].kind)`);
+  });
+
+  it('refuses a room on floor 0, off the top, or on a fractional floor', () => {
+    expect(reasonFor((d) => (d.rooms[0].floor = 0))).toBe(`${DAMAGED} (rooms[0].floor)`);
+    expect(reasonFor((d) => (d.rooms[0].floor = 101))).toBe(`${DAMAGED} (rooms[0].floor)`);
+    expect(reasonFor((d) => (d.rooms[0].floor = -11))).toBe(`${DAMAGED} (rooms[0].floor)`);
+    expect(reasonFor((d) => (d.rooms[0].floor = 2.5))).toBe(`${DAMAGED} (rooms[0].floor)`);
+  });
+
+  it('refuses a room outside the tower width', () => {
+    expect(reasonFor((d) => (d.rooms[0].x = -1))).toBe(`${DAMAGED} (rooms[0].x)`);
+    expect(reasonFor((d) => (d.rooms[0].x = 375))).toBe(`${DAMAGED} (rooms[0].x)`);
+  });
+
+  it('refuses a room with no width or no height', () => {
+    expect(reasonFor((d) => (d.rooms[0].width = 0))).toBe(`${DAMAGED} (rooms[0].width)`);
+    expect(reasonFor((d) => (d.rooms[0].height = -2))).toBe(`${DAMAGED} (rooms[0].height)`);
+  });
+
+  it('refuses a room evaluation outside 0 to 1', () => {
+    expect(reasonFor((d) => (d.rooms[0].eval = 1.5))).toBe(`${DAMAGED} (rooms[0].eval)`);
+    expect(reasonFor((d) => (d.rooms[0].eval = -0.1))).toBe(`${DAMAGED} (rooms[0].eval)`);
+    expect(reasonFor((d) => (d.rooms[0].eval = 'good'))).toBe(`${DAMAGED} (rooms[0].eval)`);
+  });
+
+  it('refuses a shaft with an unknown kind', () => {
+    expect(reasonFor((d) => (d.shafts[0].kind = 'dumbwaiter'))).toBe(`${DAMAGED} (shafts[0].kind)`);
+  });
+
+  it('refuses a shaft whose span is upside down or fractional', () => {
+    expect(reasonFor((d) => (d.shafts[0].floorMin = 20))).toBe(`${DAMAGED} (shafts[0].floorMin)`);
+    expect(reasonFor((d) => (d.shafts[0].floorMax = 10.5))).toBe(`${DAMAGED} (shafts[0].floorMax)`);
+  });
+
+  it('refuses a stop outside the shaft span', () => {
+    expect(reasonFor((d) => d.shafts[0].stops.push(44))).toBe(`${DAMAGED} (shafts[0].stops)`);
+  });
+
+  it('refuses a car parked outside the shaft span or with no number at all', () => {
+    expect(reasonFor((d) => (d.shafts[0].cars[0].y = 99))).toBe(`${DAMAGED} (shafts[0].cars[0].y)`);
+    expect(reasonFor((d) => (d.shafts[0].cars[0].y = null))).toBe(`${DAMAGED} (shafts[0].cars[0].y)`);
+  });
+
+  it('refuses a car in a state the sim never produces', () => {
+    expect(reasonFor((d) => (d.shafts[0].cars[0].state = 'plummeting'))).toBe(`${DAMAGED} (shafts[0].cars[0].state)`);
+  });
+
+  it('refuses junk sims: unknown kind, unknown state, impossible stress, no position', () => {
+    expect(reasonFor((d) => (d.sims[0].kind = 'dragon'))).toBe(`${DAMAGED} (sims[0].kind)`);
+    expect(reasonFor((d) => (d.sims[0].state = 'dancing'))).toBe(`${DAMAGED} (sims[0].state)`);
+    expect(reasonFor((d) => (d.sims[0].stress = 7))).toBe(`${DAMAGED} (sims[0].stress)`);
+    expect(reasonFor((d) => (d.sims[0].pos = null))).toBe(`${DAMAGED} (sims[0].pos)`);
+    expect(reasonFor((d) => (d.sims[0].pos = { floor: 'up', x: 10 }))).toBe(`${DAMAGED} (sims[0].pos.floor)`);
+  });
+
+  it('refuses a negative or fractional minute', () => {
+    expect(reasonFor((d) => (d.minute = -1))).toBe(`${DAMAGED} (minute)`);
+    expect(reasonFor((d) => (d.minute = 10.5))).toBe(`${DAMAGED} (minute)`);
+  });
+
+  it('refuses a star rating off the ladder', () => {
+    expect(reasonFor((d) => (d.stars = 7))).toBe(`${DAMAGED} (stars)`);
+    expect(reasonFor((d) => (d.stars = 0))).toBe(`${DAMAGED} (stars)`);
+  });
+
+  it('refuses nextId that is not past every id, which would hand out an id twice', () => {
+    expect(reasonFor((d) => (d.nextId = 11))).toBe(`${DAMAGED} (nextId)`);
+  });
+
+  it('refuses ids that are used twice, across rooms, shafts, cars and sims alike', () => {
+    expect(reasonFor((d) => (d.rooms[1].id = d.rooms[0].id))).toBe(`${DAMAGED} (rooms[1].id)`);
+    expect(reasonFor((d) => (d.sims[0].id = d.shafts[0].cars[0].id))).toBe(`${DAMAGED} (sims[0].id)`);
+  });
+
+  it('leaves a sound save loading normally after all that', () => {
+    const world = richWorld();
+    const result = deserialize(serialize(world));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(hashWorld(result.world)).toBe(hashWorld(world));
+  });
+});
+
+// The round trip is only as strong as the hash. hashWorld projects every field named in
+// types.ts, so a field the serializer drops moves the hash instead of hiding in it.
+describe('hashWorld covers every field in types.ts', () => {
+  it('keeps every Room, Shaft, Car and Sim key across a round trip', () => {
+    const world = richWorld();
+    const result = deserialize(serialize(world));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const keys = (value: object): string[] => Object.keys(value).sort();
+
+    const room = world.rooms.get(1) as Room;
+    expect(keys(result.world.rooms.get(1) as Room)).toEqual(keys(room));
+    const shaft = world.shafts.get(10) as Shaft;
+    const loadedShaft = result.world.shafts.get(10) as Shaft;
+    expect(keys(loadedShaft)).toEqual(keys(shaft));
+    expect(keys(loadedShaft.cars[0] as object)).toEqual(keys(shaft.cars[0] as object));
+    const sim = world.sims.get(20) as Sim;
+    expect(keys(result.world.sims.get(20) as Sim)).toEqual(keys(sim));
+  });
+
+  it('moves when any single Room field moves', () => {
+    // An explicit value per key: adding a field to Room fails this line until it is listed,
+    // which is the point. id and tenants are covered by the shared checks below.
+    const changes = {
+      id: (r: Room) => (r.id = 5),
+      kind: (r: Room) => (r.kind = 'shop'),
+      floor: (r: Room) => (r.floor = 3),
+      x: (r: Room) => (r.x = 101),
+      width: (r: Room) => (r.width = 11),
+      height: (r: Room) => (r.height = 2),
+      eval: (r: Room) => (r.eval = 0.5),
+      tenants: (r: Room) => r.tenants.push(20),
+      occupancy: (r: Room) => (r.occupancy = 3),
+      builtAtMinute: (r: Room) => (r.builtAtMinute = 99),
+      vacant: (r: Room) => (r.vacant = !r.vacant),
+      dirty: (r: Room) => (r.dirty = !r.dirty),
+      dirtySinceMinute: (r: Room) => (r.dirtySinceMinute = 42),
+      infested: (r: Room) => (r.infested = !r.infested),
+      lowEvalSinceMinute: (r: Room) => (r.lowEvalSinceMinute = 7),
+      onFire: (r: Room) => (r.onFire = !r.onFire),
+    } satisfies Record<keyof Room, (room: Room) => unknown>;
+
+    for (const [field, change] of Object.entries(changes)) {
+      const world = richWorld();
+      const before = hashWorld(world);
+      change(world.rooms.get(1) as Room);
+      expect(hashWorld(world), `Room.${field} is missing from the hash projection`).not.toBe(before);
+    }
+  });
+
+  it('moves when any single Car field moves', () => {
+    const changes = {
+      id: (c: Car) => (c.id = 12),
+      shaftId: (c: Car) => (c.shaftId = 13),
+      y: (c: Car) => (c.y = 4),
+      dir: (c: Car) => (c.dir = 1),
+      state: (c: Car) => (c.state = 'moving'),
+      doorTimer: (c: Car) => (c.doorTimer = 1),
+      idleSince: (c: Car) => (c.idleSince = 99),
+      passengers: (c: Car) => c.passengers.push(20),
+      calls: (c: Car) => c.calls.add(9),
+    } satisfies Record<keyof Car, (car: Car) => unknown>;
+
+    for (const [field, change] of Object.entries(changes)) {
+      const world = richWorld();
+      const before = hashWorld(world);
+      change((world.shafts.get(10) as Shaft).cars[0] as Car);
+      expect(hashWorld(world), `Car.${field} is missing from the hash projection`).not.toBe(before);
+    }
+  });
+
+  it('moves when a Sim field the serializer could forget moves', () => {
+    const world = richWorld();
+    const before = hashWorld(world);
+    (world.sims.get(20) as Sim).exiting = true;
+    expect(hashWorld(world)).not.toBe(before);
   });
 });
