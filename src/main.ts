@@ -17,8 +17,14 @@ async function boot(): Promise<void> {
   uiRoot.id = 'ui';
   app.append(view, uiRoot);
 
-  const seed = Number(new URLSearchParams(location.search).get('seed')) || Math.floor(Date.now() % 1_000_000);
+  const params = new URLSearchParams(location.search);
+  const seed = Number(params.get('seed')) || Math.floor(Date.now() % 1_000_000);
   const game = createGame(seed);
+  // Resume the autosave unless the player asked for a fresh tower with ?new. The seed only applies to new games.
+  if (!params.has('new')) {
+    const resumed = await game.load();
+    if (resumed.ok) game.world.log.push({ minute: game.world.time.minute, text: 'Welcome back. Your tower was restored from the last autosave.', level: 'info' });
+  }
   let renderer;
   try {
     renderer = await createRenderer(view, game.world);

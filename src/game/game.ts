@@ -254,6 +254,7 @@ export function createGame(seed: number): Game {
       renderer?.setGhost(null);
       renderer?.camera.centerOn(3, LIMITS.towerWidth / 2);
       notify();
+      void api.save(); // the autosave slot must not resurrect the old tower on the next reload
     },
     setReducedMotion(on) {
       reducedMotion = on;
