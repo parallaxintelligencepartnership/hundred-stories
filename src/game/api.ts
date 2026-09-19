@@ -24,6 +24,8 @@ export interface Placement {
   floorMax: number; // equal to floorMin for a room
   ok: boolean;
   reason?: string; // why it cannot be built, in the sim's own words
+  /** Set when this placement stretches a shaft that is already standing, rather than building one. */
+  shaftId?: Id;
   label: string; // the palette's name for the room or shaft
   cost: number;
   pending: boolean;
@@ -41,6 +43,8 @@ export interface GameApi {
   readonly world: World;
   apply(cmd: Command): CommandResult;
   canBuildAt(tool: Tool, floor: number, x: number): CommandResult;
+  /** Could this shaft be stretched to this span? The panel asks before it offers the button. */
+  canExtend(shaftId: Id, floorMin: number, floorMax: number): CommandResult;
   setTool(tool: Tool): void;
   getTool(): Tool;
   setSpeed(speed: Speed): void;

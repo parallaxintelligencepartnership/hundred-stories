@@ -277,6 +277,22 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
   actions.append(add, remove);
   body.append(actions);
 
+  // Stretching a standing elevator, the way the original let you drag one taller or deeper.
+  // It costs nothing, so the only question the buttons ask is whether the floor is free.
+  const reach = el('div', 'hs-actions');
+  const extendUp = button('Extend up', 'hs-btn', () => {
+    const now = game.world.shafts.get(shaftId);
+    if (!now) return;
+    ctx.apply({ kind: 'shaft.extend', shaftId, floorMin: now.floorMin, floorMax: stepFloor(now.floorMax, 1) });
+  });
+  const extendDown = button('Extend down', 'hs-btn', () => {
+    const now = game.world.shafts.get(shaftId);
+    if (!now) return;
+    ctx.apply({ kind: 'shaft.extend', shaftId, floorMin: stepFloor(now.floorMin, -1), floorMax: now.floorMax });
+  });
+  reach.append(extendUp, extendDown);
+  body.append(reach);
+
   const stopButtons: { floor: number; node: HTMLButtonElement }[] = [];
   if (shaft.kind === 'express') {
     const stops = section('Stops');
@@ -309,6 +325,8 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
     setRowValue(riders, formatCount(shaft.cars.reduce((n, c) => n + c.passengers.length, 0)));
     add.disabled = shaft.cars.length >= rule.maxCars;
     remove.disabled = shaft.cars.length <= 1;
+    offerReach(extendUp, game.canExtend(shaftId, shaft.floorMin, stepFloor(shaft.floorMax, 1)), 'Reach one floor higher');
+    offerReach(extendDown, game.canExtend(shaftId, stepFloor(shaft.floorMin, -1), shaft.floorMax), 'Reach one floor lower');
     for (const stop of stopButtons) {
       stop.node.setAttribute('aria-pressed', shaft.stops.has(stop.floor) ? 'true' : 'false');
     }
@@ -316,6 +334,18 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
   refresh();
   panel.refresh = refresh;
   return panel;
+}
+
+/** One floor up or down, stepping over the ground: floor 0 does not exist. */
+function stepFloor(floor: number, step: number): number {
+  const next = floor + step;
+  return next === 0 ? floor + step * 2 : next;
+}
+
+/** Offer the reach, or refuse it in the sim's own words. */
+function offerReach(node: HTMLButtonElement, result: CommandResult, title: string): void {
+  node.disabled = !result.ok;
+  node.title = result.ok ? title : result.reason;
 }
 
 /** Lobby, sky lobby and underground floors inside the span: the only floors an express may serve. */

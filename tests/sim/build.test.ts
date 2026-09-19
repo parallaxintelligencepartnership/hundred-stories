@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { applyCommand, canBuild, canBuildShaft } from '../../src/sim/build';
+import { applyCommand, canBuild, canBuildShaft, canExtendShaft } from '../../src/sim/build';
 import { LIMITS, ROOMS, SHAFTS } from '../../src/sim/rules';
 import { createWorld } from '../../src/sim/world';
 import type { CommandResult, RoomKind, Shaft, ShaftKind, Star, World } from '../../src/sim/types';
@@ -643,5 +643,54 @@ describe('logging, previews and delegation', () => {
     expect(office?.builtAtMinute).toBe(world.time.minute);
     expect(office?.lowEvalSinceMinute).toBeNull();
     expect(world.routingDirty).toBe(true);
+  });
+});
+
+describe('canExtendShaft', () => {
+  it('says yes to a reach upward, and charges nothing for it', () => {
+    const world = makeWorld();
+    expect(buildShaft(world, 'standard', 150, 1, 10)).toEqual(OK);
+    const shaft = onlyShaft(world);
+    const cash = world.cash;
+    expect(canExtendShaft(world, shaft.id, 1, 16)).toEqual(OK);
+    expect(applyCommand(world, { kind: 'shaft.extend', shaftId: shaft.id, floorMin: 1, floorMax: 16 })).toEqual(OK);
+    expect(world.cash).toBe(cash); // the shaft's price covered every floor it will ever serve
+  });
+
+  it('says yes to a reach below ground', () => {
+    const world = makeWorld();
+    expect(buildShaft(world, 'standard', 150, 1, 10)).toEqual(OK);
+    const shaft = onlyShaft(world);
+    expect(canExtendShaft(world, shaft.id, -3, 10)).toEqual(OK);
+  });
+
+  it('refuses to shrink, and refuses a span past the limit', () => {
+    const world = makeWorld();
+    expect(buildShaft(world, 'standard', 150, 1, 10)).toEqual(OK);
+    const shaft = onlyShaft(world);
+    expect(reasonOf(canExtendShaft(world, shaft.id, 2, 10))).toBe('You can only extend an elevator, not shrink it.');
+    expect(reasonOf(canExtendShaft(world, shaft.id, 1, 9))).toBe('You can only extend an elevator, not shrink it.');
+    expect(reasonOf(canExtendShaft(world, shaft.id, 1, 40))).toBe('Elevators can span only 30 floors.');
+  });
+
+  it('refuses a reach through stairs, and refuses a shaft that is gone', () => {
+    const world = makeWorld();
+    lobby(world);
+    expect(buildShaft(world, 'standard', 150, 1, 10)).toEqual(OK);
+    const shaft = onlyShaft(world);
+    for (let f = 2; f <= 12; f++) expect(build(world, 'office', f, 100)).toEqual(OK);
+    expect(build(world, 'stairs', 11, 148)).toEqual(OK);
+    expect(reasonOf(canExtendShaft(world, shaft.id, 1, 12))).toBe('Something is already there.');
+    expect(reasonOf(canExtendShaft(world, shaft.id + 99, 1, 12))).toBe('That elevator is gone.');
+  });
+
+  it('leaves the shaft exactly as it was: asking is not doing', () => {
+    const world = makeWorld();
+    expect(buildShaft(world, 'standard', 150, 1, 10)).toEqual(OK);
+    const shaft = onlyShaft(world);
+    const lines = world.log.length;
+    expect(canExtendShaft(world, shaft.id, 1, 16)).toEqual(OK);
+    expect(shaft.floorMax).toBe(10);
+    expect(world.log.length).toBe(lines);
   });
 });

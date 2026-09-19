@@ -82,7 +82,8 @@ export function hintText(coarsePointer: boolean): string {
  * would have shown after the money was gone.
  */
 export function placementChipText(placement: Placement): string {
-  if (placement.ok) return `${placement.label} \u00b7 ${formatMoney(placement.cost)}`;
+  // Stretching an elevator costs nothing: the shaft's price covered every floor it can serve.
+  if (placement.ok) return `${placement.label} \u00b7 ${placement.cost === 0 ? 'Free' : formatMoney(placement.cost)}`;
   return placement.reason ?? 'That spot will not take it.';
 }
 
@@ -100,9 +101,10 @@ export function placementArrowLabels(shaft: boolean): { up: string; down: string
 
 /** The Build button's own words: the price when it can be built, the refusal when it cannot. */
 export function placementBuildLabels(placement: Placement): { text: string; title: string } {
+  const extending = placement.shaftId !== undefined;
   return {
-    text: `Build ${formatMoney(placement.cost)}`,
-    title: placement.ok ? 'Build it here' : placementChipText(placement),
+    text: extending ? 'Extend' : `Build ${formatMoney(placement.cost)}`,
+    title: placement.ok ? (extending ? 'Stretch this elevator' : 'Build it here') : placementChipText(placement),
   };
 }
 
@@ -393,7 +395,11 @@ export function createUi(root: HTMLElement, game: GameApi): Ui {
     chip.classList.toggle('is-alert', !placement.ok);
 
     if (placement.pending) {
-      const arrows = placementArrowLabels(heldIsShaft());
+      // An extension is tied to its shaft's column, so sideways is not on offer.
+      const anchored = placement.shaftId !== undefined;
+      leftButton.disabled = anchored;
+      rightButton.disabled = anchored;
+      const arrows = placementArrowLabels(heldIsShaft() || anchored);
       describe(upButton, '\u25b2', arrows.up);
       describe(downButton, '\u25bc', arrows.down);
       const build = placementBuildLabels(placement);

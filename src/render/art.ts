@@ -1246,7 +1246,9 @@ function drawSlab(g: Graphics, w: number): void {
 }
 
 function drawShaft(g: Graphics, kind: ShaftKind, w: number, h: number): void {
-  box(g, 0, 0, w, h, PALETTE.shaftCavity);
+  // A hint of a cavity, not a wall: the shaft reads as rails and floor marks with the car
+  // running inside them, and whatever stands behind the column shows through.
+  box(g, 0, 0, w, h, PALETTE.shaftCavity, 0.14);
   box(g, 0, 0, 1, h, PALETTE.shaftFloorMark);
   box(g, w - 1, 0, 1, h, PALETTE.shaftFloorMark);
   box(g, 3, 0, 2, h, PALETTE.shaftRail); // guide rails

@@ -425,7 +425,14 @@ function doDemolishShaft(world: World, shaftId: number): CommandResult {
   return OK;
 }
 
-function doExtendShaft(
+/**
+ * Could this elevator be stretched to this span?
+ *
+ * Stretching is free: the shaft's price bought the column, whatever it ends up serving. The
+ * ghost and the shaft panel ask this before they offer the move, so the answer is the same
+ * sentence the log would have shown afterwards.
+ */
+export function canExtendShaft(
   world: World,
   shaftId: number,
   floorMin: number,
@@ -454,6 +461,24 @@ function doExtendShaft(
   if (shaftInTheWay(world, added, shaft.x, shaft.width, shaft.id)) {
     return no('An elevator is in the way.');
   }
+  return OK;
+}
+
+function doExtendShaft(
+  world: World,
+  shaftId: number,
+  floorMin: number,
+  floorMax: number,
+): CommandResult {
+  const refusal = canExtendShaft(world, shaftId, floorMin, floorMax);
+  if (!refusal.ok) return refusal;
+  const shaft = world.shafts.get(shaftId);
+  if (!shaft) return no('That elevator is gone.');
+
+  const rule = SHAFTS[shaft.kind];
+  const added = shaftFloors(floorMin, floorMax).filter(
+    (f) => f < shaft.floorMin || f > shaft.floorMax,
+  );
 
   shaft.floorMin = floorMin;
   shaft.floorMax = floorMax;

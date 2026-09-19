@@ -278,19 +278,14 @@ describe('the pending placement a finger parks', () => {
     });
   });
 
-  it('parks a one floor span for a tap that never moved, and says why it cannot be built', () => {
+  it('parks two floors for a tap that never moved, so the outline opens green', () => {
     const { game, host } = started(byY);
     game.setTool({ kind: 'shaft', shaft: 'standard' });
 
     host.fire('pointerdown', finger(1600, 0, 1, atFloor(2)));
     host.fire('pointerup', finger(1600, 60, 1, atFloor(2)));
 
-    expect(game.getPlacement()).toMatchObject({
-      floorMin: 2,
-      floorMax: 2,
-      ok: false,
-      reason: 'An elevator must serve at least two floors.',
-    });
+    expect(game.getPlacement()).toMatchObject({ floorMin: 2, floorMax: 3, ok: true, pending: true });
   });
 
   it('a mouse drag still builds the elevator on release', () => {
@@ -347,11 +342,12 @@ describe('moving and sizing a pending placement', () => {
     game.setTool({ kind: 'shaft', shaft: 'standard' });
     host.fire('pointerdown', finger(1600, 0, 1, atFloor(3)));
     host.fire('pointerup', finger(1600, 60, 1, atFloor(3)));
+    expect(game.getPlacement()).toMatchObject({ floorMin: 3, floorMax: 4 });
 
     game.resizePending(1, 0);
-    expect(game.getPlacement()).toMatchObject({ floorMin: 3, floorMax: 4 });
+    expect(game.getPlacement()).toMatchObject({ floorMin: 3, floorMax: 5 });
     game.resizePending(0, 2);
-    expect(game.getPlacement()).toMatchObject({ floorMin: 1, floorMax: 4 });
+    expect(game.getPlacement()).toMatchObject({ floorMin: 1, floorMax: 5 });
     game.resizePending(-9, 0);
     expect(game.getPlacement()).toMatchObject({ floorMin: 1, floorMax: 1 });
   });
@@ -416,5 +412,107 @@ describe('confirming, refusing and dropping a pending placement', () => {
     expect(game.getPlacement()?.pending).toBe(true);
     game.setTool({ kind: 'none' });
     expect(game.getPlacement()).toBeNull();
+  });
+});
+
+describe('stretching an elevator that is already standing', () => {
+  /** A game with a standard elevator from floor 1 to 3, in the player's hand as well. */
+  function withShaft(): ReturnType<typeof started> {
+    const parts = started(byY);
+    expect(
+      parts.game.apply({ kind: 'shaft.build', shaft: 'standard', x: 200, floorMin: 1, floorMax: 3 }),
+    ).toEqual({ ok: true });
+    parts.game.setTool({ kind: 'shaft', shaft: 'standard' });
+    return parts;
+  }
+
+  const spanOf = (game: ReturnType<typeof createGame>): { floorMin: number; floorMax: number } => {
+    const shaft = [...game.world.shafts.values()][0]!;
+    return { floorMin: shaft.floorMin, floorMax: shaft.floorMax };
+  };
+
+  it('a mouse drag up from inside the shaft takes it higher', () => {
+    const { game, host } = withShaft();
+
+    host.fire('pointerdown', press(1600, atFloor(2)));
+    host.fire('pointermove', press(1600, atFloor(6)));
+    host.fire('pointerup', press(1600, atFloor(6)));
+
+    expect(game.world.shafts.size).toBe(1); // stretched, not a second shaft beside it
+    expect(spanOf(game)).toEqual({ floorMin: 1, floorMax: 6 });
+  });
+
+  it('a drag down takes it below ground', () => {
+    const { game, host } = withShaft();
+
+    host.fire('pointerdown', press(1600, atFloor(2)));
+    host.fire('pointerup', press(1600, atFloor(-2)));
+
+    expect(spanOf(game)).toEqual({ floorMin: -2, floorMax: 3 });
+  });
+
+  it('shows the whole candidate span for free while the drag is out', () => {
+    const { game, host } = withShaft();
+
+    host.fire('pointerdown', press(1600, atFloor(2)));
+    host.fire('pointermove', press(1600, atFloor(6)));
+
+    expect(game.getPlacement()).toMatchObject({
+      label: 'Extend elevator',
+      cost: 0,
+      floorMin: 1,
+      floorMax: 6,
+      ok: true,
+      pending: false,
+    });
+  });
+
+  it('a plain click on the shaft builds nothing and says nothing', () => {
+    const { game, host } = withShaft();
+    const lines = game.world.log.length;
+
+    host.fire('pointerdown', press(1600, atFloor(2)));
+    host.fire('pointerup', press(1600, atFloor(2)));
+
+    expect(spanOf(game)).toEqual({ floorMin: 1, floorMax: 3 });
+    expect(game.world.shafts.size).toBe(1);
+    expect(game.world.log.length).toBe(lines);
+  });
+
+  it('a finger parks the stretch, and Build applies it', () => {
+    const { game, host } = withShaft();
+
+    host.fire('pointerdown', finger(1600, 0, 1, atFloor(2)));
+    host.fire('pointermove', finger(1600, 60, 1, atFloor(5)));
+    host.fire('pointerup', finger(1600, 90, 1, atFloor(5)));
+
+    const shaftId = [...game.world.shafts.values()][0]!.id;
+    expect(game.getPlacement()).toMatchObject({
+      shaftId,
+      floorMin: 1,
+      floorMax: 5,
+      cost: 0,
+      pending: true,
+      ok: true,
+    });
+    expect(spanOf(game)).toEqual({ floorMin: 1, floorMax: 3 }); // nothing applied yet
+
+    expect(game.confirmPending()).toEqual({ ok: true });
+    expect(spanOf(game)).toEqual({ floorMin: 1, floorMax: 5 });
+    // The parked outline is gone; what is left is the ordinary hover preview under the finger.
+    expect(game.getPlacement()?.pending).not.toBe(true);
+    expect(game.getTool()).toEqual({ kind: 'shaft', shaft: 'standard' });
+  });
+
+  it('never gives back the floors the elevator already serves', () => {
+    const { game, host } = withShaft();
+
+    host.fire('pointerdown', finger(1600, 0, 1, atFloor(2)));
+    host.fire('pointerup', finger(1600, 60, 1, atFloor(5)));
+
+    game.resizePending(-9, -9); // asking for less than it has
+    expect(game.getPlacement()).toMatchObject({ floorMin: 1, floorMax: 3 });
+    game.resizePending(0, 1);
+    expect(game.getPlacement()).toMatchObject({ floorMin: -1, floorMax: 3 });
   });
 });

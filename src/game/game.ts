@@ -1,9 +1,9 @@
 // The game shell: owns the world, the clock loop, the active tool, pointer input on the tower view, and saves.
-import { applyCommand, canBuild, canBuildShaft } from '../sim/build';
+import { applyCommand, canBuild, canBuildShaft, canExtendShaft } from '../sim/build';
 import { LIMITS, ROOMS, SHAFTS } from '../sim/rules';
 import { deserialize, serialize } from '../sim/save';
 import { tick } from '../sim/tick';
-import { clockOf, type Command, type CommandResult, type Id, type World } from '../sim/types';
+import { clockOf, type Command, type CommandResult, type Id, type Shaft, type World } from '../sim/types';
 import { createWorld } from '../sim/world';
 import { SCHEDULES } from '../sim/rules';
 import { classifyPress, isTap, PRESS_SLOP_PX, TOUCH_SLOP_PX } from '../render/input';
@@ -86,8 +86,12 @@ export function createGame(seed: number): Game {
   const subscribers = new Set<() => void>();
   const notify = () => subscribers.forEach((cb) => cb());
 
-  // Drag state for lobby segments (horizontal) and shafts (vertical).
-  let drag: null | { floor: number; x: number; kind: 'lobby' | 'shaft'; touch: boolean } = null;
+  // Drag state for lobby segments (horizontal), new shafts (vertical), and the drag that
+  // stretches a shaft that is already standing.
+  let drag:
+    | null
+    | { floor: number; x: number; kind: 'lobby' | 'shaft'; touch: boolean }
+    | { floor: number; x: number; kind: 'shaftExtend'; touch: boolean; shaftId: Id } = null;
   /**
    * The placement a finger parked on the tower, waiting for Build.
    *
@@ -95,7 +99,7 @@ export function createGame(seed: number): Game {
    * is choosing, so touch places in two steps: a tap parks this, and the ui's bar moves it,
    * sizes it and confirms it. A room keeps floorMin === floorMax === floor.
    */
-  let pending: null | { floor: number; x: number; floorMin: number; floorMax: number } = null;
+  let pending: null | { floor: number; x: number; floorMin: number; floorMax: number; shaftId?: Id } = null;
   // A left press with a room tool is provisional: it builds on release, and only if it held
   // still. A press that travels is a pan, which renderer.ts hands to the camera.
   let press: null | { sx: number; sy: number; floor: number; x: number; time: number; touch: boolean } = null;
@@ -189,6 +193,35 @@ export function createGame(seed: number): Game {
     renderer?.render(world, Math.min(1, accumulator + elapsed * rate));
   }
 
+  /** The shaft standing on this tile, if any. Tapping one with an elevator in hand extends it. */
+  function shaftAtTile(floor: number, x: number): Shaft | null {
+    for (const shaft of world.shafts.values()) {
+      if (x < shaft.x || x >= shaft.x + shaft.width) continue;
+      if (floor >= shaft.floorMin && floor <= shaft.floorMax) return shaft;
+    }
+    return null;
+  }
+
+  /** The span a drag from inside a shaft out to this floor asks for: the old span plus the reach. */
+  function extendSpan(shaft: Shaft, floor: number): { floorMin: number; floorMax: number } {
+    return {
+      floorMin: Math.min(shaft.floorMin, floor),
+      floorMax: Math.max(shaft.floorMax, floor),
+    };
+  }
+
+  /**
+   * The two floor span a tap on empty ground parks for a new elevator.
+   *
+   * One floor is never a legal elevator, so a parked single floor would open red for no
+   * reason the player can see. The pair reaches up, or down from the top of the tower.
+   */
+  function twoFloorSpan(floor: number): { floorMin: number; floorMax: number } {
+    const up = floorOfBand(bandOf(floor) + 1);
+    if (up <= LIMITS.maxFloor) return { floorMin: floor, floorMax: up };
+    return { floorMin: floorOfBand(bandOf(floor) - 1), floorMax: floor };
+  }
+
   /** How wide the tool in hand is, in tiles. Zero when it builds nothing. */
   function toolWidth(): number {
     if (tool.kind === 'room') return ROOMS[tool.room].width;
@@ -203,9 +236,25 @@ export function createGame(seed: number): Game {
 
   /** The span a placement covers, priced and judged by the sim, for the ghost and the ui. */
   function placementFor(
-    at: { x: number; floorMin: number; floorMax: number },
+    at: { x: number; floorMin: number; floorMax: number; shaftId?: Id },
     isPending: boolean,
   ): Placement | null {
+    if (at.shaftId !== undefined) {
+      const shaft = world.shafts.get(at.shaftId);
+      if (!shaft) return null;
+      const res = canExtendShaft(world, at.shaftId, at.floorMin, at.floorMax);
+      const base = {
+        floor: at.floorMin,
+        x: shaft.x,
+        floorMin: at.floorMin,
+        floorMax: at.floorMax,
+        label: `Extend ${SHAFTS[shaft.kind].label.toLowerCase()}`,
+        cost: 0, // the shaft's price covered every floor it will ever serve
+        pending: isPending,
+        shaftId: at.shaftId,
+      };
+      return res.ok ? { ...base, ok: true } : { ...base, ok: false, reason: res.reason };
+    }
     if (tool.kind === 'room') {
       const rule = ROOMS[tool.room];
       const res = canBuild(world, tool.room, at.floorMin, at.x);
@@ -238,7 +287,7 @@ export function createGame(seed: number): Game {
   }
 
   /** Park a placement and show it: the ghost stops following the pointer until it is resolved. */
-  function setPending(next: { floor: number; x: number; floorMin: number; floorMax: number }): void {
+  function setPending(next: { floor: number; x: number; floorMin: number; floorMax: number; shaftId?: Id }): void {
     pending = next;
     showPendingGhost();
     notify();
@@ -260,11 +309,12 @@ export function createGame(seed: number): Game {
     }
     // A room stands as tall as its rule says; an elevator is as tall as the span the player drew.
     const heightFloors =
-      tool.kind === 'room'
+      tool.kind === 'room' && placement.shaftId === undefined
         ? ROOMS[tool.room].height
         : bandOf(placement.floorMax) - bandOf(placement.floorMin) + 1;
+    const shaft = placement.shaftId === undefined ? null : world.shafts.get(placement.shaftId);
     renderer.setGhost({
-      widthTiles: toolWidth(),
+      widthTiles: shaft ? shaft.width : toolWidth(),
       heightFloors,
       floor: placement.floorMin,
       x: placement.x,
@@ -278,6 +328,23 @@ export function createGame(seed: number): Game {
     // player put it. A shaft drag in progress is the exception, since it is drawing a span.
     if (pending && !drag) {
       showPendingGhost();
+      return;
+    }
+    if (drag?.kind === 'shaftExtend') {
+      const shaft = world.shafts.get(drag.shaftId);
+      if (!shaft) {
+        renderer.setGhost(null);
+        return;
+      }
+      const span = extendSpan(shaft, floor);
+      const res = canExtendShaft(world, shaft.id, span.floorMin, span.floorMax);
+      renderer.setGhost({
+        widthTiles: shaft.width,
+        heightFloors: bandOf(span.floorMax) - bandOf(span.floorMin) + 1,
+        floor: span.floorMin,
+        x: shaft.x,
+        ok: res.ok,
+      });
       return;
     }
     if (tool.kind === 'room') {
@@ -311,7 +378,14 @@ export function createGame(seed: number): Game {
       drag = { floor, x, kind: 'lobby', touch };
       applyCommand(world, { kind: 'build', room: 'lobby', floor: 1, x });
       notify();
-    } else if (tool.kind === 'shaft') drag = { floor, x, kind: 'shaft', touch };
+    } else if (tool.kind === 'shaft') {
+      // An elevator in hand on a shaft that is already there means stretch that one, whichever
+      // kind it is: the player is pointing at the shaft, not choosing a new one.
+      const standing = shaftAtTile(floor, x);
+      drag = standing
+        ? { floor, x, kind: 'shaftExtend', touch, shaftId: standing.id }
+        : { floor, x, kind: 'shaft', touch };
+    }
     // Every other room waits for the release: until then the press may still become a pan.
     else if (tool.kind === 'room')
       press = { sx: ev.clientX, sy: ev.clientY, floor, x, time: ev.timeStamp, touch };
@@ -370,15 +444,30 @@ export function createGame(seed: number): Game {
       for (let sx = from; sx <= to; sx++) applyCommand(world, { kind: 'build', room: 'lobby', floor: 1, x: sx });
       notify();
     }
-    if (drag.kind === 'shaft' && tool.kind === 'shaft') {
+    if (drag.kind === 'shaftExtend') {
+      const shaft = world.shafts.get(drag.shaftId);
+      if (shaft) {
+        const span = extendSpan(shaft, floor);
+        const grew = span.floorMin !== shaft.floorMin || span.floorMax !== shaft.floorMax;
+        if (drag.touch) {
+          drag = null;
+          setPending({ floor: span.floorMin, x: shaft.x, ...span, shaftId: shaft.id });
+        } else if (grew) {
+          // A click that reached nowhere is a click on an elevator: nothing to do, nothing to say.
+          api.apply({ kind: 'shaft.extend', shaftId: shaft.id, floorMin: span.floorMin, floorMax: span.floorMax });
+        }
+      }
+    }
+    if (drag?.kind === 'shaft' && tool.kind === 'shaft') {
       const floorMin = Math.min(drag.floor, floor);
       const floorMax = Math.max(drag.floor, floor);
       // The same two steps as a room on touch: the span the finger drew is parked, not built.
-      // A tap that never moved parks a one floor span for the bar's arrows to stretch.
       if (drag.touch) {
         const dragX = drag.x;
         drag = null;
-        setPending({ floor: floorMin, x: dragX, floorMin, floorMax });
+        // A tap that never moved still parks a legal elevator, so the outline opens green.
+        const span = floorMin === floorMax ? twoFloorSpan(floorMin) : { floorMin, floorMax };
+        setPending({ floor: span.floorMin, x: dragX, ...span });
       } else {
         api.apply({ kind: 'shaft.build', shaft: tool.shaft, x: drag.x, floorMin, floorMax });
       }
@@ -430,9 +519,18 @@ export function createGame(seed: number): Game {
     },
     getSelection: () => selection,
     getHover: () => hover,
+    canExtend(shaftId, floorMin, floorMax) {
+      return canExtendShaft(world, shaftId, floorMin, floorMax);
+    },
     getPlacement(): Placement | null {
       if (pending) return placementFor(pending, true);
       if (!hover) return null;
+      // A drag that started inside a shaft is stretching that shaft, whatever the pointer is.
+      if (drag?.kind === 'shaftExtend') {
+        const shaft = world.shafts.get(drag.shaftId);
+        if (!shaft) return null;
+        return placementFor({ x: shaft.x, ...extendSpan(shaft, hover.floor), shaftId: shaft.id }, false);
+      }
       // The hover ghost, including the span a mouse is dragging an elevator across.
       const dragging = drag?.kind === 'shaft' && tool.kind === 'shaft' ? drag : null;
       const floorMin = dragging ? Math.min(dragging.floor, hover.floor) : hover.floor;
@@ -444,6 +542,12 @@ export function createGame(seed: number): Game {
     },
     nudgePending(dx, dFloor) {
       if (!pending) return;
+      // An extension is anchored to the elevator it grows from: it slides up and down, never
+      // sideways, and never lets go of the floors the shaft already serves.
+      if (pending.shaftId !== undefined) {
+        api.resizePending(dFloor > 0 ? dFloor : 0, dFloor < 0 ? -dFloor : 0);
+        return;
+      }
       const span = bandOf(pending.floorMax) - bandOf(pending.floorMin);
       // Move the band, then put the span back on it, so a placement never grows by sliding.
       const bandMin = Math.max(BAND_MIN, Math.min(bandOf(pending.floorMin) + dFloor, BAND_MAX - span));
@@ -452,19 +556,33 @@ export function createGame(seed: number): Game {
       setPending({ floor: floorMin, x: clampTileX(pending.x + dx), floorMin, floorMax });
     },
     resizePending(dTop, dBottom) {
-      if (!pending || tool.kind !== 'shaft') return; // a room is the size its rule says
+      if (!pending) return;
+      const extending = pending.shaftId !== undefined ? world.shafts.get(pending.shaftId) : undefined;
+      if (!extending && tool.kind !== 'shaft') return; // a room is the size its rule says
       // Each end stops at the other: shrinking the top never drags the bottom down with it.
-      const bandMax = Math.max(bandOf(pending.floorMin), clampBand(bandOf(pending.floorMax) + dTop));
-      const bandMin = Math.min(bandMax, clampBand(bandOf(pending.floorMin) - dBottom));
+      let bandMax = Math.max(bandOf(pending.floorMin), clampBand(bandOf(pending.floorMax) + dTop));
+      let bandMin = Math.min(bandMax, clampBand(bandOf(pending.floorMin) - dBottom));
+      // An extension only ever grows: the floors the shaft already serves are not up for debate.
+      if (extending) {
+        bandMax = Math.max(bandMax, bandOf(extending.floorMax));
+        bandMin = Math.min(bandMin, bandOf(extending.floorMin));
+      }
       const floorMin = floorOfBand(bandMin);
       const floorMax = floorOfBand(bandMax);
-      setPending({ floor: floorMin, x: pending.x, floorMin, floorMax });
+      setPending({
+        floor: floorMin,
+        x: pending.x,
+        floorMin,
+        floorMax,
+        ...(pending.shaftId === undefined ? {} : { shaftId: pending.shaftId }),
+      });
     },
     confirmPending(): CommandResult {
       if (!pending) return { ok: false, reason: 'There is nothing waiting to be built.' };
       const at = pending;
-      const cmd: Command | null =
-        tool.kind === 'room'
+      const cmd: Command | null = at.shaftId !== undefined
+        ? { kind: 'shaft.extend', shaftId: at.shaftId, floorMin: at.floorMin, floorMax: at.floorMax }
+        : tool.kind === 'room'
           ? { kind: 'build', room: tool.room, floor: at.floor, x: at.x }
           : tool.kind === 'shaft'
             ? { kind: 'shaft.build', shaft: tool.shaft, x: at.x, floorMin: at.floorMin, floorMax: at.floorMax }
