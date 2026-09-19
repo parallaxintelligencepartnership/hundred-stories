@@ -87,7 +87,7 @@ Every module is built against this document and `src/sim/types.ts`. If reality d
 
 - One `Application` on a canvas, `resizeTo` the container, `resolution = devicePixelRatio`, `antialias: false` for crisp pixel art, `roundPixels: true`.
 - Layers (containers, back to front): `sky`, `cityFar`, `cityNear`, `ground`, `tower` (slabs, rooms, shafts), `cars`, `sims`, `effects` (fire, smoke, particles), `overlay` (build ghost, stress tints, selection).
-- Camera: world units = tiles; `TILE_PX = 8`, `FLOOR_PX = 36`. Pan by drag or WASD, zoom by wheel toward the cursor between 0.35 and 3, inertia, all GPU transforms. Reduced motion: no inertia, no particles, instant transitions.
+- Camera: world units = tiles; `TILE_PX = 8`, `FLOOR_PX = 36`. The view moves by drag with any button and any tool in hand, by scroll (shift or a trackpad's `deltaX` for sideways) and by WASD, it zooms between 0.35 and 3 toward the cursor on ctrl scroll or a pinch and toward the center on the plus and minus keys, it keeps its inertia, and it eases up to follow a room built off the edge; all GPU transforms. Reduced motion: no inertia, no particles, instant transitions.
 - Procedural art: `render/art/*.ts` draws each room kind into a `RenderTexture` once per (kind, width, variant, lit) and reuses it. Windows light up by occupancy at night.
 - Lighting: sky gradient keyed to minuteOfDay, tower tint, window glow after dusk, headlight streaks on the ground road at rush hour.
 - Sims: 2x4 tile sprites with a stress tint, walking animation by x delta, batched in a `ParticleContainer` when more than 500.
