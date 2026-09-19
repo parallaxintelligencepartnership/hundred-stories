@@ -140,3 +140,11 @@ Scope: diff 4fa5f72..a8a925b. Not covered: code outside the diff, application lo
 - [x] IMPORTANT | testing | applyTheme and readTheme catch a throwing localStorage but no test exercises that path (src/site/theme.ts:9-30, tests/site/theme.test.ts) | Closed 2026-09-19: describe "storage that throws" added, 4 cases, tests/site/theme.test.ts 12 passed, suite 553 passed
 - [x] ADVISORY | production-readiness | public/theme.js had no Cache-Control rule in public/_headers, so an edit could serve stale on the Workers deploy while the nginx map already sent no-cache (public/_headers, deploy/nginx.conf:41-46) | Closed 2026-09-19: /theme.js no-cache, must-revalidate rule added to public/_headers, matching sw.js and registerSW.js
 - [x] ADVISORY | testing | no test mounts the UI, so the placement bar and share panel wiring are covered by pure helper tests only; the repo has no DOM library and adds no dependencies | Closed 2026-09-19: recorded as a coverage gap in the scope line of this checkpoint and covered by the headless screenshots above; a DOM library is a separate decision for Matt
+
+## Checkpoint 2026-09-19f - car price and limit in the shaft panel - lenses: testing, production-readiness
+Scope: diff d71cff5..7347d01, 14 lines: button label, two disabled titles, a note line in shaftPanel, one guide sentence; no logic. Not covered: code outside the diff, application logic. No dependency change. Last audit: 2026-09-19 @047d32b.
+### Evidence
+- testing: 31 files, 553 passed, typecheck clean. Matt on the live 0.2.0 shaft panel: "found it works already" (adding cars after the shaft is built). The disabled titles mirror the sim's own refusals (build.ts doRemoveCar "An elevator needs at least one car.", doAddCar "This elevator already has 8 cars.").
+- production-readiness: no headers, deploy or storage change; the guide page is static copy.
+### Findings
+none
