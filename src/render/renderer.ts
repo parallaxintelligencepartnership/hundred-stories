@@ -61,6 +61,8 @@ export interface Renderer {
   setGhost(g: null | Ghost): void;
   setSelection(sel: null | Selection): void;
   onPick(cb: (hit: PickHit) => void): void;
+  /** Off while a build tool owns the left button on the view. */
+  setPanEnabled(on: boolean): void;
   setReducedMotion(on: boolean): void;
   destroy(): void;
 }
@@ -74,6 +76,7 @@ const TAP_MS = 600;
 const FIRE_FLICKER_MS = 110;
 const LOAD_FADE_MS = 900;
 const GROUND_LINE_FRACTION = 0.68;
+const FRAME_GRACE_MS = 2000; // after this the opening framing never reasserts itself
 
 const SIM_KINDS: readonly SimKind[] = ['worker', 'resident', 'guest', 'shopper', 'diner', 'staff', 'visitor', 'vip'];
 const STRESS_BANDS: readonly StressBand[] = ['calm', 'pink', 'red'];
@@ -326,6 +329,7 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
   // reads as a stage with room for the tower to grow into the sky.
   let userMoved = false;
   let framedOnce = false;
+  const bornAt = performance.now();
   function frameInitial(): void {
     camera.zoom = 1;
     const x = lastWorld.rooms.size > 0 ? averageRoomX(lastWorld) : TOWER_WIDTH / 2;
@@ -776,22 +780,31 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
   let downY = 0;
   let downTime = 0;
   let moved = false;
+  let tapCandidate = false;
+  // Space held is a pan override. The UI also uses space to pause, so it is read,
+  // never swallowed.
+  let spaceHeld = false;
 
   const onPointerDown = (event: PointerEvent): void => {
-    if (event.button !== 0) return;
+    const middle = event.button === 1;
+    if (event.button !== 0 && !middle) return;
+    if (middle) event.preventDefault(); // no autoscroll
     const p = localPoint(event);
     dragPointer = event.pointerId;
     downX = p.x;
     downY = p.y;
     downTime = event.timeStamp;
     moved = false;
+    tapCandidate = !middle;
     try {
       app.canvas.setPointerCapture(event.pointerId);
     } catch {
       // capture is a nicety, dragging still works without it
     }
+    // A press on the view means the player owns the camera now.
     userMoved = true;
-    camera.dragStart(p.x, p.y, event.timeStamp);
+    // Middle button and space held pan even while a build tool owns the left button.
+    camera.dragStart(p.x, p.y, event.timeStamp, middle || spaceHeld);
   };
 
   const onPointerMove = (event: PointerEvent): void => {
@@ -810,10 +823,11 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
     } catch {
       // already released
     }
-    if (!moved && event.timeStamp - downTime < TAP_MS) {
+    if (tapCandidate && !moved && event.timeStamp - downTime < TAP_MS) {
       const p = localPoint(event);
       pickAt(p.x, p.y);
     }
+    tapCandidate = false;
   };
 
   const onPointerCancel = (): void => {
@@ -836,13 +850,19 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
 
   const onKeyDown = (event: KeyboardEvent): void => {
     if (typingTarget(event.target)) return;
+    // Read space, never preventDefault it: the UI still pauses on it.
+    if (event.code === 'Space') spaceHeld = true;
     if (event.code.startsWith('Key') || event.code.startsWith('Arrow')) userMoved = true;
     camera.setKey(event.code, true);
   };
   const onKeyUp = (event: KeyboardEvent): void => {
+    if (event.code === 'Space') spaceHeld = false;
     camera.setKey(event.code, false);
   };
-  const onBlur = (): void => camera.clearKeys();
+  const onBlur = (): void => {
+    spaceHeld = false;
+    camera.clearKeys();
+  };
 
   app.canvas.addEventListener('pointerdown', onPointerDown);
   app.canvas.addEventListener('pointermove', onPointerMove);
@@ -868,8 +888,9 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
       camera.setViewport(width, height);
       lastW = width;
       lastH = height;
-      // Hold the opening composition until the player takes the camera over.
-      if (!userMoved && !framedOnce) frameInitial();
+      // Hold the opening composition only until the player first touches the view,
+      // and only while the layout is still settling.
+      if (!userMoved && !framedOnce && performance.now() - bornAt < FRAME_GRACE_MS) frameInitial();
     }
     camera.update(dt);
 
@@ -925,6 +946,9 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
     },
     onPick(cb): void {
       pickListeners.push(cb);
+    },
+    setPanEnabled(on): void {
+      camera.setPanEnabled(on);
     },
     setReducedMotion(on): void {
       reducedMotion = on;

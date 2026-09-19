@@ -145,6 +145,7 @@ export function createGame(seed: number): Game {
       tool = t;
       drag = null;
       renderer?.setGhost(null);
+      renderer?.setPanEnabled(t.kind === 'none' || t.kind === 'query');
       notify();
     },
     getTool: () => tool,

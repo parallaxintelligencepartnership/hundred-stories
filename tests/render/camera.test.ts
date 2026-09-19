@@ -146,6 +146,42 @@ describe('camera', () => {
     expect(still.x).toBe(stopped);
   });
 
+  it('ignores a left drag while panning is off, and still pans on a forced drag', () => {
+    const cam = createCamera();
+    cam.setViewport(800, 600);
+    cam.centerOn(3, 150);
+    cam.setPanEnabled(false);
+    expect(cam.isPanEnabled()).toBe(false);
+
+    const start = cam.x;
+    cam.dragStart(400, 300, 0);
+    cam.dragMove(300, 300, 16);
+    cam.dragEnd();
+    cam.update(16);
+    expect(cam.x).toBe(start); // the build tool owns the left button
+
+    // Middle button and space held force the drag through.
+    cam.dragStart(400, 300, 0, true);
+    cam.dragMove(300, 300, 16);
+    cam.dragEnd();
+    expect(cam.x).toBeGreaterThan(start);
+  });
+
+  it('keeps keys and wheel working while panning is off', () => {
+    const cam = createCamera();
+    cam.setViewport(800, 600);
+    cam.centerOn(3, 150);
+    cam.setPanEnabled(false);
+    const start = cam.x;
+    const zoom = cam.zoom;
+    cam.setKey('KeyD', true);
+    cam.update(100);
+    cam.setKey('KeyD', false);
+    expect(cam.x).toBeGreaterThan(start);
+    cam.wheel(-120, 400, 300);
+    expect(cam.zoom).toBeGreaterThan(zoom);
+  });
+
   it('pans while a key is held and stops when it is released', () => {
     const cam = createCamera();
     cam.setViewport(800, 600);

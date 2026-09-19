@@ -88,7 +88,11 @@ export interface Camera {
   setGroundLine(fraction: number): void;
   setViewport(width: number, height: number): void;
   setReducedMotion(on: boolean): void;
-  dragStart(sx: number, sy: number, timeMs: number): void;
+  /** Off while a build tool owns the left button. Keys, wheel and forced drags still pan. */
+  setPanEnabled(on: boolean): void;
+  isPanEnabled(): boolean;
+  /** force overrides setPanEnabled(false), for middle button and space held drags. */
+  dragStart(sx: number, sy: number, timeMs: number, force?: boolean): void;
   dragMove(sx: number, sy: number, timeMs: number): void;
   dragEnd(): void;
   /** deltaY already normalized to pixels by the caller. */
@@ -113,6 +117,7 @@ class TowerCamera implements Camera {
   private viewW = 800;
   private viewH = 600;
   private reducedMotion = false;
+  private panEnabled = true;
 
   private dragging = false;
   private lastSx = 0;
@@ -177,7 +182,17 @@ class TowerCamera implements Camera {
     this.clampPosition();
   }
 
-  dragStart(sx: number, sy: number, timeMs: number): void {
+  setPanEnabled(on: boolean): void {
+    this.panEnabled = on;
+    if (!on && this.dragging) this.dragEnd();
+  }
+
+  isPanEnabled(): boolean {
+    return this.panEnabled;
+  }
+
+  dragStart(sx: number, sy: number, timeMs: number, force = false): void {
+    if (!this.panEnabled && !force) return;
     this.dragging = true;
     this.lastSx = sx;
     this.lastSy = sy;
