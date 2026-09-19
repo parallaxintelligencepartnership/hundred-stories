@@ -126,3 +126,7 @@ Scope: closeout sweep, 2bd3c91, five lens runbooks + history audit + dependency 
 - [x] IMPORTANT | production-readiness | with no WebGL and no WebGPU, PixiJS 8 init resolved anyway and the player got a working HUD over a blank stage instead of the plain-language message (src/render/renderer.ts createRenderer) | Closed 2026-09-19: support check added at 2bd3c91, CDP probe with both contexts stubbed shows the message and zero canvases, 470 tests green
 - [x] ADVISORY | production-readiness | SHIPPED.md "How to run it" stated 420 tests in 24 files against an actual 470 in 27 | Closed 2026-09-19: SHIPPED.md rewritten at this closeout with the current counts
 - [x] ADVISORY | production-readiness | play/index.html had no icon link, so every /play/ load requested /favicon.ico and logged a 404 | Closed 2026-09-19: link added at 2bd3c91, matching index.html
+
+## Post-ship 2026-09-19c - owner phone test
+### Findings
+- [x] IMPORTANT | testing | on Matt's phone the live game shows no way to collapse the build sheet and taps and pinches under it are still swallowed, the second time he has raised it; the collapse header and auto-collapse shipped in 4fa5f72 but were only ever verified by headless screenshot, never by a tap on a touch device, and the PWA serves a new build one load late | Closed 2026-09-19: Matt on his phone against the live 0.2.0 build: "this collapse works actually. mobile is working pretty good too"
