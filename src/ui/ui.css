@@ -38,8 +38,13 @@
   --safe-left: env(safe-area-inset-left, 0px);
 }
 
+/* Theme is a three-way choice: system (default), light, dark. The dark tokens
+   above already cover [data-theme="dark"] because they are the :root default.
+   System-light only applies when no explicit theme is set; explicit light
+   applies regardless of the OS setting. The token list below is identical in
+   both rules by design; keep them in sync if either changes. */
 @media (prefers-color-scheme: light) {
-  :root {
+  :root:not([data-theme='dark']) {
     --steel: #f1f4f8;
     --steel-2: #e4e9f0;
     --line: #c2ccda;
@@ -53,6 +58,21 @@
     --eval-fair: #b57a04;
     --eval-poor: #c22a1c;
   }
+}
+
+:root[data-theme='light'] {
+  --steel: #f1f4f8;
+  --steel-2: #e4e9f0;
+  --line: #c2ccda;
+  --ink: #151c25;
+  --ink-dim: #5a6673;
+  --amber: #b57a04;
+  --on-amber: #fdf6e6;
+  --indicator: #0c7a53;
+  --alert: #c22a1c;
+  --eval-good: #1f6fc4;
+  --eval-fair: #b57a04;
+  --eval-poor: #c22a1c;
 }
 
 html,

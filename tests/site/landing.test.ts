@@ -4,6 +4,7 @@
 
 // Raw imports rather than node:fs: this repo has no @types/node and adds no
 // dependencies, and Vite hands the files over verbatim either way.
+import notfound from '../../404.html?raw';
 import guide from '../../how-to-play/index.html?raw';
 import landing from '../../index.html?raw';
 import play from '../../play/index.html?raw';
@@ -30,10 +31,11 @@ describe('landing page', () => {
     expect(landing).toContain('application/ld+json');
   });
 
-  it('loads the site stylesheet and the hero module, and nothing else', () => {
+  it('loads the site stylesheet, the hero module and the theme init module, and nothing else', () => {
     expect(landing).toContain('href="/src/site/site.css"');
-    expect(landing.match(/<script type="module"[^>]*>/g)).toHaveLength(1);
+    expect(landing.match(/<script type="module"[^>]*>/g)).toHaveLength(2);
     expect(landing).toContain('src="/src/site/hero.ts"');
+    expect(landing).toContain('src="/src/site/theme-init.ts"');
   });
 
   it('keeps the still hero image as the fallback', () => {
@@ -57,13 +59,21 @@ describe('landing page', () => {
 });
 
 describe('the page is the building in cross section', () => {
+  it('opens on the name, before what it is', () => {
+    expect(landing).toContain('<h2 id="the-name">Why Hundred Stories</h2>');
+    expect(flat(landing)).toContain(
+      "A hundred stories is the height of a tower worth building. It is also what goes on inside one: the tenant on 40 who wants a quieter floor, the shop on 2 that lives on the lunch crowd, the hotel guest who missed the last express lift and is not coming back. Every floor is a story. Everyone's got one.",
+    );
+  });
+
   it('sends the landing page underground below the hero, one floor per section', () => {
     expect(landing).toContain('<div class="underground">');
-    expect(landing.match(/<section class="floor"/g)).toHaveLength(3);
+    expect(landing.match(/<section class="floor"/g)).toHaveLength(4);
     for (const tag of [
-      'B1 &middot; WHAT IT IS',
-      'B2 &middot; HOW IT PLAYS',
-      'B3 &middot; PHONE, TABLET OR DESKTOP',
+      'B1 &middot; THE NAME',
+      'B2 &middot; WHAT IT IS',
+      'B3 &middot; HOW IT PLAYS',
+      'B4 &middot; PHONE, TABLET OR DESKTOP',
     ]) {
       expect(landing).toContain(`<p class="floor-tag">${tag}</p>`);
     }
@@ -147,5 +157,26 @@ describe('crawler files', () => {
     for (const path of ['/', '/how-to-play/', '/play/']) {
       expect(sitemap).toContain(`<loc>https://hundredstories.xyz${path}</loc>`);
     }
+  });
+});
+
+describe('theme', () => {
+  it('applies a stored choice before first paint on every page', () => {
+    for (const page of [landing, guide, notfound, play]) {
+      const head = page.slice(0, page.indexOf('</head>'));
+      expect(head).toContain('<script src="/theme.js"></script>');
+    }
+  });
+
+  it('gives the landing page and the guide a toggle in the nav', () => {
+    for (const page of [landing, guide]) {
+      expect(page).toContain('<button type="button" class="theme-toggle" id="theme-toggle">Theme</button>');
+      expect(page).toContain('src="/src/site/theme-init.ts"');
+    }
+  });
+
+  it('leaves the 404 page without a toggle, since it has no nav', () => {
+    expect(notfound).not.toContain('theme-toggle');
+    expect(notfound).not.toContain('theme-init');
   });
 });
