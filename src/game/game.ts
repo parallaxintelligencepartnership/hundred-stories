@@ -6,6 +6,7 @@ import { tick } from '../sim/tick';
 import { clockOf, type Command, type CommandResult, type Id, type World } from '../sim/types';
 import { createWorld } from '../sim/world';
 import { SCHEDULES } from '../sim/rules';
+import { classifyPress } from '../render/input';
 import type { Renderer } from '../render/renderer';
 import type { GameApi, Speed, Tool } from './api';
 import { readSave, writeSave } from './storage';
@@ -64,7 +65,22 @@ export function createGame(seed: number): Game {
 
   // Drag state for lobby segments (horizontal) and shafts (vertical).
   let drag: null | { floor: number; x: number; kind: 'lobby' | 'shaft' } = null;
+  // A left press with a room tool is provisional: it builds on release, and only if it held
+  // still. A press that travels is a pan, which renderer.ts hands to the camera.
+  let press: null | { sx: number; sy: number; floor: number; x: number } = null;
   let hover: { floor: number; x: number } | null = null;
+
+  /** Tools that draw with the left drag. Their drag is the build gesture, so it cannot pan. */
+  function toolOwnsDrag(t: Tool): boolean {
+    return t.kind === 'shaft' || (t.kind === 'room' && t.room === 'lobby');
+  }
+
+  /** After a build, bring the whole floor on screen if the room ran off the top or bottom edge. */
+  function followBuild(cmd: Command): void {
+    if (!renderer) return;
+    if (cmd.kind === 'build') renderer.camera.ensureFloorVisible(cmd.floor);
+    else if (cmd.kind === 'shaft.build') renderer.camera.ensureFloorVisible(cmd.floorMax);
+  }
 
   function isNight(): boolean {
     const m = clockOf(world.time.minute).minuteOfDay;
@@ -151,12 +167,14 @@ export function createGame(seed: number): Game {
   function onPointerDown(ev: PointerEvent): void {
     if (!renderer || !container || ev.button !== 0) return;
     const { floor, x } = renderer.screenToTile(ev.offsetX, ev.offsetY);
+    press = null;
     if (tool.kind === 'room' && tool.room === 'lobby') {
       drag = { floor, x, kind: 'lobby' };
       applyCommand(world, { kind: 'build', room: 'lobby', floor: 1, x });
       notify();
     } else if (tool.kind === 'shaft') drag = { floor, x, kind: 'shaft' };
-    else if (tool.kind === 'room') api.apply({ kind: 'build', room: tool.room, floor, x });
+    // Every other room waits for the release: until then the press may still become a pan.
+    else if (tool.kind === 'room') press = { sx: ev.clientX, sy: ev.clientY, floor, x };
     ghostFor(floor, x);
   }
 
@@ -164,6 +182,9 @@ export function createGame(seed: number): Game {
     if (!renderer) return;
     const { floor, x } = renderer.screenToTile(ev.offsetX, ev.offsetY);
     hover = { floor, x };
+    if (press && classifyPress({ x: press.sx, y: press.sy }, { x: ev.clientX, y: ev.clientY }) === 'pan') {
+      press = null; // the camera has it now
+    }
     if (drag?.kind === 'lobby' && tool.kind === 'room') {
       // paint segments while dragging on the lobby floor
       const from = Math.min(drag.x, x);
@@ -176,8 +197,17 @@ export function createGame(seed: number): Game {
   }
 
   function onPointerUp(ev: PointerEvent): void {
-    if (!renderer || !drag) return;
+    if (!renderer) return;
     const { floor, x } = renderer.screenToTile(ev.offsetX, ev.offsetY);
+    if (press) {
+      // A click that never moved: build where it went down.
+      if (tool.kind === 'room') api.apply({ kind: 'build', room: tool.room, floor: press.floor, x: press.x });
+      press = null;
+    }
+    if (!drag) {
+      ghostFor(floor, x);
+      return;
+    }
     if (drag.kind === 'lobby') {
       const from = Math.min(drag.x, x);
       const to = Math.max(drag.x, x);
@@ -200,6 +230,7 @@ export function createGame(seed: number): Game {
     apply(cmd: Command): CommandResult {
       const res = applyCommand(world, cmd);
       if (!res.ok) world.log.push({ minute: world.time.minute, text: res.reason, level: 'warn' });
+      else followBuild(cmd);
       notify();
       return res;
     },
@@ -211,8 +242,10 @@ export function createGame(seed: number): Game {
     setTool(t) {
       tool = t;
       drag = null;
+      press = null;
       renderer?.setGhost(null);
-      renderer?.setPanEnabled(t.kind === 'none' || t.kind === 'query');
+      // Dragging pans with every tool in hand, except the two whose drag is the build itself.
+      renderer?.setToolOwnsDrag(toolOwnsDrag(t));
       notify();
     },
     getTool: () => tool,
@@ -288,8 +321,10 @@ export function createGame(seed: number): Game {
       el.addEventListener('pointerup', onPointerUp);
       el.addEventListener('pointerleave', () => {
         hover = null;
+        press = null;
         renderer?.setGhost(null);
       });
+      r.setToolOwnsDrag(toolOwnsDrag(tool));
       r.camera.centerOn(3, LIMITS.towerWidth / 2);
     },
     start() {
