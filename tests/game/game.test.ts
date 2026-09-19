@@ -79,16 +79,29 @@ describe('export and import', () => {
 });
 
 describe('save and load through the browser slot', () => {
-  it('saves, starts over, then loads the tower back', async () => {
+  it('saves, then loads the tower back into a fresh game', async () => {
     const game = createGame(11);
     expect(game.apply({ kind: 'build', room: 'lobby', floor: 1, x: 100 })).toEqual({ ok: true });
     const before = hashWorld(game.world);
     expect(await game.save()).toEqual({ ok: true });
 
-    game.newGame(11);
-    expect(game.world.rooms.size).toBe(0);
-    expect(await game.load()).toEqual({ ok: true });
-    expect(hashWorld(game.world)).toBe(before);
+    const fresh = createGame(11);
+    expect(fresh.world.rooms.size).toBe(0);
+    expect(await fresh.load()).toEqual({ ok: true });
+    expect(hashWorld(fresh.world)).toBe(before);
+  });
+
+  it('a new game overwrites the slot so a reload cannot resurrect the old tower', async () => {
+    const game = createGame(11);
+    expect(game.apply({ kind: 'build', room: 'lobby', floor: 1, x: 100 })).toEqual({ ok: true });
+    expect(await game.save()).toEqual({ ok: true });
+
+    game.newGame(12);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const fresh = createGame(1);
+    expect(await fresh.load()).toEqual({ ok: true });
+    expect(fresh.world.rooms.size).toBe(0);
+    expect(fresh.world.seed).toBe(12);
   });
 
   it('logs Game saved. only for a save the player asked for', async () => {
