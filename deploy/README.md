@@ -74,8 +74,9 @@ ssh pi3 '
 
 This swaps `html` and `html.prev` (via a temp dir, since `mv` can't safely
 swap two directories in place). No container restart is needed — nginx serves
-straight off the bind mount. Verify with
-`curl -sI https://$SITE_HOST/ | head -1`.
+straight off the bind mount. Verify both pages with
+`curl -sI https://$SITE_HOST/ | head -1` and
+`curl -sI https://$SITE_HOST/play/ | head -1`.
 
 App-level rollback beyond one release: redeploy from the previous git tag
 (`git checkout <tag> && deploy/deploy.sh`).

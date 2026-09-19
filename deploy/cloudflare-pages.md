@@ -29,9 +29,10 @@ Wrangler opens a browser login the first time you run it.
 
 ```
 curl -sI https://hundredstories.xyz/
+curl -sI https://hundredstories.xyz/play/
 ```
 
-Check for the security headers from `public/_headers` (Strict-Transport-Security, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, Content-Security-Policy) and confirm `/manifest.webmanifest` is served with a content type of `application/manifest+json` (or `application/json`). Then install the site as a PWA from the browser's install prompt to confirm the service worker and manifest are wired up correctly.
+Both must return 200. Check the security headers from `public/_headers` on each of them (Strict-Transport-Security, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, Content-Security-Policy), and check that the landing page and the game shell both come back `no-cache, must-revalidate` rather than cached. Confirm `/manifest.webmanifest` is served with a content type of `application/manifest+json` (or `application/json`) and that its `start_url` is `/play/`. Then install the site as a PWA from `/play/`, using the browser's install prompt, to confirm the service worker and manifest are wired up correctly. The landing page at `/` is not the installable app.
 
 ## Rollback
 

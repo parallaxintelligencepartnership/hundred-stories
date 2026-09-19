@@ -1,7 +1,7 @@
 # Map
 
 ## Run
-npm run dev (vite; serves on http://localhost:5173); npm run build (tsc --noEmit && vite build) then npm run preview for the static bundle; no env vars needed
+npm run dev (vite; landing on http://localhost:5173, the game on http://localhost:5173/play/); npm run build (tsc --noEmit && vite build) then npm run preview for the static bundle; no env vars needed
 
 ## Test
 npm test (vitest run); one file: npx vitest run <path>; npm run typecheck (tsc --noEmit)
@@ -9,7 +9,10 @@ npm test (vitest run); one file: npx vitest run <path>; npm run typecheck (tsc -
 ## Layout
 | Path | What lives there |
 |---|---|
-| index.html | page shell; the only script tag loads src/main.ts |
+| index.html | landing page at /: semantic markup, no framework, one module script (src/site/hero.ts) |
+| how-to-play/index.html | the guide at /how-to-play/: rooms, elevators, stress, the quarter, stars, saving, controls |
+| play/index.html | the game shell at /play/; the only script tag loads src/main.ts |
+| src/site/ | landing site: site.css (same tokens as ui.css) and hero.ts, the demo tower drawn by the game's renderer |
 | src/main.ts | entry point: reads the seed from the query string, boots game, renderer and UI, shows the WebGL message on failure; ?smoke boots the demo world instead |
 | src/sim/ | the pure simulation, no DOM: rules.ts tables, types.ts and the clock, tick.ts tick order, build, economy, elevators, evaluation, events, people, routing, stars, rng |
 | src/sim/save.ts | save format v1: serialize, deserialize with its refusal reasons, and the FNV-1a world hash |
@@ -19,8 +22,10 @@ npm test (vitest run); one file: npx vitest run <path>; npm run typecheck (tsc -
 | src/render/ | PixiJS scene: renderer.ts, camera.ts, art.ts procedural sprites, sky.ts, smoke.ts hand built demo world |
 | src/ui/ | DOM overlay: ui.ts shell, input and notices, panels.ts HUD panels including save, export and import, format.ts, ui.css |
 | public/icons/, scripts/make-icons.mjs | PWA icons and the script that draws them |
-| vite.config.ts | Vite build, the vitest include glob, and the vite-plugin-pwa manifest and service worker |
-| tests/ | vitest suite: sim/ unit tests, scenarios/ scripted tower runs plus helpers.ts, render/, ui/, harness.test.ts |
+| public/og.png, scripts/make-og.mjs | the 1200x630 link preview card and the dependency free script that draws it |
+| public/robots.txt, public/sitemap.xml | crawler files for the three pages |
+| vite.config.ts | Vite build (three page inputs), the vitest include glob, and the vite-plugin-pwa manifest and service worker, scoped to /play/ |
+| tests/ | vitest suite: sim/ unit tests, scenarios/ scripted tower runs plus helpers.ts, render/, ui/, site/, harness.test.ts |
 | deploy/ | pi3 static stack: compose.yml, nginx.conf, deploy.sh with rollback, README runbook, .env.example |
 | docs/ | BRIEF-AGENTS.md implementer brief, DESIGN.md rules and tick order, VISUAL.md art direction |
 | dist/ | build output, gitignored; rebuilt by npm run build |

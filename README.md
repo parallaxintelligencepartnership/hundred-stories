@@ -90,19 +90,25 @@ npm run dev       # start the dev server
 npm test          # run the test suite
 npm run build      # type check and build for production
 npm run preview    # preview the production build locally
+npm run og        # redraw public/og.png, the link preview card
 ```
 
-The code is laid out in five parts:
+One build serves three pages. The landing site is at `/`, the guide is at
+`/how-to-play/`, and the game itself is at `/play/`, so in development the
+tower is at `http://localhost:5173/play/`.
+
+The code is laid out in six parts:
 
 - `src/sim` is the simulation. It is pure and deterministic: no rendering, DOM, or randomness outside its own seeded generator.
 - `src/render` draws the tower with PixiJS, reading the simulation state each frame.
 - `src/ui` is the DOM layer: the top bar, palette, panels, and keyboard shortcuts.
 - `src/game` is the shell that wires the simulation, renderer, and UI together and runs the game loop.
+- `src/site` is the landing site: one stylesheet for `index.html` and `how-to-play/index.html`, plus the hero that draws the demo tower with the game's own renderer.
 - `deploy` holds the scripts and compose files that ship the built site to pi3.
 
 See `docs/DESIGN.md` for the architecture contract and `docs/VISUAL.md` for the visual direction.
 
-The simulation is deterministic: the same seed plus the same list of commands always produces the same world hash. You can set the starting seed with a `?seed=` query parameter on the page URL, for example `?seed=42`.
+The simulation is deterministic: the same seed plus the same list of commands always produces the same world hash. You can set the starting seed with a `?seed=` query parameter on the game URL, for example `/play/?seed=42`.
 
 ## Deploy
 
