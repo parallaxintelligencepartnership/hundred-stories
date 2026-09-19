@@ -30,6 +30,7 @@ export function createGame(seed: number): Game {
   let renderer: Renderer | null = null;
   let container: HTMLElement | null = null;
   let raf = 0;
+  let timer = 0;
   let last = 0;
   let accumulator = 0;
   const subscribers = new Set<() => void>();
@@ -44,9 +45,11 @@ export function createGame(seed: number): Game {
     return m >= SCHEDULES.nightStart || m < SCHEDULES.nightEnd;
   }
 
-  function frame(now: number): void {
-    raf = requestAnimationFrame(frame);
-    const dt = Math.min(0.25, (now - last) / 1000 || 0);
+  // The sim is driven by a timer, not by requestAnimationFrame, so it keeps running when the tab is
+  // hidden (Chrome pauses rAF in background tabs). Rendering stays on rAF.
+  function step(): void {
+    const now = performance.now();
+    const dt = Math.min(1, (now - last) / 1000 || 0);
     last = now;
     if (speed > 0 && !world.gameOver) {
       const rate = TICKS_PER_SECOND_AT_1X * speed * (isNight() ? NIGHT_MULTIPLIER : 1);
@@ -60,6 +63,10 @@ export function createGame(seed: number): Game {
       if (accumulator > MAX_TICKS_PER_FRAME) accumulator = 0;
       if (n > 0) notify();
     }
+  }
+
+  function frame(): void {
+    raf = requestAnimationFrame(frame);
     renderer?.render(world, accumulator);
   }
 
@@ -234,11 +241,14 @@ export function createGame(seed: number): Game {
     start() {
       if (raf) return;
       last = performance.now();
+      timer = window.setInterval(step, 50);
       raf = requestAnimationFrame(frame);
     },
     stop() {
       cancelAnimationFrame(raf);
+      window.clearInterval(timer);
       raf = 0;
+      timer = 0;
     },
   };
   return api;
