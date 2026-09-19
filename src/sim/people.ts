@@ -26,7 +26,7 @@ import type {
 import { addSim, allocId, log, removeSim, roomsOfKind } from './world';
 
 /** Tiles a sim covers in one minute on foot. */
-export const WALK_TILES_PER_MINUTE = 20;
+export const WALK_TILES_PER_MINUTE = 5;
 
 // Local rules: rules.ts has no entry for these, so they live here and are marked as our call.
 /** A waiting sim re-registers its hall call this often if the call is no longer pending. */

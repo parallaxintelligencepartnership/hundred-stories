@@ -123,7 +123,11 @@ export function createGame(seed: number): Game {
 
   function frame(): void {
     raf = requestAnimationFrame(frame);
-    renderer?.render(world, accumulator);
+    // Interpolate against real time since the last timer step so sprites glide at the display rate
+    // instead of stepping at the timer rate.
+    const elapsed = speed > 0 && !world.gameOver ? (performance.now() - last) / 1000 : 0;
+    const rate = TICKS_PER_SECOND_AT_1X * speed * (isNight() ? NIGHT_MULTIPLIER : 1);
+    renderer?.render(world, Math.min(1, accumulator + elapsed * rate));
   }
 
   function ghostFor(floor: number, x: number): void {

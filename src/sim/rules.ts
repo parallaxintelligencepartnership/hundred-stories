@@ -62,9 +62,9 @@ export interface ShaftRule {
 }
 
 export const SHAFTS: Record<ShaftKind, ShaftRule> = {
-  standard: { label: 'Elevator', width: 4, shaftCost: 200_000, carCost: 80_000, upkeepPerQuarterPerCar: 10_000, maxSpan: 30, maxCars: 8, capacity: 21, floorsPerMinute: 4, doorOpenMinutes: 1, star: 1, expressOnly: false },
-  service: { label: 'Service elevator', width: 4, shaftCost: 100_000, carCost: 50_000, upkeepPerQuarterPerCar: 10_000, maxSpan: 30, maxCars: 8, capacity: 21, floorsPerMinute: 4, doorOpenMinutes: 1, star: 2, expressOnly: false },
-  express: { label: 'Express elevator', width: 6, shaftCost: 400_000, carCost: 150_000, upkeepPerQuarterPerCar: 20_000, maxSpan: null, maxCars: 8, capacity: 42, floorsPerMinute: 8, doorOpenMinutes: 1, star: 3, expressOnly: true },
+  standard: { label: 'Elevator', width: 4, shaftCost: 200_000, carCost: 80_000, upkeepPerQuarterPerCar: 10_000, maxSpan: 30, maxCars: 8, capacity: 21, floorsPerMinute: 1, doorOpenMinutes: 1, star: 1, expressOnly: false },
+  service: { label: 'Service elevator', width: 4, shaftCost: 100_000, carCost: 50_000, upkeepPerQuarterPerCar: 10_000, maxSpan: 30, maxCars: 8, capacity: 21, floorsPerMinute: 1, doorOpenMinutes: 1, star: 2, expressOnly: false },
+  express: { label: 'Express elevator', width: 6, shaftCost: 400_000, carCost: 150_000, upkeepPerQuarterPerCar: 20_000, maxSpan: null, maxCars: 8, capacity: 42, floorsPerMinute: 2, doorOpenMinutes: 1, star: 3, expressOnly: true },
 };
 
 export const LIMITS = {
