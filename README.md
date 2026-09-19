@@ -112,7 +112,7 @@ The simulation is deterministic: the same seed plus the same list of commands al
 
 ## Deploy
 
-Primary: [Cloudflare Pages](deploy/cloudflare-pages.md). Fallback: [pi3](deploy/README.md).
+Primary: [Cloudflare Workers static assets](deploy/cloudflare-pages.md). Fallback: [pi3](deploy/README.md).
 
 ## License
 

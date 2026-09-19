@@ -56,6 +56,7 @@ export default defineConfig({
         main: 'index.html',
         howto: 'how-to-play/index.html',
         play: 'play/index.html',
+        notfound: '404.html',
       },
     },
   },

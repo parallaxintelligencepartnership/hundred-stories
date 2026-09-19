@@ -1,46 +1,64 @@
-# Cloudflare Pages deploy
+# Cloudflare Workers (static assets) deploy
 
-Cloudflare Pages is the primary hosting for Hundred Stories. The pi3 package in `deploy/` (see `deploy/README.md`) remains the fallback.
+Cloudflare Workers with static assets is the primary hosting for Hundred
+Stories. It is the successor to Cloudflare Pages: the site is served as a
+set of static assets directly from Cloudflare's edge, asset requests are
+free and unlimited, and there is no Worker code involved (`wrangler.jsonc`
+has no `main` entry). The pi3 package in `deploy/` (see `deploy/README.md`)
+remains the fallback.
 
 ## One-time setup
 
-There are two ways to set up the Pages project. Pick one.
+1. `npx wrangler login` — opens a browser login the first time you run it.
+2. Custom domains are not configured separately: they come from the
+   `routes` block in `wrangler.jsonc` (`hundredstories.xyz` and
+   `www.hundredstories.xyz`, both `custom_domain: true`). Cloudflare attaches
+   them automatically on the first deploy, provided the zone is already on
+   the account. `workers_dev` and `preview_urls` are both set to `false` in
+   `wrangler.jsonc`, so the `*.workers.dev` subdomain and preview URLs do not
+   serve the site.
 
-### (a) Dashboard, connected to GitHub
+## Deploy
 
-This path needs the GitHub mirror (private is fine), which does not exist yet: the only remote today is the self-hosted Gitea at git.parallaxintelligence.xyz, and Pages cannot connect to it. Create the mirror first (the command is in the knowledge base MATT-QUEUE.md) or use path (b), which needs no GitHub at all.
+```
+npm run deploy
+```
 
-1. In the Cloudflare dashboard, go to Workers and Pages and create a new Pages project.
-2. Connect the GitHub repo `parallaxintelligencepartnership/hundred-stories` (after the mirror exists).
-3. Set the build command to `npm ci && npm run build`.
-4. Set the output directory to `dist`.
-5. Node version: this repo has an `.nvmrc` pinning Node `26`; Cloudflare Pages reads it automatically.
-6. Under Custom domains, add `hundredstories.xyz`. Cloudflare adds the CNAME itself when the zone is already on the account.
-
-### (b) Direct upload, no GitHub
-
-1. Create the project: `npx wrangler@4.135.0 pages project create hundred-stories --production-branch main`
-2. Build locally: `npm run build`
-3. Deploy: `npx wrangler@4.135.0 pages deploy dist --project-name hundred-stories`
-
-Wrangler opens a browser login the first time you run it.
+This runs `npm run build` then `npx wrangler deploy`, which uploads `dist/`
+as static assets and attaches the custom domains from `wrangler.jsonc`.
 
 ## Verification
 
 ```
 curl -sI https://hundredstories.xyz/
-curl -sI https://hundredstories.xyz/play/
+curl -sI https://hundredstories.xyz/nope
+curl -sI https://hundred-stories.matthew-c50.workers.dev/
 ```
 
-Both must return 200. Check the security headers from `public/_headers` on each of them (Strict-Transport-Security, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, Content-Security-Policy), and check that the landing page and the game shell both come back `no-cache, must-revalidate` rather than cached. Confirm `/manifest.webmanifest` is served with a content type of `application/manifest+json` (or `application/json`) and that its `start_url` is `/play/`. Then install the site as a PWA from `/play/`, using the browser's install prompt, to confirm the service worker and manifest are wired up correctly. The landing page at `/` is not the installable app.
+The first must return 200 with the five security headers from
+`public/_headers` (Strict-Transport-Security, X-Content-Type-Options,
+Referrer-Policy, Permissions-Policy, Content-Security-Policy). The second
+must return 404 (served from `dist/404.html` via `not_found_handling:
+"404-page"`). The third, the old `*.workers.dev` URL, must stop returning
+200 after the next deploy now that `workers_dev` is `false`.
 
 ## Rollback
 
-Cloudflare Pages keeps every deployment. Roll back either by:
+Cloudflare keeps every deployed version.
 
-- Opening the project's Deployments list in the dashboard and promoting a previous deployment to production, or
-- Redeploying a previous git tag (checkout the tag, run `npm run build`, then `npx wrangler@4.135.0 pages deploy dist --project-name hundred-stories`).
+```
+npx wrangler versions list
+npx wrangler rollback
+```
+
+`wrangler rollback` reverts to the previous version.
+
+## Where the headers live
+
+Security headers are defined once, in `public/_headers`, and are served by
+Workers static assets — no server config or Worker code applies them.
 
 ## Fallback
 
-The pi3 package in `deploy/` (compose.yml, deploy.sh, nginx.conf) remains the fallback hosting path. See `deploy/README.md`.
+The pi3 package in `deploy/` (compose.yml, deploy.sh, nginx.conf) remains
+the fallback hosting path. See `deploy/README.md`.

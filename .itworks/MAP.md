@@ -25,6 +25,8 @@ npm test (vitest run); one file: npx vitest run <path>; npm run typecheck (tsc -
 | public/og.png, scripts/make-og.mjs | the 1200x630 link preview card and the dependency free script that draws it |
 | public/robots.txt, public/sitemap.xml | crawler files for the three pages |
 | vite.config.ts | Vite build (three page inputs), the vitest include glob, and the vite-plugin-pwa manifest and service worker, scoped to /play/ |
+| 404.html | the custom 404 page, built as a Vite input; served by Workers static assets via not_found_handling in wrangler.jsonc |
+| wrangler.jsonc | Cloudflare Workers static-assets config: dist as the asset directory, the 404 page, custom domain routes for hundredstories.xyz and www, workers_dev and preview_urls disabled |
 | tests/ | vitest suite: sim/ unit tests, scenarios/ scripted tower runs plus helpers.ts, render/, ui/, site/, harness.test.ts |
 | deploy/ | pi3 static stack: compose.yml, nginx.conf, deploy.sh with rollback, README runbook, .env.example |
 | docs/ | BRIEF-AGENTS.md implementer brief, DESIGN.md rules and tick order, VISUAL.md art direction |
@@ -32,7 +34,8 @@ npm test (vitest run); one file: npx vitest run <path>; npm run typecheck (tsc -
 
 ## Environment
 - Dev machine: Matt's Mac, arm64 macOS 27, Node 26, npm 11
-- Hosting target pi3: x86_64 Ubuntu 24.04 (not a Raspberry Pi), standalone docker compose, Traefik with letsencrypt, public sites are nginx static containers
+- Primary hosting: Cloudflare Workers static assets (successor to Pages; no Worker code, asset requests free and unlimited), custom domains hundredstories.xyz and www attached via wrangler.jsonc routes, workers_dev and preview_urls disabled
+- Fallback hosting target pi3: x86_64 Ubuntu 24.04 (not a Raspberry Pi), standalone docker compose, Traefik with letsencrypt, public sites are nginx static containers
 - No backend, no database, no secrets
 
 ## Gotchas
