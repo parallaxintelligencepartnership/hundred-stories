@@ -81,6 +81,7 @@ const STRIP_ABOVE = 0xeaeaea;
 const STRIP_BELOW = 0x7d818a;
 const STRIP_EDGE = 0x333333;
 const STRIP_CEILING = 0xcfcfcf;
+const DOOR_HOLD_MS = 120; // minimum time the open door texture stays up
 const TELEPORT_PX = 12 * TILE_PX; // a jump past this is a teleport, so snap instead of lerp
 const FRAME_GRACE_MS = 2000; // after this the opening framing never reasserts itself
 
@@ -409,6 +410,7 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
   const carSprites = new Map<Id, Keyed<Sprite>>();
   const simSprites = new Map<Id, Keyed<Sprite>>();
   const fireGraphics = new Map<Id, Graphics>();
+  const doorHold = new Map<Id, number>(); // car id -> time the open door texture may end
   const interp = new Map<string, Interp>();
 
   const ghostSprite = new Sprite();
@@ -658,31 +660,48 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
       if (seenCars.has(id)) continue;
       entry.node.destroy();
       carSprites.delete(id);
+      doorHold.delete(id);
       interp.delete(`car${id}`);
     }
   }
 
+  /** Doors read as open for at least DOOR_HOLD_MS, so a one tick flap cannot strobe. */
+  function carDoorsOpen(car: Car): boolean {
+    const now = performance.now();
+    if (car.state === 'doorsOpen') {
+      doorHold.set(car.id, now + DOOR_HOLD_MS);
+      return true;
+    }
+    const until = doorHold.get(car.id);
+    if (until === undefined) return false;
+    if (now < until) return true;
+    doorHold.delete(car.id);
+    return false;
+  }
+
   function drawCar(shaft: Shaft, car: Car, alpha: number): void {
-    const doorsOpen = car.state === 'doorsOpen';
+    const doorsOpen = carDoorsOpen(car);
     const key = `${shaft.kind}|${doorsOpen ? 1 : 0}`;
     let entry = carSprites.get(car.id);
     if (!entry) {
       const sprite = new Sprite(art.car(shaft.kind, doorsOpen));
+      // Bottom center on the slab line: the two door textures may differ in size,
+      // and this way a swap never moves the car.
+      sprite.anchor.set(0.5, 1);
       layers.cars.addChild(sprite);
       entry = { node: sprite, key };
       carSprites.set(car.id, entry);
     } else if (entry.key !== key) {
-      entry.node.texture = art.car(shaft.kind, doorsOpen);
+      entry.node.texture = art.car(shaft.kind, doorsOpen); // texture swap only
       entry.key = key;
     }
-    // The car art is deliberately inset inside the shaft, so keep its own size
-    // and center it in the column and in the floor band.
-    const texture = entry.node.texture;
-    const carW = texture.width || shaft.width * TILE_PX;
-    const carH = texture.height || FLOOR_PX;
-    entry.node.setSize(carW, carH);
-    const target = interpolated(`car${car.id}`, shaft.x * TILE_PX, floorYFloat(car.y), alpha);
-    entry.node.position.set(target.x + (shaft.width * TILE_PX - carW) / 2, target.y + (FLOOR_PX - carH) / 2);
+    const target = interpolated(
+      `car${car.id}`,
+      (shaft.x + shaft.width / 2) * TILE_PX,
+      floorYFloat(car.y) + FLOOR_PX - SLAB_TOP_PX,
+      alpha,
+    );
+    entry.node.position.set(target.x, target.y);
   }
 
   function simTextureKey(sim: Sim): { kind: SimKind; band: StressBand; frame: 0 | 1 } {
