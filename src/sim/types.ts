@@ -63,6 +63,7 @@ export interface Room {
   builtAtMinute: number;
   vacant: boolean; // office or condo with no tenant contract
   dirty: boolean; // hotel rooms only: needs housekeeping before it can be rented
+  dirtySinceMinute?: number | null; // hotel rooms only: when it last became dirty, for the cockroach timer; survives saves
   infested: boolean; // hotel rooms only: cockroaches
   lowEvalSinceMinute: number | null; // when eval first dropped below the leave threshold
   onFire: boolean;
