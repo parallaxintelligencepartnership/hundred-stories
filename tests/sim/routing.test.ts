@@ -341,3 +341,38 @@ describe('routing', () => {
     expect(entrances(world)).toEqual([]);
   });
 });
+
+describe('stairs versus elevator', () => {
+  let world: World;
+
+  beforeEach(() => {
+    world = createWorld(7);
+  });
+
+  it('takes the stairs for a one floor trip even with a shaft available', () => {
+    makeLobby(world, 100, 140);
+    makeShaft(world, 'standard', 150, 1, 2, [1, 2]);
+    makeStairs(world, 200, 1, 2);
+    const legs = findRoute(world, { floor: 1, x: 100 }, { floor: 2, x: 210 });
+    expect(rides(legs as Leg[])).toEqual([]);
+    expect(kinds(legs as Leg[])).toContain('stairs');
+  });
+
+  it('takes the shaft for a two floor trip when both are available', () => {
+    makeLobby(world, 100, 140);
+    const shaft = makeShaft(world, 'standard', 150, 1, 3, [1, 3]);
+    makeStairs(world, 200, 1, 3);
+    const legs = findRoute(world, { floor: 1, x: 100 }, { floor: 3, x: 210 });
+    expect(rides(legs as Leg[])).toEqual([
+      { kind: 'ride', shaftId: shaft.id, fromFloor: 1, toFloor: 3 },
+    ]);
+  });
+
+  it('takes the stairs for a two floor trip when there is no shaft', () => {
+    makeLobby(world, 100, 140);
+    makeStairs(world, 200, 1, 3);
+    const legs = findRoute(world, { floor: 1, x: 100 }, { floor: 3, x: 210 });
+    expect(rides(legs as Leg[])).toEqual([]);
+    expect(kinds(legs as Leg[])).toContain('stairs');
+  });
+});

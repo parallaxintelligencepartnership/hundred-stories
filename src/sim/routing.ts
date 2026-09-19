@@ -10,8 +10,8 @@ import { LIMITS } from './rules';
 import type { Id, Leg, Room, World } from './types';
 import { roomsOfKind, roomsOnFloor } from './world';
 
-/** Cost of boarding one elevator. Riding is cheap, changing vehicles is not. */
-const TRANSFER_COST = 10;
+/** Cost of boarding one elevator. One floor is quicker on foot, two or more ride. */
+const TRANSFER_COST = 5;
 /** Cost of one floor climbed on foot, on top of the transfer free walk. */
 const STAIR_FLOOR_COST = 4;
 /** Walking this many tiles costs the same as one unit of route cost. */
