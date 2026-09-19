@@ -19,9 +19,9 @@ This path needs the GitHub mirror (private is fine), which does not exist yet: t
 
 ### (b) Direct upload, no GitHub
 
-1. Create the project: `npx wrangler@latest pages project create hundred-stories --production-branch main`
+1. Create the project: `npx wrangler@4.135.0 pages project create hundred-stories --production-branch main`
 2. Build locally: `npm run build`
-3. Deploy: `npx wrangler@latest pages deploy dist --project-name hundred-stories`
+3. Deploy: `npx wrangler@4.135.0 pages deploy dist --project-name hundred-stories`
 
 Wrangler opens a browser login the first time you run it.
 
@@ -38,7 +38,7 @@ Check for the security headers from `public/_headers` (Strict-Transport-Security
 Cloudflare Pages keeps every deployment. Roll back either by:
 
 - Opening the project's Deployments list in the dashboard and promoting a previous deployment to production, or
-- Redeploying a previous git tag (checkout the tag, run `npm run build`, then `npx wrangler@latest pages deploy dist --project-name hundred-stories`).
+- Redeploying a previous git tag (checkout the tag, run `npm run build`, then `npx wrangler@4.135.0 pages deploy dist --project-name hundred-stories`).
 
 ## Fallback
 
