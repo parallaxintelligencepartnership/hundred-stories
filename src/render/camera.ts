@@ -25,6 +25,8 @@ const FRICTION_MS = 110; // inertia half life, roughly
 const MIN_INERTIA_SPEED = 0.015; // screen px per ms
 const MAX_INERTIA_SPEED = 4; // screen px per ms
 const PAN_MARGIN_PX = 240;
+/** Where the street sits in the opening shot, as a fraction down the viewport. */
+export const DEFAULT_GROUND_LINE = 0.68;
 
 const PAN_KEYS: Record<string, { dx: number; dy: number }> = {
   KeyW: { dx: 0, dy: -1 },
@@ -86,6 +88,8 @@ export interface Camera {
   centerOn(floor: number, x: number): void;
   /** Put the ground line (world y = 0) at this fraction down the viewport. */
   setGroundLine(fraction: number): void;
+  /** Back to the opening shot: zoom 1, tower center, street at DEFAULT_GROUND_LINE. */
+  reset(): void;
   setViewport(width: number, height: number): void;
   setReducedMotion(on: boolean): void;
   /** Off while a build tool owns the left button. Keys, wheel and forced drags still pan. */
@@ -180,6 +184,17 @@ class TowerCamera implements Camera {
     this.vx = 0;
     this.vy = 0;
     this.clampPosition();
+  }
+
+  reset(): void {
+    this.zoom = 1;
+    this.x = (TOWER_WIDTH / 2) * TILE_PX;
+    this.vx = 0;
+    this.vy = 0;
+    this.snapping = false;
+    this.wheelIdleMs = 0;
+    this.keys.clear();
+    this.setGroundLine(DEFAULT_GROUND_LINE);
   }
 
   setPanEnabled(on: boolean): void {

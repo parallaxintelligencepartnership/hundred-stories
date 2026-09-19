@@ -22,6 +22,7 @@ import { roomAt, shaftAt } from '../sim/world';
 import { createArt, FLOOR_PX, TILE_PX, type Art } from './art';
 import {
   createCamera,
+  DEFAULT_GROUND_LINE,
   floorBand,
   floorBaseY,
   floorTopY,
@@ -75,7 +76,6 @@ const TAP_SLOP_PX = 5;
 const TAP_MS = 600;
 const FIRE_FLICKER_MS = 110;
 const LOAD_FADE_MS = 900;
-const GROUND_LINE_FRACTION = 0.68;
 const FRAME_GRACE_MS = 2000; // after this the opening framing never reasserts itself
 
 const SIM_KINDS: readonly SimKind[] = ['worker', 'resident', 'guest', 'shopper', 'diner', 'staff', 'visitor', 'vip'];
@@ -331,10 +331,10 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
   let framedOnce = false;
   const bornAt = performance.now();
   function frameInitial(): void {
-    camera.zoom = 1;
+    camera.reset(); // zoom 1, no inertia, street at the default ground line
     const x = lastWorld.rooms.size > 0 ? averageRoomX(lastWorld) : TOWER_WIDTH / 2;
     camera.centerOn(6, Math.round(x));
-    camera.setGroundLine(GROUND_LINE_FRACTION);
+    camera.setGroundLine(DEFAULT_GROUND_LINE);
     if (app.screen.width > 1 && app.screen.height > 1) framedOnce = true;
   }
 
@@ -852,6 +852,11 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
     if (typingTarget(event.target)) return;
     // Read space, never preventDefault it: the UI still pauses on it.
     if (event.code === 'Space') spaceHeld = true;
+    // Home is the way back for a player who has scrolled off into the concrete.
+    if (event.code === 'Home') {
+      frameInitial();
+      return;
+    }
     if (event.code.startsWith('Key') || event.code.startsWith('Arrow')) userMoved = true;
     camera.setKey(event.code, true);
   };

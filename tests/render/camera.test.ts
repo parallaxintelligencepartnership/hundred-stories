@@ -81,6 +81,20 @@ describe('camera', () => {
     expect(cam.screenToWorld(640, 890).y).toBeGreaterThan(0);
   });
 
+  it('resets back to the opening shot after the player scrolls into the concrete', () => {
+    const cam = createCamera();
+    cam.setViewport(1280, 900);
+    cam.setGroundLine(0.68);
+    cam.zoomAt(2.5, 640, 450);
+    cam.panBy(4000, 4000); // lost underground
+    expect(cam.worldToScreen(0, 0).y).not.toBeCloseTo(0.68 * 900, 1);
+    cam.reset();
+    expect(cam.zoom).toBe(1);
+    expect(cam.worldToScreen(0, 0).y).toBeCloseTo(0.68 * 900, 4);
+    cam.update(16);
+    expect(cam.worldToScreen(0, 0).y).toBeCloseTo(0.68 * 900, 4); // no leftover inertia
+  });
+
   it('pans by screen pixels scaled by zoom', () => {
     const cam = createCamera();
     cam.setViewport(800, 600);
@@ -198,18 +212,22 @@ describe('camera', () => {
 });
 
 describe('sky', () => {
-  it('lands exactly on the VISUAL keyframes', () => {
-    expect(skyAt(0)).toEqual({ top: 0x070b1a, bottom: 0x070b1a });
-    expect(skyAt(6 * 60)).toEqual({ top: 0xf0a070, bottom: 0x4a5a9a });
-    expect(skyAt(12 * 60)).toEqual({ top: 0x8fc4f0, bottom: 0xd8ecfa });
-    expect(skyAt(18 * 60)).toEqual({ top: 0xf06a4a, bottom: 0x2a2f6a });
-    expect(skyBackground(12 * 60)).toBe(0x8fc4f0);
+  it('lands exactly on the corrected VISUAL keyframes', () => {
+    // Bright flat day for most of the day, deep blue night, never black.
+    expect(skyAt(12 * 60)).toEqual({ top: 0x9fd3f5, bottom: 0xdcefff });
+    expect(skyAt(9 * 60)).toEqual(skyAt(12 * 60));
+    expect(skyAt(0)).toEqual({ top: 0x0d1b3d, bottom: 0x1c2f5c });
+    expect(skyAt(6 * 60).bottom).toBe(0xf6b98a); // dawn
+    expect(skyAt(18 * 60 + 30).bottom).toBe(0xe08a7a); // dusk
+    expect(skyBackground(12 * 60)).toBe(0x9fd3f5);
   });
 
-  it('interpolates between keyframes and wraps around midnight', () => {
-    const mid = skyAt(9 * 60);
-    expect(mid.top).not.toBe(skyAt(6 * 60).top);
-    expect(mid.top).not.toBe(skyAt(12 * 60).top);
+  it('keeps dawn and dusk to about one hour and wraps around midnight', () => {
+    const dawn = skyAt(6 * 60 + 15);
+    expect(dawn.bottom).not.toBe(0xf6b98a);
+    expect(dawn.bottom).not.toBe(0xdcefff);
+    expect(skyAt(6 * 60 + 30)).toEqual(skyAt(12 * 60)); // day by half past six
+    expect(skyAt(19 * 60)).toEqual(skyAt(0)); // night by seven
     expect(skyAt(1440)).toEqual(skyAt(0));
     expect(skyAt(-60)).toEqual(skyAt(23 * 60));
   });

@@ -1,11 +1,11 @@
-// Sky, city silhouettes and the ground line.
+// Sky, horizon strip and the ground.
 //
-// The sky is a screen space gradient interpolated between the four keyframes in
-// docs/VISUAL.md. The two city bands sit behind the tower and parallax in x only,
-// so the ground line always meets the tower's floor 1 slab. Their windows light up
-// at night by fading a prebuilt window layer in.
+// Palette per the corrected "Color (world, procedural art)" section of docs/VISUAL.md
+// (2026-09-19): the world reads like the original SimTower, bright, flat and daytime
+// dominant. Day holds a flat gradient for most of the day, dawn and dusk are short
+// one hour transitions, night is deep blue and never black.
 //
-// Nothing here touches world.rng: the skyline uses its own seeded generator so the
+// Nothing here touches world.rng: the horizon uses its own seeded generator so the
 // simulation stays reproducible.
 
 import { Container, FillGradient, Graphics } from 'pixi.js';
@@ -25,30 +25,37 @@ interface Keyframe {
   bottom: number;
 }
 
-// "A over B" in VISUAL reads top over bottom.
+const NIGHT_TOP = 0x0d1b3d;
+const NIGHT_BOTTOM = 0x1c2f5c;
+const DAY_TOP = 0x9fd3f5;
+const DAY_BOTTOM = 0xdcefff;
+const DAWN_BOTTOM = 0xf6b98a;
+const DUSK_BOTTOM = 0xe08a7a;
+
+// Flat day for most of the day, one hour of dawn and one hour of dusk.
 const KEYFRAMES: readonly Keyframe[] = [
-  { minute: 0, top: 0x070b1a, bottom: 0x070b1a }, // night
-  { minute: 6 * 60, top: 0xf0a070, bottom: 0x4a5a9a }, // dawn
-  { minute: 12 * 60, top: 0x8fc4f0, bottom: 0xd8ecfa }, // day
-  { minute: 18 * 60, top: 0xf06a4a, bottom: 0x2a2f6a }, // dusk
-  { minute: 24 * 60, top: 0x070b1a, bottom: 0x070b1a }, // night again
+  { minute: 0, top: NIGHT_TOP, bottom: NIGHT_BOTTOM },
+  { minute: 5 * 60 + 30, top: NIGHT_TOP, bottom: NIGHT_BOTTOM },
+  { minute: 6 * 60, top: 0x9ab6d8, bottom: DAWN_BOTTOM },
+  { minute: 6 * 60 + 30, top: DAY_TOP, bottom: DAY_BOTTOM },
+  { minute: 18 * 60, top: DAY_TOP, bottom: DAY_BOTTOM },
+  { minute: 18 * 60 + 30, top: 0xa3aecb, bottom: DUSK_BOTTOM },
+  { minute: 19 * 60, top: NIGHT_TOP, bottom: NIGHT_BOTTOM },
+  { minute: 24 * 60, top: NIGHT_TOP, bottom: NIGHT_BOTTOM },
 ];
 
 const CITY_LEFT = -1600;
 const CITY_RIGHT = TOWER_WIDTH * TILE_PX + 1600;
-const FAR_PARALLAX = 0.35;
-const NEAR_PARALLAX = 0.6;
+const HORIZON_PARALLAX = 0.35;
 
-const EARTH_COLOR = 0x2a2016;
+/** One low distant skyline, no tall silhouettes and no haze. */
+const SKYLINE_HEIGHT = 24;
+const SKYLINE_COLOR = 0xb9cfe0;
+
+const CONCRETE_COLOR = 0x6b6f78;
+const CONCRETE_LINE = 0x4c5058;
 const SIDEWALK_COLOR = 0x343a44;
 const STREET_EDGE_COLOR = 0x6b7482;
-const WINDOW_WARM = 0xffd27a;
-
-// The backdrop sits well under the tower: lower, softer, hazier.
-const FAR_ALPHA = 0.45;
-const NEAR_ALPHA = 0.7;
-const FAR_MAX_HEIGHT = 126; // 60 percent of the old far band
-const NEAR_MAX_HEIGHT = 247; // 75 percent of the old near band
 
 function lerpColor(a: number, b: number, t: number): number {
   const ar = (a >> 16) & 0xff;
@@ -63,7 +70,7 @@ function lerpColor(a: number, b: number, t: number): number {
   return (r << 16) | (g << 8) | bl;
 }
 
-/** Sky gradient for a minute of day, interpolated between the four keyframes. */
+/** Sky gradient for a minute of day, interpolated between the keyframes. */
 export function skyAt(minuteOfDay: number): SkyColors {
   const minute = ((minuteOfDay % 1440) + 1440) % 1440;
   for (let i = 0; i < KEYFRAMES.length - 1; i++) {
@@ -83,13 +90,13 @@ export function skyBackground(minuteOfDay: number): number {
   return skyAt(minuteOfDay).top;
 }
 
-/** 0 in broad daylight, 1 in the dead of night, ramped across dusk and dawn. */
+/** 0 in daylight, 1 at night, ramped across the dawn and dusk hours. */
 export function nightness(minuteOfDay: number): number {
   const minute = ((minuteOfDay % 1440) + 1440) % 1440;
-  if (minute < 5 * 60 + 30) return 1;
-  if (minute < 7 * 60) return 1 - (minute - (5 * 60 + 30)) / 90;
-  if (minute < 17 * 60 + 30) return 0;
-  if (minute < 19 * 60 + 30) return (minute - (17 * 60 + 30)) / 120;
+  if (minute < 5 * 60 + 45) return 1;
+  if (minute < 6 * 60 + 30) return 1 - (minute - (5 * 60 + 45)) / 45;
+  if (minute < 18 * 60) return 0;
+  if (minute < 18 * 60 + 45) return (minute - 18 * 60) / 45;
   return 1;
 }
 
@@ -110,55 +117,25 @@ export interface Sky {
   destroy(): void;
 }
 
-interface CityBand {
-  silhouette: Graphics;
-  windows: Graphics;
-}
-
-function buildCity(
-  parent: Container,
-  seed: number,
-  options: { color: number; minHeight: number; maxHeight: number; minWidth: number; maxWidth: number; windows: boolean },
-): CityBand {
-  const rng = createRng(seed);
-  const silhouette = new Graphics();
-  const windows = new Graphics();
+/** A 24 px band of distant rooftops standing on the ground line. */
+function buildSkyline(parent: Container): Graphics {
+  const rng = createRng(0x5eed1);
+  const g = new Graphics();
+  g.rect(CITY_LEFT, -6, CITY_RIGHT - CITY_LEFT, 6).fill(SKYLINE_COLOR);
   let x = CITY_LEFT;
   while (x < CITY_RIGHT) {
-    const width = rng.int(options.minWidth, options.maxWidth);
-    const height = rng.int(options.minHeight, options.maxHeight);
-    silhouette.rect(x, -height, width, height).fill(options.color);
-    if (options.windows) {
-      // Irregular per building: the backdrop must not read as graph paper.
-      const stepX = rng.int(8, 14);
-      const stepY = rng.int(11, 17);
-      const density = 0.16 + rng.next() * 0.12;
-      const inset = rng.int(3, 6);
-      for (let wx = x + inset; wx + 2 <= x + width - inset; wx += stepX) {
-        for (let wy = -height + rng.int(7, 12); wy + 2 <= -6; wy += stepY) {
-          if (rng.next() > density) continue;
-          windows.rect(wx, wy, 2, 2).fill(WINDOW_WARM);
-        }
-      }
-    } else {
-      const dots = Math.max(1, Math.floor(width / 34));
-      for (let d = 0; d < dots; d++) {
-        if (rng.next() > 0.4) continue;
-        windows.rect(x + rng.int(3, Math.max(4, width - 5)), -rng.int(8, Math.max(9, height - 4)), 2, 2).fill(WINDOW_WARM);
-      }
-    }
-    x += width + rng.int(2, 14);
+    const width = rng.int(26, 90);
+    const height = rng.int(9, SKYLINE_HEIGHT);
+    g.rect(x, -height, width, height).fill(SKYLINE_COLOR);
+    x += width + rng.int(0, 6);
   }
-  windows.alpha = 0;
-  parent.addChild(silhouette);
-  parent.addChild(windows);
-  return { silhouette, windows };
+  parent.addChild(g);
+  return g;
 }
 
 /**
- * The lot below the street: a sidewalk band, layered soil with a floor guide at
- * every underground slab, and a speckle so it reads as earth rather than a void.
- * It stays far darker than any room so the tower keeps the eye.
+ * Below the street: flat concrete with a line at every underground slab, so a
+ * player can see where B1 to B10 sit before anything is built.
  */
 function buildGround(ground: Container): Graphics {
   const g = new Graphics();
@@ -166,29 +143,10 @@ function buildGround(ground: Container): Graphics {
   const width = CITY_RIGHT - CITY_LEFT;
   const depth = floorBaseY(MIN_FLOOR) + FLOOR_PX * 2;
 
-  g.rect(left, 0, width, depth).fill(EARTH_COLOR);
-  // Soil darkens with depth.
-  for (let band = 0; band * FLOOR_PX < depth; band++) {
-    const y = band * FLOOR_PX;
-    const shade = Math.min(0.28, band * 0.022);
-    g.rect(left, y, width, FLOOR_PX).fill({ color: 0x000000, alpha: shade });
-  }
-  // A guide at every underground slab line, so B1 to B10 are readable before anything is built.
+  g.rect(left, 0, width, depth).fill(CONCRETE_COLOR);
   for (let floor = -1; floor >= MIN_FLOOR; floor--) {
-    g.rect(left, floorBaseY(floor) - 1, width, 1).fill({ color: 0xffffff, alpha: 0.08 });
+    g.rect(left, floorBaseY(floor) - 1, width, 1).fill(CONCRETE_LINE);
   }
-  // Speckle.
-  const rng = createRng(0x50112);
-  for (let i = 0; i < 1400; i++) {
-    const sx = left + rng.next() * width;
-    const sy = rng.next() * depth;
-    const light = rng.next() > 0.5;
-    g.rect(Math.round(sx), Math.round(sy), 1, rng.next() > 0.8 ? 2 : 1).fill({
-      color: light ? 0xffffff : 0x000000,
-      alpha: light ? 0.05 : 0.12,
-    });
-  }
-
   g.rect(left, 0, width, 6).fill(SIDEWALK_COLOR);
   // The street edge: where the ground floor can be built, visible with an empty lot.
   g.rect(left, 0, width, 2).fill(STREET_EDGE_COLOR);
@@ -199,31 +157,7 @@ function buildGround(ground: Container): Graphics {
 export function createSky(layers: SkyLayers): Sky {
   const gradient = new Graphics();
   layers.sky.addChild(gradient);
-
-  const far = buildCity(layers.cityFar, 0x5eed1, {
-    color: 0x1d2740,
-    minHeight: 42,
-    maxHeight: FAR_MAX_HEIGHT,
-    minWidth: 40,
-    maxWidth: 120,
-    windows: false,
-  });
-  // Haze sits on top of the far band only, so distance reads as atmosphere.
-  const haze = new Graphics();
-  haze.rect(CITY_LEFT, -FAR_MAX_HEIGHT, CITY_RIGHT - CITY_LEFT, FAR_MAX_HEIGHT).fill(0xffffff);
-  haze.alpha = 0.35;
-  layers.cityFar.addChild(haze);
-  layers.cityFar.alpha = FAR_ALPHA;
-
-  const near = buildCity(layers.cityNear, 0x13a7c3, {
-    color: 0x121a2b,
-    minHeight: 82,
-    maxHeight: NEAR_MAX_HEIGHT,
-    minWidth: 56,
-    maxWidth: 150,
-    windows: true,
-  });
-  layers.cityNear.alpha = NEAR_ALPHA;
+  const skyline = buildSkyline(layers.cityFar);
   const ground = buildGround(layers.ground);
 
   let lastMinute = -1;
@@ -251,33 +185,19 @@ export function createSky(layers: SkyLayers): Sky {
       const rounded = Math.round(minuteOfDay);
       if (rounded !== lastMinute || viewW !== lastW || viewH !== lastH) {
         redrawGradient(minuteOfDay, viewW, viewH);
-        const lit = nightness(minuteOfDay);
-        far.windows.alpha = lit * 0.6;
-        near.windows.alpha = lit * 0.9;
-        const dim = 1 - lit * 0.35;
-        far.silhouette.tint = lerpColor(0x000000, 0xffffff, dim);
-        near.silhouette.tint = lerpColor(0x000000, 0xffffff, dim);
-        haze.tint = skyAt(minuteOfDay).bottom;
+        // The horizon settles toward the night sky instead of glowing after dark.
+        skyline.tint = lerpColor(0xffffff, 0x5c6f96, nightness(minuteOfDay));
         lastMinute = rounded;
         lastW = viewW;
         lastH = viewH;
       }
 
-      for (const [band, parallax] of [
-        [layers.cityFar, FAR_PARALLAX],
-        [layers.cityNear, NEAR_PARALLAX],
-      ] as const) {
-        band.scale.set(cam.zoom);
-        band.position.set(viewW / 2 - cam.x * cam.zoom * parallax, viewH / 2 - cam.y * cam.zoom);
-      }
+      layers.cityFar.scale.set(cam.zoom);
+      layers.cityFar.position.set(viewW / 2 - cam.x * cam.zoom * HORIZON_PARALLAX, viewH / 2 - cam.y * cam.zoom);
     },
     destroy(): void {
       gradient.destroy();
-      haze.destroy();
-      far.silhouette.destroy();
-      far.windows.destroy();
-      near.silhouette.destroy();
-      near.windows.destroy();
+      skyline.destroy();
       ground.destroy();
     },
   };
