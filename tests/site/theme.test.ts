@@ -108,6 +108,51 @@ describe('themeLabel', () => {
   });
 });
 
+describe('storage that throws', () => {
+  function fakeThrowingLocalStorage(): Storage {
+    const throwing = () => {
+      throw new Error('blocked');
+    };
+    return {
+      getItem: throwing,
+      setItem: throwing,
+      removeItem: throwing,
+      clear: () => undefined,
+      key: () => null,
+      length: 0,
+    } as unknown as Storage;
+  }
+
+  beforeEach(() => {
+    (globalThis as { localStorage: Storage }).localStorage = fakeThrowingLocalStorage();
+  });
+
+  it('readTheme returns system and does not throw', () => {
+    expect(() => readTheme()).not.toThrow();
+    expect(readTheme()).toBe('system');
+  });
+
+  it('applyTheme(dark) does not throw and still sets the attribute', () => {
+    expect(() => applyTheme('dark')).not.toThrow();
+    expect(documentElement.getAttribute('data-theme')).toBe('dark');
+  });
+
+  it('applyTheme(system) does not throw and removes the attribute', () => {
+    expect(() => applyTheme('system')).not.toThrow();
+    expect(documentElement.getAttribute('data-theme')).toBeNull();
+  });
+
+  it('mountThemeToggle does not throw and labels the button Theme: System', () => {
+    const button = {
+      textContent: '',
+      addEventListener: () => undefined,
+    } as unknown as HTMLButtonElement;
+
+    expect(() => mountThemeToggle(button)).not.toThrow();
+    expect(button.textContent).toBe('Theme: System');
+  });
+});
+
 describe('mountThemeToggle', () => {
   it('labels the button for the current theme and cycles it on click', () => {
     let clickHandler: (() => void) | undefined;

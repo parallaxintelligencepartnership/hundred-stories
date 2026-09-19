@@ -14,6 +14,9 @@
 /registerSW.js
   Cache-Control: no-cache, must-revalidate
 
+/theme.js
+  Cache-Control: no-cache, must-revalidate
+
 /manifest.webmanifest
   Cache-Control: no-cache, must-revalidate
 
