@@ -69,8 +69,8 @@ export interface Renderer {
   destroy(): void;
 }
 
-const SIM_WIDTH_PX = 2 * TILE_PX;
-const SIM_HEIGHT_PX = 4 * TILE_PX;
+const SIM_WIDTH_PX = TILE_PX; // one tile wide, matching art.ts
+const SIM_HEIGHT_PX = 3 * TILE_PX; // three tiles tall
 const PARTICLE_THRESHOLD = 500;
 const PARTICLE_RELEASE = 400; // hysteresis, so a crowd on the edge does not thrash
 const TAP_SLOP_PX = 5;
@@ -220,8 +220,8 @@ export function fallbackArt(_renderer: PixiRenderer | null): Art {
       return get(`sim|${band}|${frame}`, () =>
         canvasTexture(SIM_WIDTH_PX, SIM_HEIGHT_PX, (ctx) => {
           ctx.fillStyle = hex(FALLBACK_BAND_COLORS[band]);
-          ctx.fillRect(4, 2, 8, 12);
-          ctx.fillRect(frame === 0 ? 4 : 6, 14, 8, 16);
+          ctx.fillRect(2, 2, 4, 3); // head
+          ctx.fillRect(frame === 0 ? 2 : 1, 5, 4, SIM_HEIGHT_PX - 5); // body and legs, a pixel over on the step
         }),
       );
     },
@@ -310,7 +310,7 @@ export function simMoves(sim: Sim): boolean {
 }
 
 /**
- * A fixed spot inside the room for a sim that is staying put: two tiles apart in
+ * A fixed spot inside the room for a sim that is staying put: one slot pitch apart in
  * id order, clamped inside the room. Stable between frames, so no jitter.
  */
 export function inRoomSlot(world: World, sim: Sim, slots: Map<Id, number>): [number, number] {
@@ -319,10 +319,11 @@ export function inRoomSlot(world: World, sim: Sim, slots: Map<Id, number>): [num
   const index = slots.get(room.id) ?? 0;
   slots.set(room.id, index + 1);
   // Spread occupants across the room instead of stacking them on the first desk: slot pitch is the
-  // room width divided by its capacity (at least 2 tiles), so an office's six workers sit one per desk area.
+  // room width divided by its capacity, at least one tile now that a sim is one tile wide, so an
+  // office's six workers sit one per desk area across its nine tiles.
   const right = room.x + room.width - 1;
   const capacity = Math.max(1, ROOMS[room.kind].capacity || 1);
-  const pitch = Math.max(2, Math.floor((room.width - 2) / capacity));
+  const pitch = Math.max(1, Math.floor((room.width - 2) / capacity));
   const tile = Math.max(room.x, Math.min(room.x + 1 + index * pitch, right));
   const inside = sim.pos.floor >= room.floor && sim.pos.floor < room.floor + room.height;
   return [tile * TILE_PX, simFeetY(inside ? sim.pos.floor : room.floor)];

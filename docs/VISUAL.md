@@ -28,7 +28,7 @@ Color (world, procedural art), corrected 2026-09-19 after Matt saw the first bui
 - room walls: office `#f7f5ee`, condo `#f2e8d8`, hotel `#eef2f7`, fast food `#fff1c9`, restaurant `#f3e3e3`, shop `#e9f2e4`, cinema `#2b2b3a` (dark by nature), party hall `#f5e8f2`, medical `#f2f8f7`, security `#e4e8ee`, housekeeping `#eeeae2`, parking `#8d9199`, recycling `#dfe6dc`, metro `#c9ced8`, cathedral `#f4efe4`, lobby white marble `#f8f8f6` with `#3a3a3a` columns
 - windows: day `#7fb6e0`, night lit `#ffd866`, unlit night `#2a3550`
 - shafts: `#d8dbe0` rails on `#3b3f47` cavity, cars `#f0c419` with a dark door line
-- sims: black `#111111` figures; pink `#ff7ad9` and red `#ff2d2d` by stress band; sims are the only saturated moving color besides cars
+- sims: black `#111111` figures 1 tile wide by 3 tiles tall (8 by 24 px), like the original's; pink `#ff7ad9` and red `#ff2d2d` by stress band; sims are the only saturated moving color besides cars
 - ghost green `#5fd38a`, refused red `#ff5c4d`; the chrome keeps the steel tokens above, and the contrast between dark chrome and bright world is the composition
 
 Type:

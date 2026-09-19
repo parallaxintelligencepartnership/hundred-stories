@@ -1265,49 +1265,57 @@ function drawCar(g: Graphics, kind: ShaftKind, w: number, h: number, doorsOpen: 
   if (kind === 'express') box(g, inset + 1, h - 9, panelW - 2, 2, PALETTE.amber);
 }
 
-const SIM_W = 2 * TILE_PX; // 16
-const SIM_H = 4 * TILE_PX; // 32
+const SIM_W = TILE_PX; // 8: one tile wide, the way the original's people read
+const SIM_H = 3 * TILE_PX; // 24: three tiles tall, head to feet
 
+/**
+ * A person, drawn on an 8 by 24 grid. The feet fill the bottom row so the sprite's lower
+ * edge lands on the slab line, and the top two rows stay clear for the vip's hat.
+ * Head 3 px (a 2 px crown over a 1 px neck notch, which is what reads as a head at this size),
+ * torso 9, legs 10. Nothing may reach outside the box: at one tile wide the figures stand
+ * shoulder to shoulder in a lift queue, so a stray pixel lands on the neighbor.
+ */
 function drawSim(g: Graphics, kind: SimKind, band: StressBand, frame: 0 | 1): void {
   const body = band === 'calm' ? PALETTE.sim.calm : band === 'pink' ? PALETTE.sim.pink : PALETTE.sim.red;
-  box(g, 5, 2, 6, 6, body); // head
-  box(g, 4, 8, 8, 12, body); // torso
+  box(g, 2, 2, 4, 2, body); // head
+  box(g, 3, 4, 2, 1, body); // neck, the notch that separates head from shoulders
+  box(g, 2, 5, 4, 9, body); // torso
   if (frame === 0) {
-    box(g, 2, 9, 2, 8, body); // arms down
-    box(g, 12, 9, 2, 8, body);
-    box(g, 5, 20, 2, 11, body); // legs together
-    box(g, 9, 20, 2, 11, body);
+    box(g, 1, 6, 1, 7, body); // arms hanging
+    box(g, 6, 6, 1, 7, body);
+    box(g, 2, 14, 1, 10, body); // legs upright, a two pixel gap between them
+    box(g, 5, 14, 1, 10, body);
   } else {
-    box(g, 2, 10, 2, 7, body); // arms swinging
-    box(g, 12, 8, 2, 7, body);
-    box(g, 3, 20, 3, 8, body); // legs apart
-    box(g, 4, 28, 3, 3, body);
-    box(g, 10, 20, 3, 8, body);
-    box(g, 9, 28, 3, 3, body);
+    box(g, 1, 7, 1, 6, body); // arms swinging, one forward one back
+    box(g, 6, 5, 1, 6, body);
+    box(g, 1, 14, 1, 5, body); // legs mid stride, feet planted wide
+    box(g, 0, 19, 2, 5, body);
+    box(g, 6, 14, 1, 5, body);
+    box(g, 6, 19, 2, 5, body);
   }
-  // small per kind accents, one or two pixels each
+  // small per kind accents, one or two pixels each, kept clear of the legs
   switch (kind) {
     case 'worker':
-      box(g, 12, 16, 3, 5, PALETTE.detail.woodDark); // briefcase
+      box(g, 6, 11, 2, 3, PALETTE.detail.woodDark); // briefcase
       break;
     case 'guest':
-      box(g, 12, 17, 4, 6, PALETTE.detail.chairA); // suitcase
+      box(g, 6, 10, 2, 4, PALETTE.detail.chairA); // suitcase
       break;
     case 'shopper':
-      box(g, 12, 16, 4, 6, PALETTE.detail.shelfGoodsA); // shopping bag
+      box(g, 6, 11, 2, 3, PALETTE.detail.shelfGoodsA); // shopping bag
       break;
     case 'staff':
-      box(g, 4, 8, 8, 2, PALETTE.simAccent); // uniform collar
+      box(g, 2, 5, 4, 1, PALETTE.simAccent); // uniform collar
       break;
     case 'vip':
-      box(g, 3, 0, 10, 2, PALETTE.amber); // hat brim
-      box(g, 5, 0, 6, 2, PALETTE.amber);
+      box(g, 1, 1, 6, 1, PALETTE.amber); // hat brim
+      box(g, 2, 0, 4, 1, PALETTE.amber);
       break;
     case 'diner':
-      box(g, 12, 15, 3, 3, PALETTE.detail.linen);
+      box(g, 6, 11, 2, 2, PALETTE.detail.linen);
       break;
     case 'resident':
-      box(g, 5, 8, 6, 2, PALETTE.detail.blanketA); // scarf
+      box(g, 2, 5, 4, 1, PALETTE.detail.blanketA); // scarf
       break;
     case 'visitor':
       break;

@@ -104,17 +104,26 @@ describe('sims standing still', () => {
     return sim;
   }
 
-  it('gives each occupant a fixed slot two tiles apart inside the room', () => {
+  it('gives each occupant a fixed slot one tile apart inside an office', () => {
     const world = createWorld(1);
-    const office = room(world, 'office', 2, 100); // 100 to 108
+    const office = room(world, 'office', 2, 100); // 100 to 108, capacity 6
     const slots = new Map<number, number>();
     const a = inRoomSlot(world, occupant(world, office.id, 'inRoom'), slots);
     const b = inRoomSlot(world, occupant(world, office.id, 'inRoom'), slots);
+    // Nine tiles, six workers: one tile pitch, so all six stand shoulder to shoulder on their own desk.
     expect(a[0]).toBe(101 * TILE_PX);
-    expect(b[0]).toBe(103 * TILE_PX);
+    expect(b[0]).toBe(102 * TILE_PX);
     expect(a[1]).toBe(simFeetY(2));
     // Same inputs, same answer: nothing to jitter between frames.
     expect(inRoomSlot(world, occupant(world, office.id, 'inRoom'), new Map())[0]).toBe(a[0]);
+  });
+
+  it('fits all six of an office\'s workers inside its nine tiles', () => {
+    const world = createWorld(1);
+    const office = room(world, 'office', 2, 100); // 100 to 108
+    const slots = new Map<number, number>();
+    const tiles = Array.from({ length: 6 }, () => inRoomSlot(world, occupant(world, office.id, 'inRoom'), slots)[0] / TILE_PX);
+    expect(tiles).toEqual([101, 102, 103, 104, 105, 106]);
   });
 
   it('clamps a crowd inside the room', () => {
