@@ -43,6 +43,16 @@ export interface PanelContext {
 
 export type Selection = { roomId?: Id; simId?: Id; shaftId?: Id };
 
+/** The same six lines as the guide, for the player who looks in the menu instead. */
+const CONTROL_LINES: readonly string[] = [
+  'Move around: drag anywhere with the mouse, even with a build tool selected. Scroll the wheel to move up and down, hold shift to move sideways. On a trackpad, two-finger scroll moves the view.',
+  'Zoom: hold ctrl and scroll, or pinch on a trackpad. Plus and minus keys also zoom.',
+  'Keys: W A S D or the arrow keys move the view.',
+  'Place a room: pick it from the palette, then click where it goes. A click that does not move places; a press that moves pans.',
+  'Speed: 1, 2, 3 set the clock speed, space pauses.',
+  'Escape drops the current tool.',
+];
+
 const SIM_KINDS: Record<SimKind, string> = {
   worker: 'Worker',
   resident: 'Resident',
@@ -417,6 +427,10 @@ export function createLogPanel(game: GameApi, ctx: PanelContext): PanelElement {
 
 export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElement {
   const { panel, body } = shell('Settings', ctx);
+
+  const controls = section('Controls');
+  for (const line of CONTROL_LINES) controls.append(el('p', 'hs-note', line));
+  body.append(controls);
 
   const saves = el('div', 'hs-actions');
   saves.append(

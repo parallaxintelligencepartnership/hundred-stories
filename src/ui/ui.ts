@@ -46,6 +46,10 @@ const FONT_LINK_ID = 'hs-google-fonts';
 const FONT_HREF =
   'https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600&family=Share+Tech+Mono&display=swap';
 const REDUCED_MOTION_KEY = 'hundredStories.reducedMotion';
+const HINT_KEY = 'hs.hintSeen';
+/** The controls hint rides along for the first three loads, then gets out of the way. */
+const HINT_LOADS = 3;
+const HINT_TEXT = 'Move: drag, scroll, or W A S D. Zoom: ctrl + scroll or pinch. Click to place.';
 
 const GROUPS: { title: string; source: 'rooms' | 'shafts' | 'tools'; group?: string }[] = [
   { title: 'Structure', source: 'rooms', group: 'structure' },
@@ -56,6 +60,18 @@ const GROUPS: { title: string; source: 'rooms' | 'shafts' | 'tools'; group?: str
   { title: 'Services', source: 'rooms', group: 'services' },
   { title: 'Tools', source: 'tools' },
 ];
+
+/**
+ * Should this load show the controls hint, and what does the counter become?
+ *
+ * A missing, unreadable or nonsense counter counts as nothing seen, so the hint shows: a
+ * player who cannot find the controls is worse off than one who sees the line again.
+ */
+export function nextHintSeen(stored: string | null): { show: boolean; seen: number } {
+  const parsed = Number(stored);
+  const seen = Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 0;
+  return { show: seen < HINT_LOADS, seen: Math.min(seen + 1, HINT_LOADS) };
+}
 
 export function createUi(root: HTMLElement, game: GameApi): Ui {
   ensureFonts();
@@ -142,11 +158,24 @@ export function createUi(root: HTMLElement, game: GameApi): Ui {
   ticker.append(tickerTime, tickerText);
   ticker.addEventListener('click', () => setPanel(panelKind === 'log' ? 'none' : 'log'));
 
+  // Controls hint: one line over the view, for the first few loads only.
+  const hint = el('div', 'hs-hint');
+  hint.append(el('span', 'hs-hint-text', HINT_TEXT));
+  const hintClose = button('Close', 'hs-hint-close', () => {
+    hint.classList.add('is-hidden');
+    writeHintSeen(HINT_LOADS); // closing it means read, not just shown
+  });
+  hintClose.title = 'Hide the controls hint';
+  hint.append(hintClose);
+  const hintState = nextHintSeen(readHintSeen());
+  if (hintState.show) writeHintSeen(hintState.seen);
+  else hint.classList.add('is-hidden');
+
   const toasts = el('div', 'hs-toasts');
   toasts.setAttribute('role', 'status');
   toasts.setAttribute('aria-live', 'polite');
 
-  shell.append(top, palette, panelSlot, ticker, toasts);
+  shell.append(top, palette, hint, panelSlot, ticker, toasts);
   root.append(shell);
 
   const ctx: PanelContext = {
@@ -484,6 +513,22 @@ function readReducedMotion(): boolean {
     return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   } catch {
     return false;
+  }
+}
+
+function readHintSeen(): string | null {
+  try {
+    return window.localStorage.getItem(HINT_KEY);
+  } catch {
+    return null; // a blocked store means the hint shows again, which is the safe way to fail
+  }
+}
+
+function writeHintSeen(count: number): void {
+  try {
+    window.localStorage.setItem(HINT_KEY, String(count));
+  } catch {
+    // Nothing to do: the hint stays for this session only.
   }
 }
 

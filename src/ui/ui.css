@@ -556,6 +556,44 @@ button.hs-readout:hover {
   color: var(--alert);
 }
 
+/* Controls hint -------------------------------------------------------- */
+
+.hs-hint {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--ticker-h) + var(--pad));
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: var(--pad);
+  max-width: calc(100% - 2 * var(--pad));
+  padding: 4px var(--pad);
+  background: var(--steel);
+  border: 1px solid var(--line);
+  font-size: var(--size-12);
+  color: var(--ink-dim);
+  pointer-events: auto;
+}
+
+.hs-hint.is-hidden {
+  display: none;
+}
+
+.hs-hint-close {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  background: transparent;
+  border: 1px solid var(--line);
+  font-size: var(--size-12);
+  color: var(--ink-dim);
+  cursor: pointer;
+}
+
+.hs-hint-close:hover {
+  color: var(--ink);
+  border-color: var(--ink-dim);
+}
+
 /* Toasts --------------------------------------------------------------- */
 
 .hs-toasts {
@@ -611,6 +649,12 @@ button.hs-readout:hover {
     max-height: 60vh;
     border-left: 0;
     border-top: 1px solid var(--line);
+  }
+
+  /* The palette owns the bottom of a phone screen, so the hint sits under the top strip. */
+  .hs-hint {
+    top: calc(var(--top-h) * 2 + var(--pad));
+    bottom: auto;
   }
 
   /* The sheet and a panel share the bottom of a phone screen, so only one shows at a time. */
