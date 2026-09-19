@@ -58,3 +58,4 @@ A PixiJS upgrade that changes how it compiles shaders, first. The site's Content
 - 2026-09-19: post-ship checkpoint, people rescaled and interiors redrawn
 - 2026-09-19: second ship, live at https://hundredstories.xyz: landing site with SEO and Parallax structured data, game at /play/, sprite wordmark, camera controls, AGPL licence, public GitHub mirror, Workers static assets hosting, CSP fix for PixiJS; tag ship-2026-09-19b
 - 2026-09-19: post-ship fixes live the same day: stairs and elevators overlay rooms, shafts rise into empty air, https redirect, touch controls for phones and tablets, copy without the 1994 framing
+- Published: entry hzyq7fm6mpye | https://github.com/parallaxintelligencepartnership/itworks-site/pull/3 | 2026-09-19

@@ -1,5 +1,7 @@
 # Hundred Stories
 
+[![itworks](https://itworks.build/badge/hzyq7fm6mpye.svg)](https://itworks.build/e/hzyq7fm6mpye/)
+
 Hundred Stories is a browser game and installable PWA. You run a skyscraper: build a lobby, offices, homes, shops, and elevators, and watch it fill with people over the years.
 
 This is original work. It is not affiliated with, endorsed by, or connected to Electronic Arts, Maxis, or OPeNBooK.
