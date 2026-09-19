@@ -4,7 +4,7 @@
 
 import './ui.css';
 
-import type { GameApi, Speed, Tool } from '../game/api';
+import type { GameApi, Placement, Speed, Tool } from '../game/api';
 import { ROOMS, SHAFTS } from '../sim/rules';
 import type { Command, LogEntry, RoomKind, ShaftKind, Star } from '../sim/types';
 import {
@@ -17,7 +17,7 @@ import {
   starsGlyphs,
   starsTitle,
 } from './format';
-import { chromeInsets, isSheetLayout } from './layout';
+import { chromeInsets, isSheetLayout, placementBoxes } from './layout';
 import {
   button,
   createFinancesPanel,
@@ -75,6 +75,37 @@ export function hintText(coarsePointer: boolean): string {
   return coarsePointer ? TOUCH_HINT_TEXT : HINT_TEXT;
 }
 
+/**
+ * The line over the outline: what is being placed and what it costs, or why it cannot go there.
+ *
+ * A placement the sim refuses says so in the sim's own words, which is the sentence the log
+ * would have shown after the money was gone.
+ */
+export function placementChipText(placement: Placement): string {
+  if (placement.ok) return `${placement.label} \u00b7 ${formatMoney(placement.cost)}`;
+  return placement.reason ?? 'That spot will not take it.';
+}
+
+/**
+ * What the up and down arrows do, which depends on what is in hand.
+ *
+ * A room is the size its rule says, so its arrows move it. An elevator is as tall as the
+ * player wants, so its arrows stretch the end they point at.
+ */
+export function placementArrowLabels(shaft: boolean): { up: string; down: string } {
+  return shaft
+    ? { up: 'Extend the top one floor', down: 'Extend the bottom one floor' }
+    : { up: 'Move up one floor', down: 'Move down one floor' };
+}
+
+/** The Build button's own words: the price when it can be built, the refusal when it cannot. */
+export function placementBuildLabels(placement: Placement): { text: string; title: string } {
+  return {
+    text: `Build ${formatMoney(placement.cost)}`,
+    title: placement.ok ? 'Build it here' : placementChipText(placement),
+  };
+}
+
 const GROUPS: { title: string; source: 'rooms' | 'shafts' | 'tools'; group?: string }[] = [
   { title: 'Structure', source: 'rooms', group: 'structure' },
   { title: 'Elevators', source: 'shafts' },
@@ -106,6 +137,10 @@ export function createUi(root: HTMLElement, game: GameApi): Ui {
   let mountedKey = '';
   let lastLogLength = 0;
   let destroyed = false;
+  /** The band the chrome covers, so the chip and the bar stay out from under it. */
+  let chromeBand = { top: 0, bottom: 0 };
+  /** The frame loop that follows the ghost. It only runs while there is a ghost to follow. */
+  let placementRaf = 0;
   const timers = new Set<ReturnType<typeof setTimeout>>();
 
   const shell = el('div', 'hs-ui');
@@ -207,11 +242,40 @@ export function createUi(root: HTMLElement, game: GameApi): Ui {
   if (hintState.show) writeHintSeen(hintState.seen);
   else hint.classList.add('is-hidden');
 
+  // Placement: a chip that names what is being placed and what it costs, and, on touch, the
+  // bar that moves it and pays for it. Both ride beside the ghost the renderer draws.
+  const chipText = el('span', 'hs-place-chip-text');
+  const chip = el('div', 'hs-place-chip is-hidden');
+  chip.setAttribute('role', 'status');
+  chip.setAttribute('aria-live', 'polite');
+  chip.append(chipText);
+
+  const bar = el('div', 'hs-place-bar is-hidden');
+  bar.setAttribute('role', 'group');
+  bar.setAttribute('aria-label', 'Place this');
+  const leftButton = placeButton('\u25c0', 'Move left one tile', () => game.nudgePending(-1, 0));
+  const rightButton = placeButton('\u25b6', 'Move right one tile', () => game.nudgePending(1, 0));
+  const upButton = placeButton('\u25b2', 'Move up one floor', () => {
+    if (heldIsShaft()) game.resizePending(1, 0);
+    else game.nudgePending(0, 1);
+  });
+  const downButton = placeButton('\u25bc', 'Move down one floor', () => {
+    if (heldIsShaft()) game.resizePending(0, 1);
+    else game.nudgePending(0, -1);
+  });
+  const buildButton = placeButton('Build', 'Build it here', () => {
+    const result = game.confirmPending();
+    if (!result.ok) notice(result.reason);
+  });
+  buildButton.classList.add('is-primary');
+  const cancelButton = placeButton('Cancel', 'Put this back', () => game.cancelPending());
+  bar.append(leftButton, rightButton, upButton, downButton, buildButton, cancelButton);
+
   const toasts = el('div', 'hs-toasts');
   toasts.setAttribute('role', 'status');
   toasts.setAttribute('aria-live', 'polite');
 
-  shell.append(top, palette, hint, panelSlot, ticker, toasts);
+  shell.append(top, palette, hint, chip, bar, panelSlot, ticker, toasts);
   root.append(shell);
 
   const ctx: PanelContext = {
@@ -241,7 +305,9 @@ export function createUi(root: HTMLElement, game: GameApi): Ui {
   // measured height goes into a variable the palette, the panel and the hint sit under, and
   // into the band the camera frames the street in.
   chromeWatch = watchChrome({ strip: top, palette, ticker, shell }, (topPx, bottomPx) => {
+    chromeBand = { top: topPx, bottom: bottomPx };
     game.setChrome(topPx, bottomPx);
+    refreshPlacement();
   });
   lastLogLength = game.world.log.length;
   const unsubscribe = game.subscribe(() => update());
@@ -287,9 +353,114 @@ export function createUi(root: HTMLElement, game: GameApi): Ui {
     // Collapsed, the header row is the only thing left to say what is in hand.
     setText(paletteParts.current, held);
 
+    refreshPlacement();
     refreshPanel();
     refreshTicker();
     drainAlerts();
+  }
+
+  /** Is the tool in hand an elevator? Its up and down arrows stretch a span instead of moving it. */
+  function heldIsShaft(): boolean {
+    return game.getTool().kind === 'shaft';
+  }
+
+  function placeButton(label: string, description: string, onClick: () => void): HTMLButtonElement {
+    const node = button(label, 'hs-btn hs-place-btn', () => {
+      onClick();
+      update();
+    });
+    node.setAttribute('aria-label', description);
+    node.title = description;
+    return node;
+  }
+
+  /**
+   * Show what is about to be built, where, and for how much.
+   *
+   * The chip follows every ghost, hover or parked. The bar belongs to the parked one: it is
+   * the only placement a player can still move, and the only one that has not been paid for.
+   */
+  function refreshPlacement(): void {
+    const placement = game.getPlacement();
+    chip.classList.toggle('is-hidden', placement === null);
+    bar.classList.toggle('is-hidden', placement?.pending !== true);
+    if (!placement) {
+      stopPlacementLoop();
+      return;
+    }
+
+    setText(chipText, placementChipText(placement));
+    chip.classList.toggle('is-alert', !placement.ok);
+
+    if (placement.pending) {
+      const arrows = placementArrowLabels(heldIsShaft());
+      describe(upButton, '\u25b2', arrows.up);
+      describe(downButton, '\u25bc', arrows.down);
+      const build = placementBuildLabels(placement);
+      setText(buildButton, build.text);
+      buildButton.disabled = !placement.ok;
+      buildButton.title = build.title;
+      buildButton.setAttribute('aria-label', build.title);
+    }
+
+    positionPlacement();
+    startPlacementLoop();
+  }
+
+  function describe(node: HTMLButtonElement, glyph: string, description: string): void {
+    setText(node, glyph);
+    node.title = description;
+    node.setAttribute('aria-label', description);
+  }
+
+  /**
+   * Put the chip over the ghost and the bar under it, both inside the view.
+   *
+   * The bar goes above the chip when the ghost sits too low for it, so a room placed at the
+   * bottom of the screen is not asking to be built from behind the palette sheet.
+   */
+  function positionPlacement(): void {
+    const ghost = game.getPlacementRect();
+    if (!ghost) return;
+    const view = shell.getBoundingClientRect();
+    if (view.width <= 0 || view.height <= 0) return;
+    const boxes = placementBoxes({
+      ghost,
+      chip: sizeOf(chip),
+      bar: bar.classList.contains('is-hidden') ? null : sizeOf(bar),
+      view: { width: view.width, height: view.height },
+      chrome: chromeBand,
+    });
+    chip.style.left = `${boxes.chip.left}px`;
+    chip.style.top = `${boxes.chip.top}px`;
+    if (!boxes.bar) return;
+    bar.style.left = `${boxes.bar.left}px`;
+    bar.style.top = `${boxes.bar.top}px`;
+  }
+
+  // A pan or a pinch moves the ghost without telling anyone, so the chip and the bar follow
+  // it on their own frames, and only for as long as there is a ghost on the tower.
+  function startPlacementLoop(): void {
+    if (placementRaf || destroyed) return;
+    placementRaf = requestAnimationFrame(onPlacementFrame);
+  }
+
+  function onPlacementFrame(): void {
+    placementRaf = 0;
+    if (destroyed) return;
+    if (!game.getPlacement()) {
+      chip.classList.add('is-hidden');
+      bar.classList.add('is-hidden');
+      return;
+    }
+    positionPlacement();
+    startPlacementLoop();
+  }
+
+  function stopPlacementLoop(): void {
+    if (!placementRaf) return;
+    cancelAnimationFrame(placementRaf);
+    placementRaf = 0;
   }
 
   function refreshPanel(): void {
@@ -469,6 +640,7 @@ export function createUi(root: HTMLElement, game: GameApi): Ui {
     update,
     destroy() {
       destroyed = true;
+      stopPlacementLoop();
       unsubscribe();
       window.removeEventListener('keydown', onKeyDown);
       chromeWatch?.disconnect();
@@ -555,6 +727,11 @@ function sameTool(a: Tool, b: Tool): boolean {
   if (a.kind === 'room' && b.kind === 'room') return a.room === b.room;
   if (a.kind === 'shaft' && b.kind === 'shaft') return a.shaft === b.shaft;
   return true;
+}
+
+function sizeOf(node: HTMLElement): { width: number; height: number } {
+  const box = node.getBoundingClientRect();
+  return { width: box.width, height: box.height };
 }
 
 function setText(node: HTMLElement, text: string): void {

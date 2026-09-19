@@ -8,7 +8,7 @@ import { createWorld } from '../sim/world';
 import { SCHEDULES } from '../sim/rules';
 import { classifyPress, isTap, PRESS_SLOP_PX, TOUCH_SLOP_PX } from '../render/input';
 import type { Renderer } from '../render/renderer';
-import type { GameApi, Speed, Tool } from './api';
+import type { GameApi, Placement, PlacementRect, Speed, Tool } from './api';
 import { readSave, writeSave } from './storage';
 
 const TICKS_PER_SECOND_AT_1X = 10;
@@ -41,6 +41,27 @@ export function shouldAutosave(prevMinute: number, nextMinute: number): boolean 
   return quarterOf(nextMinute) > quarterOf(prevMinute);
 }
 
+/**
+ * Floors counted without the floor that does not exist: 1 stays 1, -1 becomes 0.
+ *
+ * Moving a placement one step has to step over the ground, the same way the renderer's
+ * shaft spans do, or a nudge up from floor -1 would land on a floor the sim refuses.
+ */
+function bandOf(floor: number): number {
+  return floor > 0 ? floor : floor + 1;
+}
+
+function floorOfBand(band: number): number {
+  return band > 0 ? band : band - 1;
+}
+
+const BAND_MIN = bandOf(LIMITS.minFloor);
+const BAND_MAX = bandOf(LIMITS.maxFloor);
+
+function clampBand(band: number): number {
+  return Math.max(BAND_MIN, Math.min(BAND_MAX, band));
+}
+
 export interface Game extends GameApi {
   attach(renderer: Renderer, container: HTMLElement): void;
   start(): void;
@@ -66,7 +87,15 @@ export function createGame(seed: number): Game {
   const notify = () => subscribers.forEach((cb) => cb());
 
   // Drag state for lobby segments (horizontal) and shafts (vertical).
-  let drag: null | { floor: number; x: number; kind: 'lobby' | 'shaft' } = null;
+  let drag: null | { floor: number; x: number; kind: 'lobby' | 'shaft'; touch: boolean } = null;
+  /**
+   * The placement a finger parked on the tower, waiting for Build.
+   *
+   * A mouse has a hover ghost and a cursor to aim it with; a finger covers the very tile it
+   * is choosing, so touch places in two steps: a tap parks this, and the ui's bar moves it,
+   * sizes it and confirms it. A room keeps floorMin === floorMax === floor.
+   */
+  let pending: null | { floor: number; x: number; floorMin: number; floorMax: number } = null;
   // A left press with a room tool is provisional: it builds on release, and only if it held
   // still. A press that travels is a pan, which renderer.ts hands to the camera.
   let press: null | { sx: number; sy: number; floor: number; x: number; time: number; touch: boolean } = null;
@@ -79,7 +108,9 @@ export function createGame(seed: number): Game {
   function abandonPress(): void {
     drag = null;
     press = null;
-    renderer?.setGhost(null);
+    // The parked placement survives a pinch: the camera took the gesture, not the choice.
+    if (pending) showPendingGhost();
+    else renderer?.setGhost(null);
   }
 
   /** Tools that draw with the left drag. Their drag is the build gesture, so it cannot pan. */
@@ -158,8 +189,97 @@ export function createGame(seed: number): Game {
     renderer?.render(world, Math.min(1, accumulator + elapsed * rate));
   }
 
+  /** How wide the tool in hand is, in tiles. Zero when it builds nothing. */
+  function toolWidth(): number {
+    if (tool.kind === 'room') return ROOMS[tool.room].width;
+    if (tool.kind === 'shaft') return SHAFTS[tool.shaft].width;
+    return 0;
+  }
+
+  /** Keep a placement inside the lot: never off the left edge, never hanging off the right. */
+  function clampTileX(x: number): number {
+    return Math.max(0, Math.min(x, LIMITS.towerWidth - toolWidth()));
+  }
+
+  /** The span a placement covers, priced and judged by the sim, for the ghost and the ui. */
+  function placementFor(
+    at: { x: number; floorMin: number; floorMax: number },
+    isPending: boolean,
+  ): Placement | null {
+    if (tool.kind === 'room') {
+      const rule = ROOMS[tool.room];
+      const res = canBuild(world, tool.room, at.floorMin, at.x);
+      const base = {
+        floor: at.floorMin,
+        x: at.x,
+        floorMin: at.floorMin,
+        floorMax: at.floorMin,
+        label: rule.label,
+        cost: rule.cost,
+        pending: isPending,
+      };
+      return res.ok ? { ...base, ok: true } : { ...base, ok: false, reason: res.reason };
+    }
+    if (tool.kind === 'shaft') {
+      const rule = SHAFTS[tool.shaft];
+      const res = canBuildShaft(world, tool.shaft, at.x, at.floorMin, at.floorMax);
+      const base = {
+        floor: at.floorMin,
+        x: at.x,
+        floorMin: at.floorMin,
+        floorMax: at.floorMax,
+        label: rule.label,
+        cost: rule.shaftCost,
+        pending: isPending,
+      };
+      return res.ok ? { ...base, ok: true } : { ...base, ok: false, reason: res.reason };
+    }
+    return null;
+  }
+
+  /** Park a placement and show it: the ghost stops following the pointer until it is resolved. */
+  function setPending(next: { floor: number; x: number; floorMin: number; floorMax: number }): void {
+    pending = next;
+    showPendingGhost();
+    notify();
+  }
+
+  function clearPending(): void {
+    if (!pending) return;
+    pending = null;
+    renderer?.setGhost(null);
+    notify();
+  }
+
+  function showPendingGhost(): void {
+    if (!renderer || !pending) return;
+    const placement = placementFor(pending, true);
+    if (!placement) {
+      renderer.setGhost(null);
+      return;
+    }
+    // A room stands as tall as its rule says; an elevator is as tall as the span the player drew.
+    const heightFloors =
+      tool.kind === 'room'
+        ? ROOMS[tool.room].height
+        : bandOf(placement.floorMax) - bandOf(placement.floorMin) + 1;
+    renderer.setGhost({
+      widthTiles: toolWidth(),
+      heightFloors,
+      floor: placement.floorMin,
+      x: placement.x,
+      ok: placement.ok,
+    });
+  }
+
   function ghostFor(floor: number, x: number): void {
     if (!renderer) return;
+    // A parked placement owns the ghost: the pointer may wander, the outline stays where the
+    // player put it. A shaft drag in progress is the exception, since it is drawing a span.
+    if (pending && !drag) {
+      showPendingGhost();
+      return;
+    }
     if (tool.kind === 'room') {
       const rule = ROOMS[tool.room];
       const res = canBuild(world, tool.room, floor, x);
@@ -186,14 +306,15 @@ export function createGame(seed: number): Game {
     if (ev.button !== 0) return;
     const { floor, x } = renderer.screenToTile(ev.offsetX, ev.offsetY);
     press = null;
+    const touch = ev.pointerType === 'touch';
     if (tool.kind === 'room' && tool.room === 'lobby') {
-      drag = { floor, x, kind: 'lobby' };
+      drag = { floor, x, kind: 'lobby', touch };
       applyCommand(world, { kind: 'build', room: 'lobby', floor: 1, x });
       notify();
-    } else if (tool.kind === 'shaft') drag = { floor, x, kind: 'shaft' };
+    } else if (tool.kind === 'shaft') drag = { floor, x, kind: 'shaft', touch };
     // Every other room waits for the release: until then the press may still become a pan.
     else if (tool.kind === 'room')
-      press = { sx: ev.clientX, sy: ev.clientY, floor, x, time: ev.timeStamp, touch: ev.pointerType === 'touch' };
+      press = { sx: ev.clientX, sy: ev.clientY, floor, x, time: ev.timeStamp, touch };
     ghostFor(floor, x);
   }
 
@@ -228,7 +349,15 @@ export function createGame(seed: number): Game {
       const placed =
         !press.touch ||
         isTap({ x: press.sx, y: press.sy }, { x: ev.clientX, y: ev.clientY }, ev.timeStamp - press.time);
-      if (placed && tool.kind === 'room') api.apply({ kind: 'build', room: tool.room, floor: press.floor, x: press.x });
+      // A finger cannot see the tile it is covering, so a tap parks the placement instead of
+      // paying for it; a second tap moves it. A click keeps building where it clicked.
+      if (placed && tool.kind === 'room') {
+        if (press.touch) {
+          setPending({ floor: press.floor, x: press.x, floorMin: press.floor, floorMax: press.floor });
+        } else {
+          api.apply({ kind: 'build', room: tool.room, floor: press.floor, x: press.x });
+        }
+      }
       press = null;
     }
     if (!drag) {
@@ -244,7 +373,15 @@ export function createGame(seed: number): Game {
     if (drag.kind === 'shaft' && tool.kind === 'shaft') {
       const floorMin = Math.min(drag.floor, floor);
       const floorMax = Math.max(drag.floor, floor);
-      api.apply({ kind: 'shaft.build', shaft: tool.shaft, x: drag.x, floorMin, floorMax });
+      // The same two steps as a room on touch: the span the finger drew is parked, not built.
+      // A tap that never moved parks a one floor span for the bar's arrows to stretch.
+      if (drag.touch) {
+        const dragX = drag.x;
+        drag = null;
+        setPending({ floor: floorMin, x: dragX, floorMin, floorMax });
+      } else {
+        api.apply({ kind: 'shaft.build', shaft: tool.shaft, x: drag.x, floorMin, floorMax });
+      }
     }
     drag = null;
     ghostFor(floor, x);
@@ -270,6 +407,7 @@ export function createGame(seed: number): Game {
       tool = t;
       drag = null;
       press = null;
+      pending = null; // a new tool in hand is a new choice: the parked outline goes with the old one
       renderer?.setGhost(null);
       // Dragging pans with every tool in hand, except the two whose drag is the build itself.
       renderer?.setToolOwnsDrag(toolOwnsDrag(t));
@@ -292,6 +430,57 @@ export function createGame(seed: number): Game {
     },
     getSelection: () => selection,
     getHover: () => hover,
+    getPlacement(): Placement | null {
+      if (pending) return placementFor(pending, true);
+      if (!hover) return null;
+      // The hover ghost, including the span a mouse is dragging an elevator across.
+      const dragging = drag?.kind === 'shaft' && tool.kind === 'shaft' ? drag : null;
+      const floorMin = dragging ? Math.min(dragging.floor, hover.floor) : hover.floor;
+      const floorMax = dragging ? Math.max(dragging.floor, hover.floor) : hover.floor;
+      return placementFor({ x: dragging ? dragging.x : hover.x, floorMin, floorMax }, false);
+    },
+    getPlacementRect(): PlacementRect | null {
+      return renderer?.ghostScreenRect() ?? null;
+    },
+    nudgePending(dx, dFloor) {
+      if (!pending) return;
+      const span = bandOf(pending.floorMax) - bandOf(pending.floorMin);
+      // Move the band, then put the span back on it, so a placement never grows by sliding.
+      const bandMin = Math.max(BAND_MIN, Math.min(bandOf(pending.floorMin) + dFloor, BAND_MAX - span));
+      const floorMin = floorOfBand(bandMin);
+      const floorMax = floorOfBand(bandMin + span);
+      setPending({ floor: floorMin, x: clampTileX(pending.x + dx), floorMin, floorMax });
+    },
+    resizePending(dTop, dBottom) {
+      if (!pending || tool.kind !== 'shaft') return; // a room is the size its rule says
+      // Each end stops at the other: shrinking the top never drags the bottom down with it.
+      const bandMax = Math.max(bandOf(pending.floorMin), clampBand(bandOf(pending.floorMax) + dTop));
+      const bandMin = Math.min(bandMax, clampBand(bandOf(pending.floorMin) - dBottom));
+      const floorMin = floorOfBand(bandMin);
+      const floorMax = floorOfBand(bandMax);
+      setPending({ floor: floorMin, x: pending.x, floorMin, floorMax });
+    },
+    confirmPending(): CommandResult {
+      if (!pending) return { ok: false, reason: 'There is nothing waiting to be built.' };
+      const at = pending;
+      const cmd: Command | null =
+        tool.kind === 'room'
+          ? { kind: 'build', room: tool.room, floor: at.floor, x: at.x }
+          : tool.kind === 'shaft'
+            ? { kind: 'shaft.build', shaft: tool.shaft, x: at.x, floorMin: at.floorMin, floorMax: at.floorMax }
+            : null;
+      if (!cmd) {
+        clearPending();
+        return { ok: false, reason: 'There is nothing waiting to be built.' };
+      }
+      const res = api.apply(cmd); // apply logs the refusal, so a failure keeps the outline up
+      if (res.ok) clearPending();
+      else showPendingGhost();
+      return res;
+    },
+    cancelPending() {
+      clearPending();
+    },
     save() {
       return saveWorld(false); // the player pressed Save, so this one logs
     },
@@ -314,6 +503,7 @@ export function createGame(seed: number): Game {
       world = createWorld(newSeed);
       selection = null;
       tool = { kind: 'none' };
+      pending = null;
       renderer?.setSelection(null);
       renderer?.setGhost(null);
       // The opening shot again: the middle of the lot, street on the chrome's free band.
@@ -358,7 +548,8 @@ export function createGame(seed: number): Game {
       el.addEventListener('pointerleave', () => {
         hover = null;
         press = null;
-        renderer?.setGhost(null);
+        if (pending) showPendingGhost();
+        else renderer?.setGhost(null);
       });
       r.setToolOwnsDrag(toolOwnsDrag(tool));
       // A ui that measured the chrome before the renderer existed still gets its band.

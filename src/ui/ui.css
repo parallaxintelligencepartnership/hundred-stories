@@ -664,6 +664,69 @@ button.hs-readout:hover {
   border-color: var(--ink-dim);
 }
 
+/* Placement chip and bar ------------------------------------------------ */
+
+/* Both are placed in script against the ghost's box, so they start at the origin and
+   are moved from there; left and top are written every frame the ghost is on screen. */
+.hs-place-chip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  max-width: calc(100% - 32px);
+  padding: 3px 8px;
+  background: var(--steel);
+  border: 1px solid var(--amber);
+  font-size: var(--size-12);
+  color: var(--ink);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.hs-place-chip.is-alert {
+  border-color: var(--alert);
+  color: var(--alert);
+  white-space: normal;
+}
+
+.hs-place-chip.is-hidden,
+.hs-place-bar.is-hidden {
+  display: none;
+}
+
+.hs-place-bar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  max-width: calc(100% - 32px);
+  padding: 4px;
+  background: var(--steel);
+  border: 1px solid var(--line);
+  pointer-events: auto;
+}
+
+/* Thumb sized: a phone is the whole reason this bar exists. */
+.hs-place-btn {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 5px 10px;
+  line-height: 1;
+}
+
+.hs-place-btn.is-primary {
+  background: var(--amber);
+  border-color: var(--amber);
+  color: var(--on-amber);
+  font-weight: 600;
+}
+
+.hs-place-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 /* Toasts --------------------------------------------------------------- */
 
 .hs-toasts {

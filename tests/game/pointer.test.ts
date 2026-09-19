@@ -3,7 +3,7 @@
 // whole gesture to the camera. The renderer and the browser are faked, so this runs in node.
 import { describe, expect, it, vi } from 'vitest';
 import { createGame } from '../../src/game/game';
-import type { Renderer } from '../../src/render/renderer';
+import type { Ghost, Renderer } from '../../src/render/renderer';
 
 vi.mock('../../src/game/storage', () => ({
   writeSave: async (): Promise<void> => {},
@@ -30,10 +30,16 @@ function fakeHost(): { el: HTMLElement; fire(type: string, event: unknown): void
   };
 }
 
-/** Eight screen pixels to the tile, everything on floor 2: enough to place a room by hand. */
-function fakeRenderer(): { renderer: Renderer; followed: number[]; toolDrag: boolean[]; frames: number } {
+/**
+ * Eight screen pixels to the tile, and by default everything on floor 2: enough to place a
+ * room by hand. A test that needs a span reads the floor off the y with its own mapping.
+ */
+function fakeRenderer(
+  floorAt: (sy: number) => number = () => 2,
+): { renderer: Renderer; followed: number[]; toolDrag: boolean[]; ghosts: (Ghost | null)[]; frames: number } {
   const followed: number[] = [];
   const toolDrag: boolean[] = [];
+  const ghosts: (Ghost | null)[] = [];
   const parts = { frames: 0 };
   const renderer = {
     render: () => {},
@@ -46,8 +52,9 @@ function fakeRenderer(): { renderer: Renderer; followed: number[]; toolDrag: boo
         parts.frames += 1;
       },
     },
-    screenToTile: (sx: number) => ({ floor: 2, x: Math.floor(sx / 8) }),
-    setGhost: () => {},
+    screenToTile: (sx: number, sy: number) => ({ floor: floorAt(sy), x: Math.floor(sx / 8) }),
+    setGhost: (g: Ghost | null) => ghosts.push(g),
+    ghostScreenRect: () => null,
     setSelection: () => {},
     onPick: () => {},
     setPanEnabled: () => {},
@@ -60,6 +67,7 @@ function fakeRenderer(): { renderer: Renderer; followed: number[]; toolDrag: boo
     renderer,
     followed,
     toolDrag,
+    ghosts,
     get frames() {
       return parts.frames;
     },
@@ -87,9 +95,13 @@ const finger = (
   timeStamp,
 });
 
-function started(): { game: ReturnType<typeof createGame>; host: ReturnType<typeof fakeHost>; parts: ReturnType<typeof fakeRenderer> } {
+function started(floorAt?: (sy: number) => number): {
+  game: ReturnType<typeof createGame>;
+  host: ReturnType<typeof fakeHost>;
+  parts: ReturnType<typeof fakeRenderer>;
+} {
   const game = createGame(1);
-  const parts = fakeRenderer();
+  const parts = fakeRenderer(floorAt);
   const host = fakeHost();
   game.attach(parts.renderer, host.el);
   expect(game.apply({ kind: 'build', room: 'lobby', floor: 1, x: 100 })).toEqual({ ok: true });
@@ -153,33 +165,36 @@ describe('press on the tower view', () => {
 });
 
 describe('touch on the tower view', () => {
-  it('places the room on a tap, the way a click does', () => {
+  it('parks the room on a tap and spends nothing yet', () => {
     const { game, host } = started();
     const rooms = game.world.rooms.size;
 
     host.fire('pointerdown', finger(800, 0));
     expect(game.world.rooms.size).toBe(rooms);
     host.fire('pointerup', finger(800, 120));
-    expect(game.world.rooms.size).toBe(rooms + 1);
+    expect(game.world.rooms.size).toBe(rooms);
+    expect(game.getPlacement()).toMatchObject({ floor: 2, x: 100, pending: true });
   });
 
-  it('forgives a shaky finger: a tremble too wide for a mouse still places', () => {
+  it('forgives a shaky finger: a tremble too wide for a mouse still parks the room', () => {
     const { game, host } = started();
     const rooms = game.world.rooms.size;
 
     host.fire('pointerdown', finger(800, 0));
     host.fire('pointermove', finger(808, 60));
     host.fire('pointerup', finger(808, 90));
-    expect(game.world.rooms.size).toBe(rooms + 1);
+    expect(game.world.rooms.size).toBe(rooms);
+    expect(game.getPlacement()?.pending).toBe(true);
   });
 
-  it('places even when the finger rested a long while: a still press is still a tap', () => {
+  it('parks even when the finger rested a long while: a still press is still a tap', () => {
     const { game, host } = started();
     const rooms = game.world.rooms.size;
 
     host.fire('pointerdown', finger(800, 0));
     host.fire('pointerup', finger(800, 900));
-    expect(game.world.rooms.size).toBe(rooms + 1);
+    expect(game.world.rooms.size).toBe(rooms);
+    expect(game.getPlacement()?.pending).toBe(true);
   });
 
   it('places nothing when a second finger lands: that gesture is the camera pinching', () => {
@@ -207,5 +222,199 @@ describe('touch on the tower view', () => {
     host.fire('pointerup', finger(900, 200, 1));
     // The drag stopped painting the moment the gesture became a pinch.
     expect(game.world.rooms.size).toBe(rooms + 1);
+  });
+});
+
+// Ten screen pixels to the floor, counting up from y = 200: floor 1 at y = 190, floor 3 at
+// y = 170, and the floor that does not exist never appears, the way the sim has it.
+const byY = (sy: number): number => {
+  const band = Math.round((200 - sy) / 10);
+  return band > 0 ? band : band - 1;
+};
+const atFloor = (floor: number): number => 200 - 10 * (floor > 0 ? floor : floor + 1);
+
+describe('the pending placement a finger parks', () => {
+  it('re-anchors on a second tap instead of parking two outlines', () => {
+    const { game, host } = started();
+
+    host.fire('pointerdown', finger(800, 0));
+    host.fire('pointerup', finger(800, 100));
+    expect(game.getPlacement()).toMatchObject({ x: 100, pending: true });
+
+    host.fire('pointerdown', finger(960, 200));
+    host.fire('pointerup', finger(960, 300));
+    expect(game.getPlacement()).toMatchObject({ x: 120, pending: true });
+    expect(game.world.rooms.size).toBe(1); // the opening lobby segment, and nothing else
+  });
+
+  it('shows the parked outline rather than the tile a later finger passes over', () => {
+    const { game, host, parts } = started();
+    host.fire('pointerdown', finger(800, 0));
+    host.fire('pointerup', finger(800, 100));
+
+    parts.ghosts.length = 0;
+    host.fire('pointermove', finger(1600, 200));
+    expect(parts.ghosts.at(-1)).toMatchObject({ x: 100 }); // not 200, where the finger went
+    expect(game.getPlacement()).toMatchObject({ x: 100, pending: true });
+  });
+
+  it('parks the span a finger drew for an elevator and builds no shaft', () => {
+    const { game, host } = started(byY);
+    game.setTool({ kind: 'shaft', shaft: 'standard' });
+
+    host.fire('pointerdown', finger(1600, 0, 1, atFloor(1)));
+    host.fire('pointermove', finger(1600, 60, 1, atFloor(3)));
+    host.fire('pointerup', finger(1600, 90, 1, atFloor(3)));
+
+    expect(game.world.shafts.size).toBe(0);
+    expect(game.getPlacement()).toMatchObject({
+      x: 200,
+      floorMin: 1,
+      floorMax: 3,
+      pending: true,
+      label: 'Elevator',
+      cost: 200_000,
+      ok: true,
+    });
+  });
+
+  it('parks a one floor span for a tap that never moved, and says why it cannot be built', () => {
+    const { game, host } = started(byY);
+    game.setTool({ kind: 'shaft', shaft: 'standard' });
+
+    host.fire('pointerdown', finger(1600, 0, 1, atFloor(2)));
+    host.fire('pointerup', finger(1600, 60, 1, atFloor(2)));
+
+    expect(game.getPlacement()).toMatchObject({
+      floorMin: 2,
+      floorMax: 2,
+      ok: false,
+      reason: 'An elevator must serve at least two floors.',
+    });
+  });
+
+  it('a mouse drag still builds the elevator on release', () => {
+    const { game, host } = started(byY);
+    game.setTool({ kind: 'shaft', shaft: 'standard' });
+
+    host.fire('pointerdown', { ...press(1600, atFloor(1)), pointerId: 1 });
+    host.fire('pointerup', { ...press(1600, atFloor(4)), pointerId: 1 });
+
+    expect(game.world.shafts.size).toBe(1);
+    expect(game.getPlacement()?.pending).not.toBe(true);
+  });
+});
+
+describe('moving and sizing a pending placement', () => {
+  it('steps over the floor that does not exist, in either direction', () => {
+    const { game, host } = started(byY);
+    host.fire('pointerdown', finger(800, 0, 1, atFloor(1)));
+    host.fire('pointerup', finger(800, 60, 1, atFloor(1)));
+    expect(game.getPlacement()?.floor).toBe(1);
+
+    game.nudgePending(0, -1);
+    expect(game.getPlacement()?.floor).toBe(-1);
+    game.nudgePending(0, -1);
+    expect(game.getPlacement()?.floor).toBe(-2);
+    game.nudgePending(0, 1);
+    expect(game.getPlacement()?.floor).toBe(-1);
+    game.nudgePending(0, 1);
+    expect(game.getPlacement()?.floor).toBe(1);
+  });
+
+  it('never walks a placement off the left edge of the lot', () => {
+    const { game, host } = started();
+    host.fire('pointerdown', finger(80, 0));
+    host.fire('pointerup', finger(80, 60));
+    expect(game.getPlacement()?.x).toBe(10);
+
+    for (let i = 0; i < 20; i += 1) game.nudgePending(-1, 0);
+    expect(game.getPlacement()?.x).toBe(0);
+  });
+
+  it('keeps the span the same size while it slides', () => {
+    const { game, host } = started(byY);
+    game.setTool({ kind: 'shaft', shaft: 'standard' });
+    host.fire('pointerdown', finger(1600, 0, 1, atFloor(1)));
+    host.fire('pointerup', finger(1600, 60, 1, atFloor(3)));
+
+    game.nudgePending(1, 1);
+    expect(game.getPlacement()).toMatchObject({ x: 201, floorMin: 2, floorMax: 4 });
+  });
+
+  it('stretches an elevator from the top and from the bottom, never below one floor', () => {
+    const { game, host } = started(byY);
+    game.setTool({ kind: 'shaft', shaft: 'standard' });
+    host.fire('pointerdown', finger(1600, 0, 1, atFloor(3)));
+    host.fire('pointerup', finger(1600, 60, 1, atFloor(3)));
+
+    game.resizePending(1, 0);
+    expect(game.getPlacement()).toMatchObject({ floorMin: 3, floorMax: 4 });
+    game.resizePending(0, 2);
+    expect(game.getPlacement()).toMatchObject({ floorMin: 1, floorMax: 4 });
+    game.resizePending(-9, 0);
+    expect(game.getPlacement()).toMatchObject({ floorMin: 1, floorMax: 1 });
+  });
+
+  it('leaves a room alone: a room is the size its rule says', () => {
+    const { game, host } = started();
+    host.fire('pointerdown', finger(800, 0));
+    host.fire('pointerup', finger(800, 60));
+    const before = game.getPlacement();
+
+    game.resizePending(1, 1);
+    expect(game.getPlacement()).toEqual(before);
+  });
+});
+
+describe('confirming, refusing and dropping a pending placement', () => {
+  it('builds on confirm, clears the outline and keeps the tool in hand', () => {
+    const { game, host } = started();
+    const rooms = game.world.rooms.size;
+    host.fire('pointerdown', finger(800, 0));
+    host.fire('pointerup', finger(800, 60));
+
+    expect(game.confirmPending()).toEqual({ ok: true });
+    expect(game.world.rooms.size).toBe(rooms + 1);
+    expect(game.getPlacement()).toBeNull();
+    expect(game.getTool()).toEqual({ kind: 'room', room: 'office' });
+  });
+
+  it('keeps the outline where it is when the sim refuses the spot', () => {
+    const { game, host } = started(byY);
+    host.fire('pointerdown', finger(800, 0, 1, atFloor(3)));
+    host.fire('pointerup', finger(800, 60, 1, atFloor(3)));
+
+    const result = game.confirmPending();
+    expect(result).toEqual({ ok: false, reason: 'Build a floor below this one first.' });
+    expect(game.getPlacement()).toMatchObject({ floor: 3, x: 100, pending: true, ok: false });
+    expect(game.world.log.at(-1)?.text).toBe('Build a floor below this one first.');
+  });
+
+  it('reports the palette name, the price and the reason', () => {
+    const { game, host } = started(byY);
+    host.fire('pointerdown', finger(800, 0, 1, atFloor(3)));
+    host.fire('pointerup', finger(800, 60, 1, atFloor(3)));
+
+    expect(game.getPlacement()).toMatchObject({
+      label: 'Office',
+      cost: 40_000,
+      ok: false,
+      reason: 'Build a floor below this one first.',
+    });
+  });
+
+  it('drops the outline on cancel and on a change of tool', () => {
+    const { game, host } = started();
+    host.fire('pointerdown', finger(800, 0));
+    host.fire('pointerup', finger(800, 60));
+    game.cancelPending();
+    expect(game.getPlacement()).toBeNull();
+
+    host.fire('pointerdown', finger(800, 200));
+    host.fire('pointerup', finger(800, 260));
+    expect(game.getPlacement()?.pending).toBe(true);
+    game.setTool({ kind: 'none' });
+    expect(game.getPlacement()).toBeNull();
   });
 });

@@ -1335,7 +1335,10 @@ function drawSim(g: Graphics, kind: SimKind, band: StressBand, frame: 0 | 1): vo
 function drawGhost(g: Graphics, w: number, h: number, ok: boolean): void {
   const color = ok ? PALETTE.ghostOk : PALETTE.alert;
   box(g, 0, 0, w, h, color, 0.18);
+  // Two pixels of edge, not one: at phone zoom a single pixel of outline all but disappears
+  // against the tower behind it, and the outline is the whole point of the preview.
   outline(g, 0, 0, w, h, color);
+  if (w > 2 && h > 2) outline(g, 1, 1, w - 2, h - 2, color);
   for (let x = 0; x < w; x += TILE_PX) box(g, x, 0, 1, h, color, 0.12); // tile guides
 }
 

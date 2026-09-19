@@ -10,6 +10,33 @@ export type Tool =
 
 export type Speed = 0 | 1 | 2 | 4;
 
+/**
+ * Where the tool in hand would land, priced and judged before a dollar is spent.
+ *
+ * A mouse gets this from the hover ghost (`pending` false). A finger gets it from the
+ * pending placement a tap parks on the tower (`pending` true), which stays put until the
+ * player confirms it, moves it, or drops it.
+ */
+export interface Placement {
+  floor: number; // a room's floor; a shaft's lowest floor
+  x: number;
+  floorMin: number;
+  floorMax: number; // equal to floorMin for a room
+  ok: boolean;
+  reason?: string; // why it cannot be built, in the sim's own words
+  label: string; // the palette's name for the room or shaft
+  cost: number;
+  pending: boolean;
+}
+
+/** The ghost's box on screen, in CSS pixels relative to the tower view. */
+export interface PlacementRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 export interface GameApi {
   readonly world: World;
   apply(cmd: Command): CommandResult;
@@ -22,6 +49,20 @@ export interface GameApi {
   select(sel: null | { roomId?: Id; simId?: Id; shaftId?: Id }): void;
   getSelection(): null | { roomId?: Id; simId?: Id; shaftId?: Id };
   getHover(): { floor: number; x: number } | null; // tile under the pointer on the tower view
+  /**
+   * The placement the player is looking at: the pending one a finger parked, or the hover
+   * ghost under a mouse. Null with no tool in hand, or with nothing under the pointer.
+   */
+  getPlacement(): Placement | null;
+  /** Where that placement sits on screen, so the ui can put its chip and its bar beside it. */
+  getPlacementRect(): PlacementRect | null;
+  /** Move the whole pending placement. Floor 0 does not exist, so a step across it lands past it. */
+  nudgePending(dx: number, dFloor: number): void;
+  /** Grow or shrink a pending elevator span. A room has nothing to resize, so this does nothing. */
+  resizePending(dTop: number, dBottom: number): void;
+  /** Build the pending placement. On success it clears and the tool stays in hand. */
+  confirmPending(): CommandResult;
+  cancelPending(): void;
   save(): Promise<CommandResult>;
   load(): Promise<CommandResult>;
   exportSave(): string;

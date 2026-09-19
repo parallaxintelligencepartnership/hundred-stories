@@ -78,6 +78,13 @@ export interface Renderer {
   camera: Camera;
   screenToTile(sx: number, sy: number): { floor: number; x: number };
   setGhost(g: null | Ghost): void;
+  /**
+   * The ghost's box in CSS pixels relative to the view element, or null with no ghost.
+   *
+   * The ui hangs the placement chip and the placement bar off this. A camera pan or a pinch
+   * moves it without notifying anyone, so the ui reads it on a frame loop while it lasts.
+   */
+  ghostScreenRect(): { x: number; y: number; w: number; h: number } | null;
   setSelection(sel: null | Selection): void;
   onPick(cb: (hit: PickHit) => void): void;
   /** Off for the landing hero: no pointer gesture pans. */
@@ -1319,6 +1326,18 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
     screenToTile,
     setGhost(g): void {
       ghost = g;
+    },
+    ghostScreenRect(): { x: number; y: number; w: number; h: number } | null {
+      if (!ghost) return null;
+      // The same two corners drawOverlay places the sprite between, put through the camera.
+      const left = ghost.x * TILE_PX;
+      const top = floorTopY(ghost.floor + ghost.heightFloors - 1);
+      const near = camera.worldToScreen(left, top);
+      const far = camera.worldToScreen(
+        left + ghost.widthTiles * TILE_PX,
+        top + ghost.heightFloors * FLOOR_PX,
+      );
+      return { x: near.x, y: near.y, w: far.x - near.x, h: far.y - near.y };
     },
     setSelection(sel): void {
       selection = sel;
