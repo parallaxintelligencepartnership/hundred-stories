@@ -109,7 +109,7 @@ function buildBitmap() {
 // s = CELL / 12, so s=1 for the base SVG (CELL=12) and s=4 for the 4x PNGs (CELL=48).
 // ---------------------------------------------------------------------------
 
-function buildScene(variant, s, { paddingXCells = 2, paddingYCells = 2 } = {}) {
+export function buildScene(variant, s, { paddingXCells = 2, paddingYCells = 2 } = {}) {
   const CELL = 12 * s;
   const { rows1, rows2, width: gridW, height1, height2 } = buildBitmap();
   const rects = [];
@@ -222,21 +222,14 @@ function chunk(type, data) {
   return Buffer.concat([lenBuf, typeBuf, data, crcBuf]);
 }
 
-function makeScenePixels(width, height, bgColor, rects) {
-  const pixels = new Uint8Array(width * height * 4);
-  const bg = toRGB(bgColor);
-  for (let i = 0; i < width * height; i++) {
-    pixels[i * 4 + 0] = bg[0];
-    pixels[i * 4 + 1] = bg[1];
-    pixels[i * 4 + 2] = bg[2];
-    pixels[i * 4 + 3] = 0xff;
-  }
-
+/** Draw a flat list of {x,y,w,h,color} rects (color = 0xRRGGBB int) onto an
+ * RGBA pixel buffer, clipping to [0, bufWidth) x [0, bufHeight). */
+function drawRectsOnBuffer(pixels, bufWidth, bufHeight, rects) {
   const fillRect = (x0, y0, x1, y1, color) => {
     const rgb = toRGB(color);
-    for (let y = Math.max(0, y0); y < Math.min(height, y1); y++) {
-      for (let x = Math.max(0, x0); x < Math.min(width, x1); x++) {
-        const idx = (y * width + x) * 4;
+    for (let y = Math.max(0, y0); y < Math.min(bufHeight, y1); y++) {
+      for (let x = Math.max(0, x0); x < Math.min(bufWidth, x1); x++) {
+        const idx = (y * bufWidth + x) * 4;
         pixels[idx + 0] = rgb[0];
         pixels[idx + 1] = rgb[1];
         pixels[idx + 2] = rgb[2];
@@ -248,6 +241,37 @@ function makeScenePixels(width, height, bgColor, rects) {
   for (const r of rects) {
     fillRect(Math.round(r.x), Math.round(r.y), Math.round(r.x + r.w), Math.round(r.y + r.h), r.color);
   }
+}
+
+/**
+ * Draw the two-line HUNDRED STORIES room-cell grid onto an existing RGBA
+ * pixel buffer (as produced e.g. by scripts/make-og.mjs's canvas), at pixel
+ * offset (x, y), with a given cell size (cellSize = the size of one 12-unit
+ * grid cell in px, i.e. CELL = cellSize, s = cellSize / 12) and colour
+ * variant ('dark' | 'light'). Pixels outside [0, bufWidth) x [0, bufHeight)
+ * are clipped. Returns the scene (width/height/rects/unlitCount) that was
+ * drawn (with rects already shifted by x, y), in case the caller wants to
+ * lay out around it.
+ */
+export function drawWordmarkOnBuffer(pixels, bufWidth, bufHeight, x, y, cellSize, variant, opts) {
+  const s = cellSize / 12;
+  const scene = buildScene(variant, s, opts);
+  const shiftedRects = scene.rects.map((r) => ({ ...r, x: r.x + x, y: r.y + y }));
+  drawRectsOnBuffer(pixels, bufWidth, bufHeight, shiftedRects);
+  return { ...scene, rects: shiftedRects };
+}
+
+function makeScenePixels(width, height, bgColor, rects) {
+  const pixels = new Uint8Array(width * height * 4);
+  const bg = toRGB(bgColor);
+  for (let i = 0; i < width * height; i++) {
+    pixels[i * 4 + 0] = bg[0];
+    pixels[i * 4 + 1] = bg[1];
+    pixels[i * 4 + 2] = bg[2];
+    pixels[i * 4 + 3] = 0xff;
+  }
+
+  drawRectsOnBuffer(pixels, width, height, rects);
 
   return pixels;
 }
@@ -291,27 +315,35 @@ function encodePNG(width, height, bgColor, rects) {
 // PNG (4x, CELL=48) for both variants.
 // ---------------------------------------------------------------------------
 
-const bitmap = buildBitmap();
-console.log('HUNDRED STORIES bitmap (5x7 letters, %d wide, line1=%d rows, line2=%d rows):', bitmap.width, bitmap.height1, bitmap.height2);
-for (const row of bitmap.rows1) console.log(row);
-for (const row of bitmap.rows2) console.log(row);
+// Guarded so scripts/make-og.mjs can import buildScene/drawWordmarkOnBuffer
+// from this module without re-running the file-writing main script.
+function main() {
+  const bitmap = buildBitmap();
+  console.log('HUNDRED STORIES bitmap (5x7 letters, %d wide, line1=%d rows, line2=%d rows):', bitmap.width, bitmap.height1, bitmap.height2);
+  for (const row of bitmap.rows1) console.log(row);
+  for (const row of bitmap.rows2) console.log(row);
 
-mkdirSync(outDir, { recursive: true });
+  mkdirSync(outDir, { recursive: true });
 
-for (const variant of ['dark', 'light']) {
-  const svgScene = buildScene(variant, 1, { paddingXCells: 2, paddingYCells: 2 });
-  const svg = buildSVG(svgScene);
-  const svgPath = join(outDir, `wordmark-${variant}.svg`);
-  writeFileSync(svgPath, svg);
-  console.log(`wrote ${svgPath} (${svgScene.width}x${svgScene.height})`);
+  for (const variant of ['dark', 'light']) {
+    const svgScene = buildScene(variant, 1, { paddingXCells: 2, paddingYCells: 2 });
+    const svg = buildSVG(svgScene);
+    const svgPath = join(outDir, `wordmark-${variant}.svg`);
+    writeFileSync(svgPath, svg);
+    console.log(`wrote ${svgPath} (${svgScene.width}x${svgScene.height})`);
 
-  const pngScene = buildScene(variant, 4, { paddingXCells: 1, paddingYCells: 2 });
-  const bg = variant === 'dark' ? COLOR.bgDark : COLOR.bgLight;
-  const png = encodePNG(pngScene.width, pngScene.height, bg, pngScene.rects);
-  const pngPath = join(outDir, `wordmark-${variant}.png`);
-  writeFileSync(pngPath, png);
-  console.log(`wrote ${pngPath} (${pngScene.width}x${pngScene.height}, ${png.length} bytes)`);
-  if (variant === 'dark') {
-    console.log(`  seed=${WINDOW_SEED}, unlit windows: ${pngScene.unlitCount}`);
+    const pngScene = buildScene(variant, 4, { paddingXCells: 1, paddingYCells: 2 });
+    const bg = variant === 'dark' ? COLOR.bgDark : COLOR.bgLight;
+    const png = encodePNG(pngScene.width, pngScene.height, bg, pngScene.rects);
+    const pngPath = join(outDir, `wordmark-${variant}.png`);
+    writeFileSync(pngPath, png);
+    console.log(`wrote ${pngPath} (${pngScene.width}x${pngScene.height}, ${png.length} bytes)`);
+    if (variant === 'dark') {
+      console.log(`  seed=${WINDOW_SEED}, unlit windows: ${pngScene.unlitCount}`);
+    }
   }
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main();
 }

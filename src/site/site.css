@@ -134,12 +134,15 @@ p {
   padding-bottom: 8px;
 }
 
-.wordmark {
-  font-family: var(--font-readout);
-  font-size: var(--size-20);
-  letter-spacing: 0.04em;
-  text-decoration: none;
+.site-wordmark {
+  display: block;
   margin-right: auto;
+}
+
+.site-wordmark img {
+  height: 24px;
+  width: auto;
+  display: block;
 }
 
 .site-nav {
@@ -329,6 +332,10 @@ main section + section {
 @media (min-width: 720px) {
   h1 {
     font-size: 48px;
+  }
+
+  .site-wordmark img {
+    height: 28px;
   }
 
   .cards {
