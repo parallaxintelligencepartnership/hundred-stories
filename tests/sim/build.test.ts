@@ -230,6 +230,37 @@ describe('build: overlap and support', () => {
     expect(sky?.x).toBe(200);
   });
 
+  it('stacks a stairwell: a flight may start where the last one reaches', () => {
+    const world = makeWorld(8_000_000, 3);
+    lobby(world);
+    expect(build(world, 'stairs', 1, 100)).toEqual(OK);
+    // a new flight starting on the floor the last one reaches is fine, even directly above it
+    expect(canBuild(world, 'stairs', 2, 100).ok).toBe(true);
+    expect(build(world, 'stairs', 2, 100)).toEqual(OK);
+  });
+
+  it('lets an escalator start on the floor a stairs flight reaches', () => {
+    const world = makeWorld(8_000_000, 3);
+    lobby(world);
+    expect(build(world, 'stairs', 1, 100)).toEqual(OK);
+    expect(canBuild(world, 'escalator', 2, 104).ok).toBe(true);
+  });
+
+  it('still refuses two connectors sharing a base floor', () => {
+    const world = makeWorld();
+    lobby(world);
+    expect(build(world, 'stairs', 1, 100)).toEqual(OK);
+    expect(canBuild(world, 'stairs', 1, 104)).toEqual({ ok: false, reason: 'Something is already there.' });
+  });
+
+  it('still refuses a shaft over a stacked stairwell', () => {
+    const world = makeWorld();
+    lobby(world);
+    expect(build(world, 'stairs', 1, 100)).toEqual(OK);
+    expect(build(world, 'stairs', 2, 100)).toEqual(OK);
+    expect(canBuildShaft(world, 'standard', 100, 1, 3)).toEqual({ ok: false, reason: 'Something is already there.' });
+  });
+
   it('refuses a shaft that overlaps another shaft', () => {
     const world = makeWorld();
     expect(buildShaft(world, 'standard', 150, 1, 10)).toEqual(OK);

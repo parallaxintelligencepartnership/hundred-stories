@@ -104,8 +104,21 @@ describe('connectors never overlap connectors', () => {
     lobby(world);
     expect(build(world, 'stairs', 2, 150)).toEqual(OK);
     expect(canBuild(world, 'stairs', 2, 154)).toEqual({ ok: false, reason: 'Something is already there.' });
-    expect(canBuild(world, 'escalator', 3, 154)).toEqual({ ok: false, reason: 'Something is already there.' });
     expect(canBuild(world, 'stairs', 2, 158).ok).toBe(true);
+  });
+
+  it('lets stairs stack on the floor the last flight reaches', () => {
+    const world = makeWorld();
+    lobby(world);
+    expect(build(world, 'stairs', 2, 150)).toEqual(OK);
+    expect(canBuild(world, 'escalator', 3, 154)).toEqual({ ok: true });
+  });
+
+  it('refuses an escalator over stairs on the same base floor', () => {
+    const world = makeWorld();
+    lobby(world);
+    expect(build(world, 'stairs', 2, 150)).toEqual(OK);
+    expect(canBuild(world, 'escalator', 2, 154)).toEqual({ ok: false, reason: 'Something is already there.' });
   });
 
   it('refuses a shaft over stairs and stairs over a shaft', () => {

@@ -17,7 +17,7 @@ Every module is built against this document and `src/sim/types.ts`. If reality d
 - A room occupies `[x, x + width)` on floors `[floor, floor + height)` (height grows upward for above ground rooms; underground rooms also grow upward from their floor).
 - A floor exists only where a room or a shaft has been built on it, and a shaft's tiles count: a floor a shaft passes through carries rooms beside it. Floor slabs are implicit: the renderer draws a slab under any tile covered by a room or a lobby.
 - Elevator shafts occupy `[x, x + width)` on floors `[floorMin, floorMax]`, and those floors need not exist yet: a shaft may rise from the lobby into empty air. A shaft overlays rooms of every kind and rooms may be built over its columns.
-- Stairs and escalators are rooms of height 2 that connect `floor` and `floor + 1`. They are connectors, like shafts: they overlay rooms and rooms overlay them. Two connectors never share a tile, so stairs over stairs, stairs over a shaft, or a shaft over either one is refused. Connectors are drawn above the rooms they cover, stairs and escalators without a backing fill so the room stays visible behind them.
+- Stairs and escalators are rooms of height 2 that connect `floor` and `floor + 1`. They are connectors, like shafts: they overlay rooms and rooms overlay them. Two connectors never share a tile on the same base floor, so a flight may start on the floor the last one reaches and a stairwell stacks in a column; stairs over a shaft, or a shaft over stairs, is still refused. Connectors are drawn above the rooms they cover, stairs and escalators without a backing fill so the room stays visible behind them.
 
 ## 3. Time
 

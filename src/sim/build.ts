@@ -118,18 +118,24 @@ function isConnector(kind: RoomKind): boolean {
   return CONNECTOR_KINDS.includes(kind);
 }
 
-/** Rooms block each other only within their own layer: connectors over here, rooms over there. */
+/**
+ * Rooms block each other only within their own layer: connectors over here, rooms over there.
+ * Two connectors only collide when they share the same base floor (the first floor of the new
+ * one's span); a flight may start where the last one reaches, so a stairwell stacks in a column.
+ */
 function roomInTheWay(
   world: World,
   kind: RoomKind,
   floors: readonly number[],
   x: number,
   width: number,
+  baseFloor: number,
 ): boolean {
   const connector = isConnector(kind);
   for (const f of floors) {
     for (const room of roomsOnFloor(world, f)) {
       if (isConnector(room.kind) !== connector) continue;
+      if (connector && room.floor !== baseFloor) continue;
       if (overlapsX(x, width, room.x, room.width)) return true;
     }
   }
@@ -277,7 +283,7 @@ export function canBuild(world: World, kind: RoomKind, floor: number, x: number)
 
   if (!hasSupport(world, floor)) return no('Build a floor below this one first.');
 
-  if (roomInTheWay(world, kind, floors, x, rule.width)) return no('Something is already there.');
+  if (roomInTheWay(world, kind, floors, x, rule.width, floor)) return no('Something is already there.');
   // A room may stand over an elevator's column; another connector may not.
   if (isConnector(kind) && shaftInTheWay(world, floors, x, rule.width)) {
     return no('An elevator is in the way.');
