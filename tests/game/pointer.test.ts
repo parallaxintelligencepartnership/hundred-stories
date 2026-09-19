@@ -1,5 +1,6 @@
 // The press on the tower view: a click places a room, a press that travels is a pan and
-// places nothing. The renderer and the browser are faked, so this runs in node.
+// places nothing, a tap places the same way a click does, and a second finger hands the
+// whole gesture to the camera. The renderer and the browser are faked, so this runs in node.
 import { describe, expect, it, vi } from 'vitest';
 import { createGame } from '../../src/game/game';
 import type { Renderer } from '../../src/render/renderer';
@@ -54,6 +55,19 @@ const press = (x: number, y = 50): Record<string, number> => ({
   offsetY: y,
   clientX: x,
   clientY: y,
+});
+
+/** One finger, with the pointer id and the clock the tap window is read from. */
+const finger = (
+  x: number,
+  timeStamp: number,
+  pointerId = 1,
+  y = 50,
+): Record<string, number | string> => ({
+  ...press(x, y),
+  pointerId,
+  pointerType: 'touch',
+  timeStamp,
 });
 
 function started(): { game: ReturnType<typeof createGame>; host: ReturnType<typeof fakeHost>; parts: ReturnType<typeof fakeRenderer> } {
@@ -113,5 +127,63 @@ describe('press on the tower view', () => {
     expect(parts.toolDrag.at(-1)).toBe(false);
     game.setTool({ kind: 'room', room: 'lobby' });
     expect(parts.toolDrag.at(-1)).toBe(true);
+  });
+});
+
+describe('touch on the tower view', () => {
+  it('places the room on a tap, the way a click does', () => {
+    const { game, host } = started();
+    const rooms = game.world.rooms.size;
+
+    host.fire('pointerdown', finger(800, 0));
+    expect(game.world.rooms.size).toBe(rooms);
+    host.fire('pointerup', finger(800, 120));
+    expect(game.world.rooms.size).toBe(rooms + 1);
+  });
+
+  it('forgives a shaky finger: a tremble too wide for a mouse still places', () => {
+    const { game, host } = started();
+    const rooms = game.world.rooms.size;
+
+    host.fire('pointerdown', finger(800, 0));
+    host.fire('pointermove', finger(808, 60));
+    host.fire('pointerup', finger(808, 90));
+    expect(game.world.rooms.size).toBe(rooms + 1);
+  });
+
+  it('places nothing when the finger rested: that press was not a tap', () => {
+    const { game, host } = started();
+    const rooms = game.world.rooms.size;
+
+    host.fire('pointerdown', finger(800, 0));
+    host.fire('pointerup', finger(800, 900));
+    expect(game.world.rooms.size).toBe(rooms);
+  });
+
+  it('places nothing when a second finger lands: that gesture is the camera pinching', () => {
+    const { game, host } = started();
+    const rooms = game.world.rooms.size;
+
+    host.fire('pointerdown', finger(800, 0, 1));
+    host.fire('pointerdown', finger(600, 30, 2));
+    host.fire('pointerup', finger(800, 120, 1));
+    host.fire('pointerup', finger(600, 140, 2));
+    expect(game.world.rooms.size).toBe(rooms);
+  });
+
+  it('gives up a lobby drag to the second finger, so two fingers pan while sizing', () => {
+    const { game, host } = started();
+    game.setTool({ kind: 'room', room: 'lobby' });
+    const rooms = game.world.rooms.size;
+
+    host.fire('pointerdown', finger(816, 0, 1)); // one new segment under the first finger
+    expect(game.world.rooms.size).toBe(rooms + 1);
+
+    host.fire('pointerdown', finger(600, 30, 2));
+    host.fire('pointermove', finger(900, 60, 1));
+    host.fire('pointermove', finger(700, 60, 2));
+    host.fire('pointerup', finger(900, 200, 1));
+    // The drag stopped painting the moment the gesture became a pinch.
+    expect(game.world.rooms.size).toBe(rooms + 1);
   });
 });

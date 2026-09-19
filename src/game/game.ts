@@ -6,7 +6,7 @@ import { tick } from '../sim/tick';
 import { clockOf, type Command, type CommandResult, type Id, type World } from '../sim/types';
 import { createWorld } from '../sim/world';
 import { SCHEDULES } from '../sim/rules';
-import { classifyPress } from '../render/input';
+import { classifyPress, isTap, PRESS_SLOP_PX, TOUCH_SLOP_PX } from '../render/input';
 import type { Renderer } from '../render/renderer';
 import type { GameApi, Speed, Tool } from './api';
 import { readSave, writeSave } from './storage';
@@ -67,8 +67,18 @@ export function createGame(seed: number): Game {
   let drag: null | { floor: number; x: number; kind: 'lobby' | 'shaft' } = null;
   // A left press with a room tool is provisional: it builds on release, and only if it held
   // still. A press that travels is a pan, which renderer.ts hands to the camera.
-  let press: null | { sx: number; sy: number; floor: number; x: number } = null;
+  let press: null | { sx: number; sy: number; floor: number; x: number; time: number; touch: boolean } = null;
   let hover: { floor: number; x: number } | null = null;
+  // Pointers down on the view. A second finger means the gesture belongs to the camera now:
+  // two fingers pan and pinch even while a lobby or an elevator is being sized.
+  const pointers = new Set<number>();
+
+  /** Drop whatever this press was going to build. The camera has the gesture. */
+  function abandonPress(): void {
+    drag = null;
+    press = null;
+    renderer?.setGhost(null);
+  }
 
   /** Tools that draw with the left drag. Their drag is the build gesture, so it cannot pan. */
   function toolOwnsDrag(t: Tool): boolean {
@@ -165,7 +175,13 @@ export function createGame(seed: number): Game {
   }
 
   function onPointerDown(ev: PointerEvent): void {
-    if (!renderer || !container || ev.button !== 0) return;
+    if (!renderer || !container) return;
+    pointers.add(ev.pointerId);
+    if (pointers.size > 1) {
+      abandonPress();
+      return;
+    }
+    if (ev.button !== 0) return;
     const { floor, x } = renderer.screenToTile(ev.offsetX, ev.offsetY);
     press = null;
     if (tool.kind === 'room' && tool.room === 'lobby') {
@@ -174,15 +190,18 @@ export function createGame(seed: number): Game {
       notify();
     } else if (tool.kind === 'shaft') drag = { floor, x, kind: 'shaft' };
     // Every other room waits for the release: until then the press may still become a pan.
-    else if (tool.kind === 'room') press = { sx: ev.clientX, sy: ev.clientY, floor, x };
+    else if (tool.kind === 'room')
+      press = { sx: ev.clientX, sy: ev.clientY, floor, x, time: ev.timeStamp, touch: ev.pointerType === 'touch' };
     ghostFor(floor, x);
   }
 
   function onPointerMove(ev: PointerEvent): void {
     if (!renderer) return;
+    if (pointers.size > 1) return; // the camera is driving
     const { floor, x } = renderer.screenToTile(ev.offsetX, ev.offsetY);
     hover = { floor, x };
-    if (press && classifyPress({ x: press.sx, y: press.sy }, { x: ev.clientX, y: ev.clientY }) === 'pan') {
+    const slop = press?.touch ? TOUCH_SLOP_PX : PRESS_SLOP_PX;
+    if (press && classifyPress({ x: press.sx, y: press.sy }, { x: ev.clientX, y: ev.clientY }, slop) === 'pan') {
       press = null; // the camera has it now
     }
     if (drag?.kind === 'lobby' && tool.kind === 'room') {
@@ -197,11 +216,17 @@ export function createGame(seed: number): Game {
   }
 
   function onPointerUp(ev: PointerEvent): void {
+    pointers.delete(ev.pointerId);
     if (!renderer) return;
     const { floor, x } = renderer.screenToTile(ev.offsetX, ev.offsetY);
     if (press) {
-      // A click that never moved: build where it went down.
-      if (tool.kind === 'room') api.apply({ kind: 'build', room: tool.room, floor: press.floor, x: press.x });
+      // A click that never moved, or a tap that came and went, builds where it went down. A
+      // finger that rested on the view does not: that press was a hesitation, or a pinch
+      // whose second finger arrived late.
+      const placed =
+        !press.touch ||
+        isTap({ x: press.sx, y: press.sy }, { x: ev.clientX, y: ev.clientY }, ev.timeStamp - press.time);
+      if (placed && tool.kind === 'room') api.apply({ kind: 'build', room: tool.room, floor: press.floor, x: press.x });
       press = null;
     }
     if (!drag) {
@@ -319,6 +344,10 @@ export function createGame(seed: number): Game {
       el.addEventListener('pointerdown', onPointerDown);
       el.addEventListener('pointermove', onPointerMove);
       el.addEventListener('pointerup', onPointerUp);
+      el.addEventListener('pointercancel', (ev: PointerEvent) => {
+        pointers.delete(ev.pointerId);
+        abandonPress();
+      });
       el.addEventListener('pointerleave', () => {
         hover = null;
         press = null;

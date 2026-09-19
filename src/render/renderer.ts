@@ -37,7 +37,17 @@ import {
   yToFloor,
   type Camera,
 } from './camera';
-import { classifyPress, wheelGesture } from './input';
+import {
+  classifyPress,
+  isTap,
+  pinchGesture,
+  PRESS_SLOP_PX,
+  TAP_MS,
+  TOUCH_SLOP_PX,
+  wheelGesture,
+  type FingerPair,
+  type Point,
+} from './input';
 import { createSky, isNight, skyBackground, type Sky } from './sky';
 
 export interface PickHit {
@@ -105,7 +115,8 @@ const SIM_WIDTH_PX = TILE_PX; // one tile wide, matching art.ts
 const SIM_HEIGHT_PX = 3 * TILE_PX; // three tiles tall
 const PARTICLE_THRESHOLD = 500;
 const PARTICLE_RELEASE = 400; // hysteresis, so a crowd on the edge does not thrash
-const TAP_MS = 600;
+/** How long a mouse press may hold still and still count as a click. A finger gets TAP_MS. */
+const CLICK_MS = 600;
 const FIRE_FLICKER_MS = 110;
 const LOAD_FADE_MS = 900;
 const SLAB_TOP_PX = 3; // art.ts draws the slab as the bottom 3 px of a floor band
@@ -983,6 +994,7 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
   let downX = 0;
   let downY = 0;
   let downTime = 0;
+  let downTouch = false;
   let moved = false;
   let tapCandidate = false;
   let panning = false;
@@ -992,11 +1004,69 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
   // never swallowed.
   let spaceHeld = false;
 
+  // Every pointer currently down on the view, in the order it landed. One is a drag, two are
+  // a pinch, and the tail of a three finger fumble is ignored rather than fought with.
+  const pointers = new Map<number, Point>();
+  // The two fingers a pinch is reading, and where they were on the last move.
+  let pinchIds: [number, number] | null = null;
+  let pinchPrev: FingerPair | null = null;
+
+  /** The slop a pointer of this kind is allowed: a finger is fatter than a mouse. */
+  const slopFor = (touch: boolean): number => (touch ? TOUCH_SLOP_PX : PRESS_SLOP_PX);
+
   /** Pointer gestures all pass through here, so setPanEnabled(false) silences every one of them. */
   const beginPan = (sx: number, sy: number, timeMs: number): void => {
     if (panning || !camera.isPanEnabled()) return;
     camera.dragStart(sx, sy, timeMs, true);
     panning = true;
+  };
+
+  const endPan = (): void => {
+    camera.dragEnd();
+    panning = false;
+  };
+
+  /** Hand the whole gesture to the camera, from wherever the fingers are now. */
+  const startPinch = (ids: [number, number], timeMs: number): void => {
+    const a = pointers.get(ids[0]);
+    const b = pointers.get(ids[1]);
+    if (!a || !b) return;
+    pinchIds = ids;
+    pinchPrev = { a: { ...a }, b: { ...b } };
+    // Whatever the first finger was doing, the camera restarts from the midpoint, so the
+    // view does not jump by the distance between that finger and the middle of the pair.
+    endPan();
+    dragPointer = null;
+    tapCandidate = false;
+    moved = true;
+    beginPan((a.x + b.x) / 2, (a.y + b.y) / 2, timeMs);
+  };
+
+  const endPinch = (): void => {
+    pinchIds = null;
+    pinchPrev = null;
+    endPan();
+  };
+
+  /** Two fingers left on the view after one lifted: keep the gesture, on the new pair. */
+  const regrip = (timeMs: number): void => {
+    const ids = [...pointers.keys()];
+    if (ids.length >= 2) {
+      startPinch([ids[0] as number, ids[1] as number], timeMs);
+      return;
+    }
+    endPinch();
+    const [id] = ids;
+    const rest = id === undefined ? undefined : pointers.get(id);
+    if (id === undefined || !rest) return;
+    // One finger still down: it goes on panning from where it is, and places nothing.
+    dragPointer = id;
+    downX = rest.x;
+    downY = rest.y;
+    downTime = timeMs;
+    moved = true;
+    tapCandidate = false;
+    beginPan(rest.x, rest.y, timeMs);
   };
 
   const onPointerDown = (event: PointerEvent): void => {
@@ -1005,13 +1075,7 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
     if (event.button !== 0 && !middle && !right) return;
     if (middle || right) event.preventDefault(); // no autoscroll, no menu
     const p = localPoint(event);
-    dragPointer = event.pointerId;
-    downX = p.x;
-    downY = p.y;
-    downTime = event.timeStamp;
-    moved = false;
-    panning = false;
-    tapCandidate = event.button === 0;
+    pointers.set(event.pointerId, p);
     try {
       app.canvas.setPointerCapture(event.pointerId);
     } catch {
@@ -1019,6 +1083,21 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
     }
     // A press on the view means the player owns the camera now.
     userMoved = true;
+    if (pointers.size >= 2) {
+      // A second finger: the camera takes the gesture whatever tool is in hand, which is how
+      // the lobby and elevator tools keep their one finger drag and still let the view move.
+      const ids = [...pointers.keys()];
+      startPinch([ids[0] as number, ids[1] as number], event.timeStamp);
+      return;
+    }
+    dragPointer = event.pointerId;
+    downX = p.x;
+    downY = p.y;
+    downTime = event.timeStamp;
+    downTouch = event.pointerType === 'touch';
+    moved = false;
+    panning = false;
+    tapCandidate = event.button === 0;
     // Middle, right and space held pan from the first pixel. A plain left press waits to see
     // whether it travels: a press that holds still is a click, one that moves is a pan.
     if (middle || right || spaceHeld) {
@@ -1028,9 +1107,24 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
   };
 
   const onPointerMove = (event: PointerEvent): void => {
+    if (pointers.has(event.pointerId)) pointers.set(event.pointerId, localPoint(event));
+    if (pinchIds) {
+      if (!pinchIds.includes(event.pointerId)) return; // a third finger along for the ride
+      const a = pointers.get(pinchIds[0]);
+      const b = pointers.get(pinchIds[1]);
+      if (!a || !b || !pinchPrev) return;
+      const next: FingerPair = { a: { ...a }, b: { ...b } };
+      const gesture = pinchGesture(pinchPrev, next);
+      pinchPrev = next;
+      // The span zooms toward the point the hand is holding, the midpoint pans, and both go
+      // through the paths the wheel and the mouse drag already use.
+      if (gesture.scale !== 1) camera.zoomAt(gesture.scale, gesture.mid.x, gesture.mid.y);
+      camera.dragMove(gesture.mid.x, gesture.mid.y, event.timeStamp);
+      return;
+    }
     if (dragPointer !== event.pointerId) return;
     const p = localPoint(event);
-    if (classifyPress({ x: downX, y: downY }, p) === 'pan') moved = true;
+    if (classifyPress({ x: downX, y: downY }, p, slopFor(downTouch)) === 'pan') moved = true;
     if (moved && tapCandidate && !toolOwnsDrag) {
       // The press turned into a pan, so the camera picks it up from where the finger went down.
       tapCandidate = false;
@@ -1040,27 +1134,38 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
   };
 
   const onPointerUp = (event: PointerEvent): void => {
-    if (dragPointer !== event.pointerId) return;
-    dragPointer = null;
-    camera.dragEnd();
-    panning = false;
+    pointers.delete(event.pointerId);
     try {
       app.canvas.releasePointerCapture(event.pointerId);
     } catch {
       // already released
     }
-    if (tapCandidate && !moved && event.timeStamp - downTime < TAP_MS) {
-      const p = localPoint(event);
-      pickAt(p.x, p.y);
+    if (pinchIds) {
+      if (pinchIds.includes(event.pointerId)) regrip(event.timeStamp);
+      return; // a gesture that grew a second finger never places anything
     }
+    if (dragPointer !== event.pointerId) return;
+    dragPointer = null;
+    endPan();
+    const p = localPoint(event);
+    const elapsed = event.timeStamp - downTime;
+    const tapped = downTouch
+      ? isTap({ x: downX, y: downY }, p, elapsed, TOUCH_SLOP_PX, TAP_MS)
+      : !moved && elapsed < CLICK_MS;
+    if (tapCandidate && !moved && tapped) pickAt(p.x, p.y);
     tapCandidate = false;
   };
 
-  const onPointerCancel = (): void => {
+  const onPointerCancel = (event: PointerEvent): void => {
+    pointers.delete(event.pointerId);
+    if (pinchIds) {
+      if (pinchIds.includes(event.pointerId)) regrip(event.timeStamp);
+      return;
+    }
+    if (dragPointer !== null && dragPointer !== event.pointerId) return;
     dragPointer = null;
-    panning = false;
     tapCandidate = false;
-    camera.dragEnd();
+    endPan();
   };
 
   // The right button is a pan handle here, so the browser menu never opens on the view.
@@ -1112,6 +1217,12 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
   const onBlur = (): void => {
     spaceHeld = false;
     camera.clearKeys();
+    // A gesture interrupted by a tab switch leaves fingers that will never lift, and a
+    // stale finger would make the next press look like the second half of a pinch.
+    pointers.clear();
+    dragPointer = null;
+    tapCandidate = false;
+    endPinch();
   };
 
   app.canvas.addEventListener('pointerdown', onPointerDown);
