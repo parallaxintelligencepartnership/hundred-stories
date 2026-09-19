@@ -17,6 +17,7 @@ import {
   type Renderer as PixiRenderer,
 } from 'pixi.js';
 import { stressBand } from '../sim/people';
+import { ROOMS } from '../sim/rules';
 import { clockOf, TOWER_WIDTH, type Car, type Id, type Room, type RoomKind, type Shaft, type Sim, type SimKind, type StressBand, type World } from '../sim/types';
 import { roomAt, shaftAt } from '../sim/world';
 import { createArt, FLOOR_PX, TILE_PX, type Art } from './art';
@@ -317,8 +318,12 @@ export function inRoomSlot(world: World, sim: Sim, slots: Map<Id, number>): [num
   if (!room) return [sim.pos.x * TILE_PX, simFeetY(sim.pos.floor)];
   const index = slots.get(room.id) ?? 0;
   slots.set(room.id, index + 1);
+  // Spread occupants across the room instead of stacking them on the first desk: slot pitch is the
+  // room width divided by its capacity (at least 2 tiles), so an office's six workers sit one per desk area.
   const right = room.x + room.width - 1;
-  const tile = Math.max(room.x, Math.min(room.x + 1 + index * 2, right));
+  const capacity = Math.max(1, ROOMS[room.kind].capacity || 1);
+  const pitch = Math.max(2, Math.floor((room.width - 2) / capacity));
+  const tile = Math.max(room.x, Math.min(room.x + 1 + index * pitch, right));
   const inside = sim.pos.floor >= room.floor && sim.pos.floor < room.floor + room.height;
   return [tile * TILE_PX, simFeetY(inside ? sim.pos.floor : room.floor)];
 }
