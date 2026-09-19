@@ -106,7 +106,7 @@ The simulation is deterministic: the same seed plus the same list of commands al
 
 ## Deploy
 
-See `deploy/README.md` for how the site is built and deployed to pi3.
+Primary: [Cloudflare Pages](deploy/cloudflare-pages.md). Fallback: [pi3](deploy/README.md).
 
 ## License
 

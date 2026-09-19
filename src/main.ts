@@ -11,6 +11,10 @@ async function boot(): Promise<void> {
     return;
   }
   app.innerHTML = '';
+  if (!navigator.onLine && !navigator.serviceWorker?.controller) {
+    app.textContent = 'Hundred Stories needs one online load before it can play offline.';
+    return;
+  }
   const view = document.createElement('div');
   view.id = 'view';
   const uiRoot = document.createElement('div');
