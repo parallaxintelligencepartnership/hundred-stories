@@ -4,7 +4,7 @@
   "description": "A downtown skyscraper simulation: run and operate a tower, one hundred stories tall.",
   "private": true,
   "type": "module",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

@@ -38,7 +38,7 @@ Rehearsed on 2026-09-19 at this ship: checked out the previous known-good commit
 ## Known limitations and accepted risks
 No finding was accepted; nothing is on the accepted risks list. Everything below is OUTSTANDING work, tracked by an open finding in `.itworks/REVIEWS.md`.
 
-- OUTSTANDING: the public GitHub mirror does not exist yet (it is in Matt's queue). Until it does, the Cloudflare Pages dashboard path in `deploy/cloudflare-pages.md` cannot be used and direct upload is the only deploy path.
+- RESOLVED 2026-09-19: the GitHub mirror now exists at https://github.com/parallaxintelligencepartnership/hundred-stories, public so the itworks.build wall can link it. Cloudflare Pages itself accepts private repos, so the dashboard path in `deploy/cloudflare-pages.md` could have been connected either way; direct upload remains the path used so far.
 - OUTSTANDING: the domain `hundredstories.xyz` is not bought and the site is not live. Nothing is deployed anywhere yet; this ship is the closeout, not the go-live.
 - OUTSTANDING: the security headers in `public/_headers` have never been checked as actually served, because there is no domain to curl. The pi3 fallback headers are unchecked for the same reason (Traefik's security-headers middleware replaces rather than appends).
 - OUTSTANDING: offline PWA install and offline play are unverified. The service worker precaches 17 entries at build time and the fonts have a runtime caching rule, but no one has installed the app and cut the network.

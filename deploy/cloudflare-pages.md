@@ -8,7 +8,7 @@ There are two ways to set up the Pages project. Pick one.
 
 ### (a) Dashboard, connected to GitHub
 
-This path needs the public GitHub mirror, which does not exist yet: the only remote today is the self-hosted Gitea at git.parallaxintelligence.xyz, and Pages cannot connect to it. Create the mirror first (the command is in the knowledge base MATT-QUEUE.md) or use path (b), which needs no GitHub at all.
+This path needs the GitHub mirror (private is fine), which does not exist yet: the only remote today is the self-hosted Gitea at git.parallaxintelligence.xyz, and Pages cannot connect to it. Create the mirror first (the command is in the knowledge base MATT-QUEUE.md) or use path (b), which needs no GitHub at all.
 
 1. In the Cloudflare dashboard, go to Workers and Pages and create a new Pages project.
 2. Connect the GitHub repo `parallaxintelligencepartnership/hundred-stories` (after the mirror exists).

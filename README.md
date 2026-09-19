@@ -110,4 +110,4 @@ Primary: [Cloudflare Pages](deploy/cloudflare-pages.md). Fallback: [pi3](deploy/
 
 ## License
 
-MIT. See `LICENSE`.
+AGPL-3.0-only. See `LICENSE`. Copyright 2026 Parallax Intelligence.
