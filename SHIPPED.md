@@ -65,4 +65,5 @@ A PixiJS upgrade that changes how it compiles shaders, first. The site's Content
 - 2026-09-19: post-ship fixes live the same day: stairs and elevators overlay rooms, shafts rise into empty air, https redirect, touch controls for phones and tablets, copy without the 1994 framing
 - Published: entry hzyq7fm6mpye | https://github.com/parallaxintelligencepartnership/itworks-site/pull/3 | 2026-09-19
 - 2026-09-19: third ship, 0.2.0: landing page and guide rebuilt as the building's cross section, phone camera clears the palette sheet, collapsible palette, honest copy (pixel art drawn in code, from-scratch homage), renderer refuses to boot without a GPU context, icon link on /play/; tag ship-2026-09-19c
+- 2026-09-19: fourth ship, 0.2.1: two-step touch placement with a nudge bar, shaft extension by drag and panel, see-through shafts, stairs stack in a column, elevator ride cost 5 so people ride, share with screenshot and challenge link, theme toggle, the name section; tag ship-2026-09-19d
 - Published: entry twaatuch26bb | https://github.com/parallaxintelligencepartnership/itworks-site/pull/4 | 2026-09-19 (supersedes hzyq7fm6mpye, whose summary said hand-drawn)
