@@ -104,6 +104,84 @@ function buildBitmap() {
   return { rows1, rows2, width, height1: rows1.length, height2: rows2.length };
 }
 
+const WORD_GAP_COLS = 2; // empty columns between the two words on one line
+
+function buildLineRow() {
+  const rows = [];
+  for (let r = 0; r < LETTER_H; r++) {
+    let row = '';
+    for (let i = 0; i < LINE1.length; i++) {
+      if (i > 0) row += '.'.repeat(LETTER_GAP);
+      row += LETTERS[LINE1[i]][r];
+    }
+    row += '.'.repeat(WORD_GAP_COLS);
+    for (let i = 0; i < LINE2.length; i++) {
+      if (i > 0) row += '.'.repeat(LETTER_GAP);
+      row += LETTERS[LINE2[i]][r];
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+
+// ---------------------------------------------------------------------------
+// One-line scene: "HUNDRED STORIES" on a single row, 7 cells tall, for the
+// site header. Same cell art and dark-variant window seed (seed 100, same
+// mulberry32 PRNG) as the two-line scene, but no sim dots.
+// ---------------------------------------------------------------------------
+
+export function buildLineScene(variant, s, { paddingXCells = 1, paddingYCells = 1 } = {}) {
+  const CELL = 12 * s;
+  const rows = buildLineRow();
+  const gridW = rows[0].length;
+  const gridH = rows.length;
+  const rects = [];
+
+  const rng = mulberry32(WINDOW_SEED);
+
+  const cells = [];
+  for (let gy = 0; gy < gridH; gy++) {
+    for (let gx = 0; gx < gridW; gx++) {
+      if (rows[gy][gx] === '#') cells.push({ x0: gx * CELL, y0: gy * CELL });
+    }
+  }
+
+  let unlitCount = 0;
+  for (const { x0, y0 } of cells) {
+    let windowColor;
+    if (variant === 'dark') {
+      const unlit = rng() < WINDOW_UNLIT_CHANCE;
+      if (unlit) unlitCount++;
+      windowColor = unlit ? COLOR.windowUnlit : COLOR.windowLit;
+    } else {
+      windowColor = COLOR.windowDay;
+    }
+    rects.push({ x: x0, y: y0, w: 12 * s, h: 12 * s, color: COLOR.outline });
+    rects.push({ x: x0 + 1 * s, y: y0 + 1 * s, w: 10 * s, h: 10 * s, color: COLOR.cream });
+    rects.push({ x: x0 + 2 * s, y: y0 + 1 * s, w: 8 * s, h: 4 * s, color: COLOR.windowFrame });
+    rects.push({ x: x0 + 3 * s, y: y0 + 2 * s, w: 6 * s, h: 2 * s, color: windowColor });
+  }
+
+  const gridPxW = gridW * CELL;
+  const gridPxH = gridH * CELL;
+
+  // Slab beneath the letters: 1px edge, then 3px slab, full width.
+  const slabEdgeY = gridPxH;
+  rects.push({ x: 0, y: slabEdgeY, w: gridPxW, h: 1 * s, color: COLOR.slabEdge });
+  rects.push({ x: 0, y: slabEdgeY + 1 * s, w: gridPxW, h: 3 * s, color: COLOR.slab });
+
+  const bottom = slabEdgeY + 1 * s + 3 * s;
+
+  const paddingX = paddingXCells * CELL;
+  const paddingY = paddingYCells * CELL;
+  const width = gridPxW + paddingX * 2;
+  const height = bottom + paddingY * 2;
+
+  const shifted = rects.map((r) => ({ ...r, x: r.x + paddingX, y: r.y + paddingY }));
+
+  return { width, height, rects: shifted, unlitCount };
+}
+
 // ---------------------------------------------------------------------------
 // Scene: turn the bitmap into a flat list of rects (in px, at a given scale).
 // s = CELL / 12, so s=1 for the base SVG (CELL=12) and s=4 for the 4x PNGs (CELL=48).
@@ -340,6 +418,17 @@ function main() {
     console.log(`wrote ${pngPath} (${pngScene.width}x${pngScene.height}, ${png.length} bytes)`);
     if (variant === 'dark') {
       console.log(`  seed=${WINDOW_SEED}, unlit windows: ${pngScene.unlitCount}`);
+    }
+  }
+
+  for (const variant of ['dark', 'light']) {
+    const lineScene = buildLineScene(variant, 1, { paddingXCells: 1, paddingYCells: 1 });
+    const lineSvg = buildSVG(lineScene);
+    const linePath = join(outDir, `wordmark-line-${variant}.svg`);
+    writeFileSync(linePath, lineSvg);
+    console.log(`wrote ${linePath} (${lineScene.width}x${lineScene.height})`);
+    if (variant === 'dark') {
+      console.log(`  seed=${WINDOW_SEED}, unlit windows: ${lineScene.unlitCount}`);
     }
   }
 }

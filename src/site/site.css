@@ -130,8 +130,8 @@ p {
   align-items: center;
   gap: 12px;
   min-height: 56px;
-  padding-top: 8px;
-  padding-bottom: 8px;
+  padding-top: 10px;
+  padding-bottom: 10px;
 }
 
 .site-wordmark {
@@ -140,7 +140,7 @@ p {
 }
 
 .site-wordmark img {
-  height: 24px;
+  height: 30px;
   width: auto;
   display: block;
 }
@@ -336,7 +336,7 @@ main section + section {
   }
 
   .site-wordmark img {
-    height: 28px;
+    height: 40px;
   }
 
   .cards {
