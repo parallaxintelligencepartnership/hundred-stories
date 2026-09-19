@@ -123,6 +123,7 @@ export interface Sim {
   stayUntil: number | null; // minute to leave the current room
   wallet: number; // cents the sim will spend this visit
   leaveReason: string | null;
+  exiting?: boolean; // durable flag: this sim is on its way out of the tower, whatever its transit state
 }
 
 export type Command =

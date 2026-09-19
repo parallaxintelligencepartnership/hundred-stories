@@ -107,17 +107,12 @@ export function roomsMatching(world: World, kind: RoomKind, opts: RoomFilter = {
 // ---------------------------------------------------------------------------
 
 /**
- * A run of ground lobby segments, skipping tiles reserved for elevator shafts.
- *
- * build.ts refuses a shaft that crosses a room, and a lobby segment that crosses a
- * shaft, so a shaft standing inside the lobby run needs its four tiles left clear.
+ * A contiguous run of ground lobby segments. Shafts may share lobby tiles, so the run
+ * needs no gap where an elevator stands.
  */
-export function lobbyRun(fromX: number, toX: number, reserved: readonly (readonly [number, number])[] = []): Command[] {
+export function lobbyRun(fromX: number, toX: number): Command[] {
   const out: Command[] = [];
-  for (let x = fromX; x <= toX; x++) {
-    if (reserved.some(([lo, hi]) => x >= lo && x <= hi)) continue;
-    out.push({ kind: 'build', room: 'lobby', floor: 1, x });
-  }
+  for (let x = fromX; x <= toX; x++) out.push({ kind: 'build', room: 'lobby', floor: 1, x });
   return out;
 }
 

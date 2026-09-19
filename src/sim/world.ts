@@ -40,7 +40,7 @@ export function allocId(world: World): Id {
 
 export function log(world: World, text: string, level: LogEntry['level'] = 'info', extra: { roomId?: Id; simId?: Id } = {}): void {
   world.log.push({ minute: world.time.minute, text, level, ...extra });
-  if (world.log.length > 500) world.log.splice(0, world.log.length - 500);
+  if (world.log.length > 2000) world.log.splice(0, world.log.length - 2000);
 }
 
 export function addRoom(world: World, room: Room): void {

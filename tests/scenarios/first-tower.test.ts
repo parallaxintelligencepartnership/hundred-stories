@@ -34,15 +34,14 @@ import type { Command, World } from '../../src/sim/types';
 
 const SEED = 12345;
 
-// The shaft stands inside the lobby run, so those four tiles stay clear of lobby
-// segments: build.ts refuses a shaft that crosses a room and a room that crosses a shaft.
+// The shaft stands inside the lobby run: lobby tiles are passable to a shaft, so the
+// run needs no gap around it.
 const SHAFT_X = 176;
-const SHAFT_TILES: readonly [number, number] = [SHAFT_X, SHAFT_X + SHAFTS.standard.width - 1];
 
 /** Scenario 2: a lobby, one standard shaft up to floor 6, two offices on floors 2 to 5. */
 function firstTowerScript(officeXs: readonly number[] = [158, 185]): Command[] {
   return [
-    ...lobbyRun(150, 200, [SHAFT_TILES]),
+    ...lobbyRun(150, 200),
     { kind: 'shaft.build', shaft: 'standard', x: SHAFT_X, floorMin: 1, floorMax: 6 },
     ...buildRow('office', 2, officeXs),
     ...buildRow('office', 3, officeXs),
@@ -68,7 +67,7 @@ function tallTower(cars: number, officeXs: readonly number[], seed = SEED): Worl
   const filler: Command[] = [];
   for (let floor = 2; floor <= 28; floor += 2) filler.push({ kind: 'build', room: 'stairs', floor, x: 300 });
   buildTower(world, [
-    ...lobbyRun(160, 190, [SHAFT_TILES]),
+    ...lobbyRun(160, 190),
     { kind: 'shaft.build', shaft: 'standard', x: SHAFT_X, floorMin: 1, floorMax: 30 },
     ...filler,
     ...buildRow('office', 30, officeXs),
@@ -186,7 +185,7 @@ describe('scenario: condos', () => {
   it('sells every condo and moves the owners in within two weekdays', () => {
     const world = createWorld(SEED);
     buildTower(world, [
-      ...lobbyRun(150, 200, [SHAFT_TILES]),
+      ...lobbyRun(150, 200),
       { kind: 'shaft.build', shaft: 'standard', x: SHAFT_X, floorMin: 1, floorMax: 6 },
       ...buildRow('condo', 2, CONDO_XS),
     ]);
@@ -202,20 +201,15 @@ describe('scenario: condos', () => {
     }
   });
 
-  // BUG: sim/evaluation.ts. A condo built directly above the ground lobby never sells.
-  // The lobby is built one tile at a time, so every lobby segment under the condo is a
-  // separate noisy vertical neighbor in noisyNeighborsOf, and evaluateRoom charges
-  // EVAL.noisePenaltyPerNeighbor (0.2) for each one. A 16 tile condo over a lobby run
-  // collects 16 neighbors, so the penalty is 3.2 and eval clamps to 0, far below
-  // ECONOMY.condoSaleEvalMin (0.5), which people.ts requires before a condo can sell.
-  // Evidence: with this scenario both condos report eval 0.00 and vacant true after two
-  // days, while the identical condos at x 205 and beyond (the test above) sell on day 1.
-  // Five lobby segments are enough to zero any quiet room above or below them, so hotel
-  // rooms on floor 2 hit the same wall and their guests move out after a day.
+  // Regression: condos on floor 2 used to be unsellable. The lobby is built one tile at
+  // a time, so while ROOMS.lobby.noisy was true every segment under a condo counted as a
+  // separate vertical noise neighbor in noisyNeighborsOf; sixteen of them cost
+  // 16 * EVAL.noisePenaltyPerNeighbor, eval clamped to 0 and the room could never reach
+  // ECONOMY.condoSaleEvalMin. The lobby is quiet in rules.ts now, so it sells.
   it('sells a condo built directly above the ground lobby', () => {
     const world = createWorld(SEED);
     buildTower(world, [
-      ...lobbyRun(150, 200, [SHAFT_TILES]),
+      ...lobbyRun(150, 200),
       { kind: 'shaft.build', shaft: 'standard', x: SHAFT_X, floorMin: 1, floorMax: 6 },
       ...buildRow('condo', 2, [150, 182]),
     ]);
@@ -230,7 +224,7 @@ describe('scenario: a small hotel', () => {
   function hotel(): World {
     const world = createWorld(SEED);
     buildTower(world, [
-      ...lobbyRun(150, 200, [SHAFT_TILES]),
+      ...lobbyRun(150, 200),
       { kind: 'shaft.build', shaft: 'standard', x: SHAFT_X, floorMin: 1, floorMax: 6 },
     ]);
     // Reaching 2 stars needs a population of 300, which this tower will never have, so
