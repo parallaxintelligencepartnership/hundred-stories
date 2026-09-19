@@ -32,6 +32,7 @@ import {
   yToFloor,
   type Camera,
 } from './camera';
+import { classifyPress, wheelGesture } from './input';
 import { createSky, isNight, skyBackground, type Sky } from './sky';
 
 export interface PickHit {
@@ -63,8 +64,10 @@ export interface Renderer {
   setGhost(g: null | Ghost): void;
   setSelection(sel: null | Selection): void;
   onPick(cb: (hit: PickHit) => void): void;
-  /** Off while a build tool owns the left button on the view. */
+  /** Off for the landing hero: no pointer gesture pans. */
   setPanEnabled(on: boolean): void;
+  /** On while the held tool draws with the left drag (lobby paint, shaft span), so it does not pan. */
+  setToolOwnsDrag(on: boolean): void;
   setReducedMotion(on: boolean): void;
   destroy(): void;
 }
@@ -73,7 +76,6 @@ const SIM_WIDTH_PX = TILE_PX; // one tile wide, matching art.ts
 const SIM_HEIGHT_PX = 3 * TILE_PX; // three tiles tall
 const PARTICLE_THRESHOLD = 500;
 const PARTICLE_RELEASE = 400; // hysteresis, so a crowd on the edge does not thrash
-const TAP_SLOP_PX = 5;
 const TAP_MS = 600;
 const FIRE_FLICKER_MS = 110;
 const LOAD_FADE_MS = 900;
@@ -938,21 +940,33 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
   let downTime = 0;
   let moved = false;
   let tapCandidate = false;
+  let panning = false;
+  // On while the held tool draws with the left drag: the lobby brush and the shaft span.
+  let toolOwnsDrag = false;
   // Space held is a pan override. The UI also uses space to pause, so it is read,
   // never swallowed.
   let spaceHeld = false;
 
+  /** Pointer gestures all pass through here, so setPanEnabled(false) silences every one of them. */
+  const beginPan = (sx: number, sy: number, timeMs: number): void => {
+    if (panning || !camera.isPanEnabled()) return;
+    camera.dragStart(sx, sy, timeMs, true);
+    panning = true;
+  };
+
   const onPointerDown = (event: PointerEvent): void => {
     const middle = event.button === 1;
-    if (event.button !== 0 && !middle) return;
-    if (middle) event.preventDefault(); // no autoscroll
+    const right = event.button === 2;
+    if (event.button !== 0 && !middle && !right) return;
+    if (middle || right) event.preventDefault(); // no autoscroll, no menu
     const p = localPoint(event);
     dragPointer = event.pointerId;
     downX = p.x;
     downY = p.y;
     downTime = event.timeStamp;
     moved = false;
-    tapCandidate = !middle;
+    panning = false;
+    tapCandidate = event.button === 0;
     try {
       app.canvas.setPointerCapture(event.pointerId);
     } catch {
@@ -960,14 +974,23 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
     }
     // A press on the view means the player owns the camera now.
     userMoved = true;
-    // Middle button and space held pan even while a build tool owns the left button.
-    camera.dragStart(p.x, p.y, event.timeStamp, middle || spaceHeld);
+    // Middle, right and space held pan from the first pixel. A plain left press waits to see
+    // whether it travels: a press that holds still is a click, one that moves is a pan.
+    if (middle || right || spaceHeld) {
+      tapCandidate = false;
+      beginPan(p.x, p.y, event.timeStamp);
+    }
   };
 
   const onPointerMove = (event: PointerEvent): void => {
     if (dragPointer !== event.pointerId) return;
     const p = localPoint(event);
-    if (Math.abs(p.x - downX) > TAP_SLOP_PX || Math.abs(p.y - downY) > TAP_SLOP_PX) moved = true;
+    if (classifyPress({ x: downX, y: downY }, p) === 'pan') moved = true;
+    if (moved && tapCandidate && !toolOwnsDrag) {
+      // The press turned into a pan, so the camera picks it up from where the finger went down.
+      tapCandidate = false;
+      beginPan(downX, downY, downTime);
+    }
     camera.dragMove(p.x, p.y, event.timeStamp);
   };
 
@@ -975,6 +998,7 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
     if (dragPointer !== event.pointerId) return;
     dragPointer = null;
     camera.dragEnd();
+    panning = false;
     try {
       app.canvas.releasePointerCapture(event.pointerId);
     } catch {
@@ -989,15 +1013,21 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
 
   const onPointerCancel = (): void => {
     dragPointer = null;
+    panning = false;
+    tapCandidate = false;
     camera.dragEnd();
+  };
+
+  // The right button is a pan handle here, so the browser menu never opens on the view.
+  const onContextMenu = (event: MouseEvent): void => {
+    event.preventDefault();
   };
 
   const onWheel = (event: WheelEvent): void => {
     event.preventDefault();
     const p = localPoint(event);
-    const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? app.screen.height : 1;
     userMoved = true;
-    camera.wheel(event.deltaY * scale, p.x, p.y);
+    camera.wheelAt(wheelGesture(event, app.screen.height), p.x, p.y);
   };
 
   const typingTarget = (target: EventTarget | null): boolean => {
@@ -1013,6 +1043,19 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
     if (event.code === 'Home') {
       frameInitial();
       return;
+    }
+    // Plus and minus zoom toward the middle of the view. Ctrl and meta are the browser's own zoom.
+    if (!event.ctrlKey && !event.metaKey) {
+      if (event.code === 'Equal' || event.code === 'NumpadAdd' || event.key === '+' || event.key === '=') {
+        userMoved = true;
+        camera.zoomStep(1);
+        return;
+      }
+      if (event.code === 'Minus' || event.code === 'NumpadSubtract' || event.key === '-' || event.key === '_') {
+        userMoved = true;
+        camera.zoomStep(-1);
+        return;
+      }
     }
     if (event.code.startsWith('Key') || event.code.startsWith('Arrow')) userMoved = true;
     camera.setKey(event.code, true);
@@ -1031,6 +1074,7 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
   app.canvas.addEventListener('pointerup', onPointerUp);
   app.canvas.addEventListener('pointercancel', onPointerCancel);
   app.canvas.addEventListener('wheel', onWheel, { passive: false });
+  app.canvas.addEventListener('contextmenu', onContextMenu);
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('keyup', onKeyUp);
   window.addEventListener('blur', onBlur);
@@ -1114,6 +1158,9 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
     setPanEnabled(on): void {
       camera.setPanEnabled(on);
     },
+    setToolOwnsDrag(on): void {
+      toolOwnsDrag = on;
+    },
     setReducedMotion(on): void {
       reducedMotion = on;
       camera.setReducedMotion(on);
@@ -1128,6 +1175,7 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
       app.canvas.removeEventListener('pointerup', onPointerUp);
       app.canvas.removeEventListener('pointercancel', onPointerCancel);
       app.canvas.removeEventListener('wheel', onWheel);
+      app.canvas.removeEventListener('contextmenu', onContextMenu);
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', onBlur);

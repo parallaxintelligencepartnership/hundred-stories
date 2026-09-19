@@ -10,6 +10,7 @@
 
 import { MAX_FLOOR, MIN_FLOOR, TOWER_WIDTH } from '../sim/types';
 import { FLOOR_PX, TILE_PX } from './art';
+import type { WheelGesture } from './input';
 
 export const MIN_ZOOM = 0.35;
 /** Opening zoom. The original drew its 8 px tiles on a 640 px screen; 2x on a modern display reads the same. */
@@ -27,6 +28,8 @@ const FRICTION_MS = 110; // inertia half life, roughly
 const MIN_INERTIA_SPEED = 0.015; // screen px per ms
 const MAX_INERTIA_SPEED = 4; // screen px per ms
 const PAN_MARGIN_PX = 240;
+const FOLLOW_EASE_MS = 140; // how fast the view catches up with a room it had to follow
+const KEY_ZOOM_DELTA = 120; // one wheel notch, so the plus and minus keys feel like the wheel
 /** Where the street sits in the opening shot, as a fraction down the viewport. */
 export const DEFAULT_GROUND_LINE = 0.68;
 
@@ -94,15 +97,21 @@ export interface Camera {
   reset(): void;
   setViewport(width: number, height: number): void;
   setReducedMotion(on: boolean): void;
-  /** Off while a build tool owns the left button. Keys, wheel and forced drags still pan. */
+  /** Off for the landing hero: no pointer gesture pans. Keys and the wheel zoom still work. */
   setPanEnabled(on: boolean): void;
   isPanEnabled(): boolean;
   /** force overrides setPanEnabled(false), for middle button and space held drags. */
   dragStart(sx: number, sy: number, timeMs: number, force?: boolean): void;
   dragMove(sx: number, sy: number, timeMs: number): void;
   dragEnd(): void;
-  /** deltaY already normalized to pixels by the caller. */
+  /** Zoom toward (sx, sy). deltaY already normalized to pixels by the caller. */
   wheel(deltaY: number, sx: number, sy: number): void;
+  /** One normalized wheel gesture: zoom toward (sx, sy), or move the view by screen pixels. */
+  wheelAt(gesture: WheelGesture, sx: number, sy: number): void;
+  /** Zoom one wheel notch toward the middle of the viewport, for the plus and minus keys. */
+  zoomStep(direction: 1 | -1): void;
+  /** Ease vertically the shortest distance that puts a whole floor on screen. */
+  ensureFloorVisible(floor: number): void;
   setKey(code: string, down: boolean): void;
   clearKeys(): void;
   /** Advance inertia, held keys and zoom snapping. dtMs is real time. */
@@ -133,6 +142,8 @@ class TowerCamera implements Camera {
   private vy = 0;
 
   private keys = new Set<string>();
+
+  private easeY: number | null = null;
 
   private wheelIdleMs = 0;
   private anchorX = 0;
@@ -173,6 +184,7 @@ class TowerCamera implements Camera {
   }
 
   centerOn(floor: number, x: number): void {
+    this.easeY = null;
     this.x = (x + 0.5) * TILE_PX;
     this.y = floorTopY(floor) + FLOOR_PX / 2;
     this.vx = 0;
@@ -181,6 +193,7 @@ class TowerCamera implements Camera {
   }
 
   setGroundLine(fraction: number): void {
+    this.easeY = null;
     // screenY(0) = viewH / 2 - y * zoom, solved for y.
     this.y = (this.viewH / 2 - fraction * this.viewH) / this.zoom;
     this.vx = 0;
@@ -189,6 +202,7 @@ class TowerCamera implements Camera {
   }
 
   reset(): void {
+    this.easeY = null;
     this.zoom = DEFAULT_ZOOM;
     this.x = (TOWER_WIDTH / 2) * TILE_PX;
     this.vx = 0;
@@ -210,6 +224,7 @@ class TowerCamera implements Camera {
 
   dragStart(sx: number, sy: number, timeMs: number, force = false): void {
     if (!this.panEnabled && !force) return;
+    this.easeY = null;
     this.dragging = true;
     this.lastSx = sx;
     this.lastSy = sy;
@@ -220,6 +235,7 @@ class TowerCamera implements Camera {
 
   dragMove(sx: number, sy: number, timeMs: number): void {
     if (!this.dragging) return;
+    this.easeY = null;
     const dx = sx - this.lastSx;
     const dy = sy - this.lastSy;
     this.lastSx = sx;
@@ -259,6 +275,45 @@ class TowerCamera implements Camera {
     this.zoomAt(factor, sx, sy);
   }
 
+  wheelAt(gesture: WheelGesture, sx: number, sy: number): void {
+    if (gesture.zoom) {
+      this.wheel(gesture.dz, sx, sy);
+      return;
+    }
+    // Scrolling is the second way out of a tall tower, so it answers to the same switch
+    // the hero uses to take every pointer gesture away.
+    if (!this.panEnabled) return;
+    if (gesture.dx === 0 && gesture.dy === 0) return;
+    this.easeY = null;
+    this.vx = 0;
+    this.vy = 0;
+    this.panBy(gesture.dx, gesture.dy);
+  }
+
+  zoomStep(direction: 1 | -1): void {
+    this.wheel(-direction * KEY_ZOOM_DELTA, this.viewW / 2, this.viewH / 2);
+  }
+
+  ensureFloorVisible(floor: number): void {
+    const half = this.viewH / 2 / this.zoom;
+    const top = floorTopY(floor);
+    const base = floorBaseY(floor);
+    let target: number;
+    if (base - top >= 2 * half) target = (top + base) / 2; // deeper than the viewport: center it
+    else if (top < this.y - half) target = top + half;
+    else if (base > this.y + half) target = base - half;
+    else return; // the whole floor is already on screen
+    target = clampY(target);
+    if (this.reducedMotion) {
+      this.easeY = null;
+      this.y = target;
+      this.clampPosition();
+      return;
+    }
+    this.vy = 0;
+    this.easeY = target;
+  }
+
   setKey(code: string, down: boolean): void {
     if (!(code in PAN_KEYS)) return;
     if (down) this.keys.add(code);
@@ -282,6 +337,7 @@ class TowerCamera implements Camera {
       ky += dir.dy;
     }
     if (kx !== 0 || ky !== 0) {
+      this.easeY = null;
       const len = Math.hypot(kx, ky) || 1;
       const step = (KEY_PAN_PX_PER_SECOND * dt) / 1000;
       this.vx = 0;
@@ -297,6 +353,21 @@ class TowerCamera implements Camera {
       if (Math.hypot(this.vx, this.vy) < MIN_INERTIA_SPEED) {
         this.vx = 0;
         this.vy = 0;
+      }
+    }
+
+    if (this.easeY !== null) {
+      if (this.dragging) this.easeY = null;
+      else {
+        const t = 1 - Math.exp(-dt / FOLLOW_EASE_MS);
+        const next = this.y + (this.easeY - this.y) * t;
+        if (Math.abs(this.easeY - next) < 0.5) {
+          this.y = this.easeY;
+          this.easeY = null;
+        } else {
+          this.y = next;
+        }
+        this.clampPosition();
       }
     }
 
@@ -341,11 +412,14 @@ class TowerCamera implements Camera {
   private clampPosition(): void {
     const left = -PAN_MARGIN_PX;
     const right = TOWER_WIDTH * TILE_PX + PAN_MARGIN_PX;
-    const top = floorTopY(MAX_FLOOR) - PAN_MARGIN_PX;
-    const bottom = floorBaseY(MIN_FLOOR) + PAN_MARGIN_PX;
     this.x = clamp(this.x, left, right);
-    this.y = clamp(this.y, top, bottom);
+    this.y = clampY(this.y);
   }
+}
+
+/** The vertical range the camera center may sit in, roof to basement plus the margin. */
+function clampY(y: number): number {
+  return clamp(y, floorTopY(MAX_FLOOR) - PAN_MARGIN_PX, floorBaseY(MIN_FLOOR) + PAN_MARGIN_PX);
 }
 
 /** The snap stop nearest to a zoom, measured in log space so 0.5 and 2 feel even. */

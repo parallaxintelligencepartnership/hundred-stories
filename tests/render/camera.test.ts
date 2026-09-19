@@ -16,7 +16,18 @@ import {
   xToTile,
   yToFloor,
 } from '../../src/render/camera';
+import { wheelGesture, type WheelLike } from '../../src/render/input';
 import { nightness, skyAt, skyBackground } from '../../src/render/sky';
+
+const wheelEvent = (over: Partial<WheelLike>): WheelLike => ({
+  deltaX: 0,
+  deltaY: 0,
+  deltaMode: 0,
+  ctrlKey: false,
+  metaKey: false,
+  shiftKey: false,
+  ...over,
+});
 
 describe('floor axis', () => {
   it('puts the floor 1 slab at y = 0 and stacks floors upward', () => {
@@ -197,6 +208,82 @@ describe('camera', () => {
     expect(cam.x).toBeGreaterThan(start);
     cam.wheel(-120, 400, 300);
     expect(cam.zoom).toBeGreaterThan(zoom);
+  });
+
+  it('scrolls the view on a plain wheel and zooms only with ctrl held', () => {
+    const cam = createCamera();
+    cam.setViewport(800, 600);
+    cam.zoom = 1;
+    cam.centerOn(3, 150);
+    const restingY = cam.y;
+    const restingZoom = cam.zoom;
+
+    cam.wheelAt(wheelGesture(wheelEvent({ deltaY: 120 }), 600), 400, 300);
+    expect(cam.y).toBeGreaterThan(restingY); // scrolling down moves the view down
+    expect(cam.zoom).toBe(restingZoom);
+
+    const scrolledY = cam.y;
+    cam.wheelAt(wheelGesture(wheelEvent({ deltaY: -120, ctrlKey: true }), 600), 400, 300);
+    expect(cam.zoom).toBeGreaterThan(restingZoom);
+    expect(cam.y).toBe(scrolledY); // a zoom at the center of the view holds the middle still
+  });
+
+  it('moves sideways on a shift wheel and on a trackpad deltaX', () => {
+    const cam = createCamera();
+    cam.setViewport(800, 600);
+    cam.zoom = 1;
+    cam.centerOn(3, 150);
+    const restingX = cam.x;
+    const restingY = cam.y;
+
+    cam.wheelAt(wheelGesture(wheelEvent({ deltaY: 120, shiftKey: true }), 600), 400, 300);
+    expect(cam.x).toBeGreaterThan(restingX);
+    expect(cam.y).toBe(restingY);
+
+    const shifted = cam.x;
+    cam.wheelAt(wheelGesture(wheelEvent({ deltaX: -40 }), 600), 400, 300);
+    expect(cam.x).toBeLessThan(shifted);
+  });
+
+  it('follows a build only when the floor is not already whole on screen', () => {
+    const cam = createCamera();
+    cam.setViewport(800, 600);
+    cam.zoom = 1;
+    cam.centerOn(5, 150);
+    const settled = cam.y;
+    cam.ensureFloorVisible(5);
+    for (let i = 0; i < 10; i++) cam.update(16);
+    expect(cam.y).toBe(settled); // the built floor was already in view
+
+    const half = 300; // half the viewport at zoom 1
+    cam.ensureFloorVisible(15); // off the top edge
+    for (let i = 0; i < 200; i++) cam.update(16);
+    expect(cam.y).toBeCloseTo(floorTopY(15) + half, 4); // the shortest move, no further
+    expect(floorBaseY(15)).toBeLessThanOrEqual(cam.y + half);
+  });
+
+  it('puts the floor on screen without easing while reduced motion is on', () => {
+    const cam = createCamera();
+    cam.setViewport(800, 600);
+    cam.setReducedMotion(true);
+    cam.zoom = 1;
+    cam.centerOn(5, 150);
+    cam.ensureFloorVisible(15);
+    expect(cam.y).toBeCloseTo(floorTopY(15) + 300, 4);
+  });
+
+  it('zooms toward the middle of the view for the plus and minus keys', () => {
+    const cam = createCamera();
+    cam.setViewport(800, 600);
+    cam.zoom = 1;
+    cam.centerOn(5, 150);
+    const middle = cam.screenToWorld(400, 300);
+    cam.zoomStep(1);
+    expect(cam.zoom).toBeGreaterThan(1);
+    expect(cam.screenToWorld(400, 300).y).toBeCloseTo(middle.y, 4);
+    cam.zoomStep(-1);
+    cam.zoomStep(-1);
+    expect(cam.zoom).toBeLessThan(1);
   });
 
   it('pans while a key is held and stops when it is released', () => {
