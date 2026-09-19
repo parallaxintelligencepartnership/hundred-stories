@@ -516,7 +516,7 @@ function readReducedMotion(): boolean {
   }
 }
 
-function readHintSeen(): string | null {
+export function readHintSeen(): string | null {
   try {
     return window.localStorage.getItem(HINT_KEY);
   } catch {
@@ -524,7 +524,7 @@ function readHintSeen(): string | null {
   }
 }
 
-function writeHintSeen(count: number): void {
+export function writeHintSeen(count: number): void {
   try {
     window.localStorage.setItem(HINT_KEY, String(count));
   } catch {
