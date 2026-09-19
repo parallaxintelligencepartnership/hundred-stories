@@ -27,6 +27,7 @@ export function createWorld(seed: number): World {
       weddingsHeld: 0,
       avgWaitMinutes: 0,
       tenantsLeftReasons: {},
+      badQuarterStreak: 0,
     },
     floorIndex: { rooms: new Map(), shafts: new Map(), builtFloors: new Set() },
     routingDirty: true,

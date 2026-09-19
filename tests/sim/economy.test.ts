@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createWorld, addRoom, addShaft } from '../../src/sim/world';
 import { ECONOMY, LIMITS, ROOMS, SHAFTS } from '../../src/sim/rules';
 import { onQuarterStart, recordCondoSale, recordHotelNight, recordVisit, spend } from '../../src/sim/economy';
+import { deserialize, serialize } from '../../src/sim/save';
 import type { Room, RoomKind, Shaft, ShaftKind, World } from '../../src/sim/types';
 
 let idCounter = 1;
@@ -200,6 +201,22 @@ describe('economy: bankruptcy', () => {
     world.cash = ECONOMY.bankruptAtCash - 1;
     onQuarterStart(world); // bad quarter 1 again, not 2 in a row
     expect(world.gameOver).toBeNull();
+  });
+
+  it('keeps the bad quarter streak across a save and load, so it still forecloses', () => {
+    const world = createWorld(1);
+    world.cash = ECONOMY.bankruptAtCash - 1;
+    onQuarterStart(world); // bad quarter 1
+    expect(world.gameOver).toBeNull();
+
+    const result = deserialize(serialize(world));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const loaded = result.world;
+
+    loaded.cash = ECONOMY.bankruptAtCash - 1;
+    onQuarterStart(loaded); // bad quarter 2, after reload
+    expect(loaded.gameOver).toEqual({ at: loaded.time.minute, reason: 'The bank has foreclosed on the tower.' });
   });
 });
 

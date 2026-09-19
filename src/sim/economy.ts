@@ -4,9 +4,6 @@ import { ECONOMY, LIMITS, ROOMS, SHAFTS } from './rules';
 import { log } from './world';
 import type { CommandResult, Room, RoomKind, ShaftKind, World } from './types';
 
-// Consecutive bad quarters (cash below ECONOMY.bankruptAtCash) per world, for bankruptcy tracking.
-const badQuarterStreaks = new WeakMap<World, number>();
-
 /** All income flows through here so incomeByKind stays in sync with cash. */
 function credit(world: World, kind: RoomKind | ShaftKind, amount: number): void {
   world.cash += amount;
@@ -64,14 +61,14 @@ export function onQuarterStart(world: World): void {
   );
 
   if (world.cash < ECONOMY.bankruptAtCash) {
-    const streak = (badQuarterStreaks.get(world) ?? 0) + 1;
-    badQuarterStreaks.set(world, streak);
+    const streak = (world.stats.badQuarterStreak ?? 0) + 1;
+    world.stats.badQuarterStreak = streak;
     if (streak >= ECONOMY.bankruptAfterQuarters && !world.gameOver) {
       world.gameOver = { at: world.time.minute, reason: 'The bank has foreclosed on the tower.' };
       log(world, 'The bank has foreclosed on the tower.', 'alert');
     }
   } else {
-    badQuarterStreaks.set(world, 0);
+    world.stats.badQuarterStreak = 0;
   }
 }
 

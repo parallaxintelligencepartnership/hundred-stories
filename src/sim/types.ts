@@ -166,6 +166,7 @@ export interface Stats {
   weddingsHeld: number;
   avgWaitMinutes: number;
   tenantsLeftReasons: Record<string, number>;
+  badQuarterStreak?: number; // consecutive quarters below the bankruptcy line; saved with the world
 }
 
 export interface FloorIndex {

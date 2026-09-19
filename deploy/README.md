@@ -8,7 +8,7 @@ shape as stillpub (see `pubworks/docs/deploy-stillpub.md` and
 
 1. **Buy the domain** (the value that will go in `SITE_HOST`, e.g.
    `hundredstories.xyz`).
-2. **Cloudflare DNS**: add an A record for the apex to `185.187.235.55`,
+2. **Cloudflare DNS**: add an A record for the apex to pi3's public address (the same A record stillpub.com uses, DNS only),
    DNS only (grey cloud, not proxied — Traefik on pi3 needs to see and
    terminate TLS directly). Optionally add a `www` CNAME to the apex.
 3. **Create the remote directory, if it does not already exist:**

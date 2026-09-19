@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   EVENT_TEST_HOOKS,
   handleEventCommand,
+  hooksActive,
   resetEventTestHooks,
   tickEvents,
   vipRatingFor,
@@ -394,5 +395,18 @@ describe('the event log', () => {
     at(world, EVENTS.bomb.detonateAtMinuteOfDay);
     expect(world.log.length).toBeGreaterThan(3);
     for (const entry of world.log) expect(['alert', 'info']).toContain(entry.level);
+  });
+});
+
+describe('EVENT_TEST_HOOKS gating', () => {
+  // The hooks export ships in the production bundle (this file imports it
+  // directly), but every read of it in events.ts is gated behind
+  // hooksActive(), which is only true when import.meta.env.MODE === 'test'.
+  // Vite sets MODE to 'test' under vitest and to 'production' in a built
+  // bundle, so forcing EVENT_TEST_HOOKS from outside the sim has no effect
+  // outside of tests. Forcing MODE itself is not practical inside vitest
+  // (it is set once for the whole run), so this checks the seam directly.
+  it('is active under vitest', () => {
+    expect(hooksActive()).toBe(true);
   });
 });

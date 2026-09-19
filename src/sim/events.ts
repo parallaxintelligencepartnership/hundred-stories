@@ -20,6 +20,12 @@ const HOTEL_SUITE: RoomKind = 'hotelSuite';
  * Test seam. Production code never writes to this. `chance` forces a roll to
  * pass or fail, `target` forces which room a fire or a bomb picks, so a test
  * does not have to hunt for a seed that lands on the room it built.
+ *
+ * The export ships in every bundle (tests import it directly), but every
+ * read of it in this file is gated behind `hooksActive()`. Vite sets
+ * `import.meta.env.MODE` to 'test' under vitest and to 'production' in a
+ * built bundle, so in production the hooks are always ignored no matter
+ * what a caller writes into them.
  */
 export const EVENT_TEST_HOOKS: {
   chance: { fire: number | null; bomb: number | null; vip: number | null };
@@ -28,6 +34,11 @@ export const EVENT_TEST_HOOKS: {
   chance: { fire: null, bomb: null, vip: null },
   target: { fire: null, bomb: null },
 };
+
+/** True only when running under vitest. See the comment on EVENT_TEST_HOOKS. */
+export function hooksActive(): boolean {
+  return import.meta.env.MODE === 'test';
+}
 
 export function resetEventTestHooks(): void {
   EVENT_TEST_HOOKS.chance = { fire: null, bomb: null, vip: null };
@@ -80,6 +91,7 @@ function securityOnDuty(world: World): boolean {
 }
 
 function chanceFor(key: 'fire' | 'bomb' | 'vip', fallback: number): number {
+  if (!hooksActive()) return fallback;
   const forced = EVENT_TEST_HOOKS.chance[key];
   return forced === null ? fallback : forced;
 }
@@ -89,7 +101,7 @@ function sortedRooms(world: World): Room[] {
 }
 
 function pickTargetRoom(world: World, key: 'fire' | 'bomb'): Room | undefined {
-  const forced = EVENT_TEST_HOOKS.target[key];
+  const forced = hooksActive() ? EVENT_TEST_HOOKS.target[key] : null;
   if (forced !== null) return world.rooms.get(forced);
   const candidates = sortedRooms(world).filter((r) => !r.onFire);
   if (candidates.length === 0) return undefined;
