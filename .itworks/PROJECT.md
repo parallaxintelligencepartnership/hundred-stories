@@ -27,7 +27,7 @@ Hosting target: static files on Cloudflare Pages (primary); pi3 (x86_64 Ubuntu 2
 Real data: none server side | Sample data: scripted tower builds under tests/scenarios (helpers.ts plus the scripted runs) used by the headless simulation tests | Sensitive: no; save games live only in the player's browser (IndexedDB) and in files they export themselves
 
 ## Where it will live
-internet - exposure notes: static site on Cloudflare Pages with the security headers from public/_headers (pi3 behind Traefik is the fallback, same headers via deploy/nginx.conf); no backend, no ports of its own; also installable offline as a PWA; not live yet, the domain hundredstories.xyz is not bought - paid services: none (no LLM calls, no payments, no maps)
+internet - exposure notes: live at https://hundredstories.xyz since 2026-09-19 as Cloudflare Workers static assets (the Pages successor; asset requests are free and unlimited, no Worker code) with the security headers from public/_headers, custom domains from wrangler.jsonc, workers.dev copy switched off (pi3 behind Traefik is the fallback, same headers via deploy/nginx.conf); no backend, no ports of its own; also installable offline as a PWA - paid services: none (no LLM calls, no payments, no maps)
 
 ## Definition of done
 1. Playable from a bare lot with a single ground-floor lobby, exactly like the original opening, to TOWER status.
