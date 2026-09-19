@@ -1,0 +1,13 @@
+{
+  "name": "Hundred Stories",
+  "summary": "A browser recreation of the 1994 tower-building sim with original art. Plays offline, saves in your browser, nothing uploaded. Live at hundredstories.xyz.",
+  "source": "public",
+  "repo_url": "https://github.com/parallaxintelligencepartnership/hundred-stories",
+  "audit_tier": "audit",
+  "audit_date": "2026-09-19",
+  "found": 24,
+  "fixed": 24,
+  "accepted": 0,
+  "critical_open": 0,
+  "critical_accepted": 0
+}

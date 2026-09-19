@@ -1,64 +1,59 @@
 # Hundred Stories - shipped 2026-09-19
 
 ## What this is
-Hundred Stories is a browser game and installable PWA that recreates the ruleset of the 1994 tower simulation, with original art and a deterministic sim core. You run a skyscraper: build a lobby, offices, homes, shops and elevators, watch it fill with people over the years, and climb the star ladder from one star to TOWER. There is no backend and no account: the whole game runs in the browser, and saves live in the player's own browser storage plus files they export themselves.
+Hundred Stories is a browser game and installable PWA that recreates the ruleset of the 1994 tower simulation, with original art and a deterministic sim core. You run a skyscraper: build a lobby, offices, homes, shops and elevators, watch it fill with people over the years, and climb the star ladder from one star to TOWER. There is no backend and no account: the whole game runs in the browser, and saves live in the player's own browser storage plus files they export themselves. The site at https://hundredstories.xyz is a static landing page with search and share metadata; the game lives at `/play/`. Source is public under AGPL-3.0-only at https://github.com/parallaxintelligencepartnership/hundred-stories.
 
 ## How to run it
 Requirements: Node 26 (pinned in `.nvmrc`). No environment variables.
 
 ```bash
 npm ci
-npm run dev       # dev server on http://localhost:5173
-npm test          # vitest run: 382 tests, 18 files
-npm run build     # tsc --noEmit then vite build, output in dist/
-npm run preview   # serve the production build on http://localhost:4173
+npm run dev       # landing on http://localhost:5173/, game on http://localhost:5173/play/
+npm test          # vitest run: 420 tests, 24 files
+npm run build     # tsc --noEmit then vite build, output in dist/ (landing, how-to-play, play, 404)
+npm run preview   # serve the production build on http://localhost:4173 (does NOT send public/_headers)
 ```
 
-`?seed=<number>` on the page URL sets the starting seed; the same seed and the same commands always produce the same world hash.
+`?seed=<number>` on the game URL sets the starting seed; `?new` skips the autosave. To test the security headers locally, run the nginx container from `deploy/cloudflare-pages.md` (Verification section); the Vite servers do not enforce them.
 
 ## How to deploy an update
-Primary, Cloudflare Pages (`deploy/cloudflare-pages.md`):
+Hosting is Cloudflare Workers static assets (the successor to Pages): no Worker code, asset requests are free and unlimited, headers from `public/_headers`, custom domains declared in `wrangler.jsonc`. Runbook: `deploy/cloudflare-pages.md`.
 
 ```bash
-npm run build
-npx wrangler@latest pages deploy dist --project-name hundred-stories
+npm run deploy    # npm run build && npx wrangler deploy (wrangler 4.135.0, pinned)
 ```
 
-`npm run deploy:pages` does both in one step. The dashboard path that connects a git repo needs the public GitHub mirror, which does not exist yet, so direct upload is the path that works today. Verify with `curl -sI https://hundredstories.xyz/` for the headers from `public/_headers`, then install the site as a PWA from the browser prompt.
+Before deploying, load `/play/` from the nginx container in headless Chrome and check the console for `Refused` or `unsafe-eval`; that is the check that would have caught the first live defect. Verify after: `curl -sI https://hundredstories.xyz/` shows the five headers, `/nope` is 404, `http://` redirects to https.
 
-Fallback, pi3 (`deploy/README.md`): copy `deploy/.env.example` to `deploy/.env`, set `SITE_HOST`, run `deploy/deploy.sh` (build, rsync to pi3, compose up, curl checks). Use `deploy/deploy.sh --no-up` to stage files before DNS and TLS exist.
+Fallback, pi3 (`deploy/README.md`): copy `deploy/.env.example` to `deploy/.env`, set `SITE_HOST`, run `deploy/deploy.sh`.
 
 ## How to roll back
-Rehearsed on 2026-09-19 at this ship: checked out the previous known-good commit `df9d853`, ran `npm run build` (green) and `npx vitest run` (382 passed, 18 files) from it, then returned to `main` at `98f2899` with a clean worktree. The ship is tagged `ship-2026-09-19`.
+Rehearsed on 2026-09-19 at this ship: tagged `ship-2026-09-19b`, checked out the previous ship tag `ship-2026-09-19` (commit `f734da8`), ran `npm run build` (green) and `npx vitest run` (382 passed, 18 files) from it, then returned to `main` at `2252a5c` with a clean worktree.
 
-- Cloudflare Pages: open the project's Deployments list and promote a previous deployment to production. Or check out the previous tag, `npm run build`, and `npx wrangler@latest pages deploy dist --project-name hundred-stories`.
-- pi3: `deploy.sh` snapshots the live tree to `/opt/hundred-stories/html.prev` before every sync; the swap command that restores it is in `deploy/README.md` under Rollback. No container restart is needed; nginx serves off the bind mount.
-- Return target for this ship: `git checkout ship-2026-09-19`. The next ship inherits this tag as a real rollback target; before it there was none.
+- Cloudflare: `npx wrangler rollback` returns the live site to the previous uploaded version; `npx wrangler versions list` shows the versions. Or check out the previous tag and `npm run deploy`.
+- pi3: `deploy.sh` snapshots the live tree to `html.prev` before every sync; the swap is in `deploy/README.md` under Rollback.
+- Return target for this ship: `git checkout ship-2026-09-19b`. Previous good state: `ship-2026-09-19`.
 
 ## Known limitations and accepted risks
-No finding was accepted; nothing is on the accepted risks list. Everything below is OUTSTANDING work, tracked by an open finding in `.itworks/REVIEWS.md`.
+No finding was accepted; the accepted risks list is empty. Every finding in `.itworks/REVIEWS.md` is closed with evidence.
 
-- RESOLVED 2026-09-19: the GitHub mirror now exists at https://github.com/parallaxintelligencepartnership/hundred-stories, public so the itworks.build wall can link it. Cloudflare Pages itself accepts private repos, so the dashboard path in `deploy/cloudflare-pages.md` could have been connected either way; direct upload remains the path used so far.
-- OUTSTANDING: the domain `hundredstories.xyz` is not bought and the site is not live. Nothing is deployed anywhere yet; this ship is the closeout, not the go-live.
-- OUTSTANDING: the security headers in `public/_headers` have never been checked as actually served, because there is no domain to curl. The pi3 fallback headers are unchecked for the same reason (Traefik's security-headers middleware replaces rather than appends).
-- OUTSTANDING: offline PWA install and offline play are unverified. The service worker precaches 17 entries at build time and the fonts have a runtime caching rule, but no one has installed the app and cut the network.
-- OUTSTANDING: the deploy path pulls `npx wrangler@latest`, an unpinned publisher tool, so two deploys of the same commit can run different code.
-- OUTSTANDING: audit coverage gaps carried from the 2026-09-19 audit, all browser-only: WebGL-unavailable fallback, the file picker import path, the renderer itself (no unit tests by the decision in `docs/DESIGN.md` section 11), and persistence across a real browser restart beyond the one live Chrome reload already recorded.
-- Verified: a Chrome extension pass drove the real game in a real browser (tower, sims, HUD, save and reload). The simulation, save format, economy, elevators and stars are covered headlessly by 382 tests, and the sweep's mutation probe confirmed the suite bites.
-- Backups: there is no server-side data to back up. The player's tower lives in their browser (IndexedDB, localStorage fallback) and their own exported JSON files; the export and import round trip is test-covered, and clearing browser data with no export loses the tower.
+- Mobile is desktop-first by decision: the landing and guide are responsive, the game loads on a phone with the palette docked at the bottom, but there is no pinch zoom or touch-tuned building. The site says so.
+- The PWA install click in the browser's address bar is outside what the browser tools can drive; installability was verified from the page (controlling service worker, manifest with standalone display, maskable icons) and the offline reload was proven live, but the install button itself is the owner's to press.
+- The two-line wordmark and the share image are procedural PNG/SVG from `scripts/make-wordmark.mjs` and `scripts/make-og.mjs`; regenerate after any palette change.
+- Backups: there is no server-side data. The player's tower lives in their browser (IndexedDB, localStorage fallback) and their own exported JSON files; export and import are test-covered and were driven live in Chrome, and clearing browser data with no export loses the tower.
 
 ## What breaks first and how you'd know
-Elevator wait under load, first. Sims give up and leave when their wait passes the black stress threshold, so a tall tower with too few shafts sheds tenants; the signal is the evaluation and population numbers in the HUD falling while rooms sit vacant, and event log lines naming the wait as the reason. Two slower failures to watch: a save format version bump orphans saved towers, and the browser refuses the file with its reason rather than corrupting the current game (`src/sim/save.ts`); and the display fonts come from Google Fonts under a CSP that names `fonts.googleapis.com` and `fonts.gstatic.com`, so if the font host ever changes the stylesheet is blocked and the game renders in system fonts, visible as a sudden plain-text look and a CSP violation in the browser console.
+A PixiJS upgrade that changes how it compiles shaders, first. The site's Content Security Policy forbids eval, and the renderer only starts because `src/render/renderer.ts` loads `pixi.js/unsafe-eval` before anything else; if an upgrade moves that requirement, `/play/` shows "The page's security policy blocked the tower renderer" and the browser console logs `unsafe-eval`. The pre-deploy nginx container check catches it before it is live. Second, elevator wait under load: sims leave when their wait passes the black threshold, visible as population and evaluation falling while rooms sit vacant, with event log lines naming the wait. Third, the display fonts come from Google Fonts under the CSP; a host change renders the game in system fonts with a CSP violation in the console.
 
 ## Where things live
-- Code: `/Users/matthew/parallax-private/Projects/hundred-stories`. `src/sim` pure deterministic simulation, `src/render` PixiJS scene, `src/ui` DOM overlay, `src/game` the shell that wires them, `tests/` the vitest suite, `docs/` DESIGN and VISUAL, `deploy/` the pi3 package. Full layout in `.itworks/MAP.md`.
-- Origin: self-hosted Gitea at `git.parallaxintelligence.xyz/ParallaxIntelligence/hundred-stories`. No public mirror yet.
-- Deploy docs: `deploy/cloudflare-pages.md` (primary) and `deploy/README.md` (pi3 fallback). Headers in `public/_headers` and `deploy/nginx.conf`, kept byte-identical.
-- Database: none. No server, no backend, no ports of its own. Player saves are in the browser (IndexedDB, localStorage fallback) and exported files.
-- Secrets: none. There is no `.env` in this project, no key anywhere in the tree or in git history, and no paid service.
-- Project state: `.itworks/` holds PROJECT.md, MAP.md, DECISIONS.md, REVIEWS.md, LANES.md and PROFILE.md; REVIEWS.md is the finding record this document is built from.
+- Code: `/Users/matthew/parallax-private/Projects/hundred-stories`. `src/sim` pure simulation, `src/render` PixiJS scene and input classification, `src/ui` DOM overlay, `src/game` the shell, `src/site` landing hero and stylesheet, `index.html`, `how-to-play/`, `play/`, `404.html` the pages, `tests/` the vitest suite, `docs/` DESIGN, VISUAL and LANDING-SPEC, `deploy/` runbooks and the pi3 package, `scripts/` icon, wordmark and share-image generators. Full layout in `.itworks/MAP.md`.
+- Origin: self-hosted Gitea at `git.parallaxintelligence.xyz/ParallaxIntelligence/hundred-stories`. Public mirror: https://github.com/parallaxintelligencepartnership/hundred-stories.
+- Hosting: Cloudflare Workers static assets, project `hundred-stories`, domains hundredstories.xyz and www from `wrangler.jsonc`; the workers.dev copy is switched off. DNS zone on Cloudflare, registrar Spaceship.
+- Database: none. No server, no backend, no ports of its own.
+- Secrets: none in the tree or in git history (swept at this closeout). Wrangler's own login lives in its config on the deploying Mac.
+- Project state: `.itworks/` holds PROJECT.md, MAP.md, DECISIONS.md, REVIEWS.md and PROFILE.md; REVIEWS.md is the finding record this document is built from.
 
 ## Ship history
 - 2026-09-19: first ship (closeout; deploy pending domain)
-- Published: entry dluwwu4f2vop | https://github.com/parallaxintelligencepartnership/itworks-site/pull/2 | 2026-09-19
 - 2026-09-19: post-ship checkpoint, people rescaled and interiors redrawn
+- 2026-09-19: second ship, live at https://hundredstories.xyz: landing site with SEO and Parallax structured data, game at /play/, sprite wordmark, camera controls, AGPL licence, public GitHub mirror, Workers static assets hosting, CSP fix for PixiJS; tag ship-2026-09-19b
