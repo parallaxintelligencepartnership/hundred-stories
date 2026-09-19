@@ -1,15 +1,29 @@
 # Map
 
 ## Run
-npm run dev (Vite dev server); no env vars needed
+npm run dev (vite; serves on http://localhost:5173); npm run build (tsc --noEmit && vite build) then npm run preview for the static bundle; no env vars needed
 
 ## Test
-npm test (vitest run); one file: npx vitest run <path>
+npm test (vitest run); one file: npx vitest run <path>; npm run typecheck (tsc --noEmit)
 
 ## Layout
 | Path | What lives there |
 |---|---|
-| (filled at first checkpoint) | |
+| index.html | page shell; the only script tag loads src/main.ts |
+| src/main.ts | entry point: reads the seed from the query string, boots game, renderer and UI, shows the WebGL message on failure; ?smoke boots the demo world instead |
+| src/sim/ | the pure simulation, no DOM: rules.ts tables, types.ts and the clock, tick.ts tick order, build, economy, elevators, evaluation, events, people, routing, stars, rng |
+| src/sim/save.ts | save format v1: serialize, deserialize with its refusal reasons, and the FNV-1a world hash |
+| src/game/game.ts | game shell: owns the world, the timer loop, tools, pointer input, save/load/export/import wiring |
+| src/game/api.ts | the contract the UI is allowed to use |
+| src/game/storage.ts | the browser save slot: IndexedDB first, localStorage as the fallback |
+| src/render/ | PixiJS scene: renderer.ts, camera.ts, art.ts procedural sprites, sky.ts, smoke.ts hand built demo world |
+| src/ui/ | DOM overlay: ui.ts shell, input and notices, panels.ts HUD panels including save, export and import, format.ts, ui.css |
+| public/icons/, scripts/make-icons.mjs | PWA icons and the script that draws them |
+| vite.config.ts | Vite build, the vitest include glob, and the vite-plugin-pwa manifest and service worker |
+| tests/ | vitest suite: sim/ unit tests, scenarios/ scripted tower runs plus helpers.ts, render/, ui/, harness.test.ts |
+| deploy/ | pi3 static stack: compose.yml, nginx.conf, deploy.sh with rollback, README runbook, .env.example |
+| docs/ | BRIEF-AGENTS.md implementer brief, DESIGN.md rules and tick order, VISUAL.md art direction |
+| dist/ | build output, gitignored; rebuilt by npm run build |
 
 ## Environment
 - Dev machine: Matt's Mac, arm64 macOS 27, Node 26, npm 11
@@ -18,3 +32,4 @@ npm test (vitest run); one file: npx vitest run <path>
 
 ## Gotchas
 - 2026-09-18 | pi1/pi2/pi3 are x86_64 servers named for Parallax Intelligence, not Raspberry Pis | run uname -m before any architecture decision
+- 2026-09-19 | the entry point serves a fake demo tower at any URL carrying ?smoke, and that code is in the production bundle | never share a ?smoke link as the game, and strip or dev-gate the import before ship

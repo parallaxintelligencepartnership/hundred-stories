@@ -24,7 +24,7 @@ PWA: web manifest plus service worker (vite-plugin-pwa)
 Hosting target: static files on pi3 (x86_64 Ubuntu 24.04) behind Traefik; domain to be chosen by Matt at deploy time
 
 ## Data
-Real data: none server side | Sample data: scripted tower builds under tests/fixtures used by the headless simulation tests | Sensitive: no; save games live only in the player's browser (IndexedDB) and in files they export themselves
+Real data: none server side | Sample data: scripted tower builds under tests/scenarios (helpers.ts plus the scripted runs) used by the headless simulation tests | Sensitive: no; save games live only in the player's browser (IndexedDB) and in files they export themselves
 
 ## Where it will live
 internet - exposure notes: static site on pi3 behind Traefik with the standard security headers; no backend, no ports of its own; also installable offline as a PWA - paid services: none (no LLM calls, no payments, no maps)

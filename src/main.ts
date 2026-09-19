@@ -5,7 +5,7 @@ import { createGame } from './game/game';
 async function boot(): Promise<void> {
   const app = document.getElementById('app');
   if (!app) throw new Error('Missing #app');
-  if (new URLSearchParams(location.search).has('smoke')) {
+  if (import.meta.env.DEV && new URLSearchParams(location.search).has('smoke')) {
     const { bootSmoke } = await import('./render/smoke');
     await bootSmoke();
     return;

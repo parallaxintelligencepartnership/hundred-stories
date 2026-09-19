@@ -20,12 +20,16 @@ Color (chrome):
 - indicator `#8ff0c0` segmented readouts only
 - alert `#ff5c4d` fire, bomb, black stress, destructive confirmations
 
-Color (world, procedural art):
-- sky keyframes by minute of day: night `#070b1a`, dawn `#f0a070` over `#4a5a9a`, day `#8fc4f0` over `#d8ecfa`, dusk `#f06a4a` over `#2a2f6a`
-- slab `#2f3238`, slab edge `#4a4e57`
-- window unlit `#1a2233`, window lit warm `#ffd27a`, window lit office `#cfe6ff`
-- room wall palette per kind, muted and desaturated so lit windows and stress tints carry the signal
-- stress tints on sims: calm none, pink `#ff9ad5`, red `#ff4d4d`, black `#101010`
+Color (world, procedural art), corrected 2026-09-19 after Matt saw the first build ("doesn't look anything like SimTower used to"). The world must read like the original: bright, flat, high contrast, daytime dominant.
+- sky: day `#9fd3f5` at the top to `#dcefff` at the horizon, flat with no haze; dawn and dusk are short transitions (about one game hour each) through `#f6b98a` and `#e08a7a`; night `#0d1b3d` to `#1c2f5c`, never black
+- horizon: one low distant skyline strip, 24 px, `#b9cfe0`, no tall silhouettes, no parallax city
+- underground: concrete gray `#6b6f78` with floor lines `#4c5058`, not brown or black
+- slab `#e6e6e6` with a 1 px `#333333` edge; every room cell has a 1 px `#222222` outline so rooms read as bright cells like the original
+- room walls: office `#f7f5ee`, condo `#f2e8d8`, hotel `#eef2f7`, fast food `#fff1c9`, restaurant `#f3e3e3`, shop `#e9f2e4`, cinema `#2b2b3a` (dark by nature), party hall `#f5e8f2`, medical `#f2f8f7`, security `#e4e8ee`, housekeeping `#eeeae2`, parking `#8d9199`, recycling `#dfe6dc`, metro `#c9ced8`, cathedral `#f4efe4`, lobby white marble `#f8f8f6` with `#3a3a3a` columns
+- windows: day `#7fb6e0`, night lit `#ffd866`, unlit night `#2a3550`
+- shafts: `#d8dbe0` rails on `#3b3f47` cavity, cars `#f0c419` with a dark door line
+- sims: black `#111111` figures; pink `#ff7ad9` and red `#ff2d2d` by stress band; sims are the only saturated moving color besides cars
+- ghost green `#5fd38a`, refused red `#ff5c4d`; the chrome keeps the steel tokens above, and the contrast between dark chrome and bright world is the composition
 
 Type:
 - Display and UI: Bricolage Grotesque (Google Fonts), weights 400 and 600. Panel titles at 600, everything else 400.
