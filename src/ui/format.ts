@@ -82,6 +82,11 @@ export function formatFloor(floor: number): string {
   return floor < 0 ? `Basement ${Math.abs(floor)}` : `Floor ${floor}`;
 }
 
+/** The compact form for the cursor readout: "Floor 12" above ground, "B3" below it. */
+export function formatFloorShort(floor: number): string {
+  return floor < 0 ? `B${Math.abs(floor)}` : `Floor ${floor}`;
+}
+
 export function formatFloorRange(floorMin: number, floorMax: number): string {
   return `${formatFloor(floorMin)} to ${formatFloor(floorMax).toLowerCase()}`;
 }

@@ -7,6 +7,7 @@ import {
   formatCount,
   formatDate,
   formatFloor,
+  formatFloorShort,
   formatMoney,
   formatPercent,
   formatTimestamp,
@@ -125,6 +126,12 @@ describe('small readouts', () => {
     expect(formatFloor(1)).toBe('Floor 1');
     expect(formatFloor(12)).toBe('Floor 12');
     expect(formatFloor(-2)).toBe('Basement 2');
+  });
+
+  it('shortens the floor under the cursor', () => {
+    expect(formatFloorShort(12)).toBe('Floor 12');
+    expect(formatFloorShort(1)).toBe('Floor 1');
+    expect(formatFloorShort(-3)).toBe('B3');
   });
 
   it('rounds evaluation to whole percent', () => {

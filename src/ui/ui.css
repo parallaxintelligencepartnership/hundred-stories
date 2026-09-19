@@ -24,7 +24,7 @@
   --size-28: 28px;
 
   --top-h: 44px;
-  --palette-w: 200px;
+  --palette-w: 232px;
   --ticker-h: 28px;
   --panel-w: 300px;
   --pad: 8px;
@@ -137,6 +137,10 @@ button.hs-readout:hover {
   color: var(--amber);
 }
 
+.hs-readout.is-hidden {
+  display: none;
+}
+
 .hs-readout-sub {
   font-size: var(--size-12);
   color: var(--ink-dim);
@@ -197,6 +201,7 @@ button.hs-readout:hover {
   bottom: var(--ticker-h);
   left: 0;
   width: var(--palette-w);
+  overflow-x: hidden;
   overflow-y: auto;
   background: var(--steel);
   border-right: 1px solid var(--line);
@@ -218,6 +223,7 @@ button.hs-readout:hover {
   justify-content: space-between;
   gap: var(--pad);
   width: 100%;
+  max-width: 100%;
   padding: 6px var(--pad) 6px 16px;
   background: transparent;
   border: 0;
@@ -242,7 +248,16 @@ button.hs-readout:hover {
   cursor: default;
 }
 
+.hs-tool-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .hs-tool-cost {
+  flex: 0 0 78px;
   font-family: var(--font-readout);
   font-size: var(--size-12);
   text-align: right;
@@ -250,7 +265,33 @@ button.hs-readout:hover {
 }
 
 .hs-tool.is-locked .hs-tool-cost {
+  /* "Needs 3 stars" is wider than the price column, so this one sizes to its text. */
+  flex: 0 0 auto;
   font-family: var(--font-ui);
+}
+
+/* Scrolling chrome: a hairline scrollbar, never a system slab. */
+
+.hs-palette,
+.hs-panel {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) var(--steel);
+}
+
+.hs-palette::-webkit-scrollbar,
+.hs-panel::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.hs-palette::-webkit-scrollbar-track,
+.hs-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.hs-palette::-webkit-scrollbar-thumb,
+.hs-panel::-webkit-scrollbar-thumb {
+  background: var(--line);
 }
 
 /* Panels --------------------------------------------------------------- */
@@ -262,6 +303,7 @@ button.hs-readout:hover {
   bottom: var(--ticker-h);
   width: var(--panel-w);
   max-width: 100%;
+  overflow-x: hidden;
   overflow-y: auto;
   background: var(--steel);
   border-left: 1px solid var(--line);

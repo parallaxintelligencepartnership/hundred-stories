@@ -11,6 +11,7 @@ import {
   formatClock,
   formatCount,
   formatDate,
+  formatFloorShort,
   formatMoney,
   formatTimestamp,
   starsGlyphs,
@@ -92,7 +93,12 @@ export function createUi(root: HTMLElement, game: GameApi): Ui {
   const clockReadout = el('div', 'hs-readout');
   clockReadout.append(clockValue, dateValue);
 
-  readouts.append(cashButton, popReadout, starsReadout, clockReadout);
+  const hoverValue = el('span', 'hs-readout-value');
+  const hoverReadout = el('div', 'hs-readout is-hidden');
+  hoverReadout.title = 'Floor under the cursor';
+  hoverReadout.append(hoverValue);
+
+  readouts.append(cashButton, popReadout, starsReadout, clockReadout, hoverReadout);
 
   const speedBar = el('div', 'hs-speed');
   speedBar.setAttribute('role', 'group');
@@ -185,6 +191,10 @@ export function createUi(root: HTMLElement, game: GameApi): Ui {
     }
     setText(clockValue, formatClock(world.time.minute));
     setText(dateValue, formatDate(world.time.minute));
+
+    const hover = game.getHover();
+    hoverReadout.classList.toggle('is-hidden', hover === null);
+    if (hover) setText(hoverValue, formatFloorShort(hover.floor));
 
     const speed = game.getSpeed();
     for (const entry of speedButtons) {
@@ -415,6 +425,7 @@ function addRow(
 ): PaletteRow {
   const node = button('', 'hs-tool', () => onPick(tool));
   const cost = el('span', 'hs-tool-cost', costText);
+  node.title = label;
   node.replaceChildren(el('span', 'hs-tool-label', label), cost);
   node.setAttribute('aria-pressed', 'false');
   palette.append(node);
