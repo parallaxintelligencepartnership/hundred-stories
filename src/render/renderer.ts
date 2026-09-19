@@ -100,6 +100,8 @@ export interface Renderer {
    * re-frames the opening shot around the new band.
    */
   setChrome(topPx: number, bottomPx: number): void;
+  /** A still image of the current view, for sharing. Throws if extraction fails. */
+  snapshot(): HTMLCanvasElement;
   destroy(): void;
 }
 
@@ -1363,6 +1365,9 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
         fadeLeft = 0;
         fadeCover.visible = false;
       }
+    },
+    snapshot(): HTMLCanvasElement {
+      return app.renderer.extract.canvas({ target: app.stage }) as HTMLCanvasElement;
     },
     destroy(): void {
       app.canvas.removeEventListener('pointerdown', onPointerDown);

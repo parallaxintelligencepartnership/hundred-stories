@@ -5,6 +5,7 @@
 import './ui.css';
 
 import type { GameApi, Placement, Speed, Tool } from '../game/api';
+import type { Renderer } from '../render/renderer';
 import { ROOMS, SHAFTS } from '../sim/rules';
 import type { Command, LogEntry, RoomKind, ShaftKind, Star } from '../sim/types';
 import {
@@ -24,6 +25,7 @@ import {
   createLogPanel,
   createQueryPanel,
   createSettingsPanel,
+  createSharePanel,
   el,
 } from './panels';
 import type { PanelContext, PanelElement } from './panels';
@@ -33,7 +35,7 @@ export interface Ui {
   update(): void;
 }
 
-type PanelKind = 'none' | 'finances' | 'log' | 'settings';
+type PanelKind = 'none' | 'finances' | 'log' | 'settings' | 'share';
 
 interface PaletteRow {
   node: HTMLButtonElement;
@@ -130,7 +132,7 @@ export function nextHintSeen(stored: string | null): { show: boolean; seen: numb
   return { show: seen < HINT_LOADS, seen: Math.min(seen + 1, HINT_LOADS) };
 }
 
-export function createUi(root: HTMLElement, game: GameApi): Ui {
+export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): Ui {
   ensureFonts();
 
   let reducedMotion = readReducedMotion();
@@ -196,10 +198,13 @@ export function createUi(root: HTMLElement, game: GameApi): Ui {
     return { node, speed };
   });
 
+  const shareButton = button('Share', 'hs-btn', () =>
+    setPanel(panelKind === 'share' ? 'none' : 'share'),
+  );
   const menuButton = button('Menu', 'hs-btn', () =>
     setPanel(panelKind === 'settings' ? 'none' : 'settings'),
   );
-  actions.append(speedBar, menuButton);
+  actions.append(speedBar, shareButton, menuButton);
 
   // Palette: a building directory board, with a header row that folds it away.
   const palette = el('nav', 'hs-palette');
@@ -497,7 +502,9 @@ export function createUi(root: HTMLElement, game: GameApi): Ui {
           ? createLogPanel(game, ctx)
           : panelKind === 'settings'
             ? createSettingsPanel(game, ctx)
-            : createQueryPanel(game, selection ?? {}, ctx);
+            : panelKind === 'share'
+              ? createSharePanel(game, renderer, ctx)
+              : createQueryPanel(game, selection ?? {}, ctx);
 
     mountedPanel = panel;
     panelSlot.append(panel);

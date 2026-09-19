@@ -245,6 +245,12 @@ p {
   color: var(--w-text);
 }
 
+.challenge {
+  margin: 0 0 8px;
+  color: var(--amber);
+  font-weight: 600;
+}
+
 .hero-panel h1 {
   color: var(--w-text);
 }

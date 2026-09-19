@@ -60,7 +60,7 @@ export async function boot(app: HTMLElement, deps: BootDeps = defaultDeps): Prom
     return;
   }
   game.attach(renderer, view);
-  const ui = deps.createUi(uiRoot, game);
+  const ui = deps.createUi(uiRoot, game, renderer);
   game.subscribe(() => ui.update());
   game.start();
 }
