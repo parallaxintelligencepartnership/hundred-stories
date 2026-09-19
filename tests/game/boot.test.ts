@@ -65,6 +65,23 @@ describe('boot', () => {
     expect(app.children.length).toBeGreaterThan(0);
   });
 
+  it('shows a security-policy message (not the WebGL message) when the renderer rejects with a CSP unsafe-eval error', async () => {
+    const app = fakeApp();
+    await boot(
+      app,
+      baseDeps({
+        createRenderer: async () => {
+          throw new Error('Current environment does not allow unsafe-eval, please use pixi.js/unsafe-eval module');
+        },
+      }),
+    );
+    const view = (app as unknown as { querySelector(s: string): HTMLElement | null }).querySelector('#view');
+    expect(view?.textContent).toBe(
+      "The page's security policy blocked the tower renderer. This is a site bug, not your browser. Please reload later.",
+    );
+    expect(view?.textContent).not.toBe('This browser cannot draw the tower. WebGL is required.');
+  });
+
   it('shows the offline first-load message when offline with no service worker controller', async () => {
     const app = fakeApp();
     await boot(app, baseDeps({ online: () => false, hasController: () => false }));

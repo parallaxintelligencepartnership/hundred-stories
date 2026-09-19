@@ -52,7 +52,10 @@ export async function boot(app: HTMLElement, deps: BootDeps = defaultDeps): Prom
   try {
     renderer = await deps.createRenderer(view, game.world);
   } catch (e) {
-    view.textContent = 'This browser cannot draw the tower. WebGL is required.';
+    const message = String((e as { message?: unknown })?.message ?? e);
+    view.textContent = message.includes('unsafe-eval')
+      ? "The page's security policy blocked the tower renderer. This is a site bug, not your browser. Please reload later."
+      : 'This browser cannot draw the tower. WebGL is required.';
     console.error(e);
     return;
   }
