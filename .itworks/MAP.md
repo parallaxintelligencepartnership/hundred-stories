@@ -19,7 +19,7 @@ npm test (vitest run); one file: npx vitest run <path>; npm run typecheck (tsc -
 | src/game/game.ts | game shell: owns the world, the timer loop, tools, pointer input, save/load/export/import wiring |
 | src/game/api.ts | the contract the UI is allowed to use |
 | src/game/storage.ts | the browser save slot: IndexedDB first, localStorage as the fallback |
-| src/render/ | PixiJS scene: renderer.ts, camera.ts, art.ts procedural sprites, sky.ts, smoke.ts hand built demo world |
+| src/render/ | PixiJS scene: renderer.ts, camera.ts, input.ts press and wheel classification, art.ts procedural sprites, sky.ts, smoke.ts hand built demo world (also drives the landing hero) |
 | src/ui/ | DOM overlay: ui.ts shell, input and notices, panels.ts HUD panels including save, export and import, format.ts, ui.css |
 | public/icons/, scripts/make-icons.mjs | PWA icons and the script that draws them |
 | public/og.png, scripts/make-og.mjs | the 1200x630 link preview card and the dependency free script that draws it |
@@ -37,5 +37,6 @@ npm test (vitest run); one file: npx vitest run <path>; npm run typecheck (tsc -
 
 ## Gotchas
 - 2026-09-18 | pi1/pi2/pi3 are x86_64 servers named for Parallax Intelligence, not Raspberry Pis | run uname -m before any architecture decision
-- 2026-09-19 | the entry point serves a fake demo tower at any URL carrying ?smoke, and that code is in the production bundle | never share a ?smoke link as the game, and strip or dev-gate the import before ship
+- 2026-09-19 | the entry point serves a fake demo tower at ?smoke in dev only (gated on import.meta.env.DEV); the same demo world is deliberately in the landing bundle as the hero | never share a ?smoke link as the game, never remove the DEV gate in src/main.ts
+- 2026-09-19 | headless Chrome with --disable-gpu still renders WebGL through the software path | to test the no-WebGL message use --disable-3d-apis
 - 2026-09-19 | the closeout published to itworks.build on the strength of a kickoff wish, with 3 IMPORTANT and 1 ADVISORY still open; Matt had not approved it | never publish to the wall without an explicit per-publish yes from Matt and an empty findings list

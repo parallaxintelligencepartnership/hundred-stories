@@ -71,3 +71,13 @@ Scope: closeout sweep, 98f2899, five lens runbooks + history audit. Not covered:
 Scope: diff 98f2899..edef508.
 ### Findings
 - [x] ADVISORY | testing | render changes verified by the sim-art and floors harnesses plus a live Chrome pass at zoom 2 | Closed 2026-09-19: npx vitest run tests/render 31 passed
+
+## Checkpoint 2026-09-19c - landing site, /play/ move, wordmark, camera controls - lenses: testing, production-readiness
+Scope: diff edef508..c9a78b8. Not covered: code outside the diff, application logic. Dependency vetting: no dependency added or changed (package.json diff is the licence field, the og script and the wrangler pin). Last audit: 2026-09-19 @047d32b.
+### Evidence
+- testing: npm test 23 files, 416 passed. Mutations red then green: input.ts slop comparison (2 failed then 7 passed), camera.ts ensureFloorVisible early return (2 failed then 23 passed), ui.ts hint decision (2 failed then 3 passed). Failure paths covered: press at exactly 4 px is a click and 5 px is a pan; wheel without ctrl does not zoom; follow is a no-op when the floor is already visible; landing asserts og:image, canonical, ld+json, twitter card, the /play/ link and no game script on the landing.
+- production-readiness: package-lock.json tracked, no ^ or ~ ranges; errors recorded (main.ts:38 console.error on renderer failure, hero.ts:54 and :131 console.warn); deploy story in deploy/cloudflare-pages.md; landing content present without JS (one h1, /play/ link); /play/ and /how-to-play/ return 200 on preview. Headless Chrome with --disable-gpu still renders WebGL through the software path, so that flag is NOT evidence for the WebGL-unavailable message; the open advisory's evidence line now names --disable-3d-apis.
+### Findings
+- [x] ADVISORY | testing | the settings panel and the guide said drag pans with any tool, but the lobby brush and the shaft tool keep the left drag (src/ui/panels.ts:48, how-to-play/index.html:172) | Closed 2026-09-19: copy corrected in c9a78b8, tests/ui and tests/site 35 passed
+- [ ] ADVISORY | testing | the hint's storage read and write are wrapped in try/catch so a blocked localStorage still shows the hint, but no test exercises the throw path (src/ui/ui.ts:521) | Evidence to close: a test in tests/ui/hint.test.ts stubs localStorage to throw and asserts the hint is shown, red before the wrapper and green after
+Plus 3 still open from the closeout and Checkpoint 1 (two need the live site, one is the browser probes).
