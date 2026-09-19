@@ -28,11 +28,11 @@ Before deploying, load `/play/` from the nginx container in headless Chrome and 
 Fallback, pi3 (`deploy/README.md`): copy `deploy/.env.example` to `deploy/.env`, set `SITE_HOST`, run `deploy/deploy.sh`.
 
 ## How to roll back
-Rehearsed on 2026-09-19 at the third ship: tagged `ship-2026-09-19c`, checked out the previous ship tag `ship-2026-09-19b` (commit `3a15899`), ran `npm run build` (green) and `npx vitest run` (459 passed, 26 files) from it, then returned to `main` at `3fbdae3` with a clean worktree.
+Rehearsed on 2026-09-19 at the fourth ship: tagged `ship-2026-09-19d`, checked out the previous ship tag `ship-2026-09-19c` (commit `3fbdae3`), ran `npm run build` (green) and `npx vitest run` (470 passed, 27 files) from it, then returned to `main` at `afbe687` with a clean worktree.
 
 - Cloudflare: `npx wrangler rollback` returns the live site to the previous uploaded version; `npx wrangler versions list` shows the versions. Or check out the previous tag and `npm run deploy`.
 - pi3: `deploy.sh` snapshots the live tree to `html.prev` before every sync; the swap is in `deploy/README.md` under Rollback.
-- Return target for this ship: `git checkout ship-2026-09-19c`. Previous good state: `ship-2026-09-19b`.
+- Return target for this ship: `git checkout ship-2026-09-19d`. Previous good state: `ship-2026-09-19c`.
 
 ## Known limitations and accepted risks
 No finding was accepted; the accepted risks list is empty. Every finding in `.itworks/REVIEWS.md` is closed with evidence.
