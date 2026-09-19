@@ -220,7 +220,7 @@ describe('scenario: growth over two quarters', () => {
   // In the growth run above this leaves 1,098 stale diners in world.sims after two
   // quarters, all of them walked by tickPeople every minute for the rest of the game.
   // Visitors who leave from the floor they arrived on are removed correctly.
-  it.fails('removes a visitor who rides an elevator on the way out', { timeout: 30_000 }, () => {
+  it('removes a visitor who rides an elevator on the way out', { timeout: 30_000 }, () => {
     const world = createWorld(SEED);
     world.cash = CONSTRUCTION_BUDGET;
     buildTower(world, [

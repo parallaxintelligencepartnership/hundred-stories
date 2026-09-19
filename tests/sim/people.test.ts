@@ -536,6 +536,58 @@ describe('leaving', () => {
     expect(office.vacant).toBe(true);
   });
 
+  it('removes a visitor that rides an elevator on the way out', () => {
+    const world = makeTower();
+    const shaft = makeShaft(world);
+    shaftRoutes(shaft.id);
+    const shop = makeRoom(world, 'shop', 5, 200);
+    const sim = makeSim(world, {
+      kind: 'shopper',
+      pos: { floor: 5, x: 206 },
+      state: 'inRoom',
+      inRoomId: shop.id,
+      stayUntil: world.time.minute,
+      schedule: [
+        { minuteOfDay: 0, days: ['weekday', 'weekend'], goal: { kind: 'room', roomId: shop.id }, stayMinutes: SCHEDULES.shopper.visitMinutes },
+      ],
+      nextScheduleIndex: 1,
+    });
+    shop.occupancy = 1;
+    const id = sim.id;
+
+    run(world, 1); // the visit ends and the sim heads for the door
+    expect(sim.exiting).toBe(true);
+
+    run(world, 5); // routed to the shaft, now waiting for a car
+    expect(sim.state).toBe('waiting');
+
+    // elevators.ts owns these writes: boarding and alighting overwrite the state.
+    sim.state = 'riding';
+    sim.inCarId = shaft.cars[0]?.id ?? null;
+    run(world, 1);
+    sim.pos = { floor: 1, x: shaft.x };
+    sim.inCarId = null;
+    sim.state = 'walking';
+    sim.route.shift();
+
+    run(world, 10);
+
+    expect(world.sims.has(id)).toBe(false);
+    expect(shop.occupancy).toBe(0);
+  });
+
+  it('does not park visitors outside when they cannot be routed anywhere', () => {
+    const world = makeTower();
+    makeRoom(world, 'shop', 1, 110);
+    mocks.findRoute.mockReturnValue(null);
+    setTime(world, 0, SCHEDULES.shopper.open);
+
+    run(world, 120);
+
+    expect(simsOfKind(world, 'shopper')).toHaveLength(0);
+    expect(world.sims.size).toBe(0);
+  });
+
   it('removes a shopper once its visit is over', () => {
     const world = makeTower();
     makeRoom(world, 'shop', 1, 110);

@@ -59,6 +59,7 @@ export function tickPeople(world: World): void {
   runHousekeeping(world, clock);
   runLeaving(world);
   moveSims(world);
+  retireOutsideSims(world);
   updateStress(world);
 }
 
@@ -264,6 +265,11 @@ function pickRoomOfKind(world: World, sim: Sim, kind: RoomKind): Room | undefine
 
 /** Head for the nearest entrance: visitors are removed there, tenants wait outside. */
 function leaveTower(world: World, sim: Sim): void {
+  // Visitors and tenants who are moving out never come back, and the intent has to
+  // outlive the transit state: boarding rewrites state to waiting, riding, then walking,
+  // so only this flag survives the trip. Tenants heading home for the night keep it
+  // clear, because they wait outside and return on tomorrow's schedule.
+  if (TRANSIENT_KINDS.has(sim.kind) || sim.state === 'leaving') sim.exiting = true;
   if (sim.inRoomId !== null) departRoom(world, sim);
   if (TRANSIENT_KINDS.has(sim.kind)) {
     sim.state = 'leaving';
@@ -350,6 +356,10 @@ function climbStairs(world: World, sim: Sim, leg: Extract<Leg, { kind: 'stairs' 
 }
 
 function enterRoom(world: World, sim: Sim, room: Room): void {
+  if (sim.exiting) {
+    leaveTower(world, sim);
+    return;
+  }
   if (COMMERCE_KINDS.has(room.kind) && room.occupancy >= ROOMS[room.kind].capacity) {
     leaveTower(world, sim);
     return;
@@ -374,7 +384,7 @@ function stayMinutesFor(sim: Sim, room: Room): number {
 
 /** A route that ended without an enter leg finished at an entrance. */
 function arriveWithoutRoom(world: World, sim: Sim): void {
-  if (sim.state === 'leaving') {
+  if (sim.exiting || sim.state === 'leaving') {
     finishLeave(world, sim);
     return;
   }
@@ -440,6 +450,7 @@ function retryHallCall(world: World, sim: Sim): void {
 
 function giveUp(world: World, sim: Sim): void {
   sim.stress = STRESS.giveUp;
+  sim.exiting = true;
   sim.route = [];
   sim.waitStart = null;
   sim.state = 'leaving';
@@ -453,7 +464,9 @@ function giveUp(world: World, sim: Sim): void {
 
 function runLeaving(world: World): void {
   for (const sim of [...world.sims.values()]) {
-    if (sim.state !== 'leaving' || sim.route.length > 0) continue;
+    if (sim.state !== 'leaving') continue;
+    sim.exiting = true; // evaluation.ts sets the state only
+    if (sim.route.length > 0) continue;
     if (sim.inRoomId !== null) departRoom(world, sim);
     const exit = nearestEntrance(world, sim.pos);
     if (!exit) {
@@ -480,8 +493,29 @@ function finishLeave(world: World, sim: Sim): void {
     home.tenants = home.tenants.filter((id) => id !== sim.id);
     if (home.tenants.length === 0 && (home.kind === 'office' || home.kind === 'condo')) home.vacant = true;
   }
+  const car = sim.inCarId !== null ? carById(world, sim.inCarId) : undefined;
+  if (car) car.passengers = car.passengers.filter((id) => id !== sim.id);
+  sim.inCarId = null;
   sim.state = 'gone';
+  delete sim.exiting;
   removeSim(world, sim.id);
+}
+
+function carById(world: World, carId: Id) {
+  for (const shaft of world.shafts.values()) {
+    for (const car of shaft.cars) if (car.id === carId) return car;
+  }
+  return undefined;
+}
+
+/** Nobody idles outside the tower: a sim out there is either a tenant waiting for tomorrow or finished. */
+function retireOutsideSims(world: World): void {
+  for (const sim of [...world.sims.values()]) {
+    if (sim.state !== 'outside') continue;
+    const homeGone = sim.homeRoomId !== null && !world.rooms.get(sim.homeRoomId);
+    const noPlanLeft = sim.homeRoomId === null && sim.nextScheduleIndex >= sim.schedule.length;
+    if (sim.exiting || homeGone || noPlanLeft) finishLeave(world, sim);
+  }
 }
 
 // ---------------------------------------------------------------------------
