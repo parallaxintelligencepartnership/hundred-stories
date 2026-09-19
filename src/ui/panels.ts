@@ -269,9 +269,16 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
   const cars = row('Cars', `${formatCount(shaft.cars.length)} of ${formatCount(rule.maxCars)}`);
   const riders = row('Riders', formatCount(shaft.cars.reduce((n, c) => n + c.passengers.length, 0)));
   body.append(cars, riders);
+  body.append(
+    el(
+      'p',
+      'hs-note',
+      `Shaft ${formatMoney(rule.shaftCost)} includes the first car. Extra cars ${formatMoney(rule.carCost)} each, up to ${rule.maxCars}.`,
+    ),
+  );
 
   const actions = el('div', 'hs-actions');
-  const add = button('Add car', 'hs-btn', () => {
+  const add = button(`Add car ${formatMoney(rule.carCost)}`, 'hs-btn', () => {
     ctx.apply({ kind: 'shaft.addCar', shaftId: shaft.id });
   });
   const remove = button('Remove car', 'hs-btn', () => {
@@ -327,7 +334,9 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
     setRowValue(cars, `${formatCount(shaft.cars.length)} of ${formatCount(rule.maxCars)}`);
     setRowValue(riders, formatCount(shaft.cars.reduce((n, c) => n + c.passengers.length, 0)));
     add.disabled = shaft.cars.length >= rule.maxCars;
+    add.title = add.disabled ? `This elevator already has ${shaft.cars.length} cars.` : '';
     remove.disabled = shaft.cars.length <= 1;
+    remove.title = remove.disabled ? 'An elevator needs at least one car.' : '';
     offerReach(extendUp, game.canExtend(shaftId, shaft.floorMin, stepFloor(shaft.floorMax, 1)), 'Reach one floor higher');
     offerReach(extendDown, game.canExtend(shaftId, stepFloor(shaft.floorMin, -1), shaft.floorMax), 'Reach one floor lower');
     for (const stop of stopButtons) {
