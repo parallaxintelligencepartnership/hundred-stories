@@ -212,7 +212,7 @@ describe('scenario: condos', () => {
   // days, while the identical condos at x 205 and beyond (the test above) sell on day 1.
   // Five lobby segments are enough to zero any quiet room above or below them, so hotel
   // rooms on floor 2 hit the same wall and their guests move out after a day.
-  it.fails('sells a condo built directly above the ground lobby', () => {
+  it('sells a condo built directly above the ground lobby', () => {
     const world = createWorld(SEED);
     buildTower(world, [
       ...lobbyRun(150, 200, [SHAFT_TILES]),
