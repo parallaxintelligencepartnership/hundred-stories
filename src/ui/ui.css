@@ -226,7 +226,8 @@ button.hs-readout:hover {
 
 .hs-palette {
   position: absolute;
-  top: calc(var(--top-h) + var(--safe-top));
+  /* Under the strip, whatever height it wrapped to. The fallback is the unwrapped strip. */
+  top: var(--top-actual, calc(var(--top-h) + var(--safe-top)));
   bottom: calc(var(--ticker-h) + var(--safe-bottom));
   left: 0;
   width: var(--palette-w);
@@ -328,7 +329,7 @@ button.hs-readout:hover {
 
 .hs-panel {
   position: absolute;
-  top: calc(var(--top-h) + var(--safe-top));
+  top: var(--top-actual, calc(var(--top-h) + var(--safe-top)));
   right: 0;
   bottom: calc(var(--ticker-h) + var(--safe-bottom));
   width: var(--panel-w);
@@ -682,7 +683,7 @@ button.hs-readout:hover {
 
   /* The palette owns the bottom of a phone screen, so the hint sits under the top strip. */
   .hs-hint {
-    top: calc(var(--top-h) * 2 + var(--safe-top) + var(--pad));
+    top: calc(var(--top-actual, calc(var(--top-h) * 2 + var(--safe-top))) + var(--pad));
     bottom: auto;
   }
 

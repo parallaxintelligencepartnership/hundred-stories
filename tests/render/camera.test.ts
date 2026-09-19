@@ -340,6 +340,11 @@ describe('groundLineFor', () => {
     expect(groundLineFor(PHONE_MAX_WIDTH_PX + 1)).toBe(DEFAULT_GROUND_LINE);
   });
 
+  it('treats a viewport nobody has measured as a desktop, not as a phone', () => {
+    expect(groundLineFor(0)).toBe(DEFAULT_GROUND_LINE);
+    expect(groundLineFor(Number.NaN)).toBe(DEFAULT_GROUND_LINE);
+  });
+
   it('lifts it on a phone, where the palette sheet owns the bottom of the screen', () => {
     expect(groundLineFor(390)).toBe(PHONE_GROUND_LINE);
     expect(groundLineFor(PHONE_MAX_WIDTH_PX)).toBe(PHONE_GROUND_LINE);

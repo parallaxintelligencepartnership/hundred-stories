@@ -45,6 +45,7 @@ export const PHONE_MAX_WIDTH_PX = 720;
  * the ground the player has to build on behind the sheet, with nothing but sky in the gap.
  */
 export function groundLineFor(viewportWidth: number): number {
+  if (!(viewportWidth > 0)) return DEFAULT_GROUND_LINE; // a viewport nobody has measured is not a phone
   return viewportWidth <= PHONE_MAX_WIDTH_PX ? PHONE_GROUND_LINE : DEFAULT_GROUND_LINE;
 }
 

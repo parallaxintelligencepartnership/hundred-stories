@@ -3,6 +3,7 @@
 // whole gesture to the camera. The renderer and the browser are faked, so this runs in node.
 import { describe, expect, it, vi } from 'vitest';
 import { createGame } from '../../src/game/game';
+import { DEFAULT_GROUND_LINE } from '../../src/render/camera';
 import type { Renderer } from '../../src/render/renderer';
 
 vi.mock('../../src/game/storage', () => ({
@@ -31,12 +32,17 @@ function fakeHost(): { el: HTMLElement; fire(type: string, event: unknown): void
 }
 
 /** Eight screen pixels to the tile, everything on floor 2: enough to place a room by hand. */
-function fakeRenderer(): { renderer: Renderer; followed: number[]; toolDrag: boolean[] } {
+function fakeRenderer(): { renderer: Renderer; followed: number[]; toolDrag: boolean[]; groundLines: number[] } {
   const followed: number[] = [];
   const toolDrag: boolean[] = [];
+  const groundLines: number[] = [];
   const renderer = {
     render: () => {},
-    camera: { centerOn: () => {}, ensureFloorVisible: (floor: number) => followed.push(floor) },
+    camera: {
+      centerOn: () => {},
+      ensureFloorVisible: (floor: number) => followed.push(floor),
+      setGroundLine: (fraction: number) => groundLines.push(fraction),
+    },
     screenToTile: (sx: number) => ({ floor: 2, x: Math.floor(sx / 8) }),
     setGhost: () => {},
     setSelection: () => {},
@@ -46,7 +52,7 @@ function fakeRenderer(): { renderer: Renderer; followed: number[]; toolDrag: boo
     setReducedMotion: () => {},
     destroy: () => {},
   } as unknown as Renderer;
-  return { renderer, followed, toolDrag };
+  return { renderer, followed, toolDrag, groundLines };
 }
 
 const press = (x: number, y = 50): Record<string, number> => ({
@@ -113,6 +119,11 @@ describe('press on the tower view', () => {
     host.fire('pointermove', press(803));
     host.fire('pointerup', press(803));
     expect(game.world.rooms.size).toBe(rooms + 1);
+  });
+
+  it('opens on the street, at the line the screen it is on asks for', () => {
+    const { parts } = started();
+    expect(parts.groundLines).toEqual([DEFAULT_GROUND_LINE]); // a viewport with no width is a desktop
   });
 
   it('follows the build with the camera and leaves the drag tools their drag', () => {

@@ -208,6 +208,9 @@ export function createUi(root: HTMLElement, game: GameApi): Ui {
   };
 
   applyReducedMotion(reducedMotion);
+  // The top strip wraps on a narrow screen, so nothing below it can assume one row: the
+  // measured height goes into a variable the palette, the panel and the hint sit under.
+  const stripSize = watchStripHeight(top, shell);
   lastLogLength = game.world.log.length;
   const unsubscribe = game.subscribe(() => update());
   window.addEventListener('keydown', onKeyDown);
@@ -413,6 +416,7 @@ export function createUi(root: HTMLElement, game: GameApi): Ui {
       destroyed = true;
       unsubscribe();
       window.removeEventListener('keydown', onKeyDown);
+      stripSize?.disconnect();
       for (const timer of timers) clearTimeout(timer);
       timers.clear();
       mountedPanel?.remove();
@@ -506,6 +510,21 @@ function ensureFonts(): void {
   link.rel = 'stylesheet';
   link.href = FONT_HREF;
   document.head.append(link);
+}
+
+/**
+ * Keep --top-actual on the shell equal to the height the top strip really takes.
+ *
+ * Returns null where there is no ResizeObserver: the css falls back to one strip row, which
+ * is what every screen wide enough not to wrap gets anyway.
+ */
+function watchStripHeight(strip: HTMLElement, shell: HTMLElement): ResizeObserver | null {
+  if (typeof ResizeObserver === 'undefined') return null;
+  const observer = new ResizeObserver(() => {
+    shell.style.setProperty('--top-actual', `${Math.round(strip.getBoundingClientRect().height)}px`);
+  });
+  observer.observe(strip);
+  return observer;
 }
 
 /** True on a touch screen. A browser that will not answer is treated as a mouse. */
