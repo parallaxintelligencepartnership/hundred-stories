@@ -42,6 +42,14 @@ must return 404 (served from `dist/404.html` via `not_found_handling:
 "404-page"`). The third, the old `*.workers.dev` URL, must stop returning
 200 after the next deploy now that `workers_dev` is `false`.
 
+`vite preview` does not send `public/_headers`; test the CSP with the nginx
+container before deploying:
+
+```
+npm run build
+docker run --rm -d --name hs-csp -p 8089:80 -v "$PWD/dist:/usr/share/nginx/html:ro" -v "$PWD/deploy/nginx.conf:/etc/nginx/nginx.conf:ro" nginx:1.29.4-alpine
+```
+
 ## Rollback
 
 Cloudflare keeps every deployed version.

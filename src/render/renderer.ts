@@ -4,6 +4,11 @@
 // The renderer never mutates the world and never touches world.rng: it reads the
 // world, moves sprites, and reports picks back through onPick.
 
+// Our CSP (public/_headers, deploy/nginx.conf) has no 'unsafe-eval' in script-src.
+// PixiJS 8 compiles shader/uniform code with `new Function` unless this CSP-safe
+// module is loaded first, so it must be the first import, before any Application
+// is created (both the game and the landing hero go through createRenderer here).
+import 'pixi.js/unsafe-eval';
 import {
   Application,
   Container,
