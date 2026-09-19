@@ -12,7 +12,9 @@ npm test (vitest run); one file: npx vitest run <path>; npm run typecheck (tsc -
 | index.html | landing page at /: semantic markup, no framework, one module script (src/site/hero.ts) |
 | how-to-play/index.html | the guide at /how-to-play/: rooms, elevators, stress, the quarter, stars, saving, controls |
 | play/index.html | the game shell at /play/; the only script tag loads src/main.ts |
-| src/site/ | landing site: site.css (same tokens as ui.css) and hero.ts, the demo tower drawn by the game's renderer |
+| src/site/ | landing site: site.css (same tokens as ui.css), hero.ts (the demo tower drawn by the game renderer, imports challenge.ts), challenge.ts (the friend greeting from a shared link), theme.ts and theme-init.ts (the system, light or dark choice under localStorage hs.theme) |
+| src/share/share.ts | share feature, pure: stats from the world, message, link with floors, people and stars in the query, parseChallenge, and the PNG composer |
+| public/theme.js | plain script every page loads first: applies a stored theme before paint (inline scripts are blocked by the CSP) |
 | src/main.ts | entry point: reads the seed from the query string, boots game, renderer and UI, shows the WebGL message on failure; ?smoke boots the demo world instead |
 | src/sim/ | the pure simulation, no DOM: rules.ts tables, types.ts and the clock, tick.ts tick order, build, economy, elevators, evaluation, events, people, routing, stars, rng |
 | src/sim/save.ts | save format v1: serialize, deserialize with its refusal reasons, and the FNV-1a world hash |

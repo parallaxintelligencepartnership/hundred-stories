@@ -20,14 +20,14 @@ describe('mountChallenge', () => {
     const el = fakeBanner();
     mountChallenge('?floors=40&people=2000&stars=3', el);
     expect(el.hidden).toBe(false);
-    expect(el.textContent).toBe('A friend built a 40-floor tower with 2000 people and 3 stars. Think you can do better?');
+    expect(el.textContent).toBe('A friend built a 40-floor tower with 2,000 people and 3 stars. Think you can do better?');
   });
 
   it('fills and unhides the banner for 6 stars, calling it TOWER status', () => {
     const el = fakeBanner();
     mountChallenge('?floors=100&people=50000&stars=6', el);
     expect(el.hidden).toBe(false);
-    expect(el.textContent).toBe('A friend built a 100-floor tower with 50000 people and TOWER status. Think you can do better?');
+    expect(el.textContent).toBe('A friend built a 100-floor tower with 50,000 people and TOWER status. Think you can do better?');
   });
 
   it('leaves the banner untouched and hidden with no query string', () => {

@@ -3,6 +3,7 @@
 // no innerHTML, and it stays hidden when the link carries nothing or something invalid.
 
 import { parseChallenge } from '../share/share';
+import { formatCount } from '../ui/format';
 
 function starsPhrase(stars: number): string {
   if (stars === 6) return ' and TOWER status';
@@ -13,7 +14,7 @@ function starsPhrase(stars: number): string {
 export function mountChallenge(search: string, el: { textContent: string; hidden: boolean }): void {
   const stats = parseChallenge(search);
   if (!stats) return;
-  el.textContent = `A friend built a ${stats.floors}-floor tower with ${stats.people} people${starsPhrase(stats.stars)}. Think you can do better?`;
+  el.textContent = `A friend built a ${stats.floors}-floor tower with ${formatCount(stats.people)} people${starsPhrase(stats.stars)}. Think you can do better?`;
   el.hidden = false;
 }
 
