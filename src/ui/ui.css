@@ -48,6 +48,24 @@
   }
 }
 
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden; /* the tower view pans itself; the page never scrolls */
+  background: var(--steel, #1c232e);
+}
+
+#app,
+#view {
+  position: absolute;
+  inset: 0;
+}
+
+#view canvas {
+  display: block;
+}
+
 .hs-ui {
   /* Fixed so the chrome works whether or not the mount point is a positioned box. */
   position: fixed;
