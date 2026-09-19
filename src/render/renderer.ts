@@ -76,6 +76,11 @@ const TAP_SLOP_PX = 5;
 const TAP_MS = 600;
 const FIRE_FLICKER_MS = 110;
 const LOAD_FADE_MS = 900;
+const SLAB_TOP_PX = 3; // art.ts draws the slab as the bottom 3 px of a floor band
+const STRIP_ABOVE = 0xeaeaea;
+const STRIP_BELOW = 0x7d818a;
+const STRIP_EDGE = 0x333333;
+const STRIP_CEILING = 0xcfcfcf;
 const FRAME_GRACE_MS = 2000; // after this the opening framing never reasserts itself
 
 const SIM_KINDS: readonly SimKind[] = ['worker', 'resident', 'guest', 'shopper', 'diner', 'staff', 'visitor', 'vip'];
@@ -259,6 +264,37 @@ function shaftFloorSpan(shaft: Shaft): number {
   return floorBand(shaft.floorMax) - floorBand(shaft.floorMin) + 1;
 }
 
+/**
+ * The built extent of every floor: from the leftmost to the rightmost tile covered
+ * by a room or by a shaft spanning that floor. The renderer paints a continuous
+ * floor across it, so a sim standing in a gap is never on nothing. `max` is the
+ * exclusive right tile. Floor 0 does not exist and never appears.
+ */
+export function builtFloorExtents(world: World): Map<number, { min: number; max: number }> {
+  const extents = new Map<number, { min: number; max: number }>();
+  const cover = (floor: number, from: number, to: number): void => {
+    if (floor === 0) return;
+    const found = extents.get(floor);
+    if (!found) extents.set(floor, { min: from, max: to });
+    else {
+      if (from < found.min) found.min = from;
+      if (to > found.max) found.max = to;
+    }
+  };
+  for (const room of world.rooms.values()) {
+    for (let f = room.floor; f < room.floor + room.height; f++) cover(f, room.x, room.x + room.width);
+  }
+  for (const shaft of world.shafts.values()) {
+    for (let f = shaft.floorMin; f <= shaft.floorMax; f++) cover(f, shaft.x, shaft.x + shaft.width);
+  }
+  return extents;
+}
+
+/** World y a sim's feet rest on: the top of its floor's slab. */
+export function simFeetY(floor: number): number {
+  return floorBaseY(floor) - SLAB_TOP_PX;
+}
+
 function simIsVisible(sim: Sim): boolean {
   return sim.state !== 'gone' && sim.state !== 'outside' && sim.inCarId === null;
 }
@@ -298,7 +334,10 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
   const slabLayer = new Container();
   const roomLayer = new Container();
   const shaftLayer = new Container();
-  layers.tower.addChild(slabLayer, shaftLayer, roomLayer);
+  // Behind everything in the tower: a continuous floor across each built floor,
+  // so a sim between two rooms is never walking on sky.
+  const floorStrips = new Graphics();
+  layers.tower.addChild(floorStrips, slabLayer, shaftLayer, roomLayer);
 
   const simSpriteLayer = new Container();
   layers.sims.addChild(simSpriteLayer);
@@ -451,6 +490,39 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
     return { x: entry.px + (entry.cx - entry.px) * t, y: entry.py + (entry.cy - entry.py) * t };
   }
 
+  // Built floor extents. Rooms never move once built, so the cache only has to
+  // notice a change in the room count, the shaft count or a shaft's span.
+  let stripSignature = -1;
+
+  function builtSignature(w: World): number {
+    let sig = w.rooms.size * 131 + w.shafts.size * 17;
+    for (const shaft of w.shafts.values()) sig += shaft.x * 3 + shaft.floorMin * 7 + shaft.floorMax * 13;
+    return sig;
+  }
+
+  function rebuildFloorStrips(w: World): void {
+    const extents = builtFloorExtents(w);
+    floorStrips.clear();
+    for (const [floor, extent] of extents) {
+      const x = extent.min * TILE_PX;
+      const width = (extent.max - extent.min) * TILE_PX;
+      if (width <= 0) continue;
+      const top = floorTopY(floor);
+      floorStrips.rect(x, top, width, FLOOR_PX).fill(floor > 0 ? STRIP_ABOVE : STRIP_BELOW);
+      floorStrips.rect(x, top, width, 1).fill(STRIP_CEILING);
+      // The slab edge sits where art.ts draws it, SLAB_TOP_PX up from the bottom of
+      // the band, so an empty stretch lines up with the rooms on either side.
+      floorStrips.rect(x, top + FLOOR_PX - SLAB_TOP_PX, width, 1).fill(STRIP_EDGE);
+    }
+  }
+
+  function syncFloorStrips(w: World): void {
+    const sig = builtSignature(w);
+    if (sig === stripSignature) return;
+    stripSignature = sig;
+    rebuildFloorStrips(w);
+  }
+
   function reconcileRooms(w: World, night: boolean): void {
     const seenRooms = new Set<Id>();
     for (const room of w.rooms.values()) {
@@ -591,7 +663,8 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
       seen.add(sim.id);
       const { kind, band, frame } = simTextureKey(sim);
       const key = `${kind}|${band}|${frame}`;
-      const point = interpolated(`sim${sim.id}`, sim.pos.x * TILE_PX, floorBaseY(sim.pos.floor), alpha);
+      // Feet on the slab top, not the bottom of the floor band.
+      const point = interpolated(`sim${sim.id}`, sim.pos.x * TILE_PX, simFeetY(sim.pos.floor), alpha);
 
       const atlasTile = particleMode && particles && particleAtlas ? particleAtlas.get(key) : undefined;
       if (particles && atlasTile) {
@@ -721,7 +794,7 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
       if (sim) {
         box = {
           x: sim.pos.x * TILE_PX - SIM_WIDTH_PX / 2 - 2,
-          y: floorBaseY(sim.pos.floor) - SIM_HEIGHT_PX - 2,
+          y: simFeetY(sim.pos.floor) - SIM_HEIGHT_PX - 2,
           w: SIM_WIDTH_PX + 4,
           h: SIM_HEIGHT_PX + 4,
         };
@@ -935,6 +1008,7 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
       lastWorld = w;
       const clock = clockOf(w.time.minute);
       const night = isNight(clock.minuteOfDay);
+      syncFloorStrips(w);
       reconcileRooms(w, night);
       reconcileShaftsAndCars(w, alpha);
       reconcileSims(w, alpha);
