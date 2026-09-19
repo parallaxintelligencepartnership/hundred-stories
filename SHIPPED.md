@@ -1,7 +1,7 @@
 # Hundred Stories - shipped 2026-09-19
 
 ## What this is
-Hundred Stories is a browser game and installable PWA that recreates the ruleset of the 1994 tower simulation, with original art and a deterministic sim core. You run a skyscraper: build a lobby, offices, homes, shops and elevators, watch it fill with people over the years, and climb the star ladder from one star to TOWER. There is no backend and no account: the whole game runs in the browser, and saves live in the player's own browser storage plus files they export themselves. The site at https://hundredstories.xyz is a static landing page with search and share metadata; the game lives at `/play/`. Source is public under AGPL-3.0-only at https://github.com/parallaxintelligencepartnership/hundred-stories.
+Hundred Stories is a browser game and installable PWA: a tower-building simulation with hand-drawn pixel art and a deterministic sim core. You run a skyscraper: build a lobby, offices, homes, shops and elevators, watch it fill with people over the years, and climb the star ladder from one star to TOWER. There is no backend and no account: the whole game runs in the browser, and saves live in the player's own browser storage plus files they export themselves. The site at https://hundredstories.xyz is a static landing page with search and share metadata; the game lives at `/play/`. Source is public under AGPL-3.0-only at https://github.com/parallaxintelligencepartnership/hundred-stories.
 
 ## How to run it
 Requirements: Node 26 (pinned in `.nvmrc`). No environment variables.
