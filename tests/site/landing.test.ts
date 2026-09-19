@@ -180,3 +180,24 @@ describe('theme', () => {
     expect(notfound).not.toContain('theme-init');
   });
 });
+
+describe('footer', () => {
+  const pages: Array<[string, string]> = [
+    ['landing', landing],
+    ['guide', guide],
+    ['404', notfound],
+  ];
+
+  it.each(pages)('gives the %s page the site footer with the contact address', (_name, html) => {
+    expect(html.match(/<footer class="site-foot">/g)).toHaveLength(1);
+    expect(html).toContain('href="mailto:hello@parallaxintelligence.ai"');
+    expect(html).toContain('>hello@parallaxintelligence.ai<');
+    expect(html).toContain('href="https://www.gnu.org/licenses/agpl-3.0.html"');
+    expect(flat(html)).toContain('Hundred Stories is a from-scratch homage to SimTower');
+    expect(html).toContain('src="/wordmark-line-dark.svg"');
+  });
+
+  it('keeps the footer off the game shell', () => {
+    expect(play).not.toContain('site-foot');
+  });
+});
