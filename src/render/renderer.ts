@@ -81,6 +81,7 @@ const STRIP_ABOVE = 0xeaeaea;
 const STRIP_BELOW = 0x7d818a;
 const STRIP_EDGE = 0x333333;
 const STRIP_CEILING = 0xcfcfcf;
+const TELEPORT_PX = 12 * TILE_PX; // a jump past this is a teleport, so snap instead of lerp
 const FRAME_GRACE_MS = 2000; // after this the opening framing never reasserts itself
 
 const SIM_KINDS: readonly SimKind[] = ['worker', 'resident', 'guest', 'shopper', 'diner', 'staff', 'visitor', 'vip'];
@@ -295,8 +296,29 @@ export function simFeetY(floor: number): number {
   return floorBaseY(floor) - SLAB_TOP_PX;
 }
 
-function simIsVisible(sim: Sim): boolean {
-  return sim.state !== 'gone' && sim.state !== 'outside' && sim.inCarId === null;
+export function simIsVisible(sim: Sim): boolean {
+  // A riding sim is inside the car, which draws itself.
+  return sim.state !== 'gone' && sim.state !== 'outside' && sim.state !== 'riding' && sim.inCarId === null;
+}
+
+/** Only these states move across the floor, so only these interpolate and animate. */
+export function simMoves(sim: Sim): boolean {
+  return sim.state === 'walking' || sim.state === 'waiting' || sim.state === 'leaving';
+}
+
+/**
+ * A fixed spot inside the room for a sim that is staying put: two tiles apart in
+ * id order, clamped inside the room. Stable between frames, so no jitter.
+ */
+export function inRoomSlot(world: World, sim: Sim, slots: Map<Id, number>): [number, number] {
+  const room = sim.inRoomId === null ? undefined : world.rooms.get(sim.inRoomId);
+  if (!room) return [sim.pos.x * TILE_PX, simFeetY(sim.pos.floor)];
+  const index = slots.get(room.id) ?? 0;
+  slots.set(room.id, index + 1);
+  const right = room.x + room.width - 1;
+  const tile = Math.max(room.x, Math.min(room.x + 1 + index * 2, right));
+  const inside = sim.pos.floor >= room.floor && sim.pos.floor < room.floor + room.height;
+  return [tile * TILE_PX, simFeetY(inside ? sim.pos.floor : room.floor)];
 }
 
 export async function createRenderer(container: HTMLElement, world: World): Promise<Renderer> {
@@ -480,14 +502,34 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
       entry = { px: x, py: y, cx: x, cy: y };
       interp.set(key, entry);
     } else if (entry.cx !== x || entry.cy !== y) {
-      entry.px = entry.cx;
-      entry.py = entry.cy;
+      // A jump this big is a teleport, not a step: entering from an entrance,
+      // alighting from a car, or several ticks landing in one frame. Snap.
+      if (Math.abs(x - entry.cx) > TELEPORT_PX || Math.abs(y - entry.cy) > TELEPORT_PX) {
+        entry.px = x;
+        entry.py = y;
+      } else {
+        entry.px = entry.cx;
+        entry.py = entry.cy;
+      }
       entry.cx = x;
       entry.cy = y;
     }
     if (reducedMotion) return { x: entry.cx, y: entry.cy };
     const t = alpha < 0 ? 0 : alpha > 1 ? 1 : alpha;
     return { x: entry.px + (entry.cx - entry.px) * t, y: entry.py + (entry.cy - entry.py) * t };
+  }
+
+  /** Park an entity at a fixed point so it does not lerp away from it next frame. */
+  function interpolateFrom(key: string, x: number, y: number): { x: number; y: number } {
+    const entry = interp.get(key);
+    if (!entry) interp.set(key, { px: x, py: y, cx: x, cy: y });
+    else {
+      entry.px = x;
+      entry.py = y;
+      entry.cx = x;
+      entry.cy = y;
+    }
+    return { x, y };
   }
 
   // Built floor extents. Rooms never move once built, so the cache only has to
@@ -645,8 +687,9 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
 
   function simTextureKey(sim: Sim): { kind: SimKind; band: StressBand; frame: 0 | 1 } {
     const band = stressBand(sim.stress);
-    const walking = sim.state === 'walking' || sim.state === 'leaving';
-    const frame: 0 | 1 = !reducedMotion && walking ? ((Math.floor(sim.pos.x * 0.5) & 1) as 0 | 1) : 0;
+    // Frame alternates every two tiles walked, so the step follows distance, not ticks.
+    const frame: 0 | 1 =
+      !reducedMotion && simMoves(sim) ? ((Math.floor(sim.pos.x * 0.5) & 1) as 0 | 1) : 0;
     return { kind: sim.kind, band, frame };
   }
 
@@ -657,14 +700,19 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
     if (!particleMode && visible > PARTICLE_THRESHOLD) enterParticleMode();
     else if (particleMode && visible < PARTICLE_RELEASE) leaveParticleMode();
 
+    // Sims standing in a room take a fixed slot, in id order, so they stop jittering.
+    const slots = new Map<Id, number>();
+
     const seen = new Set<Id>();
     for (const sim of w.sims.values()) {
       if (!simIsVisible(sim)) continue;
       seen.add(sim.id);
       const { kind, band, frame } = simTextureKey(sim);
       const key = `${kind}|${band}|${frame}`;
-      // Feet on the slab top, not the bottom of the floor band.
-      const point = interpolated(`sim${sim.id}`, sim.pos.x * TILE_PX, simFeetY(sim.pos.floor), alpha);
+      const point = simMoves(sim)
+        ? // Feet on the slab top, not the bottom of the floor band.
+          interpolated(`sim${sim.id}`, sim.pos.x * TILE_PX, simFeetY(sim.pos.floor), alpha)
+        : interpolateFrom(`sim${sim.id}`, ...inRoomSlot(w, sim, slots));
 
       const atlasTile = particleMode && particles && particleAtlas ? particleAtlas.get(key) : undefined;
       if (particles && atlasTile) {
