@@ -162,13 +162,13 @@ describe('touch on the tower view', () => {
     expect(game.world.rooms.size).toBe(rooms + 1);
   });
 
-  it('places nothing when the finger rested: that press was not a tap', () => {
+  it('places even when the finger rested a long while: a still press is still a tap', () => {
     const { game, host } = started();
     const rooms = game.world.rooms.size;
 
     host.fire('pointerdown', finger(800, 0));
     host.fire('pointerup', finger(800, 900));
-    expect(game.world.rooms.size).toBe(rooms);
+    expect(game.world.rooms.size).toBe(rooms + 1);
   });
 
   it('places nothing when a second finger lands: that gesture is the camera pinching', () => {

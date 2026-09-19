@@ -68,21 +68,21 @@ export function wheelGesture(event: WheelLike, pageHeightPx: number): WheelGestu
  */
 export const TOUCH_SLOP_PX = 10;
 
-/** How long a tap may last. A finger held longer than this meant to drag, not to place. */
-export const TAP_MS = 400;
-
 /**
- * Was that press a tap: held inside the slop and let go quickly?
+ * Was that press a tap: held inside the slop, however long that took?
  *
- * The renderer asks before it picks and the game shell asks before it builds, so a finger that
- * rests on the view, or one that was only the first half of a pinch, places nothing.
+ * A still finger is a placement no matter how long it rested, so only the slop decides. The
+ * renderer asks before it picks and the game shell asks before it builds, so a finger that
+ * wandered past the slop, or one that was only the first half of a pinch, places nothing. The
+ * time window stays as a parameter so a caller with its own duration rule, such as a mouse
+ * click, can still pass one in.
  */
 export function isTap(
   down: Point,
   up: Point,
   elapsedMs: number,
   slop: number = TOUCH_SLOP_PX,
-  maxMs: number = TAP_MS,
+  maxMs: number = Infinity,
 ): boolean {
   if (!(elapsedMs >= 0) || elapsedMs >= maxMs) return false; // a NaN duration is not a tap
   return classifyPress(down, up, slop) === 'click';

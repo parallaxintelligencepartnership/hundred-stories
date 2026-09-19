@@ -42,7 +42,6 @@ import {
   isTap,
   pinchGesture,
   PRESS_SLOP_PX,
-  TAP_MS,
   TOUCH_SLOP_PX,
   wheelGesture,
   type FingerPair,
@@ -115,7 +114,7 @@ const SIM_WIDTH_PX = TILE_PX; // one tile wide, matching art.ts
 const SIM_HEIGHT_PX = 3 * TILE_PX; // three tiles tall
 const PARTICLE_THRESHOLD = 500;
 const PARTICLE_RELEASE = 400; // hysteresis, so a crowd on the edge does not thrash
-/** How long a mouse press may hold still and still count as a click. A finger gets TAP_MS. */
+/** How long a mouse press may hold still and still count as a click. A finger gets no limit. */
 const CLICK_MS = 600;
 const FIRE_FLICKER_MS = 110;
 const LOAD_FADE_MS = 900;
@@ -1150,7 +1149,7 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
     const p = localPoint(event);
     const elapsed = event.timeStamp - downTime;
     const tapped = downTouch
-      ? isTap({ x: downX, y: downY }, p, elapsed, TOUCH_SLOP_PX, TAP_MS)
+      ? isTap({ x: downX, y: downY }, p, elapsed, TOUCH_SLOP_PX)
       : !moved && elapsed < CLICK_MS;
     if (tapCandidate && !moved && tapped) pickAt(p.x, p.y);
     tapCandidate = false;

@@ -8,7 +8,6 @@ import {
   isTap,
   pinchGesture,
   PRESS_SLOP_PX,
-  TAP_MS,
   TOUCH_SLOP_PX,
   wheelGesture,
   type FingerPair,
@@ -84,9 +83,9 @@ describe('isTap', () => {
     expect(isTap(down, { x: 260, y: 500 }, 80)).toBe(false);
   });
 
-  it('refuses a finger that rested: a long press is a drag that never moved', () => {
-    expect(isTap(down, { x: 200, y: 400 }, TAP_MS)).toBe(false);
-    expect(isTap(down, { x: 200, y: 400 }, 5000)).toBe(false);
+  it('a slow touch press that holds still is still a tap', () => {
+    expect(isTap(down, { x: 200, y: 400 }, 400)).toBe(true);
+    expect(isTap(down, { x: 200, y: 400 }, 5000)).toBe(true);
   });
 
   it('refuses a duration it cannot read rather than guessing', () => {
