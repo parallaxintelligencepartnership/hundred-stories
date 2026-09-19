@@ -6,7 +6,9 @@ import type { Renderer } from '../render/renderer';
 import { composeShareImage, shareMessage, shareStats, shareText, shareUrl } from '../share/share';
 import { applyTheme, cycleTheme, readTheme, themeLabel } from '../site/theme';
 import { EVAL, LIMITS, ROOMS, SHAFTS } from '../sim/rules';
+import { carRangeOf } from '../sim/types';
 import type {
+  Car,
   Command,
   CommandResult,
   Id,
@@ -328,9 +330,132 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
     body.append(stops);
   }
 
+  // Each car can take its own slice of the shaft and its own riders. A dedicated car
+  // still carries everyone else while its own people have nothing on, so the list is
+  // rebuilt whenever the cars change and reread on every refresh.
+  const carsSection = section('Cars');
+  const carList = el('div', 'hs-cars');
+  carsSection.append(
+    el(
+      'p',
+      'hs-note',
+      'Give a car its own floors and its own riders. A dedicated car still picks up everyone else while its own riders are idle.',
+    ),
+    carList,
+  );
+  body.append(carsSection);
+
+  interface CarRow {
+    carId: Id;
+    label: HTMLParagraphElement;
+    serves: HTMLButtonElement;
+    steps: { node: HTMLButtonElement; edge: 'lo' | 'hi'; step: -1 | 1 }[];
+    whole: HTMLButtonElement;
+  }
+  let carRows: CarRow[] = [];
+  let carSignature = '';
+
+  const setCarRange = (car: Car, lo: number, hi: number): void => {
+    ctx.apply({ kind: 'shaft.setCarRange', shaftId, carId: car.id, range: { lo, hi } });
+  };
+
+  const buildCarRows = (shaft: Shaft): void => {
+    carList.replaceChildren();
+    carRows = shaft.cars.map((car, index) => {
+      const node = el('div', 'hs-car');
+      const label = el('p', 'hs-car-label');
+      const actions = el('div', 'hs-actions hs-car-actions');
+
+      const serves = button('Serves', 'hs-btn', () => {
+        const now = carOf(game, shaftId, car.id);
+        if (!now) return;
+        ctx.apply({
+          kind: 'shaft.setCarServes',
+          shaftId,
+          carId: car.id,
+          serves: nextServes(now.serves),
+        });
+      });
+      serves.setAttribute('aria-label', `Riders for car ${index + 1}`);
+
+      const steps: CarRow['steps'] = [];
+      const stepper = (text: string, edge: 'lo' | 'hi', step: -1 | 1): HTMLButtonElement => {
+        const btn = button(text, 'hs-btn', () => {
+          const shaftNow = game.world.shafts.get(shaftId);
+          const now = shaftNow?.cars.find((c) => c.id === car.id);
+          if (!shaftNow || !now) return;
+          const span = carRangeOf(shaftNow, now);
+          const moved = stepFloor(edge === 'lo' ? span.lo : span.hi, step);
+          if (edge === 'lo') setCarRange(now, moved, span.hi);
+          else setCarRange(now, span.lo, moved);
+        });
+        btn.setAttribute('aria-label', `${text} floor for car ${index + 1}`);
+        steps.push({ node: btn, edge, step });
+        return btn;
+      };
+
+      const whole = button('Whole shaft', 'hs-btn', () => {
+        ctx.apply({ kind: 'shaft.setCarRange', shaftId, carId: car.id, range: null });
+      });
+
+      actions.append(
+        serves,
+        stepper('Bottom \u2212', 'lo', -1),
+        stepper('Bottom +', 'lo', 1),
+        stepper('Top \u2212', 'hi', -1),
+        stepper('Top +', 'hi', 1),
+        whole,
+      );
+      node.append(label, actions);
+      carList.append(node);
+      return { carId: car.id, label, serves, steps, whole };
+    });
+  };
+
+  const refreshCars = (shaft: Shaft): void => {
+    const signature = shaft.cars.map((car) => car.id).join(',');
+    if (signature !== carSignature) {
+      carSignature = signature;
+      buildCarRows(shaft);
+    }
+    for (let i = 0; i < carRows.length; i += 1) {
+      const row = carRows[i] as CarRow;
+      const car = shaft.cars[i];
+      if (!car) continue;
+      const span = carRangeOf(shaft, car);
+      setText(row.label, `Car ${i + 1} \u00b7 ${floorsLabel(span.lo, span.hi)} \u00b7 ${SERVES_LABEL[car.serves]}`);
+      setText(row.serves, `Serves: ${SERVES_LABEL[car.serves]}`);
+      const busy = car.passengers.length > 0;
+      for (const step of row.steps) {
+        const at = step.edge === 'lo' ? span.lo : span.hi;
+        const moved = stepFloor(at, step.step);
+        const outside = moved < shaft.floorMin || moved > shaft.floorMax;
+        const crossed = step.edge === 'lo' ? moved > span.hi : moved < span.lo;
+        const newLo = step.edge === 'lo' ? moved : span.lo;
+        const newHi = step.edge === 'hi' ? moved : span.hi;
+        const tooNarrow = newHi - newLo < 1;
+        step.node.disabled = busy || outside || crossed || tooNarrow;
+        const edgeWord = step.edge === 'lo' ? 'bottom' : 'top';
+        step.node.title = busy
+          ? 'People are inside.'
+          : outside
+            ? `This car already reaches the ${step.step === 1 ? 'top' : 'bottom'} of the shaft.`
+            : crossed
+              ? 'A car needs at least one floor.'
+              : tooNarrow
+                ? 'A car must serve at least two floors.'
+                : `Move the ${edgeWord} of this car to ${formatFloor(moved).toLowerCase()}`;
+      }
+      row.whole.hidden = car.range === null;
+      row.whole.disabled = busy;
+      row.whole.title = busy ? 'People are inside.' : 'Work the whole shaft again';
+    }
+  };
+
   const refresh = (): void => {
     const shaft = game.world.shafts.get(shaftId);
     if (!shaft) return;
+    refreshCars(shaft);
     setRowValue(cars, `${formatCount(shaft.cars.length)} of ${formatCount(rule.maxCars)}`);
     setRowValue(riders, formatCount(shaft.cars.reduce((n, c) => n + c.passengers.length, 0)));
     add.disabled = shaft.cars.length >= rule.maxCars;
@@ -346,6 +471,35 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
   refresh();
   panel.refresh = refresh;
   return panel;
+}
+
+/** What the panel calls each setting, in the label and on the button. */
+const SERVES_LABEL: Record<Car['serves'], string> = {
+  any: 'Everyone',
+  hotel: 'Hotel guests',
+  office: 'Office staff',
+};
+
+/** Everyone, then hotel guests, then office staff, then round again. */
+function nextServes(serves: Car['serves']): Car['serves'] {
+  if (serves === 'any') return 'hotel';
+  if (serves === 'hotel') return 'office';
+  return 'any';
+}
+
+function carOf(game: GameApi, shaftId: Id, carId: Id): Car | undefined {
+  return game.world.shafts.get(shaftId)?.cars.find((car) => car.id === carId);
+}
+
+/** "Floors 3-12", or "Floor 5" when a car works one floor, with B for the basements. */
+function floorsLabel(lo: number, hi: number): string {
+  const short = (floor: number): string => (floor < 0 ? `B${Math.abs(floor)}` : String(floor));
+  if (lo === hi) return `Floor ${short(lo)}`;
+  return `Floors ${short(lo)}\u2013${short(hi)}`;
+}
+
+function setText(node: HTMLElement, text: string): void {
+  if (node.textContent !== text) node.textContent = text;
 }
 
 /** One floor up or down, stepping over the ground: floor 0 does not exist. */

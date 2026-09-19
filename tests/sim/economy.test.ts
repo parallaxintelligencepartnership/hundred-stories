@@ -37,7 +37,7 @@ function makeShaft(overrides: Partial<Shaft> & { kind: ShaftKind; x: number; flo
 }
 
 function makeCar(shaftId: number) {
-  return { id: idCounter++, shaftId, y: 1, dir: 0 as const, state: 'idle' as const, doorTimer: 0, idleSince: null, passengers: [], calls: new Set<number>() };
+  return { id: idCounter++, shaftId, y: 1, dir: 0 as const, state: 'idle' as const, doorTimer: 0, idleSince: null, passengers: [], calls: new Set<number>(), serves: 'any' as const, range: null };
 }
 
 describe('economy: spend', () => {

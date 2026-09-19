@@ -216,6 +216,8 @@ function makeCar(world: World, shaftId: number, homeFloor: number): Car {
     idleSince: world.time.minute,
     passengers: [],
     calls: new Set<number>(),
+    serves: 'any', // a new car carries everyone until the player says otherwise
+    range: null, // and works the whole shaft, growing with it
   };
 }
 
@@ -508,6 +510,7 @@ function doAddCar(world: World, shaftId: number): CommandResult {
   if (!paid.ok) return no(cannotAfford(carLabel, rule.carCost));
 
   shaft.cars.push(makeCar(world, shaft.id, shaft.homeFloor));
+  world.routingDirty = true; // routes are planned on the cars, not on the shaft alone
   log(world, `Added a car to the ${rule.label.toLowerCase()} at ${floorName(shaft.floorMin)}.`);
   return OK;
 }
@@ -522,6 +525,7 @@ function doRemoveCar(world: World, shaftId: number): CommandResult {
   if (car.passengers.length > 0) return no('People are inside.');
 
   shaft.cars.pop();
+  world.routingDirty = true;
   const rule = SHAFTS[shaft.kind];
   log(world, `Removed a car from the ${rule.label.toLowerCase()} at ${floorName(shaft.floorMin)}.`);
   return OK;
@@ -556,6 +560,76 @@ function doSetStop(world: World, shaftId: number, floor: number, stops: boolean)
   return OK;
 }
 
+/** The word the log uses for a car's riders. */
+const SERVES_LABEL: Record<Car['serves'], string> = {
+  any: 'everyone',
+  hotel: 'hotel guests',
+  office: 'office staff',
+};
+
+/** Which car this is to the player: the panel numbers them from 1, in shaft order. */
+function carNumber(shaft: Shaft, carId: number): number {
+  return shaft.cars.findIndex((car) => car.id === carId) + 1;
+}
+
+function doSetCarServes(
+  world: World,
+  shaftId: number,
+  carId: number,
+  serves: Car['serves'],
+): CommandResult {
+  const shaft = world.shafts.get(shaftId);
+  if (!shaft) return no('That elevator is gone.');
+  const car = shaft.cars.find((c) => c.id === carId);
+  if (!car) return no('That car is gone.');
+  if (serves !== 'any' && serves !== 'hotel' && serves !== 'office') {
+    return no('A car carries everyone, hotel guests, or office staff.');
+  }
+  if (car.serves === serves) return OK;
+
+  car.serves = serves;
+  world.routingDirty = true; // who a car carries decides which trips it can be planned for
+
+  const name = SHAFTS[shaft.kind].label.toLowerCase();
+  log(world, `Car ${carNumber(shaft, carId)} of the ${name} now carries ${SERVES_LABEL[serves]}.`);
+  return OK;
+}
+
+function doSetCarRange(
+  world: World,
+  shaftId: number,
+  carId: number,
+  range: { lo: number; hi: number } | null,
+): CommandResult {
+  const shaft = world.shafts.get(shaftId);
+  if (!shaft) return no('That elevator is gone.');
+  const car = shaft.cars.find((c) => c.id === carId);
+  if (!car) return no('That car is gone.');
+  if (range !== null) {
+    if (!Number.isInteger(range.lo) || !Number.isInteger(range.hi)) {
+      return no('That floor is not on this elevator.');
+    }
+    if (range.lo < shaft.floorMin || range.hi > shaft.floorMax) {
+      return no('That floor is not on this elevator.');
+    }
+    if (range.lo > range.hi) return no('The bottom floor cannot be above the top floor.');
+    if (range.hi - range.lo < 1) return no('A car must serve at least two floors.');
+  }
+  // Changing the floors under a rider aboard would strand them: the car may not leave
+  // its range, so a destination outside it would never come.
+  if (car.passengers.length > 0) return no('People are inside.');
+
+  car.range = range === null ? null : { lo: range.lo, hi: range.hi };
+  world.routingDirty = true;
+
+  const name = SHAFTS[shaft.kind].label.toLowerCase();
+  const where = range === null
+    ? 'the whole shaft'
+    : `${floorName(range.lo)} to ${floorName(range.hi).toLowerCase()}`;
+  log(world, `Car ${carNumber(shaft, carId)} of the ${name} now works ${where}.`);
+  return OK;
+}
+
 function doSetHome(world: World, shaftId: number, floor: number): CommandResult {
   const shaft = world.shafts.get(shaftId);
   if (!shaft) return no('That elevator is gone.');
@@ -587,6 +661,10 @@ export function applyCommand(world: World, cmd: Command): CommandResult {
       return doSetStop(world, cmd.shaftId, cmd.floor, cmd.stops);
     case 'shaft.setHome':
       return doSetHome(world, cmd.shaftId, cmd.floor);
+    case 'shaft.setCarServes':
+      return doSetCarServes(world, cmd.shaftId, cmd.carId, cmd.serves);
+    case 'shaft.setCarRange':
+      return doSetCarRange(world, cmd.shaftId, cmd.carId, cmd.range);
     case 'bomb.pay':
     case 'fire.callHelicopter':
       return handleEventCommand(world, cmd);

@@ -6,11 +6,11 @@
  * world.rng, so a seed plus a command list always replays the same day.
  */
 
-import { requestHallCall } from './elevators';
+import { hallCallPending, requestHallCall } from './elevators';
 import { recordCondoSale, recordHotelNight, recordVisit } from './economy';
 import { ensureRouting, entrances, findRoute, isReachableFromLobby } from './routing';
 import { ECONOMY, ROOMS, SCHEDULES, STRESS } from './rules';
-import { clockOf } from './types';
+import { clockOf, riderClassOf } from './types';
 import type {
   Clock,
   Id,
@@ -28,6 +28,14 @@ import { addSim, allocId, log, removeSim, roomsOfKind } from './world';
 
 /** Tiles a sim covers in one minute on foot. */
 export const WALK_TILES_PER_MINUTE = 5;
+
+/**
+ * How this sim asks routing for a way: service shafts for staff, and the rider class,
+ * so a trip is never planned on a car dedicated to somebody else.
+ */
+function routeOpts(sim: Sim): { staff: boolean; riderClass: ReturnType<typeof riderClassOf> } {
+  return { staff: sim.kind === 'staff', riderClass: riderClassOf(sim.kind) };
+}
 
 // Local rules: rules.ts has no entry for these, so they live here and are marked as our call.
 /** A waiting sim re-registers its hall call this often if the call is no longer pending. */
@@ -245,7 +253,7 @@ function startTrip(world: World, sim: Sim, goal: ScheduleEntry['goal']): boolean
   if (!room) return false;
   if (sim.inRoomId === room.id) return true;
   const target = { floor: room.floor, x: roomCenter(room) };
-  const legs = findRoute(world, sim.pos, target, sim.kind === 'staff' ? { staff: true } : undefined);
+  const legs = findRoute(world, sim.pos, target, routeOpts(sim));
   if (!legs) return false;
   if (sim.inRoomId !== null) departRoom(world, sim);
   sim.route = [...withoutStandingRides(legs), { kind: 'enter', roomId: room.id }];
@@ -290,7 +298,7 @@ function leaveTower(world: World, sim: Sim): void {
     sim.route = [];
     return;
   }
-  const legs = findRoute(world, sim.pos, exit);
+  const legs = findRoute(world, sim.pos, exit, routeOpts(sim));
   if (!legs || legs.length === 0) {
     sim.state = 'outside';
     sim.pos = { floor: exit.floor, x: exit.x };
@@ -365,7 +373,7 @@ function beginWait(world: World, sim: Sim, leg: Extract<Leg, { kind: 'ride' }>, 
   sim.state = 'waiting';
   if (sim.waitStart === null) {
     sim.waitStart = world.time.minute;
-    requestHallCall(world, shaft.id, sim.pos.floor, leg.toFloor > sim.pos.floor ? 1 : -1);
+    requestHallCall(world, shaft.id, sim.pos.floor, leg.toFloor > sim.pos.floor ? 1 : -1, riderClassOf(sim.kind));
   }
 }
 
@@ -486,15 +494,14 @@ function retryHallCall(world: World, sim: Sim): void {
   }
   if (!withinReach(sim, shaft)) return;
   const dir: 1 | -1 = leg.toFloor > sim.pos.floor ? 1 : -1;
-  const pending = shaft.hallCalls.get(sim.pos.floor);
-  if (pending && (dir === 1 ? pending.up : pending.down)) return;
-  requestHallCall(world, shaft.id, sim.pos.floor, dir);
+  if (hallCallPending(shaft, sim.pos.floor, dir, riderClassOf(sim.kind))) return;
+  requestHallCall(world, shaft.id, sim.pos.floor, dir, riderClassOf(sim.kind));
 }
 
 /** Three silent retries: the shaft is not serving this floor, so ask routing for another way. */
 function rerouteWaitingSim(world: World, sim: Sim): void {
   const dest = routeDestination(world, sim);
-  const legs = findRoute(world, sim.pos, dest.at, sim.kind === 'staff' ? { staff: true } : undefined);
+  const legs = findRoute(world, sim.pos, dest.at, routeOpts(sim));
   if (!legs) return; // nothing better on offer: keep waiting and let stress decide
   const enter: Leg[] = dest.roomId !== null ? [{ kind: 'enter', roomId: dest.roomId }] : [];
   sim.route = [...withoutStandingRides(legs), ...enter];
@@ -565,7 +572,7 @@ function runLeaving(world: World): void {
       finishLeave(world, sim);
       continue;
     }
-    const legs = findRoute(world, sim.pos, exit);
+    const legs = findRoute(world, sim.pos, exit, routeOpts(sim));
     if (!legs || legs.length === 0) {
       finishLeave(world, sim);
       continue;
@@ -665,7 +672,7 @@ function claimedRoomIds(world: World): Set<Id> {
 }
 
 function assignCleaning(world: World, keeper: Sim, room: Room): boolean {
-  const legs = findRoute(world, keeper.pos, { floor: room.floor, x: roomCenter(room) }, { staff: true });
+  const legs = findRoute(world, keeper.pos, { floor: room.floor, x: roomCenter(room) }, routeOpts(keeper));
   if (!legs) return false;
   departRoom(world, keeper);
   keeper.route = [...withoutStandingRides(legs), { kind: 'enter', roomId: room.id }];
@@ -685,7 +692,7 @@ function finishCleaning(world: World, keeper: Sim): void {
     keeper.stayUntil = null;
     return;
   }
-  const legs = findRoute(world, keeper.pos, { floor: office.floor, x: roomCenter(office) }, { staff: true });
+  const legs = findRoute(world, keeper.pos, { floor: office.floor, x: roomCenter(office) }, routeOpts(keeper));
   if (!legs) {
     keeper.stayUntil = null;
     return;

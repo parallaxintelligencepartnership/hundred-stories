@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   isReachableFromLobby: vi.fn(),
   entrances: vi.fn(),
   requestHallCall: vi.fn(),
+  hallCallPending: vi.fn(),
   tickElevators: vi.fn(),
   spend: vi.fn(),
   onQuarterStart: vi.fn(),
@@ -29,6 +30,7 @@ vi.mock('../../src/sim/elevators', () => ({
   IDLE_RETURN_MINUTES: 10,
   requestHallCall: mocks.requestHallCall,
   tickElevators: mocks.tickElevators,
+  hallCallPending: mocks.hallCallPending,
 }));
 
 vi.mock('../../src/sim/economy', () => ({
@@ -97,7 +99,7 @@ function makeRoom(world: World, kind: RoomKind, floor: number, x: number, over: 
 
 function makeShaft(world: World, floorMin = 1, floorMax = 10): Shaft {
   const id = allocId(world);
-  const car: Car = { id: allocId(world), shaftId: id, y: 1, dir: 0, state: 'idle', doorTimer: 0, idleSince: null, passengers: [], calls: new Set() };
+  const car: Car = { id: allocId(world), shaftId: id, y: 1, dir: 0, state: 'idle', doorTimer: 0, idleSince: null, passengers: [], calls: new Set(), serves: 'any', range: null };
   const stops = new Set<number>();
   for (let f = floorMin; f <= floorMax; f++) stops.add(f);
   const shaft: Shaft = { id, kind: 'standard', x: SHAFT_X, width: 4, floorMin, floorMax, stops, homeFloor: 1, cars: [car], hallCalls: new Map() };
@@ -339,7 +341,10 @@ describe('housekeeping', () => {
 
     tickPeople(world);
     expect(office.tenants).toHaveLength(ROOMS.housekeeping.capacity);
-    expect(mocks.findRoute).toHaveBeenCalledWith(world, expect.anything(), expect.anything(), { staff: true });
+    expect(mocks.findRoute).toHaveBeenCalledWith(world, expect.anything(), expect.anything(), {
+      staff: true,
+      riderClass: 'other',
+    });
 
     run(world, walkMinutes(KEEPER_WALK) + SCHEDULES.housekeeping.minutesPerRoom + 5);
 
@@ -490,7 +495,7 @@ describe('movement', () => {
     expect(guard).toBe(walkMinutes(10, 0)); // it walked the ten tiles, it did not jump them
     expect(Math.abs(sim.pos.x - shaft.x)).toBeLessThanOrEqual(shaft.width + 1);
     expect(mocks.requestHallCall).toHaveBeenCalledTimes(1);
-    expect(mocks.requestHallCall).toHaveBeenCalledWith(world, shaft.id, 1, 1);
+    expect(mocks.requestHallCall).toHaveBeenCalledWith(world, shaft.id, 1, 1, 'office');
   });
 
   it('drops a ride leg that goes nowhere instead of calling a car', () => {
@@ -551,7 +556,7 @@ describe('movement', () => {
     expect(sim.state).toBe('waiting');
     expect(sim.pos.x).toBe(SHAFT_X);
     expect(mocks.requestHallCall).toHaveBeenCalledTimes(1);
-    expect(mocks.requestHallCall).toHaveBeenCalledWith(world, shaft.id, 1, 1);
+    expect(mocks.requestHallCall).toHaveBeenCalledWith(world, shaft.id, 1, 1, 'office');
   });
 });
 

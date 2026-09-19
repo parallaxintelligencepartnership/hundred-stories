@@ -7,7 +7,8 @@
 // the stair limit comes from LIMITS.
 
 import { LIMITS } from './rules';
-import type { Id, Leg, Room, World } from './types';
+import { carRangeOf } from './types';
+import type { Id, Leg, RiderClass, Room, World } from './types';
 import { roomsOfKind, roomsOnFloor } from './world';
 
 /** Cost of boarding one elevator. One floor is quicker on foot, two or more ride. */
@@ -48,7 +49,14 @@ interface Node {
   parent: Node | null;
 }
 
-const graphs = new WeakMap<World, RoutingGraph>();
+/**
+ * One graph per rider class, because a shaft only connects the floors some car will
+ * carry that rider between. The key `all` is the class blind graph: every car counts,
+ * which is what a structural question like isReachableFromLobby wants.
+ */
+type GraphKey = RiderClass | 'all';
+
+const graphs = new WeakMap<World, Map<GraphKey, RoutingGraph>>();
 
 function walkCost(tiles: number): number {
   return Math.abs(tiles) / WALK_TILES_PER_COST;
@@ -63,7 +71,7 @@ function stairAccessX(room: Room): number {
   return room.x + Math.floor(room.width / 2);
 }
 
-function buildGraph(world: World): RoutingGraph {
+function buildGraph(world: World, key: GraphKey): RoutingGraph {
   const byFloor = new Map<number, Connector[]>();
   const add = (connector: Connector): void => {
     for (const floor of connector.floors) {
@@ -74,17 +82,29 @@ function buildGraph(world: World): RoutingGraph {
   };
 
   for (const shaft of world.shafts.values()) {
-    const floors = [...shaft.stops]
+    const stops = [...shaft.stops]
       .filter((f) => f >= shaft.floorMin && f <= shaft.floorMax)
       .sort((a, b) => a - b);
-    if (floors.length < 2) continue; // a shaft with one stop connects nothing
-    add({
-      kind: 'shaft',
-      id: shaft.id,
-      x: shaft.x,
-      floors,
-      staffOnly: shaft.kind === 'service',
-    });
+    if (stops.length < 2) continue; // a shaft with one stop connects nothing
+    // One connector per distinct range among the cars that would carry this rider.
+    // A dedicated car counts for its own class only: the leftover rule is a courtesy
+    // the dispatcher pays at the door, never a connection a trip may be planned on.
+    const ranges = new Set<string>();
+    for (const car of shaft.cars) {
+      if (key !== 'all' && car.serves !== 'any' && car.serves !== key) continue;
+      const { lo, hi } = carRangeOf(shaft, car);
+      if (ranges.has(`${lo}:${hi}`)) continue;
+      ranges.add(`${lo}:${hi}`);
+      const floors = stops.filter((f) => f >= lo && f <= hi);
+      if (floors.length < 2) continue; // this car connects nothing
+      add({
+        kind: 'shaft',
+        id: shaft.id,
+        x: shaft.x,
+        floors,
+        staffOnly: shaft.kind === 'service',
+      });
+    }
   }
 
   for (const room of world.rooms.values()) {
@@ -106,14 +126,17 @@ function buildGraph(world: World): RoutingGraph {
 
 export function ensureRouting(world: World): void {
   if (world.routingDirty || !graphs.has(world)) {
-    graphs.set(world, buildGraph(world));
+    graphs.set(world, new Map()); // every class is rebuilt on demand
     world.routingDirty = false;
   }
 }
 
-function graphOf(world: World): RoutingGraph {
+function graphOf(world: World, key: GraphKey): RoutingGraph {
   ensureRouting(world);
-  return graphs.get(world) as RoutingGraph;
+  const cache = graphs.get(world) as Map<GraphKey, RoutingGraph>;
+  let graph = cache.get(key);
+  if (!graph) cache.set(key, (graph = buildGraph(world, key)));
+  return graph;
 }
 
 /** True when a is the better of two candidate nodes: cheaper, then closer to home. */
@@ -150,9 +173,10 @@ export function findRoute(
   world: World,
   from: { floor: number; x: number },
   to: { floor: number; x: number },
-  opts?: { staff?: boolean },
+  opts?: { staff?: boolean; riderClass?: RiderClass },
 ): Leg[] | null {
-  const graph = graphOf(world);
+  // No class named means the class blind graph: ask whether the floors connect at all.
+  const graph = graphOf(world, opts?.riderClass ?? 'all');
   if (from.floor === to.floor) return [{ kind: 'walk', toX: to.x }];
 
   const staff = opts?.staff === true;

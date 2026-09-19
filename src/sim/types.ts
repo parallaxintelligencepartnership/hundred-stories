@@ -44,6 +44,16 @@ export type SimKind =
   | 'visitor'
   | 'vip';
 
+/** Who a car may carry when it is dedicated. Hotel guests, office staff, or anyone else. */
+export type RiderClass = 'hotel' | 'office' | 'other';
+
+/** Which class of rider a sim counts as. Pure: the kind is the whole answer. */
+export function riderClassOf(kind: SimKind): RiderClass {
+  if (kind === 'guest' || kind === 'vip') return 'hotel';
+  if (kind === 'worker') return 'office';
+  return 'other';
+}
+
 export type StressBand = 'calm' | 'pink' | 'red'; // calm sims draw black, like the original
 
 export type Star = 1 | 2 | 3 | 4 | 5 | 6; // 6 is TOWER status
@@ -79,6 +89,8 @@ export interface Car {
   idleSince: number | null; // minute the car went idle
   passengers: Id[];
   calls: Set<number>; // destination floors requested by passengers
+  serves: 'any' | 'hotel' | 'office'; // riders this car is dedicated to; 'any' carries everyone
+  range: { lo: number; hi: number } | null; // floors this car works, null for the whole shaft
 }
 
 export interface Shaft {
@@ -91,7 +103,24 @@ export interface Shaft {
   stops: Set<number>; // floors this shaft serves; must be within [floorMin, floorMax]
   homeFloor: number;
   cars: Car[];
-  hallCalls: Map<number, { up: boolean; down: boolean }>;
+  hallCalls: Map<number, { up: Set<RiderClass>; down: Set<RiderClass> }>;
+}
+
+/**
+ * The floors a car actually works, clamped into its shaft. A null range follows the
+ * shaft, so a car with no range of its own grows with it.
+ */
+export function carRangeOf(shaft: Shaft, car: Car): { lo: number; hi: number } {
+  if (!car.range) return { lo: shaft.floorMin, hi: shaft.floorMax };
+  const lo = Math.min(Math.max(car.range.lo, shaft.floorMin), shaft.floorMax);
+  const hi = Math.min(Math.max(car.range.hi, shaft.floorMin), shaft.floorMax);
+  return { lo, hi: Math.max(lo, hi) };
+}
+
+/** Does this car work that floor? */
+export function carCovers(shaft: Shaft, car: Car, floor: number): boolean {
+  const { lo, hi } = carRangeOf(shaft, car);
+  return floor >= lo && floor <= hi;
 }
 
 export type Leg =
@@ -136,6 +165,8 @@ export type Command =
   | { kind: 'shaft.removeCar'; shaftId: Id }
   | { kind: 'shaft.setStop'; shaftId: Id; floor: number; stops: boolean }
   | { kind: 'shaft.setHome'; shaftId: Id; floor: number }
+  | { kind: 'shaft.setCarServes'; shaftId: Id; carId: Id; serves: Car['serves'] }
+  | { kind: 'shaft.setCarRange'; shaftId: Id; carId: Id; range: { lo: number; hi: number } | null }
   | { kind: 'bomb.pay' }
   | { kind: 'fire.callHelicopter' };
 

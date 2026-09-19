@@ -4,15 +4,20 @@
 
 import { SHAFTS } from './rules';
 import type { ShaftRule } from './rules';
-import type { Car, Id, Shaft, Sim, World } from './types';
+import { carCovers, carRangeOf, riderClassOf } from './types';
+import type { Car, Id, RiderClass, Shaft, Sim, World } from './types';
 
 /** Minutes a car may stand idle away from its home floor before it goes back. */
 export const IDLE_RETURN_MINUTES = 10;
 
-/** A hall call at a floor in one direction, as handed to a single car. */
+/** Every rider class, in a fixed order so dispatch never depends on Set insertion. */
+export const RIDER_CLASSES: readonly RiderClass[] = ['hotel', 'office', 'other'];
+
+/** A hall call at a floor in one direction for one class of rider, as handed to a car. */
 interface HallEntry {
   floor: number;
   dir: 1 | -1;
+  cls: RiderClass;
 }
 
 /** shaft id -> floor -> waiting sims that want a ride on that shaft, in queue order. */
@@ -22,18 +27,58 @@ type WaitIndex = Map<Id, Map<number, Sim[]>>;
  * Register a hall call. Floors the shaft does not stop at are ignored, so an
  * express shaft never picks up a call from a floor it cannot serve.
  */
-export function requestHallCall(world: World, shaftId: Id, floor: number, dir: 1 | -1): void {
+export function requestHallCall(
+  world: World,
+  shaftId: Id,
+  floor: number,
+  dir: 1 | -1,
+  cls: RiderClass,
+): void {
   const shaft = world.shafts.get(shaftId);
   if (!shaft) return;
   if (floor < shaft.floorMin || floor > shaft.floorMax) return;
   if (!shaft.stops.has(floor)) return;
   let call = shaft.hallCalls.get(floor);
   if (!call) {
-    call = { up: false, down: false };
+    call = { up: new Set(), down: new Set() };
     shaft.hallCalls.set(floor, call);
   }
-  if (dir === 1) call.up = true;
-  else call.down = true;
+  (dir === 1 ? call.up : call.down).add(cls);
+}
+
+/** Is anyone of this class still waiting here in this direction? */
+export function hallCallPending(shaft: Shaft, floor: number, dir: 1 | -1, cls: RiderClass): boolean {
+  const call = shaft.hallCalls.get(floor);
+  if (!call) return false;
+  return (dir === 1 ? call.up : call.down).has(cls);
+}
+
+/** Put out the light for one class; the floor drops off the list once nobody is left. */
+function clearHallCall(shaft: Shaft, floor: number, dir: 1 | -1, cls: RiderClass): void {
+  const call = shaft.hallCalls.get(floor);
+  if (!call) return;
+  (dir === 1 ? call.up : call.down).delete(cls);
+  if (call.up.size === 0 && call.down.size === 0) shaft.hallCalls.delete(floor);
+}
+
+/**
+ * A dedicated car with nothing of its own to do takes anyone: no passengers aboard and
+ * no call from its own class anywhere inside its range. This is the leftover rule, and
+ * it is re-read every tick, so the moment its own people call, the car is theirs again.
+ */
+export function isLeftoverCar(shaft: Shaft, car: Car): boolean {
+  if (car.serves === 'any') return false; // a general car is never a leftover
+  if (car.passengers.length > 0) return false;
+  for (const [floor, call] of shaft.hallCalls) {
+    if (!shaft.stops.has(floor) || !carCovers(shaft, car, floor)) continue;
+    if (call.up.has(car.serves) || call.down.has(car.serves)) return false;
+  }
+  return true;
+}
+
+/** May this car answer a call from this class, given what else it has on. */
+function carServesClass(car: Car, cls: RiderClass, leftover: boolean): boolean {
+  return car.serves === 'any' || car.serves === cls || leftover;
 }
 
 /** Advance every car by one game minute. */
@@ -86,27 +131,45 @@ function assignHallCalls(shaft: Shaft): Map<Id, HallEntry[]> {
     const call = shaft.hallCalls.get(floor);
     if (!call || !shaft.stops.has(floor)) continue;
     for (const dir of [1, -1] as const) {
-      if (dir === 1 ? !call.up : !call.down) continue;
-      const car = bestCarFor(shaft, capacity, floor, dir);
-      if (!car) continue;
-      const list = out.get(car.id);
-      if (list) list.push({ floor, dir });
-      else out.set(car.id, [{ floor, dir }]);
+      const classes = dir === 1 ? call.up : call.down;
+      for (const cls of RIDER_CLASSES) {
+        if (!classes.has(cls)) continue;
+        const car = bestCarFor(shaft, capacity, floor, dir, cls);
+        if (!car) continue;
+        const list = out.get(car.id);
+        if (list) list.push({ floor, dir, cls });
+        else out.set(car.id, [{ floor, dir, cls }]);
+      }
     }
   }
   return out;
 }
 
-function bestCarFor(shaft: Shaft, capacity: number, floor: number, dir: 1 | -1): Car | null {
+/** Leftover cars rank below every car that is meant for this rider, however placed. */
+const LEFTOVER_TIER = 3;
+
+function bestCarFor(
+  shaft: Shaft,
+  capacity: number,
+  floor: number,
+  dir: 1 | -1,
+  cls: RiderClass,
+): Car | null {
   let best: Car | null = null;
   let bestTier = Number.MAX_SAFE_INTEGER;
   let bestDist = Number.POSITIVE_INFINITY;
   for (const car of shaft.cars) {
+    if (!carCovers(shaft, car, floor)) continue; // that floor is not this car's work
+    const dedicated = car.serves === 'any' || car.serves === cls;
+    if (!dedicated && !isLeftoverCar(shaft, car)) continue;
     const room = car.passengers.length < capacity;
     const ahead = dir === 1 ? floor >= car.y : floor <= car.y;
-    let tier = 2;
-    if (room && car.dir === dir && ahead) tier = 0;
-    else if (room && car.dir === 0) tier = 1;
+    let tier = LEFTOVER_TIER;
+    if (dedicated) {
+      tier = 2;
+      if (room && car.dir === dir && ahead) tier = 0;
+      else if (room && car.dir === 0) tier = 1;
+    }
     const dist = Math.abs(floor - car.y);
     const better =
       best === null ||
@@ -140,12 +203,17 @@ function stepCar(
     car.state = 'idle';
   }
 
+  // A car whose range moved out from under it walks back into it before doing anything else.
+  const span = carRangeOf(shaft, car);
+  if (car.y < span.lo) return driveTo(car, 1, span.lo, rule);
+  if (car.y > span.hi) return driveTo(car, -1, span.hi, rule);
+
   const y = car.y;
   const atFloor = Number.isInteger(y) ? y : null;
   const hasRoom = car.passengers.length < rule.capacity;
   // A full car skips hall calls entirely; the sims on that floor keep waiting.
   const halls = hasRoom ? assigned.filter((e) => stillCalled(shaft, e)) : [];
-  const carFloors = [...car.calls].filter((f) => shaft.stops.has(f));
+  const carFloors = [...car.calls].filter((f) => shaft.stops.has(f) && carCovers(shaft, car, f));
 
   let dir: 1 | -1;
   if (car.dir === 0) {
@@ -236,10 +304,14 @@ function serveFloor(world: World, shaft: Shaft, car: Car, waiting: WaitIndex): v
   car.calls.delete(floor);
 
   const hadRoom = car.passengers.length < rule.capacity;
+  // Read the leftover state once, after alighting and before anyone gets on: boarding
+  // would otherwise change the answer halfway down the queue.
+  const leftover = isLeftoverCar(shaft, car);
   const queue = waiting.get(shaft.id)?.get(floor) ?? [];
   for (const sim of queue) {
     if (car.passengers.length >= rule.capacity) break;
     if (!boardable(sim, shaft, floor, dir)) continue;
+    if (!carTakes(shaft, car, sim, leftover)) continue; // wrong car for this rider
     sim.inCarId = car.id;
     sim.state = 'riding';
     car.passengers.push(sim.id);
@@ -247,18 +319,25 @@ function serveFloor(world: World, shaft: Shaft, car: Car, waiting: WaitIndex): v
     if (leg && leg.kind === 'ride') car.calls.add(leg.toFloor);
   }
 
-  if (hadRoom) {
-    const call = shaft.hallCalls.get(floor);
-    if (call) {
-      if (dir === 1) call.up = false;
-      else call.down = false;
-      if (!call.up && !call.down) shaft.hallCalls.delete(floor);
+  // The light goes out only for the classes this car just served in this direction.
+  if (hadRoom && carCovers(shaft, car, floor)) {
+    for (const cls of RIDER_CLASSES) {
+      if (carServesClass(car, cls, leftover)) clearHallCall(shaft, floor, dir, cls);
     }
   }
   // Anyone this car could not take keeps the floor lit, so another trip comes back.
-  if (queue.some((sim) => boardable(sim, shaft, floor, dir))) {
-    requestHallCall(world, shaft.id, floor, dir);
+  for (const sim of queue) {
+    if (!boardable(sim, shaft, floor, dir)) continue; // boarded sims are riding now
+    requestHallCall(world, shaft.id, floor, dir, riderClassOf(sim.kind));
   }
+}
+
+/** Would this car carry this sim: the right class, and the destination inside its range. */
+function carTakes(shaft: Shaft, car: Car, sim: Sim, leftover: boolean): boolean {
+  const leg = sim.route[0];
+  if (!leg || leg.kind !== 'ride') return false;
+  if (!carCovers(shaft, car, leg.toFloor)) return false;
+  return carServesClass(car, riderClassOf(sim.kind), leftover);
 }
 
 function boardable(sim: Sim, shaft: Shaft, floor: number, dir: 1 | -1): boolean {
@@ -274,7 +353,9 @@ function boardable(sim: Sim, shaft: Shaft, floor: number, dir: 1 | -1): boolean 
 function idleStep(world: World, shaft: Shaft, car: Car, rule: ShaftRule): number {
   if (car.idleSince === null) car.idleSince = world.time.minute;
   const homeReachable =
-    shaft.homeFloor >= shaft.floorMin && shaft.homeFloor <= shaft.floorMax;
+    shaft.homeFloor >= shaft.floorMin &&
+    shaft.homeFloor <= shaft.floorMax &&
+    carCovers(shaft, car, shaft.homeFloor);
   const waited = world.time.minute - car.idleSince;
   if (waited >= IDLE_RETURN_MINUTES && homeReachable && car.y !== shaft.homeFloor) {
     car.dir = shaft.homeFloor > car.y ? 1 : -1;
@@ -293,9 +374,7 @@ function stepToward(y: number, target: number, floorsPerMinute: number): number 
 }
 
 function stillCalled(shaft: Shaft, entry: HallEntry): boolean {
-  const call = shaft.hallCalls.get(entry.floor);
-  if (!call) return false;
-  return entry.dir === 1 ? call.up : call.down;
+  return hallCallPending(shaft, entry.floor, entry.dir, entry.cls);
 }
 
 function nearestAhead(

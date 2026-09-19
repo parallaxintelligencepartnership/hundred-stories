@@ -13,9 +13,15 @@ import { createRng } from './rng';
 import { ROOMS, SHAFTS } from './rules';
 import { createWorld, rebuildFloorIndex } from './world';
 import { MAX_FLOOR, MIN_FLOOR, TOWER_WIDTH } from './types';
-import type { Car, LogEntry, Room, Shaft, Sim, SimKind, World } from './types';
+import type { Car, LogEntry, RiderClass, Room, Shaft, Sim, SimKind, World } from './types';
 
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
+
+/** Versions this loader understands. v1 has no per car settings and boolean hall calls. */
+const READABLE_VERSIONS = [1, 2];
+
+/** A v1 hall call was one bit per direction: anyone waiting there was everyone. */
+const ALL_CLASSES: readonly RiderClass[] = ['hotel', 'office', 'other'];
 
 const LOG_LIMIT = 200;
 
@@ -29,7 +35,14 @@ interface SaveCar {
   idleSince: number | null;
   passengers: number[];
   calls: number[];
+  serves: Car['serves']; // absent in v1: those cars carried everyone
+  range: { lo: number; hi: number } | null;
 }
+
+/** v1 wrote `{ up: boolean, down: boolean }`; v2 writes the classes still waiting. */
+type SaveHallCall =
+  | { up: boolean; down: boolean }
+  | { up: RiderClass[]; down: RiderClass[] };
 
 interface SaveShaft {
   id: number;
@@ -41,7 +54,7 @@ interface SaveShaft {
   stops: number[];
   homeFloor: number;
   cars: SaveCar[];
-  hallCalls: [number, { up: boolean; down: boolean }][];
+  hallCalls: [number, SaveHallCall][];
 }
 
 interface SaveData {
@@ -82,9 +95,19 @@ function shaftToSave(shaft: Shaft): SaveShaft {
       idleSince: car.idleSince,
       passengers: [...car.passengers],
       calls: Array.from(car.calls),
+      serves: car.serves,
+      range: car.range === null ? null : { lo: car.range.lo, hi: car.range.hi },
     })),
-    hallCalls: Array.from(shaft.hallCalls.entries()),
+    hallCalls: Array.from(shaft.hallCalls.entries()).map(([floor, call]) => [
+      floor,
+      { up: classList(call.up), down: classList(call.down) },
+    ]),
   };
+}
+
+/** Classes in a fixed order, so the same world always serializes to the same bytes. */
+function classList(classes: Set<RiderClass>): RiderClass[] {
+  return ALL_CLASSES.filter((cls) => classes.has(cls));
 }
 
 function buildSaveData(world: World): SaveData {
@@ -139,6 +162,10 @@ const SIM_STATES = {
 } satisfies Record<Sim['state'], true>;
 
 const CAR_STATES = { idle: true, moving: true, doorsOpen: true } satisfies Record<Car['state'], true>;
+
+const CAR_SERVES = { any: true, hotel: true, office: true } satisfies Record<Car['serves'], true>;
+
+const RIDER_CLASS_VALUES = { hotel: true, office: true, other: true } satisfies Record<RiderClass, true>;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -238,6 +265,35 @@ function firstInvalidField(d: SaveData): string | null {
       if (badCar) return badCar;
       if (!inRange(car.y, shaft.floorMin, shaft.floorMax)) return `${carAt}.y`;
       if (typeof car.state !== 'string' || !Object.hasOwn(CAR_STATES, car.state)) return `${carAt}.state`;
+      // v1 cars have neither field; both default on load.
+      if (car.serves !== undefined) {
+        if (typeof car.serves !== 'string' || !Object.hasOwn(CAR_SERVES, car.serves)) {
+          return `${carAt}.serves`;
+        }
+      }
+      if (car.range !== undefined && car.range !== null) {
+        const span = car.range as unknown;
+        if (!isPlainObject(span)) return `${carAt}.range`;
+        if (!isInteger(span.lo) || !isInteger(span.hi)) return `${carAt}.range`;
+        if (span.lo > span.hi) return `${carAt}.range`;
+        if (span.lo < shaft.floorMin || span.hi > shaft.floorMax) return `${carAt}.range`;
+      }
+    }
+    if (!Array.isArray(shaft.hallCalls)) return `${at}.hallCalls`;
+    for (const entry of shaft.hallCalls) {
+      if (!Array.isArray(entry) || entry.length !== 2) return `${at}.hallCalls`;
+      if (!isInteger(entry[0])) return `${at}.hallCalls`;
+      const call = entry[1] as unknown;
+      if (!isPlainObject(call)) return `${at}.hallCalls`;
+      for (const side of [call.up, call.down]) {
+        if (typeof side === 'boolean') continue; // v1
+        if (!Array.isArray(side)) return `${at}.hallCalls`;
+        for (const cls of side) {
+          if (typeof cls !== 'string' || !Object.hasOwn(RIDER_CLASS_VALUES, cls)) {
+            return `${at}.hallCalls`;
+          }
+        }
+      }
     }
   }
 
@@ -258,6 +314,16 @@ function firstInvalidField(d: SaveData): string | null {
   return null;
 }
 
+/** A v1 direction bit means every class was waiting; v2 names them. */
+function loadClasses(side: boolean | RiderClass[]): Set<RiderClass> {
+  if (typeof side === 'boolean') return new Set(side ? ALL_CLASSES : []);
+  return new Set(side);
+}
+
+function loadHallCall(call: SaveHallCall): { up: Set<RiderClass>; down: Set<RiderClass> } {
+  return { up: loadClasses(call.up), down: loadClasses(call.down) };
+}
+
 export function deserialize(text: string): { ok: true; world: World } | { ok: false; reason: string } {
   try {
     let parsed: unknown;
@@ -271,7 +337,7 @@ export function deserialize(text: string): { ok: true; world: World } | { ok: fa
       return { ok: false, reason: NOT_A_SAVE_REASON };
     }
 
-    if (parsed.version !== SAVE_VERSION) {
+    if (!READABLE_VERSIONS.includes(parsed.version)) {
       return { ok: false, reason: WRONG_VERSION_REASON };
     }
 
@@ -311,8 +377,10 @@ export function deserialize(text: string): { ok: true; world: World } | { ok: fa
             idleSince: car.idleSince,
             passengers: [...car.passengers],
             calls: new Set(car.calls),
+            serves: car.serves ?? 'any',
+            range: car.range ?? null,
           })),
-          hallCalls: new Map(saved.hallCalls),
+          hallCalls: new Map(saved.hallCalls.map(([floor, call]) => [floor, loadHallCall(call)])),
         };
         return [shaft.id, shaft];
       })
@@ -398,6 +466,8 @@ function carForHash(car: Car) {
     idleSince: car.idleSince,
     passengers: [...car.passengers],
     calls: Array.from(car.calls).sort((a, b) => a - b),
+    serves: car.serves,
+    range: car.range === null ? null : { lo: car.range.lo, hi: car.range.hi },
   } satisfies Record<keyof Car, unknown>;
 }
 
@@ -412,7 +482,9 @@ function shaftForHash(shaft: Shaft) {
     stops: Array.from(shaft.stops).sort((a, b) => a - b),
     homeFloor: shaft.homeFloor,
     cars: shaft.cars.map(carForHash), // creation order is meaningful, so it is kept
-    hallCalls: Array.from(shaft.hallCalls.entries()).sort((a, b) => a[0] - b[0]),
+    hallCalls: Array.from(shaft.hallCalls.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([floor, call]) => [floor, { up: classList(call.up), down: classList(call.down) }]),
   } satisfies Record<keyof Shaft, unknown>;
 }
 

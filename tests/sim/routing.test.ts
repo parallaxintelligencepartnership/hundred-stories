@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import { entrances, ensureRouting, findRoute, isReachableFromLobby } from '../../src/sim/routing';
 import { LIMITS, ROOMS } from '../../src/sim/rules';
-import type { Leg, Room, RoomKind, Shaft, ShaftKind, World } from '../../src/sim/types';
+import type { Car, Leg, Room, RoomKind, Shaft, ShaftKind, World } from '../../src/sim/types';
 import { addRoom, addShaft, allocId, createWorld } from '../../src/sim/world';
 
 function makeRoom(world: World, kind: RoomKind, floor: number, x: number): Room {
@@ -53,11 +53,31 @@ function makeShaft(
     floorMax,
     stops: new Set(floors),
     homeFloor: 1,
-    cars: [], // routing never looks at cars
+    cars: [],
     hallCalls: new Map(),
   };
+  // Routing reads the cars now: a shaft connects the floors some car will carry you
+  // between, so every fixture shaft gets the one car a built shaft always has.
+  shaft.cars.push(makeCar(world, shaft.id, floorMin));
   addShaft(world, shaft);
   return shaft;
+}
+
+/** The plain car every shaft is built with: carries everyone, works the whole shaft. */
+function makeCar(world: World, shaftId: number, y: number): Car {
+  return {
+    id: allocId(world),
+    shaftId,
+    y,
+    dir: 0,
+    state: 'idle',
+    doorTimer: 0,
+    idleSince: null,
+    passengers: [],
+    calls: new Set<number>(),
+    serves: 'any',
+    range: null,
+  };
 }
 
 /** A stack of stairs rooms: each one links its floor to the floor above. */

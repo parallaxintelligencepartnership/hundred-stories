@@ -61,6 +61,8 @@ function makeShaft(world: World, kind: ShaftKind, x: number, floorMin: number, f
       idleSince: null,
       passengers: [],
       calls: new Set<number>(),
+      serves: 'any',
+      range: null,
     });
   }
   addShaft(world, shaft);

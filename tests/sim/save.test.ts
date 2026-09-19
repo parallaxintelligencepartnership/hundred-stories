@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createWorld, addRoom, addShaft, addSim, log } from '../../src/sim/world';
 import { serialize, deserialize, hashWorld, SAVE_VERSION } from '../../src/sim/save';
-import type { Car, Room, Shaft, Sim, World } from '../../src/sim/types';
+import type { Car, RiderClass, Room, Shaft, Sim, World } from '../../src/sim/types';
 
 function buildRoom(overrides: Partial<Room> = {}): Room {
   return {
@@ -45,9 +45,11 @@ function buildShaft(overrides: Partial<Shaft> = {}): Shaft {
         idleSince: 0,
         passengers: [],
         calls: new Set([5]),
+        serves: 'any',
+        range: null,
       },
     ],
-    hallCalls: new Map([[3, { up: true, down: false }]]),
+    hallCalls: new Map([[3, { up: new Set<RiderClass>(['office']), down: new Set<RiderClass>() }]]),
     ...overrides,
   };
 }
@@ -129,7 +131,7 @@ describe('save/deserialize round trip', () => {
     expect(shaft?.cars[0]?.calls).toBeInstanceOf(Set);
     expect(shaft?.cars[0]?.calls.has(5)).toBe(true);
     expect(shaft?.hallCalls).toBeInstanceOf(Map);
-    expect(shaft?.hallCalls.get(3)).toEqual({ up: true, down: false });
+    expect(shaft?.hallCalls.get(3)).toEqual({ up: new Set(['office']), down: new Set() });
   });
 
   it('restores sims as a Map keyed by id', () => {
@@ -418,6 +420,8 @@ describe('hashWorld covers every field in types.ts', () => {
       idleSince: (c: Car) => (c.idleSince = 99),
       passengers: (c: Car) => c.passengers.push(20),
       calls: (c: Car) => c.calls.add(9),
+      serves: (c: Car) => (c.serves = 'hotel'),
+      range: (c: Car) => (c.range = { lo: 2, hi: 6 }),
     } satisfies Record<keyof Car, (car: Car) => unknown>;
 
     for (const [field, change] of Object.entries(changes)) {

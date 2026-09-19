@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { IDLE_RETURN_MINUTES, requestHallCall, tickElevators } from '../../src/sim/elevators';
+import { riderClassOf } from '../../src/sim/types';
 import { SHAFTS } from '../../src/sim/rules';
 import type { Car, Shaft, ShaftKind, Sim, World } from '../../src/sim/types';
 import { addShaft, addSim, allocId, createWorld } from '../../src/sim/world';
@@ -19,6 +20,8 @@ interface ShaftOpts {
   stops?: number[];
   cars?: number[]; // starting floor of each car
   homeFloor?: number;
+  serves?: Car['serves'];
+  range?: { lo: number; hi: number } | null;
 }
 
 function buildShaft(world: World, opts: ShaftOpts = {}): Shaft {
@@ -48,6 +51,8 @@ function buildShaft(world: World, opts: ShaftOpts = {}): Shaft {
       idleSince: null,
       passengers: [],
       calls: new Set<number>(),
+      serves: opts.serves ?? 'any',
+      range: opts.range ?? null,
     });
   }
   addShaft(world, shaft);
@@ -80,7 +85,7 @@ function addWaiter(world: World, shaft: Shaft, fromFloor: number, toFloor: numbe
     leaveReason: null,
   };
   addSim(world, sim);
-  requestHallCall(world, shaft.id, fromFloor, toFloor > fromFloor ? 1 : -1);
+  requestHallCall(world, shaft.id, fromFloor, toFloor > fromFloor ? 1 : -1, riderClassOf(sim.kind));
   return sim;
 }
 
@@ -128,10 +133,10 @@ describe('requestHallCall', () => {
   it('registers a call in one direction at a time', () => {
     const world = createWorld(1);
     const shaft = buildShaft(world);
-    requestHallCall(world, shaft.id, 4, 1);
-    expect(shaft.hallCalls.get(4)).toEqual({ up: true, down: false });
-    requestHallCall(world, shaft.id, 4, -1);
-    expect(shaft.hallCalls.get(4)).toEqual({ up: true, down: true });
+    requestHallCall(world, shaft.id, 4, 1, 'office');
+    expect(shaft.hallCalls.get(4)).toEqual({ up: new Set(['office']), down: new Set() });
+    requestHallCall(world, shaft.id, 4, -1, 'office');
+    expect(shaft.hallCalls.get(4)).toEqual({ up: new Set(['office']), down: new Set(['office']) });
   });
 
   it('ignores floors the shaft does not stop at', () => {
@@ -142,17 +147,17 @@ describe('requestHallCall', () => {
       floorMax: 30,
       stops: [1, 15, 30],
     });
-    requestHallCall(world, shaft.id, 7, 1);
+    requestHallCall(world, shaft.id, 7, 1, 'office');
     expect(shaft.hallCalls.has(7)).toBe(false);
-    requestHallCall(world, shaft.id, 15, 1);
+    requestHallCall(world, shaft.id, 15, 1, 'office');
     expect(shaft.hallCalls.has(15)).toBe(true);
   });
 
   it('ignores an unknown shaft and a floor outside the span', () => {
     const world = createWorld(1);
     const shaft = buildShaft(world, { floorMin: 1, floorMax: 10 });
-    expect(() => requestHallCall(world, 9999, 3, 1)).not.toThrow();
-    requestHallCall(world, shaft.id, 44, 1);
+    expect(() => requestHallCall(world, 9999, 3, 1, 'office')).not.toThrow();
+    requestHallCall(world, shaft.id, 44, 1, 'office');
     expect(shaft.hallCalls.size).toBe(0);
   });
 });
@@ -184,7 +189,7 @@ describe('tickElevators: a single ride', () => {
     const world = createWorld(2);
     const shaft = buildShaft(world);
     addWaiter(world, shaft, 1, 5);
-    expect(shaft.hallCalls.get(1)).toEqual({ up: true, down: false });
+    expect(shaft.hallCalls.get(1)).toEqual({ up: new Set(['office']), down: new Set() });
     run(world, 1);
     expect(shaft.hallCalls.size).toBe(0);
   });
@@ -253,7 +258,7 @@ describe('tickElevators: capacity', () => {
     const window = 2 + Math.ceil(9 / SHAFTS.standard.floorsPerMinute);
     expect(recordStops(world, car, window)).toEqual([1, 10]);
     expect(stranded.state).toBe('waiting');
-    expect(shaft.hallCalls.get(5)).toEqual({ up: true, down: false });
+    expect(shaft.hallCalls.get(5)).toEqual({ up: new Set(['office']), down: new Set() });
   });
 
   it('alights before boarding, so a freed seat can be filled at the same floor', () => {
@@ -295,19 +300,19 @@ describe('tickElevators: SCAN dispatch', () => {
     const world = createWorld(4);
     const shaft = buildShaft(world);
     const car = carAt(shaft, 0);
-    requestHallCall(world, shaft.id, 5, 1);
-    requestHallCall(world, shaft.id, 5, -1);
+    requestHallCall(world, shaft.id, 5, 1, 'office');
+    requestHallCall(world, shaft.id, 5, -1, 'office');
     run(world, Math.ceil(4 / SHAFTS.standard.floorsPerMinute) + 1);
     expect(car.state).toBe('doorsOpen');
     expect(Math.round(car.y)).toBe(5);
     expect(car.dir).toBe(1);
-    expect(shaft.hallCalls.get(5)).toEqual({ up: false, down: true });
+    expect(shaft.hallCalls.get(5)).toEqual({ up: new Set(), down: new Set(['office']) });
   });
 
   it('clears a stale hall call when nobody is there to board', () => {
     const world = createWorld(4);
     const shaft = buildShaft(world);
-    requestHallCall(world, shaft.id, 6, 1);
+    requestHallCall(world, shaft.id, 6, 1, 'office');
     run(world, travelTicks(shaft, 1, 6));
     expect(shaft.hallCalls.size).toBe(0);
   });
@@ -506,7 +511,7 @@ describe('tickElevators: a parked car holds still', () => {
     const world = createWorld(14);
     const shaft = buildShaft(world, { floorMin: 1, floorMax: 8, cars: [1], homeFloor: 1 });
     const car = carAt(shaft, 0);
-    requestHallCall(world, shaft.id, 1, 1);
+    requestHallCall(world, shaft.id, 1, 1, 'office');
 
     let cycles = 0;
     let wasOpen = false;
