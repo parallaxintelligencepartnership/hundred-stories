@@ -37,6 +37,7 @@ export function createGame(seed: number): Game {
 
   // Drag state for lobby segments (horizontal) and shafts (vertical).
   let drag: null | { floor: number; x: number; kind: 'lobby' | 'shaft' } = null;
+  let hover: { floor: number; x: number } | null = null;
 
   function isNight(): boolean {
     const m = clockOf(world.time.minute).minuteOfDay;
@@ -83,8 +84,11 @@ export function createGame(seed: number): Game {
   function onPointerDown(ev: PointerEvent): void {
     if (!renderer || !container || ev.button !== 0) return;
     const { floor, x } = renderer.screenToTile(ev.offsetX, ev.offsetY);
-    if (tool.kind === 'room' && tool.room === 'lobby') drag = { floor, x, kind: 'lobby' };
-    else if (tool.kind === 'shaft') drag = { floor, x, kind: 'shaft' };
+    if (tool.kind === 'room' && tool.room === 'lobby') {
+      drag = { floor, x, kind: 'lobby' };
+      applyCommand(world, { kind: 'build', room: 'lobby', floor: 1, x });
+      notify();
+    } else if (tool.kind === 'shaft') drag = { floor, x, kind: 'shaft' };
     else if (tool.kind === 'room') api.apply({ kind: 'build', room: tool.room, floor, x });
     ghostFor(floor, x);
   }
@@ -92,6 +96,7 @@ export function createGame(seed: number): Game {
   function onPointerMove(ev: PointerEvent): void {
     if (!renderer) return;
     const { floor, x } = renderer.screenToTile(ev.offsetX, ev.offsetY);
+    hover = { floor, x };
     if (drag?.kind === 'lobby' && tool.kind === 'room') {
       // paint segments while dragging on the lobby floor
       const from = Math.min(drag.x, x);
@@ -106,6 +111,12 @@ export function createGame(seed: number): Game {
   function onPointerUp(ev: PointerEvent): void {
     if (!renderer || !drag) return;
     const { floor, x } = renderer.screenToTile(ev.offsetX, ev.offsetY);
+    if (drag.kind === 'lobby') {
+      const from = Math.min(drag.x, x);
+      const to = Math.max(drag.x, x);
+      for (let sx = from; sx <= to; sx++) applyCommand(world, { kind: 'build', room: 'lobby', floor: 1, x: sx });
+      notify();
+    }
     if (drag.kind === 'shaft' && tool.kind === 'shaft') {
       const floorMin = Math.min(drag.floor, floor);
       const floorMax = Math.max(drag.floor, floor);
@@ -152,6 +163,7 @@ export function createGame(seed: number): Game {
       notify();
     },
     getSelection: () => selection,
+    getHover: () => hover,
     async save() {
       try {
         await writeSave(serialize(world));
@@ -212,7 +224,10 @@ export function createGame(seed: number): Game {
       el.addEventListener('pointerdown', onPointerDown);
       el.addEventListener('pointermove', onPointerMove);
       el.addEventListener('pointerup', onPointerUp);
-      el.addEventListener('pointerleave', () => renderer?.setGhost(null));
+      el.addEventListener('pointerleave', () => {
+        hover = null;
+        renderer?.setGhost(null);
+      });
       r.camera.centerOn(3, LIMITS.towerWidth / 2);
     },
     start() {

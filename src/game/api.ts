@@ -21,6 +21,7 @@ export interface GameApi {
   togglePause(): void;
   select(sel: null | { roomId?: Id; simId?: Id; shaftId?: Id }): void;
   getSelection(): null | { roomId?: Id; simId?: Id; shaftId?: Id };
+  getHover(): { floor: number; x: number } | null; // tile under the pointer on the tower view
   save(): Promise<CommandResult>;
   load(): Promise<CommandResult>;
   exportSave(): string;
