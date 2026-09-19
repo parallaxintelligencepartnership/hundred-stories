@@ -117,6 +117,70 @@ export function buildDemoWorld(): World {
   return world;
 }
 
+export interface DemoAnimationOptions {
+  /** Game minutes per real millisecond. 0.12 is one demo day every twelve seconds. */
+  minutesPerMs?: number;
+  /** The office on floor 3 catches fire on a six second cycle. */
+  fire?: boolean;
+}
+
+interface DemoState {
+  elapsed: number;
+  dirs: Map<number, number>;
+  shaft: Shaft | undefined;
+  burning: Room | undefined;
+}
+
+// Per world, so the smoke page and the landing hero each keep their own phase
+// while sharing one copy of the motion.
+const demoStates = new WeakMap<World, DemoState>();
+
+/**
+ * One frame of the demo world's fake life: the clock, the sims pacing their
+ * floors, the cars running their shaft, and the fire. Both the ?smoke page and
+ * the landing hero call this, so the two can never drift apart.
+ */
+export function animateDemo(world: World, dt: number, options: DemoAnimationOptions = {}): void {
+  const minutesPerMs = options.minutesPerMs ?? 0.12;
+  const fire = options.fire ?? true;
+
+  let state = demoStates.get(world);
+  if (!state) {
+    state = {
+      elapsed: 0,
+      dirs: new Map<number, number>(),
+      shaft: [...world.shafts.values()][0],
+      burning: [...world.rooms.values()].find((r) => r.kind === 'office' && r.floor === 3),
+    };
+    for (const sim of world.sims.values()) state.dirs.set(sim.id, sim.id % 2 === 0 ? 1 : -1);
+    demoStates.set(world, state);
+  }
+  state.elapsed += dt;
+
+  world.time.minute += dt * minutesPerMs;
+
+  for (const sim of world.sims.values()) {
+    const dir = state.dirs.get(sim.id) ?? 1;
+    sim.pos.x += dir * dt * 0.006;
+    if (sim.pos.x > 176) state.dirs.set(sim.id, -1);
+    if (sim.pos.x < 101) state.dirs.set(sim.id, 1);
+    sim.stress = (sim.stress + dt * 0.00002) % 1;
+  }
+
+  const shaft = state.shaft;
+  if (shaft) {
+    const span = shaft.floorMax - shaft.floorMin;
+    shaft.cars.forEach((car, index) => {
+      const phase = (state.elapsed / 4000 + index * 0.5) % 2;
+      const t = phase < 1 ? phase : 2 - phase;
+      car.y = shaft.floorMin + t * span;
+      car.state = t < 0.02 || t > 0.98 ? 'doorsOpen' : 'moving';
+    });
+  }
+
+  if (state.burning) state.burning.onFire = fire && Math.floor(state.elapsed / 6000) % 2 === 1;
+}
+
 /**
  * Boots the renderer full screen into document.body with the demo world and a
  * small animation loop. Returns the renderer so a caller can tear it down.
@@ -144,11 +208,6 @@ export async function bootSmoke(): Promise<Renderer> {
   renderer.setGhost({ widthTiles: ROOMS.office.width, heightFloors: 1, floor: 7, x: 120, ok: true });
   renderer.camera.centerOn(3, 130);
 
-  const shaft = [...world.shafts.values()][0];
-  const burning = [...world.rooms.values()].find((r) => r.kind === 'office' && r.floor === 3);
-  const dirs = new Map<number, number>();
-  for (const sim of world.sims.values()) dirs.set(sim.id, sim.id % 2 === 0 ? 1 : -1);
-
   let last = performance.now();
   let running = true;
 
@@ -158,27 +217,7 @@ export async function bootSmoke(): Promise<Renderer> {
     last = now;
 
     // One demo day every twelve seconds, so the sky keyframes are easy to see.
-    world.time.minute += dt * 0.12;
-
-    for (const sim of world.sims.values()) {
-      const dir = dirs.get(sim.id) ?? 1;
-      sim.pos.x += dir * dt * 0.006;
-      if (sim.pos.x > 176) dirs.set(sim.id, -1);
-      if (sim.pos.x < 101) dirs.set(sim.id, 1);
-      sim.stress = (sim.stress + dt * 0.00002) % 1;
-    }
-
-    if (shaft) {
-      const span = shaft.floorMax - shaft.floorMin;
-      shaft.cars.forEach((car, index) => {
-        const phase = (now / 4000 + index * 0.5) % 2;
-        const t = phase < 1 ? phase : 2 - phase;
-        car.y = shaft.floorMin + t * span;
-        car.state = t < 0.02 || t > 0.98 ? 'doorsOpen' : 'moving';
-      });
-    }
-
-    if (burning) burning.onFire = Math.floor(now / 6000) % 2 === 1;
+    animateDemo(world, dt, { minutesPerMs: 0.12, fire: true });
 
     renderer.render(world, 1);
     requestAnimationFrame(frame);
