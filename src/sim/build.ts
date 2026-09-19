@@ -81,6 +81,10 @@ function countText(count: number, label: string): string {
 // Geometry helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * A floor number the tower can hold: a whole number, never 0, between MIN_FLOOR and
+ * MAX_FLOOR. Nothing has to stand on it yet: a shaft may rise into empty air.
+ */
 function floorExists(floor: number): boolean {
   return Number.isInteger(floor) && floor !== 0 && floor >= MIN_FLOOR && floor <= MAX_FLOOR;
 }
@@ -103,20 +107,37 @@ function overlapsX(aX: number, aWidth: number, bX: number, bWidth: number): bool
   return aX < bX + bWidth && bX < aX + aWidth;
 }
 
-/** Lobbies wrap around elevator shafts, so a shaft and a lobby may share tiles. */
-const SHAFT_MAY_PASS: readonly RoomKind[] = ['lobby', 'skyLobby'];
+/**
+ * Connectors carry people between floors: stairs and escalators are rooms, an elevator
+ * is a shaft. A connector overlays rooms and rooms overlay it, but two connectors never
+ * share a tile.
+ */
+const CONNECTOR_KINDS: readonly RoomKind[] = ['stairs', 'escalator'];
 
-function roomInTheWay(world: World, floors: readonly number[], x: number, width: number): boolean {
+function isConnector(kind: RoomKind): boolean {
+  return CONNECTOR_KINDS.includes(kind);
+}
+
+/** Rooms block each other only within their own layer: connectors over here, rooms over there. */
+function roomInTheWay(
+  world: World,
+  kind: RoomKind,
+  floors: readonly number[],
+  x: number,
+  width: number,
+): boolean {
+  const connector = isConnector(kind);
   for (const f of floors) {
     for (const room of roomsOnFloor(world, f)) {
+      if (isConnector(room.kind) !== connector) continue;
       if (overlapsX(x, width, room.x, room.width)) return true;
     }
   }
   return false;
 }
 
-/** Room overlap as seen by a shaft: lobby and sky lobby tiles are passable. */
-function roomInTheWayOfShaft(
+/** Room overlap as seen by a shaft: only stairs and escalators stand in an elevator's way. */
+function connectorInTheWayOfShaft(
   world: World,
   floors: readonly number[],
   x: number,
@@ -124,7 +145,7 @@ function roomInTheWayOfShaft(
 ): boolean {
   for (const f of floors) {
     for (const room of roomsOnFloor(world, f)) {
-      if (SHAFT_MAY_PASS.includes(room.kind)) continue;
+      if (!isConnector(room.kind)) continue;
       if (overlapsX(x, width, room.x, room.width)) return true;
     }
   }
@@ -148,12 +169,21 @@ function shaftInTheWay(
   return false;
 }
 
+/** A shaft's tiles are floor too, so a floor exists where a room or a shaft stands on it. */
+function floorIsBuilt(world: World, floor: number): boolean {
+  if (roomsOnFloor(world, floor).length > 0) return true;
+  for (const shaft of world.shafts.values()) {
+    if (floor >= shaft.floorMin && floor <= shaft.floorMax) return true;
+  }
+  return false;
+}
+
 /** A floor may only be built on when the floor nearer the ground already exists. */
 function hasSupport(world: World, floor: number): boolean {
   if (floor === 1) return true;
-  if (floor > 1) return roomsOnFloor(world, floor - 1).length > 0;
+  if (floor > 1) return floorIsBuilt(world, floor - 1);
   if (floor === -1) return groundLobby(world) !== undefined;
-  return roomsOnFloor(world, floor + 1).length > 0;
+  return floorIsBuilt(world, floor + 1);
 }
 
 function isExpressStop(floor: number): boolean {
@@ -247,9 +277,9 @@ export function canBuild(world: World, kind: RoomKind, floor: number, x: number)
 
   if (!hasSupport(world, floor)) return no('Build a floor below this one first.');
 
-  if (roomInTheWay(world, floors, x, rule.width)) return no('Something is already there.');
-  // A lobby or sky lobby wraps around a shaft that is already standing there.
-  if (!SHAFT_MAY_PASS.includes(kind) && shaftInTheWay(world, floors, x, rule.width)) {
+  if (roomInTheWay(world, kind, floors, x, rule.width)) return no('Something is already there.');
+  // A room may stand over an elevator's column; another connector may not.
+  if (isConnector(kind) && shaftInTheWay(world, floors, x, rule.width)) {
     return no('An elevator is in the way.');
   }
 
@@ -281,7 +311,7 @@ export function canBuildShaft(
     return no(`You can build ${countText(LIMITS.maxShafts, 'Elevator')}.`);
   }
 
-  if (roomInTheWayOfShaft(world, floors, x, rule.width)) return no('Something is already there.');
+  if (connectorInTheWayOfShaft(world, floors, x, rule.width)) return no('Something is already there.');
   if (shaftInTheWay(world, floors, x, rule.width)) return no('An elevator is in the way.');
 
   if (world.cash < rule.shaftCost) return no(cannotAfford(rule.label, rule.shaftCost));
@@ -412,7 +442,7 @@ function doExtendShaft(
   }
 
   const added = floors.filter((f) => f < shaft.floorMin || f > shaft.floorMax);
-  if (roomInTheWayOfShaft(world, added, shaft.x, shaft.width)) {
+  if (connectorInTheWayOfShaft(world, added, shaft.x, shaft.width)) {
     return no('Something is already there.');
   }
   if (shaftInTheWay(world, added, shaft.x, shaft.width, shaft.id)) {

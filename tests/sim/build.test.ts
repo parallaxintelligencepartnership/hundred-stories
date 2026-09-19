@@ -180,23 +180,28 @@ describe('build: overlap and support', () => {
     expect(build(world, 'office', 2, 109)).toEqual(OK);
   });
 
-  it('refuses a room that overlaps an elevator shaft', () => {
+  it('lets a room stand over an elevator shaft column', () => {
     const world = makeWorld();
     lobby(world);
     expect(buildShaft(world, 'standard', 150, 1, 10)).toEqual(OK);
     expect(build(world, 'office', 2, 100)).toEqual(OK);
-    // the office would run from 146 to 154, across the shaft columns 150 to 153
-    expect(canBuild(world, 'office', 2, 146)).toEqual({ ok: false, reason: 'An elevator is in the way.' });
+    // the office runs from 146 to 154, across the shaft columns 150 to 153: the shaft overlays it
+    expect(canBuild(world, 'office', 2, 146).ok).toBe(true);
     expect(canBuild(world, 'office', 2, 154).ok).toBe(true);
+    // a connector is the one thing that may not share the column
+    expect(canBuild(world, 'stairs', 2, 146)).toEqual({ ok: false, reason: 'An elevator is in the way.' });
   });
 
-  it('refuses a shaft that overlaps a room other than a lobby', () => {
+  it('lets a shaft pass through rooms of every kind', () => {
     const world = makeWorld();
     lobby(world);
     expect(build(world, 'office', 2, 100)).toEqual(OK);
-    // the office on floor 2 is in the way, the lobby segments on floor 1 are not
-    expect(canBuildShaft(world, 'standard', 102, 1, 6)).toEqual({ ok: false, reason: 'Something is already there.' });
+    // the office on floor 2 is no obstacle, and neither are the lobby segments on floor 1
+    expect(canBuildShaft(world, 'standard', 102, 1, 6).ok).toBe(true);
     expect(canBuildShaft(world, 'standard', 102, -1, 1).ok).toBe(true);
+    // stairs are, they are a connector too
+    expect(build(world, 'stairs', 2, 120)).toEqual(OK);
+    expect(canBuildShaft(world, 'standard', 122, 1, 6)).toEqual({ ok: false, reason: 'Something is already there.' });
   });
 
   it('lets a shaft run through a lobby run', () => {
@@ -214,9 +219,9 @@ describe('build: overlap and support', () => {
     expect(buildShaft(world, 'standard', 150, 1, 10)).toEqual(OK);
     expect(build(world, 'lobby', 1, 151)).toEqual(OK);
     expect(world.floorIndex.rooms.get(1)?.some((r) => r.x === 151)).toBe(true);
-    // every other kind still refuses the same tile
+    // every other kind may stand on those tiles too, the shaft overlays them
     expect(build(world, 'lobby', 1, 100)).toEqual(OK);
-    expect(canBuild(world, 'office', 2, 149)).toEqual({ ok: false, reason: 'An elevator is in the way.' });
+    expect(canBuild(world, 'office', 2, 149).ok).toBe(true);
 
     expect(buildShaft(world, 'express', 200, 1, 20)).toEqual(OK);
     for (let f = 2; f <= 15; f++) expect(build(world, 'office', f, 100)).toEqual(OK);
@@ -411,15 +416,18 @@ describe('shafts: stops, cars and home floor', () => {
     expect(shaft.floorMax).toBe(10);
   });
 
-  it('refuses an extension into an occupied floor', () => {
+  it('refuses an extension into a connector and passes through rooms', () => {
     const world = makeWorld();
     lobby(world);
     expect(buildShaft(world, 'standard', 150, 1, 10)).toEqual(OK);
     const shaft = onlyShaft(world);
     for (let f = 2; f <= 12; f++) expect(build(world, 'office', f, 100)).toEqual(OK);
-    // an office in the shaft columns, just above the top of the shaft
+    // an office in the shaft columns, just above the top of the shaft, is overlaid
     expect(build(world, 'office', 11, 148)).toEqual(OK);
-    const result = applyCommand(world, { kind: 'shaft.extend', shaftId: shaft.id, floorMin: 1, floorMax: 12 });
+    expect(applyCommand(world, { kind: 'shaft.extend', shaftId: shaft.id, floorMin: 1, floorMax: 11 })).toEqual(OK);
+    // stairs in the columns above are not
+    expect(build(world, 'stairs', 12, 148)).toEqual(OK);
+    const result = applyCommand(world, { kind: 'shaft.extend', shaftId: shaft.id, floorMin: 1, floorMax: 13 });
     expect(result.ok).toBe(false);
     expect(reasonOf(result)).toBe('Something is already there.');
   });
