@@ -26,90 +26,92 @@ export interface Art {
 // ---------------------------------------------------------------------------
 
 const PALETTE = {
-  slab: 0x2f3238,
-  slabEdge: 0x4a4e57,
-  ceiling: 0x232831,
-  windowUnlit: 0x1a2233,
-  windowWarm: 0xffd27a,
-  windowOffice: 0xcfe6ff,
-  windowFrame: 0x121821,
-  amber: 0xf4b942,
+  outline: 0x222222, // every room cell is boxed in this
+  slab: 0xe6e6e6,
+  slabEdge: 0x333333,
+  windowDay: 0x7fb6e0,
+  windowLit: 0xffd866,
+  windowUnlit: 0x2a3550,
+  windowFrame: 0x222222,
+  amber: 0xf0c419,
   alert: 0xff5c4d,
-  ghostOk: 0x5fd38a, // world green; the chrome token indicator #8ff0c0 is reserved for readouts
-  shaftCavity: 0x0d1118,
-  shaftRail: 0x515c6d,
-  shaftFloorMark: 0x2b3442,
-  carBody: 0x9aa6b6,
-  carTrim: 0x5e6a7a,
-  carDoor: 0xc3cddb,
-  carInterior: 0x1b222e,
-  carLight: 0xffd27a,
-  sim: { calm: 0x101010, pink: 0xff9ad5, red: 0xff4d4d },
-  simAccent: 0xe8ecf2,
-  // Muted, desaturated wall color per room kind.
+  ghostOk: 0x5fd38a,
+  shaftCavity: 0x3b3f47,
+  shaftRail: 0xd8dbe0,
+  shaftFloorMark: 0x222222,
+  carBody: 0xf0c419,
+  carTrim: 0x222222,
+  carDoor: 0xf7d54a,
+  carInterior: 0x3b3f47,
+  carLight: 0xfff3b0,
+  sim: { calm: 0x111111, pink: 0xff7ad9, red: 0xff2d2d },
+  simAccent: 0xffffff,
+  // Flat, bright wall color per kind, the way the original reads at 1x.
   wall: {
-    lobby: 0x453f3c,
-    skyLobby: 0x453f3c,
-    stairs: 0x33363d,
-    escalator: 0x343a42,
-    office: 0x3c4450,
-    condo: 0x4a4048,
-    hotelSingle: 0x473c46,
-    hotelTwin: 0x473c46,
-    hotelSuite: 0x4f4149,
-    fastFood: 0x54423a,
-    restaurant: 0x4a3a3c,
-    shop: 0x3f4a4a,
-    cinema: 0x2e2c3c,
-    partyHall: 0x453a52,
-    medical: 0x3c4a4a,
-    security: 0x343d48,
-    housekeeping: 0x3e4440,
-    parkingRamp: 0x33363b,
-    parkingSpace: 0x33363b,
-    recycling: 0x2f3a34,
-    metro: 0x2b323c,
-    cathedral: 0x3a3646,
+    lobby: 0xf8f8f6,
+    skyLobby: 0xf8f8f6,
+    stairs: 0xd9dde2,
+    escalator: 0xd3dae2,
+    office: 0xf7f5ee,
+    condo: 0xf2e8d8,
+    hotelSingle: 0xeef2f7,
+    hotelTwin: 0xeef2f7,
+    hotelSuite: 0xeef2f7,
+    fastFood: 0xfff1c9,
+    restaurant: 0xf3e3e3,
+    shop: 0xe9f2e4,
+    cinema: 0x2b2b3a,
+    partyHall: 0xf5e8f2,
+    medical: 0xf2f8f7,
+    security: 0xe4e8ee,
+    housekeeping: 0xeeeae2,
+    parkingRamp: 0x8d9199,
+    parkingSpace: 0x8d9199,
+    recycling: 0xdfe6dc,
+    metro: 0xc9ced8,
+    cathedral: 0xf4efe4,
   } as Record<RoomKind, number>,
+  // Interiors are drawn in dark saturated inks so they read against the light walls.
   detail: {
-    metal: 0x8b94a2,
-    metalDark: 0x59616e,
-    wood: 0x8a6a46,
-    woodDark: 0x5d472f,
-    linen: 0xe4e9ef,
-    pillow: 0xf6f8fb,
-    blanketA: 0x5e7fb0,
-    blanketB: 0x9a5f6e,
-    marble: 0xd8d2c4,
-    marbleVein: 0xb3ad9f,
-    carpet: 0x7a3c45,
-    chairA: 0x3f6ea8,
-    chairB: 0x7a5aa0,
-    screenOn: 0xcfe6ff,
-    screenOff: 0x26303c,
-    glow: 0xffd27a,
-    pot: 0xa9643f,
-    leaf: 0x4f8b53,
-    counter: 0xb08652,
-    tile: 0xc9d2da,
-    cross: 0xe0483f,
-    shelfGoodsA: 0xd08a4a,
-    shelfGoodsB: 0x4f8b8b,
-    seatA: 0x8c3a3a,
-    seatB: 0x3a4f8c,
-    curtain: 0x7b2f46,
-    stripe: 0xcdd3d8,
-    carRed: 0xb04a42,
-    carBlue: 0x3f6b9c,
-    binGreen: 0x4f8b53,
-    binBlue: 0x3f6b9c,
-    binAmber: 0xc98b3a,
-    rail: 0x9aa6b6,
-    stone: 0x6f6a7e,
-    stoneDark: 0x514c5e,
-    gold: 0xd8b25a,
-    glass: 0x7fb0d8,
-    dark: 0x151a22,
+    metal: 0x5a6472,
+    metalDark: 0x333a44,
+    wood: 0xa9702f,
+    woodDark: 0x6b4420,
+    linen: 0xf7f7f2,
+    pillow: 0xffffff,
+    blanketA: 0x2f5c9e,
+    blanketB: 0x8c3050,
+    marble: 0xf8f8f6,
+    marbleVein: 0xc9c4b8,
+    column: 0x3a3a3a,
+    carpet: 0x8c2f3c,
+    chairA: 0x2b5ea8,
+    chairB: 0x6a3a97,
+    screenOn: 0x8fd4ff,
+    screenOff: 0x33404d,
+    glow: 0xffd866,
+    pot: 0xa4522c,
+    leaf: 0x2f7d3a,
+    counter: 0xa9702f,
+    tile: 0xeef2f5,
+    cross: 0xd22b2b,
+    shelfGoodsA: 0xd2761f,
+    shelfGoodsB: 0x1f7d7d,
+    seatA: 0x9c2b2b,
+    seatB: 0x2b3f9c,
+    curtain: 0x8c1f3d,
+    stripe: 0x555b63,
+    carRed: 0xc03028,
+    carBlue: 0x2f5c9e,
+    binGreen: 0x2f7d3a,
+    binBlue: 0x2f5c9e,
+    binAmber: 0xd28c1f,
+    rail: 0x5a6472,
+    stone: 0x8e87a3,
+    stoneDark: 0x6c6482,
+    gold: 0xc9a227,
+    glass: 0x7fb6e0,
+    dark: 0x222222,
   },
 } as const;
 
@@ -120,26 +122,26 @@ const WIN_W = 5;
 const WIN_STEP = 9;
 const INTERIOR_TOP = 13; // first free pixel under the window band, relative to a floor band
 
-type WindowMood = 'warm' | 'office' | 'none';
+type WindowMood = 'glass' | 'none';
 
 const WINDOWS: Record<RoomKind, WindowMood> = {
-  lobby: 'warm',
-  skyLobby: 'warm',
-  stairs: 'office',
-  escalator: 'office',
-  office: 'office',
-  condo: 'warm',
-  hotelSingle: 'warm',
-  hotelTwin: 'warm',
-  hotelSuite: 'warm',
-  fastFood: 'warm',
-  restaurant: 'warm',
-  shop: 'office',
+  lobby: 'glass',
+  skyLobby: 'glass',
+  stairs: 'glass',
+  escalator: 'glass',
+  office: 'glass',
+  condo: 'glass',
+  hotelSingle: 'glass',
+  hotelTwin: 'glass',
+  hotelSuite: 'glass',
+  fastFood: 'glass',
+  restaurant: 'glass',
+  shop: 'glass',
   cinema: 'none', // a cinema is a dark box: the screen and the projector carry the light
-  partyHall: 'warm',
-  medical: 'office',
-  security: 'office',
-  housekeeping: 'office',
+  partyHall: 'glass',
+  medical: 'glass',
+  security: 'glass',
+  housekeeping: 'glass',
   parkingRamp: 'none',
   parkingSpace: 'none',
   recycling: 'none',
@@ -270,11 +272,12 @@ function carSilhouette(g: Graphics, x: number, by: number, color: number): void 
 function drawWindowBand(g: Graphics, kind: RoomKind, y0: number, w: number, lit: boolean): void {
   const mood = WINDOWS[kind];
   if (mood === 'none') return;
-  const color = lit ? (mood === 'warm' ? PALETTE.windowWarm : PALETTE.windowOffice) : PALETTE.windowUnlit;
   box(g, 0, y0 + WIN_Y - 1, w, WIN_H + 2, PALETTE.windowFrame);
   for (let x = 2; x + WIN_W <= w - 1; x += WIN_STEP) {
-    box(g, x, y0 + WIN_Y, WIN_W, WIN_H, color);
-    if (lit) box(g, x, y0 + WIN_Y, WIN_W, 1, color, 0.6);
+    box(g, x, y0 + WIN_Y, WIN_W, WIN_H, lit ? PALETTE.windowLit : PALETTE.windowUnlit);
+    // The renderer only knows lit or unlit, so an unlit pane keeps a day sky reflection
+    // in its upper half and the deep unlit blue below.
+    if (!lit) box(g, x, y0 + WIN_Y, WIN_W, 3, PALETTE.windowDay);
   }
 }
 
@@ -284,7 +287,6 @@ function drawShell(g: Graphics, kind: RoomKind, w: number, h: number, lit: boole
   const perFloorSlabs = !FULL_HEIGHT.has(kind);
   for (let f = 0; f < floors; f++) {
     const y0 = f * FLOOR_PX;
-    box(g, 0, y0, w, 1, PALETTE.ceiling);
     drawWindowBand(g, kind, y0, w, lit);
     if (perFloorSlabs || f === floors - 1) {
       const sy = y0 + FLOOR_PX - SLAB_H;
@@ -292,6 +294,11 @@ function drawShell(g: Graphics, kind: RoomKind, w: number, h: number, lit: boole
       box(g, 0, sy, w, 1, PALETTE.slabEdge);
     }
   }
+}
+
+function drawCellOutline(g: Graphics, w: number, h: number, floors: number, perFloor: boolean): void {
+  if (perFloor) for (let f = 0; f < floors; f++) outline(g, 0, f * FLOOR_PX, w, FLOOR_PX, PALETTE.outline);
+  else outline(g, 0, 0, w, h, PALETTE.outline);
 }
 
 // ---------------------------------------------------------------------------
@@ -466,7 +473,7 @@ function drawLobby(g: Graphics, y0: number, w: number, h: number, v: number, lit
   const by = y0 + h - SLAB_H;
   const ty = y0 + INTERIOR_TOP;
   marbleFloor(g, y0, w, h);
-  for (let x = 2; x + 3 <= w; x += 16) box(g, x, y0 + INTERIOR_TOP, 3, h - INTERIOR_TOP - SLAB_H - 4, PALETTE.detail.gold, 0.5);
+  for (let x = 2; x + 3 <= w; x += 16) box(g, x, y0 + INTERIOR_TOP, 3, h - INTERIOR_TOP - SLAB_H - 4, PALETTE.detail.column);
   if (w >= 48) {
     box(g, 6, by - 13, 22, 3, PALETTE.detail.wood); // reception desk
     box(g, 7, by - 10, 20, 6, PALETTE.detail.woodDark);
@@ -486,8 +493,8 @@ function drawSkyLobby(g: Graphics, y0: number, w: number, h: number, v: number, 
   const mezz = y0 + h - FLOOR_PX - 6; // balcony one floor above the main floor
   box(g, 0, mezz, w, 3, PALETTE.slab);
   box(g, 0, mezz, w, 1, PALETTE.slabEdge);
-  box(g, 0, mezz - 6, w, 1, PALETTE.detail.gold); // handrail
-  for (let x = 2; x < w; x += 5) box(g, x, mezz - 6, 1, 6, PALETTE.detail.gold, 0.7);
+  box(g, 0, mezz - 6, w, 1, PALETTE.detail.column); // handrail
+  for (let x = 2; x < w; x += 5) box(g, x, mezz - 6, 1, 6, PALETTE.detail.column, 0.7);
   const by = y0 + h - SLAB_H;
   if (w >= 40) {
     box(g, 5, by - 12, 18, 3, PALETTE.detail.wood);
@@ -534,7 +541,6 @@ function drawEscalator(g: Graphics, y0: number, w: number, h: number, v: number,
 
 function drawCinema(g: Graphics, y0: number, w: number, h: number, v: number, lit: boolean): void {
   const by = y0 + h - SLAB_H;
-  box(g, 0, y0 + 1, w, h - 1 - SLAB_H, PALETTE.detail.dark, 0.35); // the dark box
   const sw = Math.min(28, Math.floor(w / 6));
   box(g, 4, y0 + 8, sw, h - 20, PALETTE.detail.metalDark);
   box(g, 6, y0 + 10, sw - 4, h - 24, lit ? PALETTE.detail.screenOn : PALETTE.detail.screenOff); // screen
@@ -627,8 +633,9 @@ function drawCathedral(g: Graphics, y0: number, w: number, h: number, v: number,
   for (let x = 6; x + 11 <= w - 6; x += 22) {
     const top = y0 + 12;
     const bot = by - 30;
-    box(g, x, top + 4, 10, bot - top - 4, lit ? PALETTE.windowWarm : PALETTE.windowUnlit);
-    box(g, x + 2, top, 6, 5, lit ? PALETTE.windowWarm : PALETTE.windowUnlit); // arch
+    box(g, x, top + 4, 10, bot - top - 4, lit ? PALETTE.windowLit : PALETTE.windowUnlit);
+    box(g, x + 2, top, 6, 5, lit ? PALETTE.windowLit : PALETTE.windowUnlit); // arch
+    if (!lit) box(g, x, top + 4, 10, Math.max(3, Math.floor((bot - top) / 3)), PALETTE.windowDay); // day sky through the glass
     box(g, x + 4, top + 4, 2, bot - top - 4, glass); // tracery
     box(g, x, top + Math.floor((bot - top) / 2), 10, 2, glass);
     outline(g, x - 1, top - 1, 12, bot - top + 6, PALETTE.detail.stone);
@@ -660,7 +667,7 @@ function drawCathedral(g: Graphics, y0: number, w: number, h: number, v: number,
 function drawSlab(g: Graphics, w: number): void {
   box(g, 0, 0, w, 4, PALETTE.slab);
   box(g, 0, 0, w, 1, PALETTE.slabEdge);
-  for (let x = 4; x < w; x += 16) box(g, x, 1, 1, 3, PALETTE.ceiling); // rib marks
+  for (let x = 4; x < w; x += 16) box(g, x, 1, 1, 3, PALETTE.slabEdge, 0.5); // rib marks
 }
 
 function drawShaft(g: Graphics, kind: ShaftKind, w: number, h: number): void {
@@ -787,6 +794,7 @@ export function createArt(renderer: Renderer): Art {
         } else {
           for (let f = 0; f < floors; f++) drawInterior(g, kind, f * FLOOR_PX, w, FLOOR_PX, v, lit);
         }
+        drawCellOutline(g, w, h, floors, !FULL_HEIGHT.has(kind));
       });
     },
 
