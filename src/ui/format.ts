@@ -1,7 +1,7 @@
 // Pure display formatting for the UI. No DOM, so it is safe to import anywhere, tests included.
 // Every string here is sentence case, US spelling, and free of dashes used as punctuation.
 
-import { STRESS } from '../sim/rules';
+import { EVAL, STRESS } from '../sim/rules';
 import { clockOf } from '../sim/types';
 import type { Star, StressBand } from '../sim/types';
 
@@ -93,6 +93,19 @@ export function formatFloorRange(floorMin: number, floorMax: number): string {
 
 export function formatPercent(fraction: number): string {
   return `${Math.round(Math.max(0, Math.min(1, fraction)) * 100)}%`;
+}
+
+/** Evaluation reads red, yellow, blue from left to right, as the original meter did. */
+export function evalBandLabel(value: number): string {
+  const poorEnd = EVAL.leaveThreshold;
+  const fairEnd = poorEnd + (1 - poorEnd) / 2;
+  if (value < poorEnd) return 'Poor';
+  if (value < fairEnd) return 'Fair';
+  return 'Good';
+}
+
+export function formatEval(value: number): string {
+  return `${evalBandLabel(value)} ${formatPercent(value)}`;
 }
 
 export function stressBandOf(stress: number): StressBand {

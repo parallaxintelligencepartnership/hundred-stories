@@ -16,6 +16,7 @@ import type {
 } from '../sim/types';
 import {
   formatCount,
+  formatEval,
   formatFloor,
   formatFloorRange,
   formatMoney,
@@ -171,7 +172,7 @@ function roomPanel(roomId: Id, game: GameApi, ctx: PanelContext): PanelElement {
 
   const evaluation = section('Evaluation');
   const bar = evalBar(room.eval);
-  const readout = row('Score', formatPercent(room.eval));
+  const readout = row('Score', formatEval(room.eval));
   evaluation.append(bar.node, readout);
   body.append(evaluation);
 
@@ -193,7 +194,7 @@ function roomPanel(roomId: Id, game: GameApi, ctx: PanelContext): PanelElement {
     const room = game.world.rooms.get(roomId);
     if (!room) return;
     bar.set(room.eval);
-    setRowValue(readout, formatPercent(room.eval));
+    setRowValue(readout, formatEval(room.eval));
     setRowValue(tenants, formatCount(room.tenants.length));
     setRowValue(
       occupancy,

@@ -26,7 +26,7 @@
   --top-h: 44px;
   --palette-w: 232px;
   --ticker-h: 28px;
-  --panel-w: 300px;
+  --panel-w: 320px;
   --pad: 8px;
   --motion: 160ms;
 }
@@ -302,7 +302,8 @@ button.hs-readout:hover {
   right: 0;
   bottom: var(--ticker-h);
   width: var(--panel-w);
-  max-width: 100%;
+  max-width: 100vw;
+  box-sizing: border-box;
   overflow-x: hidden;
   overflow-y: auto;
   background: var(--steel);
@@ -332,6 +333,7 @@ button.hs-readout:hover {
 }
 
 .hs-panel-body {
+  max-width: 100%;
   padding: var(--pad);
 }
 
@@ -347,15 +349,23 @@ button.hs-readout:hover {
 }
 
 .hs-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: baseline;
-  justify-content: space-between;
-  gap: var(--pad);
+  column-gap: var(--pad);
   padding: 3px 0;
   border-bottom: 1px solid var(--line);
 }
 
+.hs-row-label {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .hs-row-value {
+  justify-self: end;
   font-family: var(--font-readout);
   font-size: var(--size-14);
   text-align: right;
@@ -384,10 +394,13 @@ button.hs-readout:hover {
 /* Evaluation bar: blue, yellow and red zones with a marker */
 
 .hs-eval {
-  display: flex;
-  height: 10px;
-  border: 1px solid var(--line);
   position: relative;
+  display: flex;
+  width: 100%;
+  height: 10px;
+  margin: 2px 0 6px;
+  border: 1px solid var(--line);
+  box-sizing: border-box;
 }
 
 .hs-eval-zone {
@@ -576,7 +589,7 @@ button.hs-readout:hover {
     top: auto;
     bottom: var(--ticker-h);
     left: 0;
-    width: auto;
+    width: 100vw;
     max-height: 60vh;
     border-left: 0;
     border-top: 1px solid var(--line);

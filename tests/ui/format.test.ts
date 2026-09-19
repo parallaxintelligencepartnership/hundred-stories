@@ -7,6 +7,7 @@ import {
   formatCount,
   formatDate,
   formatFloor,
+  formatEval,
   formatFloorShort,
   formatMoney,
   formatPercent,
@@ -132,6 +133,12 @@ describe('small readouts', () => {
     expect(formatFloorShort(12)).toBe('Floor 12');
     expect(formatFloorShort(1)).toBe('Floor 1');
     expect(formatFloorShort(-3)).toBe('B3');
+  });
+
+  it('names the evaluation zone beside the percent', () => {
+    expect(formatEval(0.2)).toBe('Poor 20%');
+    expect(formatEval(0.5)).toBe('Fair 50%');
+    expect(formatEval(0.72)).toBe('Good 72%');
   });
 
   it('rounds evaluation to whole percent', () => {
