@@ -43,11 +43,12 @@ export interface PanelContext {
 
 export type Selection = { roomId?: Id; simId?: Id; shaftId?: Id };
 
-/** The same six lines as the guide, for the player who looks in the menu instead. */
+/** The same lines as the guide, for the player who looks in the menu instead. */
 const CONTROL_LINES: readonly string[] = [
   'Move around: drag anywhere with the mouse, even with most build tools selected. The lobby and elevator tools drag to size, so pan with the right button, scroll, or keys while they are active. Scroll the wheel to move up and down, hold shift to move sideways. On a trackpad, two-finger scroll moves the view.',
   'Zoom: hold ctrl and scroll, or pinch on a trackpad. Plus and minus keys also zoom.',
   'Keys: W A S D or the arrow keys move the view.',
+  'Touch: one finger moves the view, pinch zooms, tap places, two fingers drag to pan while sizing a lobby or an elevator.',
   'Place a room: pick it from the palette, then click where it goes. A click that does not move places; a press that moves pans.',
   'Speed: 1, 2, 3 set the clock speed, space pauses.',
   'Escape drops the current tool.',

@@ -32,6 +32,21 @@ const FOLLOW_EASE_MS = 140; // how fast the view catches up with a room it had t
 const KEY_ZOOM_DELTA = 120; // one wheel notch, so the plus and minus keys feel like the wheel
 /** Where the street sits in the opening shot, as a fraction down the viewport. */
 export const DEFAULT_GROUND_LINE = 0.68;
+/** On a phone the palette is a bottom sheet, so the street starts above it, not behind it. */
+export const PHONE_GROUND_LINE = 0.4;
+/** The width ui.css turns the palette into a bottom sheet at. */
+export const PHONE_MAX_WIDTH_PX = 720;
+
+/**
+ * Where to put the street when the game opens, for a viewport this wide.
+ *
+ * Two thirds down is the right stage for a tower on a desktop. On a phone the lower half of
+ * the screen belongs to the palette sheet and the ticker, so an empty lot framed that way puts
+ * the ground the player has to build on behind the sheet, with nothing but sky in the gap.
+ */
+export function groundLineFor(viewportWidth: number): number {
+  return viewportWidth <= PHONE_MAX_WIDTH_PX ? PHONE_GROUND_LINE : DEFAULT_GROUND_LINE;
+}
 
 const PAN_KEYS: Record<string, { dx: number; dy: number }> = {
   KeyW: { dx: 0, dy: -1 },

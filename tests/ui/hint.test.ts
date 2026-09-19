@@ -1,6 +1,7 @@
-// The controls hint counter: three loads, then silence, and a blocked store shows the line.
+// The controls hint: three loads then silence, a blocked store shows the line, and the line
+// names the gestures the pointer in the room actually has.
 import { describe, expect, it, afterEach } from 'vitest';
-import { nextHintSeen, readHintSeen, writeHintSeen } from '../../src/ui/ui';
+import { hintText, nextHintSeen, readHintSeen, writeHintSeen } from '../../src/ui/ui';
 
 describe('nextHintSeen', () => {
   it('shows the hint on the first three loads and counts each one', () => {
@@ -50,5 +51,17 @@ describe('a blocked localStorage', () => {
     expect(hintState.show).toBe(true);
 
     expect(() => writeHintSeen(hintState.seen)).not.toThrow();
+  });
+});
+
+describe('hintText', () => {
+  it('tells a finger about fingers', () => {
+    expect(hintText(true)).toBe('Move: one finger. Zoom: pinch. Tap to place.');
+  });
+
+  it('keeps the wheel, the keys and the click for a mouse', () => {
+    const line = hintText(false);
+    expect(line).toContain('W A S D');
+    expect(line).toContain('Click to place.');
   });
 });

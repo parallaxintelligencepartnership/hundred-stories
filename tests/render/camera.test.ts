@@ -5,14 +5,18 @@ import { describe, expect, it } from 'vitest';
 import { FLOOR_PX, TILE_PX } from '../../src/render/art';
 import {
   createCamera,
+  DEFAULT_GROUND_LINE,
   floorBand,
   floorBandFloat,
   floorBaseY,
   floorTopY,
+  groundLineFor,
   DEFAULT_ZOOM,
   MAX_ZOOM,
   MIN_ZOOM,
   nearestSnap,
+  PHONE_GROUND_LINE,
+  PHONE_MAX_WIDTH_PX,
   xToTile,
   yToFloor,
 } from '../../src/render/camera';
@@ -327,5 +331,18 @@ describe('sky', () => {
     expect(nightness(12 * 60)).toBe(0);
     expect(nightness(18 * 60 + 30)).toBeGreaterThan(0);
     expect(nightness(18 * 60 + 30)).toBeLessThan(1);
+  });
+});
+
+describe('groundLineFor', () => {
+  it('keeps the street two thirds down on a desktop', () => {
+    expect(groundLineFor(1440)).toBe(DEFAULT_GROUND_LINE);
+    expect(groundLineFor(PHONE_MAX_WIDTH_PX + 1)).toBe(DEFAULT_GROUND_LINE);
+  });
+
+  it('lifts it on a phone, where the palette sheet owns the bottom of the screen', () => {
+    expect(groundLineFor(390)).toBe(PHONE_GROUND_LINE);
+    expect(groundLineFor(PHONE_MAX_WIDTH_PX)).toBe(PHONE_GROUND_LINE);
+    expect(PHONE_GROUND_LINE).toBeLessThan(DEFAULT_GROUND_LINE);
   });
 });

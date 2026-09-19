@@ -28,11 +28,11 @@ import { roomsOnFloor, shaftAt } from '../sim/world';
 import { createArt, FLOOR_PX, OVERLAY_KINDS, TILE_PX, type Art } from './art';
 import {
   createCamera,
-  DEFAULT_GROUND_LINE,
   floorBand,
   floorBaseY,
   floorTopY,
   floorYFloat,
+  groundLineFor,
   xToTile,
   yToFloor,
   type Camera,
@@ -461,7 +461,7 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
     camera.reset(); // zoom 1, no inertia, street at the default ground line
     const x = lastWorld.rooms.size > 0 ? averageRoomX(lastWorld) : TOWER_WIDTH / 2;
     camera.centerOn(6, Math.round(x));
-    camera.setGroundLine(DEFAULT_GROUND_LINE);
+    camera.setGroundLine(groundLineFor(app.screen.width));
     if (app.screen.width > 1 && app.screen.height > 1) framedOnce = true;
   }
 

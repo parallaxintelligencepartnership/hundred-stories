@@ -50,6 +50,13 @@ const HINT_KEY = 'hs.hintSeen';
 /** The controls hint rides along for the first three loads, then gets out of the way. */
 const HINT_LOADS = 3;
 const HINT_TEXT = 'Move: drag, scroll, or W A S D. Zoom: ctrl + scroll or pinch. Click to place.';
+/** A phone has no wheel, no keys and no cursor, so it gets the three gestures it does have. */
+const TOUCH_HINT_TEXT = 'Move: one finger. Zoom: pinch. Tap to place.';
+
+/** The hint speaks to the pointer in the room: a finger is told about fingers. */
+export function hintText(coarsePointer: boolean): string {
+  return coarsePointer ? TOUCH_HINT_TEXT : HINT_TEXT;
+}
 
 const GROUPS: { title: string; source: 'rooms' | 'shafts' | 'tools'; group?: string }[] = [
   { title: 'Structure', source: 'rooms', group: 'structure' },
@@ -160,7 +167,7 @@ export function createUi(root: HTMLElement, game: GameApi): Ui {
 
   // Controls hint: one line over the view, for the first few loads only.
   const hint = el('div', 'hs-hint');
-  hint.append(el('span', 'hs-hint-text', HINT_TEXT));
+  hint.append(el('span', 'hs-hint-text', hintText(coarsePointer())));
   const hintClose = button('Close', 'hs-hint-close', () => {
     hint.classList.add('is-hidden');
     writeHintSeen(HINT_LOADS); // closing it means read, not just shown
@@ -499,6 +506,15 @@ function ensureFonts(): void {
   link.rel = 'stylesheet';
   link.href = FONT_HREF;
   document.head.append(link);
+}
+
+/** True on a touch screen. A browser that will not answer is treated as a mouse. */
+function coarsePointer(): boolean {
+  try {
+    return window.matchMedia('(pointer: coarse)').matches;
+  } catch {
+    return false;
+  }
 }
 
 function readReducedMotion(): boolean {

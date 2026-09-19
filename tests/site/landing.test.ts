@@ -11,6 +11,9 @@ import robots from '../../public/robots.txt?raw';
 import sitemap from '../../public/sitemap.xml?raw';
 import { describe, expect, it } from 'vitest';
 
+/** Copy is wrapped in the markup, so read it the way a browser lays it out: one line. */
+const flat = (html: string): string => html.replace(/\s+/g, ' ');
+
 describe('landing page', () => {
   it('is the front door, not the game shell', () => {
     expect(landing).toContain('<h1>Build a tower. Run it well.</h1>');
@@ -37,6 +40,16 @@ describe('landing page', () => {
     expect(landing).toContain('id="hero-shot"');
     expect(landing).toContain('id="hero-view"');
   });
+
+  it('invites a phone and a tablet, not a desktop only', () => {
+    expect(landing).toContain('<h2 id="platforms">Phone, tablet or desktop</h2>');
+    expect(landing).toContain('aria-labelledby="platforms"');
+    expect(flat(landing)).toContain(
+      'Play in a desktop browser with a mouse, or on a phone or tablet with touch: one finger moves, pinch zooms, tap to place. Install it from the browser menu and it opens like an app.',
+    );
+    expect(landing).not.toContain('Best on a desktop');
+    expect(landing).not.toContain('desktop-note');
+  });
 });
 
 describe('guide page', () => {
@@ -54,6 +67,12 @@ describe('guide page', () => {
     }
   });
 
+  it('tells a player with a touch screen what their fingers do', () => {
+    expect(flat(guide)).toContain(
+      'Touch: one finger moves the view, pinch zooms, tap places, two fingers drag to pan while sizing a lobby or an elevator.',
+    );
+  });
+
   it('points at itself and at the game', () => {
     expect(guide).toContain('<link rel="canonical" href="https://hundredstories.xyz/how-to-play/" />');
     expect(guide).toContain('href="/play/"');
@@ -67,6 +86,12 @@ describe('game shell', () => {
     expect(play).toContain('<title>Play Hundred Stories</title>');
     expect(play).toContain('Hundred Stories needs JavaScript and WebGL.');
     expect(play).toContain('<link rel="canonical" href="https://hundredstories.xyz/play/" />');
+  });
+
+  it('lets the view reach under the notch and the home indicator', () => {
+    expect(play).toContain('viewport-fit=cover');
+    // The canvas takes the touch gestures itself, so the page never has to forbid zooming.
+    expect(play).not.toContain('user-scalable=no');
   });
 });
 

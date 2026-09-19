@@ -29,6 +29,13 @@
   --panel-w: 320px;
   --pad: 8px;
   --motion: 160ms;
+
+  /* The notch, the home indicator and a phone's rounded corners. Zero on every other screen,
+     so the strips can spend them without a media query. */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
 }
 
 @media (prefers-color-scheme: light) {
@@ -53,6 +60,7 @@ body {
   margin: 0;
   height: 100%;
   overflow: hidden; /* the tower view pans itself; the page never scrolls */
+  overscroll-behavior: none; /* and a drag that runs past the view never pulls to refresh */
   background: var(--steel, #1c232e);
 }
 
@@ -64,6 +72,9 @@ body {
 
 #view canvas {
   display: block;
+  /* Every touch on the tower belongs to the game: no page scroll, no double tap zoom, no
+     browser pinch. The canvas moves and zooms itself, so the browser must keep its hands off. */
+  touch-action: none;
 }
 
 .hs-ui {
@@ -101,12 +112,12 @@ body {
 .hs-top {
   position: absolute;
   inset: 0 0 auto 0;
-  min-height: var(--top-h);
+  min-height: calc(var(--top-h) + var(--safe-top));
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--pad);
-  padding: 0 var(--pad);
+  padding: var(--safe-top) calc(var(--pad) + var(--safe-right)) 0 calc(var(--pad) + var(--safe-left));
   background: var(--steel);
   border-bottom: 1px solid var(--line);
   pointer-events: auto;
@@ -215,10 +226,11 @@ button.hs-readout:hover {
 
 .hs-palette {
   position: absolute;
-  top: var(--top-h);
-  bottom: var(--ticker-h);
+  top: calc(var(--top-h) + var(--safe-top));
+  bottom: calc(var(--ticker-h) + var(--safe-bottom));
   left: 0;
   width: var(--palette-w);
+  padding-left: var(--safe-left);
   overflow-x: hidden;
   overflow-y: auto;
   background: var(--steel);
@@ -316,9 +328,9 @@ button.hs-readout:hover {
 
 .hs-panel {
   position: absolute;
-  top: var(--top-h);
+  top: calc(var(--top-h) + var(--safe-top));
   right: 0;
-  bottom: var(--ticker-h);
+  bottom: calc(var(--ticker-h) + var(--safe-bottom));
   width: var(--panel-w);
   max-width: 100vw;
   box-sizing: border-box;
@@ -523,12 +535,12 @@ button.hs-readout:hover {
 .hs-ticker {
   position: absolute;
   inset: auto 0 0 0;
-  height: var(--ticker-h);
+  height: calc(var(--ticker-h) + var(--safe-bottom));
   display: flex;
   align-items: center;
   gap: var(--pad);
   width: 100%;
-  padding: 0 var(--pad);
+  padding: 0 calc(var(--pad) + var(--safe-right)) var(--safe-bottom) calc(var(--pad) + var(--safe-left));
   background: var(--steel);
   border: 0;
   border-top: 1px solid var(--line);
@@ -561,7 +573,7 @@ button.hs-readout:hover {
 .hs-hint {
   position: absolute;
   left: 50%;
-  bottom: calc(var(--ticker-h) + var(--pad));
+  bottom: calc(var(--ticker-h) + var(--safe-bottom) + var(--pad));
   transform: translateX(-50%);
   display: flex;
   align-items: center;
@@ -598,8 +610,8 @@ button.hs-readout:hover {
 
 .hs-toasts {
   position: absolute;
-  right: var(--pad);
-  bottom: calc(var(--ticker-h) + var(--pad));
+  right: calc(var(--pad) + var(--safe-right));
+  bottom: calc(var(--ticker-h) + var(--safe-bottom) + var(--pad));
   display: flex;
   flex-direction: column;
   gap: var(--pad);
@@ -627,33 +639,50 @@ button.hs-readout:hover {
 
 @media (max-width: 720px) {
   .hs-top {
-    min-height: calc(var(--top-h) * 2);
+    min-height: calc(var(--top-h) * 2 + var(--safe-top));
   }
 
+  /* A bottom sheet: it takes the lower part of the screen and scrolls inside itself, so the
+     tower is always visible above it and the list below the fold is a flick away. */
   .hs-palette {
     top: auto;
-    bottom: var(--ticker-h);
+    bottom: calc(var(--ticker-h) + var(--safe-bottom));
     left: 0;
     right: 0;
     width: auto;
-    max-height: 45vh;
+    max-height: 42vh;
+    padding-left: var(--safe-left);
+    padding-right: var(--safe-right);
     border-right: 0;
     border-top: 1px solid var(--line);
+    overflow-y: auto;
+    /* The sheet scrolls up and down and nothing else: sideways and past the ends belong to
+       neither the page nor the tower. */
+    touch-action: pan-y;
+    overscroll-behavior: contain;
+  }
+
+  /* A finger needs a target it can hit: 44 px is the smallest comfortable one. */
+  .hs-tool {
+    min-height: 44px;
+    align-items: center;
   }
 
   .hs-panel {
     top: auto;
-    bottom: var(--ticker-h);
+    bottom: calc(var(--ticker-h) + var(--safe-bottom));
     left: 0;
     width: 100vw;
     max-height: 60vh;
     border-left: 0;
     border-top: 1px solid var(--line);
+    touch-action: pan-y;
+    overscroll-behavior: contain;
   }
 
   /* The palette owns the bottom of a phone screen, so the hint sits under the top strip. */
   .hs-hint {
-    top: calc(var(--top-h) * 2 + var(--pad));
+    top: calc(var(--top-h) * 2 + var(--safe-top) + var(--pad));
     bottom: auto;
   }
 
