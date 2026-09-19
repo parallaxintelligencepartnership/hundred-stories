@@ -2,6 +2,7 @@
 // Panels read the world through GameApi only and never reach into the sim modules.
 
 import type { GameApi } from '../game/api';
+import { applyTheme, cycleTheme, readTheme, themeLabel } from '../site/theme';
 import { EVAL, LIMITS, ROOMS, SHAFTS } from '../sim/rules';
 import type {
   Command,
@@ -512,6 +513,18 @@ export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElem
   motionLabel.htmlFor = motionBox.id;
   motionField.append(motionBox, motionLabel);
   motion.append(motionField);
+
+  let theme = readTheme();
+  const themeField = el('div', 'hs-field');
+  const themeLabelEl = el('span', 'hs-row-label', 'Theme');
+  const themeButton = button(themeLabel(theme), 'hs-btn', () => {
+    theme = cycleTheme(theme);
+    applyTheme(theme);
+    themeButton.textContent = themeLabel(theme);
+  });
+  themeField.append(themeLabelEl, themeButton);
+  motion.append(themeField);
+
   body.append(motion);
 
   return panel;

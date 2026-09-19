@@ -30,6 +30,7 @@
     <meta name="theme-color" content="#0b1020" />
     <link rel="icon" href="/icons/icon-192.png" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <script src="/theme.js"></script>
     <link
       rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600&family=Share+Tech+Mono&display=swap"
@@ -42,11 +43,12 @@
   <body>
     <header class="site-head">
       <div class="wrap">
-        <a class="site-wordmark" href="/" aria-label="Hundred Stories home"><picture><source srcset="/wordmark-line-light.svg" media="(prefers-color-scheme: light)"><img src="/wordmark-line-dark.svg" alt="Hundred Stories" width="1032" height="112"></picture></a>
+        <a class="site-wordmark" href="/" aria-label="Hundred Stories home"><img class="wordmark wordmark-dark" src="/wordmark-line-dark.svg" alt="Hundred Stories" width="1032" height="112"><img class="wordmark wordmark-light" src="/wordmark-line-light.svg" alt="Hundred Stories" width="1032" height="112"></a>
         <nav class="site-nav" aria-label="Main">
           <a href="/how-to-play/">How to play</a>
           <a class="nav-play" href="/play/">Play</a>
           <a href="https://github.com/parallaxintelligencepartnership/hundred-stories">Source</a>
+          <button type="button" class="theme-toggle" id="theme-toggle">Theme</button>
         </nav>
       </div>
     </header>
@@ -76,9 +78,22 @@
       </section>
 
       <div class="underground">
+        <section class="floor" aria-labelledby="the-name">
+          <div class="wrap">
+            <p class="floor-tag">B1 &middot; THE NAME</p>
+            <h2 id="the-name">Why Hundred Stories</h2>
+            <p>
+              A hundred stories is the height of a tower worth building. It is also what goes on
+              inside one: the tenant on 40 who wants a quieter floor, the shop on 2 that lives on
+              the lunch crowd, the hotel guest who missed the last express lift and is not coming
+              back. Every floor is a story. Everyone's got one.
+            </p>
+          </div>
+        </section>
+
         <section class="floor" aria-labelledby="features">
           <div class="wrap">
-            <p class="floor-tag">B1 &middot; WHAT IT IS</p>
+            <p class="floor-tag">B2 &middot; WHAT IT IS</p>
             <h2 id="features">What it is</h2>
             <div class="cards">
               <article class="card">
@@ -109,7 +124,7 @@
 
         <section class="floor" aria-labelledby="how-it-plays">
           <div class="wrap">
-            <p class="floor-tag">B2 &middot; HOW IT PLAYS</p>
+            <p class="floor-tag">B3 &middot; HOW IT PLAYS</p>
             <h2 id="how-it-plays">How it plays</h2>
             <ol class="steps">
               <li><span class="step-num">01</span>Start with a lobby and a little cash.</li>
@@ -128,7 +143,7 @@
 
         <section class="floor" aria-labelledby="platforms">
           <div class="wrap">
-            <p class="floor-tag">B3 &middot; PHONE, TABLET OR DESKTOP</p>
+            <p class="floor-tag">B4 &middot; PHONE, TABLET OR DESKTOP</p>
             <h2 id="platforms">Phone, tablet or desktop</h2>
             <div class="note">
               <p>
@@ -160,5 +175,6 @@
     </footer>
 
     <script type="module" src="/src/site/hero.ts"></script>
+    <script type="module" src="/src/site/theme-init.ts"></script>
   </body>
 </html>
