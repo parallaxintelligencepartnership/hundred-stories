@@ -1,0 +1,73 @@
+// The boot sequence, driven through injected deps so it runs in node: no real DOM, no
+// real network, no real renderer. See src/main.ts for the browser wiring these deps stand in for.
+import { describe, expect, it, vi } from 'vitest';
+import { boot, type BootDeps } from '../../src/main';
+import { createGame } from '../../src/game/game';
+
+vi.mock('../../src/game/storage', () => ({
+  writeSave: async (): Promise<void> => {},
+  readSave: async (): Promise<string | null> => null,
+}));
+
+/** A host element in the pointer.test.ts style: just enough of the DOM shape to inspect. */
+function fakeApp(): HTMLElement & { children: HTMLElement[] } {
+  const children: HTMLElement[] = [];
+  const el = {
+    children,
+    get innerHTML() {
+      return '';
+    },
+    set innerHTML(_v: string) {
+      children.length = 0;
+    },
+    textContent: null as string | null,
+    append(...nodes: HTMLElement[]) {
+      children.push(...nodes);
+    },
+    querySelector(sel: string) {
+      const id = sel.replace('#', '');
+      return children.find((c) => c.id === id) ?? null;
+    },
+  };
+  return el as unknown as HTMLElement & { children: HTMLElement[] };
+}
+
+function fakeElement(): HTMLElement {
+  return { id: '', textContent: null } as unknown as HTMLElement;
+}
+
+function baseDeps(overrides: Partial<BootDeps> = {}): BootDeps {
+  return {
+    createRenderer: async () => ({}) as never,
+    createGame,
+    createUi: (() => ({ update: () => {} })) as never,
+    createElement: () => fakeElement(),
+    online: () => true,
+    hasController: () => false,
+    search: () => '',
+    ...overrides,
+  };
+}
+
+describe('boot', () => {
+  it('shows the WebGL message and leaves app non-blank when the renderer rejects', async () => {
+    const app = fakeApp();
+    await boot(
+      app,
+      baseDeps({
+        createRenderer: async () => {
+          throw new Error('no webgl in this browser');
+        },
+      }),
+    );
+    const view = (app as unknown as { querySelector(s: string): HTMLElement | null }).querySelector('#view');
+    expect(view?.textContent).toBe('This browser cannot draw the tower. WebGL is required.');
+    expect(app.children.length).toBeGreaterThan(0);
+  });
+
+  it('shows the offline first-load message when offline with no service worker controller', async () => {
+    const app = fakeApp();
+    await boot(app, baseDeps({ online: () => false, hasController: () => false }));
+    expect(app.textContent).toBe('Hundred Stories needs one online load before it can play offline.');
+  });
+});
