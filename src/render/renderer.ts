@@ -396,7 +396,8 @@ export function inRoomSlot(world: World, sim: Sim, slots: Map<Id, number>): [num
 export async function createRenderer(container: HTMLElement, world: World): Promise<Renderer> {
   // PixiJS 8 resolves init even when no GPU context can be made, which leaves a working HUD
   // over a blank stage. Refuse up front so main.ts can show the plain-language message instead.
-  if (!isWebGLSupported() && !(await isWebGPUSupported())) {
+  // false: a software WebGL (a VM, a remote desktop) is slow but plays; only no context refuses.
+  if (!isWebGLSupported(false) && !(await isWebGPUSupported())) {
     throw new Error('This browser cannot draw the tower. WebGL is required.');
   }
   const app = new Application();
