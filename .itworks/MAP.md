@@ -19,7 +19,7 @@ npm test (vitest run); one file: npx vitest run <path>; npm run typecheck (tsc -
 | src/game/game.ts | game shell: owns the world, the timer loop, tools, pointer input, save/load/export/import wiring |
 | src/game/api.ts | the contract the UI is allowed to use |
 | src/game/storage.ts | the browser save slot: IndexedDB first, localStorage as the fallback |
-| src/render/ | PixiJS scene: renderer.ts, camera.ts, input.ts press and wheel classification, art.ts procedural sprites, sky.ts, smoke.ts hand built demo world (also drives the landing hero) |
+| src/render/ | PixiJS scene: renderer.ts (rooms, shafts, then a connector layer on top), camera.ts, input.ts press, tap, wheel and pinch classification, art.ts procedural sprites, sky.ts, smoke.ts hand built demo world (also drives the landing hero) |
 | src/ui/ | DOM overlay: ui.ts shell, input and notices, panels.ts HUD panels including save, export and import, format.ts, ui.css |
 | public/icons/, scripts/make-icons.mjs | PWA icons and the script that draws them |
 | public/og.png, scripts/make-og.mjs | the 1200x630 link preview card and the dependency free script that draws it |

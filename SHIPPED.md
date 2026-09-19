@@ -37,7 +37,7 @@ Rehearsed on 2026-09-19 at this ship: tagged `ship-2026-09-19b`, checked out the
 ## Known limitations and accepted risks
 No finding was accepted; the accepted risks list is empty. Every finding in `.itworks/REVIEWS.md` is closed with evidence.
 
-- Mobile is desktop-first by decision: the landing and guide are responsive, the game loads on a phone with the palette docked at the bottom, but there is no pinch zoom or touch-tuned building. The site says so.
+- Touch: one finger moves the view, pinch zooms, a still press places, two fingers pan while sizing a lobby or elevator; the palette is a scrollable bottom sheet on phones. Proven with emulated touch events in Chrome at 390x844, not yet on a physical phone in Safari; that hands-on check is the owner's.
 - The PWA install click in the browser's address bar is outside what the browser tools can drive; installability was verified from the page (controlling service worker, manifest with standalone display, maskable icons) and the offline reload was proven live, but the install button itself is the owner's to press.
 - The two-line wordmark and the share image are procedural PNG/SVG from `scripts/make-wordmark.mjs` and `scripts/make-og.mjs`; regenerate after any palette change.
 - Backups: there is no server-side data. The player's tower lives in their browser (IndexedDB, localStorage fallback) and their own exported JSON files; export and import are test-covered and were driven live in Chrome, and clearing browser data with no export loses the tower.
@@ -57,3 +57,4 @@ A PixiJS upgrade that changes how it compiles shaders, first. The site's Content
 - 2026-09-19: first ship (closeout; deploy pending domain)
 - 2026-09-19: post-ship checkpoint, people rescaled and interiors redrawn
 - 2026-09-19: second ship, live at https://hundredstories.xyz: landing site with SEO and Parallax structured data, game at /play/, sprite wordmark, camera controls, AGPL licence, public GitHub mirror, Workers static assets hosting, CSP fix for PixiJS; tag ship-2026-09-19b
+- 2026-09-19: post-ship fixes live the same day: stairs and elevators overlay rooms, shafts rise into empty air, https redirect, touch controls for phones and tablets, copy without the 1994 framing
