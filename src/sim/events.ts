@@ -34,20 +34,20 @@ export function resetEventTestHooks(): void {
   EVENT_TEST_HOOKS.target = { fire: null, bomb: null };
 }
 
-// Cockroaches have no ActiveEvent kind and Room has no "dirty since" field, so
-// the timer lives here, keyed by world. It is rebuilt from scratch after a load,
-// which means a reloaded save restarts the infestation clock.
-interface RoachState {
-  dirtySince: Map<Id, number>;
+// The dirty-since timer lives on room.dirtySinceMinute so it survives save and
+// load. Only the spread cadence (a cosmetic pacing, not part of the save
+// contract) still lives here, keyed by world, and is rebuilt from scratch
+// after a load.
+interface RoachSpreadState {
   lastSpread: number | null;
 }
-const roachState = new WeakMap<World, RoachState>();
+const roachSpread = new WeakMap<World, RoachSpreadState>();
 
-function roachesOf(world: World): RoachState {
-  let state = roachState.get(world);
+function roachSpreadOf(world: World): RoachSpreadState {
+  let state = roachSpread.get(world);
   if (!state) {
-    state = { dirtySince: new Map(), lastSpread: null };
-    roachState.set(world, state);
+    state = { lastSpread: null };
+    roachSpread.set(world, state);
   }
   return state;
 }
@@ -330,7 +330,7 @@ function isHotelRoom(kind: RoomKind): boolean {
 
 /** Runs once a day. Dirty hotel rooms breed cockroaches, and cockroaches travel. */
 export function tickCockroaches(world: World): void {
-  const state = roachesOf(world);
+  const state = roachSpreadOf(world);
   const minute = world.time.minute;
 
   for (const room of sortedRooms(world)) {
@@ -338,20 +338,22 @@ export function tickCockroaches(world: World): void {
     if (!room.dirty) {
       // Housekeeping cleaning a dirty room takes the cockroaches with it. A clean
       // room that caught them by spread keeps them until it needs cleaning again.
-      const wasDirty = state.dirtySince.delete(room.id);
+      const wasDirty = room.dirtySinceMinute != null;
+      room.dirtySinceMinute = null;
       if (wasDirty && room.infested) {
         room.infested = false;
         log(world, `The ${describe(room)} is clean again and the cockroaches are gone.`, 'info', { roomId: room.id });
       }
       continue;
     }
-    const since = state.dirtySince.get(room.id);
-    if (since === undefined) {
-      state.dirtySince.set(room.id, minute);
+    if (room.dirtySinceMinute == null) {
+      // First sight of a dirty room, or an older save made before this field
+      // existed. Either way, the countdown starts now.
+      room.dirtySinceMinute = minute;
       continue;
     }
     if (room.infested) continue;
-    if (minute - since < EVENTS.cockroaches.dirtyDaysBeforeInfested * MINUTES_PER_DAY) continue;
+    if (minute - room.dirtySinceMinute < EVENTS.cockroaches.dirtyDaysBeforeInfested * MINUTES_PER_DAY) continue;
     room.infested = true;
     if (state.lastSpread === null) state.lastSpread = minute;
     log(world, `Cockroaches moved into the ${describe(room)}.`, 'alert', { roomId: room.id });

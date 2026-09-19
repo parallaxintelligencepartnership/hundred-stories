@@ -7,6 +7,7 @@ import {
   vipRatingFor,
 } from '../../src/sim/events';
 import { EVENTS, ROOMS, STRESS } from '../../src/sim/rules';
+import { deserialize, serialize } from '../../src/sim/save';
 import type { ActiveEvent, Room, RoomKind, Star, World } from '../../src/sim/types';
 import { addRoom, allocId, createWorld } from '../../src/sim/world';
 
@@ -280,7 +281,7 @@ describe('VIP', () => {
 
 describe('cockroaches', () => {
   it('leave a dirty room alone until the infestation delay is up', () => {
-    const room = place(world, 'hotelSingle', 3, 100, { dirty: true });
+    const room = place(world, 'hotelSingle', 3, 100, { dirty: true, dirtySinceMinute: 0 });
     for (let day = 0; day < EVENTS.cockroaches.dirtyDaysBeforeInfested; day++) {
       at(world, ROLL_MINUTE + day * 1440);
     }
@@ -288,7 +289,7 @@ describe('cockroaches', () => {
   });
 
   it('infest a room that stayed dirty for the full delay', () => {
-    const room = place(world, 'hotelSingle', 3, 100, { dirty: true });
+    const room = place(world, 'hotelSingle', 3, 100, { dirty: true, dirtySinceMinute: 0 });
     for (let day = 0; day <= EVENTS.cockroaches.dirtyDaysBeforeInfested; day++) {
       at(world, ROLL_MINUTE + day * 1440);
     }
@@ -297,7 +298,7 @@ describe('cockroaches', () => {
   });
 
   it('spread to the room next door after the spread delay', () => {
-    place(world, 'hotelSingle', 3, 100, { dirty: true });
+    place(world, 'hotelSingle', 3, 100, { dirty: true, dirtySinceMinute: 0 });
     const neighbor = place(world, 'hotelSingle', 3, 104);
     const infestedDay = EVENTS.cockroaches.dirtyDaysBeforeInfested;
     const spreadDay = infestedDay + EVENTS.cockroaches.spreadDays;
@@ -308,13 +309,33 @@ describe('cockroaches', () => {
   });
 
   it('housekeeping cleaning the room clears the cockroaches', () => {
-    const room = place(world, 'hotelSingle', 3, 100, { dirty: true });
+    const room = place(world, 'hotelSingle', 3, 100, { dirty: true, dirtySinceMinute: 0 });
     for (let day = 0; day <= EVENTS.cockroaches.dirtyDaysBeforeInfested; day++) {
       at(world, ROLL_MINUTE + day * 1440);
     }
     room.dirty = false;
     at(world, ROLL_MINUTE + (EVENTS.cockroaches.dirtyDaysBeforeInfested + 1) * 1440);
     expect(room.infested).toBe(false);
+  });
+
+  it('keeps the infestation countdown across a save and load', () => {
+    place(world, 'hotelSingle', 3, 100, { dirty: true, dirtySinceMinute: world.time.minute });
+    at(world, ROLL_MINUTE + 1440); // one tick so the countdown is on record, room still not infested
+
+    const saved = serialize(world);
+    const result = deserialize(saved);
+    if (!result.ok) throw new Error(result.reason);
+    const loaded = result.world;
+    const loadedRoom = [...loaded.rooms.values()].find((r) => r.kind === 'hotelSingle');
+    if (!loadedRoom) throw new Error('hotel room missing after load');
+    expect(loadedRoom.dirtySinceMinute).toBe(ROLL_MINUTE);
+
+    for (let day = 1; day <= EVENTS.cockroaches.dirtyDaysBeforeInfested + 1; day++) {
+      loaded.time.minute = ROLL_MINUTE + day * 1440;
+      tickEvents(loaded);
+    }
+
+    expect(loadedRoom.infested).toBe(true);
   });
 });
 

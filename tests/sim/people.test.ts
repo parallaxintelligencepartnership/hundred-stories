@@ -331,6 +331,37 @@ describe('housekeeping', () => {
 
     expect(simsOfKind(world, 'staff').every((s) => s.inRoomId === office.id)).toBe(true);
   });
+
+  it('stamps dirtySinceMinute on checkout and clears it on cleaning', () => {
+    const world = makeTower(7);
+    const room = makeRoom(world, 'hotelSingle', 2, 200);
+    setTime(world, 0, SCHEDULES.guest.checkInStart);
+
+    // Check the guest in the evening, then step minute by minute through
+    // checkout so we know exactly which minute dirtySinceMinute should record.
+    // No housekeeping office exists yet, so nothing cleans the room out from
+    // under us while we watch for the checkout minute.
+    run(world, 5 * 60 + 30);
+    expect(room.tenants).toHaveLength(1);
+
+    let checkoutMinute: number | null = null;
+    for (let i = 0; i < 18 * 60; i++) {
+      tickPeople(world);
+      if (room.dirty && checkoutMinute === null) checkoutMinute = world.time.minute;
+      world.time.minute += 1;
+    }
+
+    expect(checkoutMinute).not.toBeNull();
+    expect(room.dirtySinceMinute).toBe(checkoutMinute);
+
+    // Now bring housekeeping online; cleaning clears dirtySinceMinute alongside dirty.
+    makeRoom(world, 'housekeeping', 1, 300);
+    setTime(world, 2, SCHEDULES.housekeeping.start);
+    run(world, SCHEDULES.housekeeping.minutesPerRoom + 60);
+
+    expect(room.dirty).toBe(false);
+    expect(room.dirtySinceMinute).toBeNull();
+  });
 });
 
 describe('commerce crowds', () => {

@@ -400,6 +400,7 @@ function checkOutOfHotel(world: World, sim: Sim, room: Room): void {
   room.tenants = room.tenants.filter((id) => id !== sim.id);
   if (room.tenants.length > 0) return;
   room.dirty = true;
+  room.dirtySinceMinute = world.time.minute;
   recordHotelNight(world, room);
   log(world, `A hotel room on ${floorLabel(room.floor)} checked out and needs cleaning.`, 'info', { roomId: room.id });
 }
@@ -554,6 +555,7 @@ function finishCleaning(world: World, keeper: Sim): void {
   const room = keeper.inRoomId !== null ? world.rooms.get(keeper.inRoomId) : undefined;
   if (room && HOTEL_KINDS.has(room.kind)) {
     room.dirty = false;
+    room.dirtySinceMinute = null;
     log(world, `Housekeeping cleaned a hotel room on ${floorLabel(room.floor)}.`, 'info', { roomId: room.id });
   }
   const office = keeper.homeRoomId !== null ? world.rooms.get(keeper.homeRoomId) : undefined;
