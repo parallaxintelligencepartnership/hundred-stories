@@ -5,6 +5,8 @@ export default defineConfig({
   plugins: [
     VitePWA({
       registerType: 'autoUpdate',
+      // The installable app is the game, not the landing site.
+      scope: '/play/',
       includeAssets: ['icons/*.png'],
       manifest: {
         name: 'Hundred Stories',
@@ -14,7 +16,9 @@ export default defineConfig({
         theme_color: '#0b1020',
         background_color: '#0b1020',
         display: 'standalone',
-        start_url: '/',
+        scope: '/play/',
+        start_url: '/play/',
+        id: '/play/',
         icons: [
           { src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png' },
           {
@@ -26,6 +30,7 @@ export default defineConfig({
         ],
       },
       workbox: {
+        navigateFallback: '/play/index.html',
         globPatterns: ['**/*.{js,css,html,png,svg,woff2}'],
         // Google Fonts are fetched at runtime; cache them so the installed app keeps its faces offline.
         runtimeCaching: [
@@ -43,6 +48,17 @@ export default defineConfig({
       },
     }),
   ],
+  build: {
+    // Three pages, one build. Paths are relative to the Vite root: this repo
+    // has no @types/node, so node:path and __dirname are not available here.
+    rollupOptions: {
+      input: {
+        main: 'index.html',
+        howto: 'how-to-play/index.html',
+        play: 'play/index.html',
+      },
+    },
+  },
   test: {
     include: ['tests/**/*.test.ts'],
   },

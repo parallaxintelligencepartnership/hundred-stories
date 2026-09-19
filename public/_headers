@@ -19,3 +19,9 @@
 
 /index.html
   Cache-Control: no-cache, must-revalidate
+
+/play/index.html
+  Cache-Control: no-cache, must-revalidate
+
+/how-to-play/index.html
+  Cache-Control: no-cache, must-revalidate
