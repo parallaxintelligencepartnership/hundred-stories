@@ -85,3 +85,18 @@ One stylesheet for landing and guide. Use the same font stack and the same colou
 2. `npm run build` emits `dist/index.html`, `dist/how-to-play/index.html`, `dist/play/index.html`, `dist/robots.txt`, `dist/sitemap.xml`, `dist/og.png`, `dist/sw.js`, `dist/manifest.webmanifest`; `grep start_url dist/manifest.webmanifest` shows `/play/`.
 3. `npm run preview` then `curl -s http://localhost:4173/ | grep -c 'og:image'` is 1, `curl -s http://localhost:4173/play/ | grep -c 'src/main\|assets/'` is at least 1, `curl -sI http://localhost:4173/how-to-play/` is 200.
 4. `grep -rn 'wrangler@latest'` still empty.
+
+## WebGL hero (added 2026-09-19, Matt: "a bit of fun WebGL that matches the game")
+
+The landing hero shows the game's own renderer drawing a living demo tower, not a screenshot. Same art, same sky, same elevators.
+
+- New `src/site/hero.ts`, loaded from `index.html` with `<script type="module" src="/src/site/hero.ts">` (CSP allows self scripts). It is the only script on the landing page.
+- The hero section holds a `<div id="hero-view">` sized by CSS (full hero width, 320px tall on phones, 480px at 720px and above, `aspect-ratio` not required) behind the hero text, and the `og.png` img stays as the fallback with id `hero-shot`.
+- `hero.ts` behaviour:
+  1. If `matchMedia('(prefers-reduced-motion: reduce)')` matches, do nothing: the static image stays.
+  2. Otherwise `buildDemoWorld()` from `src/render/smoke.ts` (do NOT call `bootSmoke`; it takes over the whole page) and `createRenderer(heroView, world)`. On any throw (no WebGL), leave the image and return. On success, hide `#hero-shot`.
+  3. Run a frame loop like `bootSmoke` does: advance the world clock so one demo day passes every 40 seconds (slower than smoke's 12), move the elevator cars and walk the sims the same way `bootSmoke` does (copy that logic into a shared helper `animateDemo(world, dt)` in `smoke.ts` and call it from both places so the two never drift), and call `renderer.render(world, alpha)`. Camera: `renderer.setPanEnabled(false)`, start centred on floor 3 like smoke, then drift upward very slowly (about one floor every 6 seconds) until the top of the demo tower, then ease back down, forever. Pointer interaction is off: no `onPick`, no ghost, no selection.
+  4. Pause the loop with `IntersectionObserver` when the hero is off screen and with `document.visibilityState === 'hidden'`; resume when back. Call `renderer.destroy()` on `pagehide`.
+- Bundle: `src/render/smoke.ts` is currently a dev-only dynamic import in `src/main.ts`. Keep that gate exactly as it is for the game (the MAP gotcha about `?smoke` stands). The landing importing `buildDemoWorld` statically is intended; Vite will put pixi in a shared chunk between the landing and the game, which is fine.
+- Text stays readable: the hero copy sits in a panel with a translucent dark backdrop over the canvas (`backdrop-filter` optional, a solid `rgba` fallback required). At phone width the canvas sits above the text instead of behind it.
+- Verification adds: `npm run build` emits the hero as its own entry chunk; `npm run preview` then loading `/` in Chrome shows the moving tower behind the hero; with Chrome started with `--disable-gpu --disable-software-rasterizer` the static image shows and the console has no uncaught error; the page still scores as static content with JS disabled (all copy present in the HTML).
