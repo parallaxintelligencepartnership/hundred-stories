@@ -61,3 +61,4 @@ Elevator wait under load, first. Sims give up and leave when their wait passes t
 ## Ship history
 - 2026-09-19: first ship (closeout; deploy pending domain)
 - Published: entry dluwwu4f2vop | https://github.com/parallaxintelligencepartnership/itworks-site/pull/2 | 2026-09-19
+- 2026-09-19: post-ship checkpoint, people rescaled and interiors redrawn

@@ -66,3 +66,8 @@ Scope: closeout sweep, 98f2899, five lens runbooks + history audit. Not covered:
 - [ ] IMPORTANT | production-readiness | the deploy path pulls an unpinned tool at run time: both the npm script and the runbook call `npx wrangler@latest`, so two deploys of the same commit can run different publisher code (package.json:14, deploy/cloudflare-pages.md:31) | Evidence to close: `grep -rn "wrangler@" package.json deploy/` shows an exact version in every occurrence
 - [ ] ADVISORY | testing | the browser-only probes carried over from the audit's Coverage gaps are still unrun: WebGL unavailable, the file picker import path (src/ui/panels.ts:444), and the pi3 fallback headers | Evidence to close: Chrome with --disable-gpu --disable-software-rasterizer shows the WebGL message; the three file picker cases each show their notice; `curl -sI https://$SITE_HOST/ | grep -i permissions-policy` after a pi3 deploy
 - [x] ADVISORY | production-readiness | PROJECT.md still named pi3 as where the project would live after Cloudflare Pages became the primary path, so the ship checklist's "Where it will live" line was stale (.itworks/PROJECT.md:24) | Closed 2026-09-19: PROJECT.md Stack and Where it will live now name Cloudflare Pages primary, pi3 fallback, and that the domain is not bought yet
+
+## Checkpoint 2026-09-19b - post-ship people scale and interiors - lenses: testing, production-readiness
+Scope: diff 98f2899..edef508.
+### Findings
+- [x] ADVISORY | testing | render changes verified by the sim-art and floors harnesses plus a live Chrome pass at zoom 2 | Closed 2026-09-19: npx vitest run tests/render 31 passed
