@@ -9,6 +9,7 @@ import {
   floorBandFloat,
   floorBaseY,
   floorTopY,
+  DEFAULT_ZOOM,
   MAX_ZOOM,
   MIN_ZOOM,
   nearestSnap,
@@ -89,7 +90,7 @@ describe('camera', () => {
     cam.panBy(4000, 4000); // lost underground
     expect(cam.worldToScreen(0, 0).y).not.toBeCloseTo(0.68 * 900, 1);
     cam.reset();
-    expect(cam.zoom).toBe(1);
+    expect(cam.zoom).toBe(DEFAULT_ZOOM);
     expect(cam.worldToScreen(0, 0).y).toBeCloseTo(0.68 * 900, 4);
     cam.update(16);
     expect(cam.worldToScreen(0, 0).y).toBeCloseTo(0.68 * 900, 4); // no leftover inertia
@@ -98,6 +99,7 @@ describe('camera', () => {
   it('pans by screen pixels scaled by zoom', () => {
     const cam = createCamera();
     cam.setViewport(800, 600);
+    cam.zoom = 1;
     cam.centerOn(5, 150);
     const before = cam.x;
     cam.zoomAt(2, 400, 300);
@@ -124,6 +126,7 @@ describe('camera', () => {
   it('snaps the zoom to a crisp step once the wheel stops', () => {
     const cam = createCamera();
     cam.setViewport(800, 600);
+    cam.zoom = 1;
     cam.wheel(-120, 400, 300); // zoom in a little, off the snap steps
     expect(cam.zoom).toBeGreaterThan(1);
     expect(cam.zoom).toBeLessThan(2);

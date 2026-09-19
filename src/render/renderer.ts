@@ -125,6 +125,7 @@ interface Interp {
   py: number;
   cx: number;
   cy: number;
+  minute: number; // sim minute the current target belongs to; a new minute with the same target means the sprite has settled
 }
 
 interface Keyed<T> {
@@ -412,6 +413,7 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
   const fireGraphics = new Map<Id, Graphics>();
   const doorHold = new Map<Id, number>(); // car id -> time the open door texture may end
   const interp = new Map<string, Interp>();
+  let renderMinute = 0;
 
   const ghostSprite = new Sprite();
   ghostSprite.visible = false;
@@ -501,9 +503,18 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
   function interpolated(key: string, x: number, y: number, alpha: number): { x: number; y: number } {
     let entry = interp.get(key);
     if (!entry) {
-      entry = { px: x, py: y, cx: x, cy: y };
+      entry = { px: x, py: y, cx: x, cy: y, minute: renderMinute };
       interp.set(key, entry);
-    } else if (entry.cx !== x || entry.cy !== y) {
+    } else if (entry.cx === x && entry.cy === y) {
+      // Same target on a later sim minute: the thing has stopped. Settle the previous position on it,
+      // otherwise every tick would re-lerp from where it was a minute ago and a parked car bounces.
+      if (entry.minute !== renderMinute) {
+        entry.px = x;
+        entry.py = y;
+        entry.minute = renderMinute;
+      }
+    } else {
+      entry.minute = renderMinute;
       // A jump this big is a teleport, not a step: entering from an entrance,
       // alighting from a car, or several ticks landing in one frame. Snap.
       if (Math.abs(x - entry.cx) > TELEPORT_PX || Math.abs(y - entry.cy) > TELEPORT_PX) {
@@ -524,7 +535,7 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
   /** Park an entity at a fixed point so it does not lerp away from it next frame. */
   function interpolateFrom(key: string, x: number, y: number): { x: number; y: number } {
     const entry = interp.get(key);
-    if (!entry) interp.set(key, { px: x, py: y, cx: x, cy: y });
+    if (!entry) interp.set(key, { px: x, py: y, cx: x, cy: y, minute: renderMinute });
     else {
       entry.px = x;
       entry.py = y;
@@ -1073,6 +1084,7 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
   const renderer: Renderer = {
     render(w: World, alpha: number): void {
       lastWorld = w;
+      renderMinute = w.time.minute;
       const clock = clockOf(w.time.minute);
       const night = isNight(clock.minuteOfDay);
       syncFloorStrips(w);

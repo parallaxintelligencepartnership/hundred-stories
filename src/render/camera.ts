@@ -12,6 +12,8 @@ import { MAX_FLOOR, MIN_FLOOR, TOWER_WIDTH } from '../sim/types';
 import { FLOOR_PX, TILE_PX } from './art';
 
 export const MIN_ZOOM = 0.35;
+/** Opening zoom. The original drew its 8 px tiles on a 640 px screen; 2x on a modern display reads the same. */
+export const DEFAULT_ZOOM = 2;
 export const MAX_ZOOM = 3;
 /** Zoom levels the wheel snaps to once it stops. */
 export const SNAP_ZOOMS: readonly number[] = [0.5, 1, 2, 3];
@@ -116,7 +118,7 @@ function clamp(value: number, min: number, max: number): number {
 class TowerCamera implements Camera {
   x = (TOWER_WIDTH / 2) * TILE_PX;
   y = -FLOOR_PX * 3;
-  zoom = 1;
+  zoom = DEFAULT_ZOOM;
 
   private viewW = 800;
   private viewH = 600;
@@ -187,7 +189,7 @@ class TowerCamera implements Camera {
   }
 
   reset(): void {
-    this.zoom = 1;
+    this.zoom = DEFAULT_ZOOM;
     this.x = (TOWER_WIDTH / 2) * TILE_PX;
     this.vx = 0;
     this.vy = 0;
