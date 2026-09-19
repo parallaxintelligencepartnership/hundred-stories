@@ -75,7 +75,7 @@ Every module is built against this document and `src/sim/types.ts`. If reality d
 
 ## 7. Noise and evaluation (sim/evaluation.ts)
 
-- Noisy kinds: fast food, restaurant, shop, cinema, party hall, lobby, sky lobby. Quiet kinds: office, condo, hotel rooms.
+- Noisy kinds: fast food, restaurant, shop, cinema, party hall. Lobbies are not noisy (a lobby run is many one tile rooms and would zero anything above it). Quiet kinds: office, condo, hotel rooms.
 - A quiet room loses eval for each noisy room on the same floor within `NOISE.rangeTiles`, and for noisy rooms directly above or below overlapping in x.
 - Room eval = clamp(1 - avgTenantStressPenalty - noisePenalty - dirtyPenalty). Below `EVAL.leaveThreshold` for a full day: tenants leave with a logged reason; office becomes vacant, condo goes back on sale, hotel room stays.
 

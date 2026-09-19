@@ -22,8 +22,8 @@ export interface RoomRule {
 }
 
 export const ROOMS: Record<RoomKind, RoomRule> = {
-  lobby: { label: 'Lobby', width: 1, height: 1, cost: 5_000, upkeepPerQuarter: 0, incomePerQuarter: 0, capacity: 0, population: 0, star: 1, placement: 'aboveGround', noisy: true, quiet: false, maxCount: null, group: 'structure' },
-  skyLobby: { label: 'Sky lobby', width: 1, height: 3, cost: 5_000, upkeepPerQuarter: 0, incomePerQuarter: 0, capacity: 0, population: 0, star: 3, placement: 'aboveGround', noisy: true, quiet: false, maxCount: null, group: 'structure' },
+  lobby: { label: 'Lobby', width: 1, height: 1, cost: 5_000, upkeepPerQuarter: 0, incomePerQuarter: 0, capacity: 0, population: 0, star: 1, placement: 'aboveGround', noisy: false, quiet: false, maxCount: null, group: 'structure' },
+  skyLobby: { label: 'Sky lobby', width: 1, height: 3, cost: 5_000, upkeepPerQuarter: 0, incomePerQuarter: 0, capacity: 0, population: 0, star: 3, placement: 'aboveGround', noisy: false, quiet: false, maxCount: null, group: 'structure' },
   stairs: { label: 'Stairs', width: 8, height: 2, cost: 5_000, upkeepPerQuarter: 0, incomePerQuarter: 0, capacity: 0, population: 0, star: 1, placement: 'both', noisy: false, quiet: false, maxCount: 64, group: 'structure' },
   escalator: { label: 'Escalator', width: 8, height: 2, cost: 20_000, upkeepPerQuarter: 5_000, incomePerQuarter: 0, capacity: 0, population: 0, star: 3, placement: 'both', noisy: false, quiet: false, maxCount: 64, group: 'structure' },
   office: { label: 'Office', width: 9, height: 1, cost: 40_000, upkeepPerQuarter: 0, incomePerQuarter: 10_000, capacity: 6, population: 6, star: 1, placement: 'aboveGround', noisy: false, quiet: true, maxCount: null, group: 'commercial' },
