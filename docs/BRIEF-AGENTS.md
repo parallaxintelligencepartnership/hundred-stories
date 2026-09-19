@@ -43,7 +43,7 @@ export function requestHallCall(world: World, shaftId: Id, floor: number, dir: 1
 export function tickElevators(world: World): void;
 export const IDLE_RETURN_MINUTES: number;
 ```
-Per car: SCAN dispatch across hallCalls and car.calls; move `SHAFTS[kind].floorsPerMinute` floors per tick toward the next stop; on reaching a stop open doors for doorOpenMinutes; while doors open, alight passengers whose route[0] is a ride leg with toFloor === floor (set sim.pos = {floor, x: shaft.x}, inCarId null, state 'walking', route.shift()), then board waiting sims on that floor whose route[0] is a ride leg on this shaft (state 'waiting', |sim.pos.x - shaft.x| <= shaft.width + 1) up to capacity (set inCarId, state 'riding', car.calls.add(toFloor)); clear the hall call in the served direction; idle cars return to homeFloor after IDLE_RETURN_MINUTES. Cars in one shaft never pass through each other: keep them ordered by y.
+Per car: SCAN dispatch across hallCalls and car.calls; move `SHAFTS[kind].floorsPerMinute` floors per tick toward the next stop; on reaching a stop open doors for doorOpenMinutes; while doors open, alight passengers whose route[0] is a ride leg with toFloor === floor (set sim.pos = {floor, x: shaft.x}, inCarId null, state 'walking', route.shift()), then board waiting sims on that floor whose route[0] is a ride leg on this shaft (state 'waiting', |sim.pos.x - shaft.x| <= shaft.width + 1) up to capacity (set inCarId, state 'riding', car.calls.add(toFloor)); clear the hall call in the served direction; idle cars return to homeFloor after IDLE_RETURN_MINUTES. Cars in one shaft may pass through each other (decided 2026-09-18 to avoid crossing-demand wedges); cars stay in creation order.
 
 ### sim/people.ts
 ```ts
