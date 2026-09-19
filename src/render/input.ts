@@ -57,3 +57,77 @@ export function wheelGesture(event: WheelLike, pageHeightPx: number): WheelGestu
   if (event.shiftKey && dx === 0) return { zoom: false, dx: dy, dy: 0, dz: 0 };
   return { zoom: false, dx, dy, dz: 0 };
 }
+
+// ------------------------------------------------------------------- touch
+
+/**
+ * How far a finger may travel and still count as a tap, in css pixels.
+ *
+ * A finger is a fat, shaky pointer: a press that would be a click from a mouse arrives from a
+ * thumb with a few pixels of travel in it, so touch gets its own, coarser slop.
+ */
+export const TOUCH_SLOP_PX = 10;
+
+/** How long a tap may last. A finger held longer than this meant to drag, not to place. */
+export const TAP_MS = 400;
+
+/**
+ * Was that press a tap: held inside the slop and let go quickly?
+ *
+ * The renderer asks before it picks and the game shell asks before it builds, so a finger that
+ * rests on the view, or one that was only the first half of a pinch, places nothing.
+ */
+export function isTap(
+  down: Point,
+  up: Point,
+  elapsedMs: number,
+  slop: number = TOUCH_SLOP_PX,
+  maxMs: number = TAP_MS,
+): boolean {
+  if (!(elapsedMs >= 0) || elapsedMs >= maxMs) return false; // a NaN duration is not a tap
+  return classifyPress(down, up, slop) === 'click';
+}
+
+/** Two fingers on the view, in the order they went down. */
+export interface FingerPair {
+  a: Point;
+  b: Point;
+}
+
+/** What two fingers did between one move and the next. */
+export interface PinchGesture {
+  /** Multiply the zoom by this: above 1 the fingers spread, below 1 they closed. */
+  scale: number;
+  /** Screen pixels the midpoint travelled, the pan half of the gesture. */
+  dx: number;
+  dy: number;
+  /** Where the fingers point now: the world under it is the point the zoom holds still. */
+  mid: Point;
+}
+
+/** Fingers this close together are one smudge: their span is too noisy to zoom by. */
+const MIN_PINCH_SPAN_PX = 12;
+
+function midpointOf(pair: FingerPair): Point {
+  return { x: (pair.a.x + pair.b.x) / 2, y: (pair.a.y + pair.b.y) / 2 };
+}
+
+function spanOf(pair: FingerPair): number {
+  return Math.hypot(pair.a.x - pair.b.x, pair.a.y - pair.b.y);
+}
+
+/**
+ * One step of a two finger gesture, split into a zoom and a pan.
+ *
+ * The span between the fingers is the zoom and the midpoint is the pan, so a pinch that also
+ * slides does both at once, which is what a hand actually does. The two are read from the same
+ * pair of points, which is why this is one function and not two.
+ */
+export function pinchGesture(prev: FingerPair, next: FingerPair): PinchGesture {
+  const before = spanOf(prev);
+  const after = spanOf(next);
+  const from = midpointOf(prev);
+  const mid = midpointOf(next);
+  const scale = before < MIN_PINCH_SPAN_PX || after < MIN_PINCH_SPAN_PX ? 1 : after / before;
+  return { scale, dx: mid.x - from.x, dy: mid.y - from.y, mid };
+}
