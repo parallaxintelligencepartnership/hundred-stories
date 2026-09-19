@@ -81,3 +81,8 @@ Scope: diff edef508..c9a78b8. Not covered: code outside the diff, application lo
 - [x] ADVISORY | testing | the settings panel and the guide said drag pans with any tool, but the lobby brush and the shaft tool keep the left drag (src/ui/panels.ts:48, how-to-play/index.html:172) | Closed 2026-09-19: copy corrected in c9a78b8, tests/ui and tests/site 35 passed
 - [x] ADVISORY | testing | the hint's storage read and write are wrapped in try/catch so a blocked localStorage still shows the hint, but no test exercises the throw path (src/ui/ui.ts:521) | Closed 2026-09-19: 5c355ce adds the throw-path test; red with the try/catch removed (1 failed, 3 passed), green restored (4 passed)
 Plus 3 still open from the closeout and Checkpoint 1 (two need the live site, one is the browser probes).
+
+## Post-deploy 2026-09-19 - first live load
+### Findings
+- [ ] IMPORTANT | production-readiness | on the live site the renderer throws "Current environment does not allow unsafe-eval" under the CSP in public/_headers and the game falls back to the WebGL message; the landing hero silently falls back to the static image for the same reason (src/render/renderer.ts:1) | Evidence to close: with pixi.js/unsafe-eval imported first in renderer.ts, headless Chrome against the nginx container and then against https://hundredstories.xyz/play/?new logs no unsafe-eval or Refused line and the HUD and canvas render; the landing hero shows the live tower
+- [ ] ADVISORY | production-readiness | the landing header clips the wordmark (Matt, live) (src/site/site.css) | Evidence to close: screenshots at 1280 and 390 wide show the wordmark fully inside the header with clearance above and below
