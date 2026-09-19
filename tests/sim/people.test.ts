@@ -43,6 +43,14 @@ import { stressBand, tickPeople, WALK_TILES_PER_MINUTE } from '../../src/sim/peo
 
 const ENTRANCE = { floor: 1, x: 100 };
 const SHAFT_X = 150;
+/** Walks the fixtures below ask for: entrance to office, to hotel room, office to hotel room. */
+const OFFICE_WALK = 104;
+const HOTEL_WALK = 102;
+const KEEPER_WALK = 105;
+/** HALL_CALL_RETRY_MINUTES times RETRIES_BEFORE_REROUTE in people.ts: both are minutes, not distances. */
+const SILENT_RETRY_MINUTES = 18;
+/** How far apart the first and last worker of an office arrive. */
+const ARRIVAL_SPREAD = SCHEDULES.worker.arriveEnd - SCHEDULES.worker.arriveStart;
 
 type Point = { floor: number; x: number };
 
@@ -132,6 +140,21 @@ function run(world: World, minutes: number): void {
   }
 }
 
+/**
+ * Minutes a walk of this many tiles needs at the current speed, plus slack for the
+ * leg handoffs at each end. Tick budgets derive from this so a speed retune in
+ * people.ts cannot silently turn a timing into a fixed number of ticks.
+ */
+function walkMinutes(tiles: number, slack = 3): number {
+  return Math.ceil(Math.abs(tiles) / WALK_TILES_PER_MINUTE) + slack;
+}
+
+/** Minutes from now to that minute of day, today when it is still ahead. */
+function minutesUntil(world: World, minuteOfDay: number): number {
+  const now = world.time.minute % 1440;
+  return minuteOfDay >= now ? minuteOfDay - now : 1440 - now + minuteOfDay;
+}
+
 function simsOfKind(world: World, kind: Sim['kind']): Sim[] {
   return [...world.sims.values()].filter((s) => s.kind === kind);
 }
@@ -216,7 +239,7 @@ describe('office intake', () => {
     const office = makeRoom(world, 'office', 2, 200);
     setTime(world, 0, SCHEDULES.worker.arriveStart);
 
-    run(world, 180);
+    run(world, ARRIVAL_SPREAD + walkMinutes(OFFICE_WALK));
 
     expect(office.occupancy).toBe(6);
     expect(simsOfKind(world, 'worker').every((s) => s.state === 'inRoom' && s.inRoomId === office.id)).toBe(true);
@@ -226,13 +249,15 @@ describe('office intake', () => {
     const world = makeTower();
     const office = makeRoom(world, 'office', 2, 200);
     setTime(world, 0, SCHEDULES.worker.arriveStart);
-    run(world, 180);
+    run(world, ARRIVAL_SPREAD + walkMinutes(OFFICE_WALK));
 
-    run(world, 15 * 60); // through the evening into the small hours
+    // Past the last leaving time, plus the walk out, and on into the small hours.
+    run(world, SCHEDULES.worker.leaveEnd - SCHEDULES.worker.arriveEnd + walkMinutes(OFFICE_WALK) + 5 * 60);
     expect(simsOfKind(world, 'worker').every((s) => s.state === 'outside')).toBe(true);
     expect(office.occupancy).toBe(0);
 
-    run(world, 9 * 60); // through the next weekday morning
+    // On to the next weekday's last arrival, plus the walk in.
+    run(world, minutesUntil(world, SCHEDULES.worker.arriveEnd) + walkMinutes(OFFICE_WALK));
     expect(office.occupancy).toBe(6);
     expect(simsOfKind(world, 'worker')).toHaveLength(6);
   });
@@ -271,7 +296,7 @@ describe('hotel guests', () => {
     const room = makeRoom(world, 'hotelSingle', 2, 200);
     setTime(world, 0, SCHEDULES.guest.checkInStart);
 
-    run(world, 5 * 60 + 30);
+    run(world, SCHEDULES.guest.checkInEnd - SCHEDULES.guest.checkInStart + walkMinutes(HOTEL_WALK));
 
     expect(room.tenants).toHaveLength(1);
     expect(room.occupancy).toBe(1);
@@ -316,7 +341,7 @@ describe('housekeeping', () => {
     expect(office.tenants).toHaveLength(ROOMS.housekeeping.capacity);
     expect(mocks.findRoute).toHaveBeenCalledWith(world, expect.anything(), expect.anything(), { staff: true });
 
-    run(world, SCHEDULES.housekeeping.minutesPerRoom + 30);
+    run(world, walkMinutes(KEEPER_WALK) + SCHEDULES.housekeeping.minutesPerRoom + 5);
 
     expect(room.dirty).toBe(false);
   });
@@ -442,6 +467,70 @@ describe('movement', () => {
     expect(sim.stress).toBeCloseTo(STRESS.perStairFloor, 6);
   });
 
+  it('calls no car until the sim reaches the shaft doors, then calls once', () => {
+    const world = makeTower();
+    const shaft = makeShaft(world);
+    shaftRoutes(shaft.id);
+    const sim = makeSim(world, {
+      pos: { floor: 1, x: SHAFT_X - 10 },
+      route: [{ kind: 'ride', shaftId: shaft.id, fromFloor: 1, toFloor: 5 }],
+    });
+
+    // A car sent to a sim standing ten tiles off would open on an empty floor and close again.
+    let guard = 0;
+    while (sim.state !== 'waiting' && guard < walkMinutes(10) + 2) {
+      expect(mocks.requestHallCall).not.toHaveBeenCalled();
+      tickPeople(world);
+      world.time.minute += 1;
+      guard += 1;
+    }
+
+    expect(sim.state).toBe('waiting');
+    expect(sim.pos.x).toBe(SHAFT_X);
+    expect(guard).toBe(walkMinutes(10, 0)); // it walked the ten tiles, it did not jump them
+    expect(Math.abs(sim.pos.x - shaft.x)).toBeLessThanOrEqual(shaft.width + 1);
+    expect(mocks.requestHallCall).toHaveBeenCalledTimes(1);
+    expect(mocks.requestHallCall).toHaveBeenCalledWith(world, shaft.id, 1, 1);
+  });
+
+  it('drops a ride leg that goes nowhere instead of calling a car', () => {
+    const world = makeTower();
+    const shaft = makeShaft(world);
+    const shop = makeRoom(world, 'shop', 1, 160);
+    const sim = makeSim(world, {
+      pos: { floor: 1, x: SHAFT_X },
+      route: [
+        { kind: 'ride', shaftId: shaft.id, fromFloor: 1, toFloor: 1 },
+        { kind: 'walk', toX: 166 },
+        { kind: 'enter', roomId: shop.id },
+      ],
+    });
+
+    run(world, walkMinutes(166 - SHAFT_X));
+
+    expect(mocks.requestHallCall).not.toHaveBeenCalled();
+    expect(sim.inRoomId).toBe(shop.id);
+  });
+
+  it('asks routing again when three retries bring no car', () => {
+    const world = makeTower();
+    const shaft = makeShaft(world);
+    shaftRoutes(shaft.id);
+    const sim = makeSim(world, {
+      pos: { floor: 1, x: SHAFT_X },
+      route: [{ kind: 'ride', shaftId: shaft.id, fromFloor: 1, toFloor: 5 }],
+    });
+
+    run(world, 2);
+    expect(sim.state).toBe('waiting');
+    mocks.findRoute.mockClear();
+
+    run(world, SILENT_RETRY_MINUTES);
+
+    expect(mocks.findRoute).toHaveBeenCalled();
+    expect(sim.state).toBe('waiting'); // routing offered the same shaft, so it waits again
+  });
+
   it('requests one hall call when it reaches a ride leg', () => {
     const world = makeTower();
     const shaft = makeShaft(world);
@@ -455,7 +544,9 @@ describe('movement', () => {
       ],
     });
 
-    run(world, 5);
+    // Short slack on purpose: the waiting stretch has to stay inside the hall call
+    // retry window, otherwise a second call is expected and this test asserts one.
+    run(world, walkMinutes(SHAFT_X - 130, 2));
 
     expect(sim.state).toBe('waiting');
     expect(sim.pos.x).toBe(SHAFT_X);
@@ -468,6 +559,7 @@ describe('stress', () => {
   it('rises while a sim waits for a car', () => {
     const world = makeTower();
     const shaft = makeShaft(world);
+    shaftRoutes(shaft.id); // a reroute after the silent retries puts it back at the doors
     const sim = makeSim(world, {
       pos: { floor: 1, x: SHAFT_X },
       route: [{ kind: 'ride', shaftId: shaft.id, fromFloor: 1, toFloor: 5 }],
@@ -496,6 +588,7 @@ describe('stress', () => {
   it('gives up at the give up threshold with a reason naming the floor, then leaves', () => {
     const world = makeTower();
     const shaft = makeShaft(world);
+    // This sim holds no lease, so giving up takes it out of the tower for good.
     const sim = makeSim(world, {
       pos: { floor: 3, x: SHAFT_X },
       stress: STRESS.giveUp - STRESS.perWaitingMinute,
@@ -508,12 +601,127 @@ describe('stress', () => {
     expect(sim.leaveReason).toBe('Gave up waiting for an elevator on floor 3.');
     expect(sim.leaveReason).toContain('floor 3');
 
-    run(world, 20);
+    run(world, walkMinutes(SHAFT_X - ENTRANCE.x));
     expect(world.sims.has(id)).toBe(false);
   });
 });
 
 describe('leaving', () => {
+  it('sends a tenant who gives up home for the day and keeps the lease', () => {
+    const world = makeTower();
+    const shaft = makeShaft(world);
+    shaftRoutes(shaft.id);
+    const office = makeRoom(world, 'office', 5, 200, { vacant: false });
+    const sim = makeSim(world, {
+      kind: 'worker',
+      homeRoomId: office.id,
+      pos: { floor: 1, x: SHAFT_X },
+      stress: STRESS.giveUp - STRESS.perWaitingMinute,
+      route: [{ kind: 'ride', shaftId: shaft.id, fromFloor: 1, toFloor: 5 }],
+      schedule: [
+        { minuteOfDay: SCHEDULES.worker.arriveStart, days: ['weekday'], goal: { kind: 'room', roomId: office.id }, stayMinutes: 0 },
+        { minuteOfDay: SCHEDULES.worker.leaveStart, days: ['weekday'], goal: { kind: 'exit' }, stayMinutes: 0 },
+      ],
+      nextScheduleIndex: 1,
+    });
+    office.tenants.push(sim.id);
+    setTime(world, 0, SCHEDULES.worker.arriveStart + 30);
+
+    run(world, 1);
+    expect(sim.leaveReason).toBe('Gave up waiting for an elevator on floor 1 and went home.');
+    expect(world.log.some((entry) => entry.text.endsWith('and went home.'))).toBe(true);
+
+    run(world, walkMinutes(SHAFT_X - ENTRANCE.x));
+    expect(sim.state).toBe('outside');
+    expect(world.sims.has(sim.id)).toBe(true);
+    expect(sim.homeRoomId).toBe(office.id);
+    expect(office.tenants).toContain(sim.id);
+    expect(office.vacant).toBe(false);
+    expect(sim.stress).toBe(STRESS.giveUp); // the day's stress stands while it sits outside
+
+    // Tomorrow it tries again, and the elevator it needs is working this time.
+    walkOnlyRoutes();
+    run(world, minutesUntil(world, SCHEDULES.worker.arriveStart) + walkMinutes(OFFICE_WALK));
+
+    expect(sim.state).toBe('inRoom');
+    expect(sim.inRoomId).toBe(office.id);
+    expect(sim.leaveReason).toBeNull();
+    expect(sim.stress).toBeLessThan(STRESS.pink);
+  });
+
+  it('logs a tenant give up once and waits for the ride home', () => {
+    const world = makeTower();
+    const shaft = makeShaft(world);
+    shaftRoutes(shaft.id);
+    const office = makeRoom(world, 'office', 5, 200, { vacant: false });
+    const sim = makeSim(world, {
+      kind: 'worker',
+      homeRoomId: office.id,
+      pos: { floor: 5, x: SHAFT_X },
+      stress: STRESS.giveUp - STRESS.perWaitingMinute,
+      route: [{ kind: 'ride', shaftId: shaft.id, fromFloor: 5, toFloor: 8 }],
+    });
+    office.tenants.push(sim.id);
+
+    run(world, 1);
+    expect(sim.leaveReason).toContain('went home');
+    mocks.findRoute.mockClear();
+
+    // The way home needs a car too. Giving up again here would clear that route every
+    // minute and buy a new one on the next, which is a route per sim per tick.
+    run(world, SILENT_RETRY_MINUTES - 1);
+
+    expect(world.log.filter((entry) => entry.text.startsWith('Gave up'))).toHaveLength(1);
+    expect(sim.state).toBe('waiting');
+    expect(mocks.findRoute).not.toHaveBeenCalled();
+  });
+
+  it('removes a visitor who gives up', () => {
+    const world = makeTower();
+    const shaft = makeShaft(world);
+    const sim = makeSim(world, {
+      kind: 'shopper',
+      pos: { floor: 3, x: SHAFT_X },
+      stress: STRESS.giveUp - STRESS.perWaitingMinute,
+      route: [{ kind: 'ride', shaftId: shaft.id, fromFloor: 3, toFloor: 10 }],
+    });
+    const id = sim.id;
+
+    run(world, 1);
+    expect(sim.state).toBe('leaving');
+    expect(sim.leaveReason).toBe('Gave up waiting for an elevator on floor 3.');
+
+    run(world, walkMinutes(SHAFT_X - ENTRANCE.x));
+    expect(world.sims.has(id)).toBe(false);
+  });
+
+  it('does not give up a second time while waiting for the ride out', () => {
+    const world = makeTower();
+    const shaft = makeShaft(world);
+    shaftRoutes(shaft.id);
+    const sim = makeSim(world, {
+      pos: { floor: 3, x: SHAFT_X },
+      stress: STRESS.giveUp - STRESS.perWaitingMinute,
+      route: [{ kind: 'ride', shaftId: shaft.id, fromFloor: 3, toFloor: 10 }],
+    });
+
+    run(world, 1);
+    expect(sim.state).toBe('leaving');
+    expect(sim.exiting).toBe(true);
+
+    run(world, 1); // routed to the doors, now waiting for the car out
+    expect(sim.state).toBe('waiting');
+    mocks.findRoute.mockClear();
+
+    // Giving up again here would clear the exit route every minute and ask routing
+    // for a new one on the next, which costs a route per sim per tick forever.
+    run(world, SILENT_RETRY_MINUTES - 1);
+
+    expect(sim.state).toBe('waiting');
+    expect(sim.stress).toBe(STRESS.giveUp);
+    expect(mocks.findRoute).not.toHaveBeenCalled();
+  });
+
   it('walks a leaving tenant to the entrance, removes it and frees the room', () => {
     const world = makeTower();
     const office = makeRoom(world, 'office', 1, 200, { vacant: false, occupancy: 1 });
@@ -528,7 +736,7 @@ describe('leaving', () => {
     office.tenants.push(sim.id);
     const id = sim.id;
 
-    run(world, 20);
+    run(world, walkMinutes(204 - ENTRANCE.x));
 
     expect(world.sims.has(id)).toBe(false);
     expect(office.occupancy).toBe(0);
@@ -558,7 +766,7 @@ describe('leaving', () => {
     run(world, 1); // the visit ends and the sim heads for the door
     expect(sim.exiting).toBe(true);
 
-    run(world, 5); // routed to the shaft, now waiting for a car
+    run(world, walkMinutes(206 - SHAFT_X)); // routed to the shaft, now waiting for a car
     expect(sim.state).toBe('waiting');
 
     // elevators.ts owns these writes: boarding and alighting overwrite the state.
@@ -570,7 +778,7 @@ describe('leaving', () => {
     sim.state = 'walking';
     sim.route.shift();
 
-    run(world, 10);
+    run(world, walkMinutes(SHAFT_X - ENTRANCE.x));
 
     expect(world.sims.has(id)).toBe(false);
     expect(shop.occupancy).toBe(0);

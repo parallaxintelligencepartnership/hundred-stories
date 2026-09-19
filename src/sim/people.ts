@@ -16,6 +16,7 @@ import type {
   Id,
   Leg,
   Room,
+  Shaft,
   RoomKind,
   ScheduleEntry,
   Sim,
@@ -31,12 +32,16 @@ export const WALK_TILES_PER_MINUTE = 5;
 // Local rules: rules.ts has no entry for these, so they live here and are marked as our call.
 /** A waiting sim re-registers its hall call this often if the call is no longer pending. */
 const HALL_CALL_RETRY_MINUTES = 6;
+/** After this many silent retries the sim stops trusting the shaft and asks routing again. */
+const RETRIES_BEFORE_REROUTE = 3;
 /** Housekeepers stop taking new rooms after this minute of day. */
 const HOUSEKEEPING_END_MINUTE = 20 * 60;
 /** Share of a commerce room's seats that the crowd aims to fill, tuned to ROOMS[kind].incomePerQuarter. */
 const VISITOR_FILL: Partial<Record<RoomKind, number>> = { shop: 0.2, fastFood: 0.8, restaurant: 0.45 };
 /** A show pulls between this share of the seats and a full house. */
 const SHOW_FILL_MIN = 0.5;
+/** Preference weight only, not a duration: one floor away counts as this many tiles when picking the nearest room or door. */
+const FLOOR_PREFERENCE_TILES = 10;
 
 const COMMERCE_KINDS = new Set<RoomKind>(['shop', 'fastFood', 'restaurant', 'cinema', 'partyHall']);
 const HOTEL_KINDS = new Set<RoomKind>(['hotelSingle', 'hotelTwin', 'hotelSuite']);
@@ -192,7 +197,10 @@ function visitorRatePerMinute(room: Room, clock: Clock): number {
 function runSchedules(world: World, clock: Clock): void {
   for (const sim of [...world.sims.values()]) {
     if (sim.state === 'gone' || sim.state === 'leaving') continue;
-    if (clock.minuteOfDay === 0 && sim.homeRoomId !== null) sim.nextScheduleIndex = 0;
+    if (clock.minuteOfDay === 0 && sim.homeRoomId !== null) {
+      sim.nextScheduleIndex = 0;
+      sim.leaveReason = null; // a new day, and stress starts fading again
+    }
     if (sim.state === 'inRoom' && sim.stayUntil !== null && world.time.minute >= sim.stayUntil) {
       onStayEnded(world, sim, clock);
       continue;
@@ -240,7 +248,7 @@ function startTrip(world: World, sim: Sim, goal: ScheduleEntry['goal']): boolean
   const legs = findRoute(world, sim.pos, target, sim.kind === 'staff' ? { staff: true } : undefined);
   if (!legs) return false;
   if (sim.inRoomId !== null) departRoom(world, sim);
-  sim.route = [...legs, { kind: 'enter', roomId: room.id }];
+  sim.route = [...withoutStandingRides(legs), { kind: 'enter', roomId: room.id }];
   sim.state = 'walking';
   sim.waitStart = null;
   return true;
@@ -254,7 +262,7 @@ function pickRoomOfKind(world: World, sim: Sim, kind: RoomKind): Room | undefine
     if (!wanted.has(room.kind) || room.onFire) continue;
     if (room.occupancy >= ROOMS[room.kind].capacity) continue;
     if (!isReachableFromLobby(world, room.floor, room.x)) continue;
-    const cost = Math.abs(room.floor - sim.pos.floor) * 10 + Math.abs(room.x - sim.pos.x);
+    const cost = Math.abs(room.floor - sim.pos.floor) * FLOOR_PREFERENCE_TILES + Math.abs(room.x - sim.pos.x);
     if (cost < bestCost) {
       bestCost = cost;
       best = room;
@@ -289,7 +297,7 @@ function leaveTower(world: World, sim: Sim): void {
     sim.route = [];
     return;
   }
-  sim.route = legs;
+  sim.route = withoutStandingRides(legs);
   sim.state = 'walking';
 }
 
@@ -316,7 +324,22 @@ function stepAlongRoute(world: World, sim: Sim): void {
       if (sim.pos.x === leg.toX) sim.route.shift();
       else break;
     } else if (leg.kind === 'ride') {
-      beginWait(world, sim, leg);
+      const shaft = world.shafts.get(leg.shaftId);
+      if (!shaft) {
+        leaveTower(world, sim);
+        return;
+      }
+      if (leg.toFloor === sim.pos.floor) {
+        sim.route.shift(); // a ride that goes nowhere: the car would open and close on the spot
+        continue;
+      }
+      if (!withinReach(sim, shaft)) {
+        // Walk to the doors before calling anything: a car answering a call nobody can
+        // board opens, finds no one, and closes again every couple of ticks.
+        sim.route.unshift({ kind: 'walk', toX: shaft.x });
+        continue;
+      }
+      beginWait(world, sim, leg, shaft);
       return;
     } else if (leg.kind === 'stairs') {
       climbStairs(world, sim, leg);
@@ -328,23 +351,32 @@ function stepAlongRoute(world: World, sim: Sim): void {
       else leaveTower(world, sim);
       return;
     }
-    if (budget <= 0) break;
+    if (budget <= 0) {
+      const next = sim.route[0];
+      // Calling a car or stepping through a door costs no walking, so take it now
+      // rather than standing at the door for a minute. Walks and stairs wait.
+      if (!next || next.kind === 'walk' || next.kind === 'stairs') break;
+    }
   }
   if (sim.route.length === 0) arriveWithoutRoom(world, sim);
 }
 
-function beginWait(world: World, sim: Sim, leg: Extract<Leg, { kind: 'ride' }>): void {
-  const shaft = world.shafts.get(leg.shaftId);
-  if (!shaft) {
-    leaveTower(world, sim);
-    return;
-  }
-  sim.pos.x = shaft.x;
+function beginWait(world: World, sim: Sim, leg: Extract<Leg, { kind: 'ride' }>, shaft: Shaft): void {
   sim.state = 'waiting';
   if (sim.waitStart === null) {
     sim.waitStart = world.time.minute;
     requestHallCall(world, shaft.id, sim.pos.floor, leg.toFloor > sim.pos.floor ? 1 : -1);
   }
+}
+
+/** Close enough to the doors to board, the same test elevators.ts uses. */
+function withinReach(sim: Sim, shaft: Shaft): boolean {
+  return Math.abs(sim.pos.x - shaft.x) <= shaft.width + 1;
+}
+
+/** Routing can hand back a ride between the same two floors; nobody should call a car for it. */
+function withoutStandingRides(legs: Leg[]): Leg[] {
+  return legs.filter((leg) => leg.kind !== 'ride' || leg.fromFloor !== leg.toFloor);
 }
 
 function climbStairs(world: World, sim: Sim, leg: Extract<Leg, { kind: 'stairs' }>): void {
@@ -423,12 +455,18 @@ function updateStress(world: World): void {
   for (const sim of [...world.sims.values()]) {
     if (sim.state === 'waiting') {
       sim.stress = Math.min(STRESS.giveUp, sim.stress + STRESS.perWaitingMinute);
-      if (sim.stress >= STRESS.giveUp) {
+      // A sim can abandon a trip once a day. On the way out, or on the way home after
+      // giving up, there is nothing left to abandon: giving up again would clear the
+      // route every minute and ask routing for a new one on the next, so a sim already
+      // headed for the door waits for its car however cross it is.
+      if (sim.stress >= STRESS.giveUp && !sim.exiting && sim.leaveReason === null) {
         giveUp(world, sim);
         continue;
       }
       retryHallCall(world, sim);
-    } else if (sim.state === 'inRoom' || sim.state === 'outside') {
+    } else if (sim.state === 'inRoom' || (sim.state === 'outside' && sim.leaveReason === null)) {
+      // Outside with a reason means it went home cross today: the stress stands until
+      // midnight so evaluation.ts sees the day it had.
       sim.stress = Math.max(0, sim.stress - STRESS.decayPerMinuteInRoom);
     }
   }
@@ -442,20 +480,70 @@ function retryHallCall(world: World, sim: Sim): void {
   if (waited <= 0 || waited % HALL_CALL_RETRY_MINUTES !== 0) return;
   const shaft = world.shafts.get(leg.shaftId);
   if (!shaft) return;
+  if (waited >= HALL_CALL_RETRY_MINUTES * RETRIES_BEFORE_REROUTE) {
+    rerouteWaitingSim(world, sim);
+    return;
+  }
+  if (!withinReach(sim, shaft)) return;
   const dir: 1 | -1 = leg.toFloor > sim.pos.floor ? 1 : -1;
   const pending = shaft.hallCalls.get(sim.pos.floor);
   if (pending && (dir === 1 ? pending.up : pending.down)) return;
   requestHallCall(world, shaft.id, sim.pos.floor, dir);
 }
 
+/** Three silent retries: the shaft is not serving this floor, so ask routing for another way. */
+function rerouteWaitingSim(world: World, sim: Sim): void {
+  const dest = routeDestination(world, sim);
+  const legs = findRoute(world, sim.pos, dest.at, sim.kind === 'staff' ? { staff: true } : undefined);
+  if (!legs) return; // nothing better on offer: keep waiting and let stress decide
+  const enter: Leg[] = dest.roomId !== null ? [{ kind: 'enter', roomId: dest.roomId }] : [];
+  sim.route = [...withoutStandingRides(legs), ...enter];
+  sim.state = 'walking';
+  sim.waitStart = null;
+}
+
+/** Where the legs still in hand were taking this sim. */
+function routeDestination(world: World, sim: Sim): { at: { floor: number; x: number }; roomId: Id | null } {
+  let floor = sim.pos.floor;
+  let x = sim.pos.x;
+  let roomId: Id | null = null;
+  for (const leg of sim.route) {
+    if (leg.kind === 'walk') x = leg.toX;
+    else if (leg.kind === 'ride' || leg.kind === 'stairs') floor = leg.toFloor;
+    else {
+      roomId = leg.roomId;
+      const room = world.rooms.get(leg.roomId);
+      if (room) {
+        floor = room.floor;
+        x = roomCenter(room);
+      }
+    }
+  }
+  return { at: { floor, x }, roomId };
+}
+
 function giveUp(world: World, sim: Sim): void {
   sim.stress = STRESS.giveUp;
-  sim.exiting = true;
   sim.route = [];
   sim.waitStart = null;
+  if (isTenant(sim)) {
+    // A fed up tenant abandons today's trip, not the lease. It sulks outside with its
+    // stress intact, which is what the room's evaluation averages, so a tower that keeps
+    // people waiting empties the office through evaluation.ts over a full day instead.
+    sim.leaveReason = `Gave up waiting for an elevator on ${floorLabel(sim.pos.floor)} and went home.`;
+    log(world, sim.leaveReason, 'warn', { simId: sim.id });
+    leaveTower(world, sim);
+    return;
+  }
+  sim.exiting = true;
   sim.state = 'leaving';
   sim.leaveReason = `Gave up waiting for an elevator on ${floorLabel(sim.pos.floor)}.`;
   log(world, sim.leaveReason, 'warn', { simId: sim.id });
+}
+
+/** Workers and residents hold a lease. Guests, shoppers, diners, staff and VIPs do not. */
+function isTenant(sim: Sim): boolean {
+  return sim.homeRoomId !== null && (sim.kind === 'worker' || sim.kind === 'resident');
 }
 
 // ---------------------------------------------------------------------------
@@ -482,7 +570,7 @@ function runLeaving(world: World): void {
       finishLeave(world, sim);
       continue;
     }
-    sim.route = legs;
+    sim.route = withoutStandingRides(legs);
   }
 }
 
@@ -580,7 +668,7 @@ function assignCleaning(world: World, keeper: Sim, room: Room): boolean {
   const legs = findRoute(world, keeper.pos, { floor: room.floor, x: roomCenter(room) }, { staff: true });
   if (!legs) return false;
   departRoom(world, keeper);
-  keeper.route = [...legs, { kind: 'enter', roomId: room.id }];
+  keeper.route = [...withoutStandingRides(legs), { kind: 'enter', roomId: room.id }];
   keeper.state = 'walking';
   return true;
 }
@@ -603,7 +691,7 @@ function finishCleaning(world: World, keeper: Sim): void {
     return;
   }
   departRoom(world, keeper);
-  keeper.route = [...legs, { kind: 'enter', roomId: office.id }];
+  keeper.route = [...withoutStandingRides(legs), { kind: 'enter', roomId: office.id }];
   keeper.state = 'walking';
 }
 
@@ -714,7 +802,7 @@ function nearestEntrance(world: World, from: { floor: number; x: number }): { fl
   let best: { floor: number; x: number } | null = null;
   let bestCost = Number.POSITIVE_INFINITY;
   for (const door of doors) {
-    const cost = Math.abs(door.floor - from.floor) * 10 + Math.abs(door.x - from.x);
+    const cost = Math.abs(door.floor - from.floor) * FLOOR_PREFERENCE_TILES + Math.abs(door.x - from.x);
     if (cost < bestCost) {
       bestCost = cost;
       best = door;

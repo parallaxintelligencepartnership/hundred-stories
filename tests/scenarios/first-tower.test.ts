@@ -270,11 +270,11 @@ describe('scenario: a small hotel', () => {
 
 describe('scenario: the morning rush', () => {
   it('pushes a sim into the pink band when one car serves a floor of offices', () => {
-    // Twenty offices, not ten. One car makes a round trip to floor 30 in roughly
-    // 17 minutes and holds SHAFTS.standard.capacity (21), so ten offices (60 workers
-    // spread over the 75 minute arrival window) never queue longer than a single round
-    // trip and peak at 0.340 stress, a minute of waiting short of STRESS.pink (0.35).
-    // Twenty offices put 120 workers on a car that cannot keep up, which is the point.
+    // Twenty offices, not ten. One car holds SHAFTS.standard.capacity (21) and climbs at
+    // SHAFTS.standard.floorsPerMinute, so a round trip to floor 30 cannot clear the 75
+    // minute arrival window: the queue builds until sims reach STRESS.giveUp and go home
+    // for the day, keeping their lease. Ten offices already run hot; twenty put 120
+    // workers on that one car, which makes the band impossible to miss.
     const world = tallTower(1, TWENTY_OFFICES);
     at(world, 7, 55);
 
