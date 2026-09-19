@@ -33,3 +33,4 @@ npm test (vitest run); one file: npx vitest run <path>; npm run typecheck (tsc -
 ## Gotchas
 - 2026-09-18 | pi1/pi2/pi3 are x86_64 servers named for Parallax Intelligence, not Raspberry Pis | run uname -m before any architecture decision
 - 2026-09-19 | the entry point serves a fake demo tower at any URL carrying ?smoke, and that code is in the production bundle | never share a ?smoke link as the game, and strip or dev-gate the import before ship
+- 2026-09-19 | the closeout published to itworks.build on the strength of a kickoff wish, with 3 IMPORTANT and 1 ADVISORY still open; Matt had not approved it | never publish to the wall without an explicit per-publish yes from Matt and an empty findings list
