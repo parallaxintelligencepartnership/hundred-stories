@@ -155,6 +155,13 @@ const WINDOWS: Record<RoomKind, WindowMood> = {
   cathedral: 'none', // tall stained windows are drawn by the cathedral interior itself
 };
 
+/**
+ * Connectors are overlays: they are drawn above the rooms they cover, so they get no
+ * wall fill and no slab band. Only their treads, rails, landings and outline are drawn,
+ * and the room behind shows through everything else.
+ */
+export const OVERLAY_KINDS: ReadonlySet<RoomKind> = new Set<RoomKind>(['stairs', 'escalator']);
+
 // Kinds whose interior is drawn once across the whole height instead of once per floor.
 const FULL_HEIGHT: ReadonlySet<RoomKind> = new Set<RoomKind>([
   'skyLobby',
@@ -413,6 +420,9 @@ function drawWindowBand(g: Graphics, kind: RoomKind, y0: number, w: number, lit:
 }
 
 function drawShell(g: Graphics, kind: RoomKind, w: number, h: number, lit: boolean): void {
+  // An overlay has no shell at all: the wall and the slab would hide the room behind it.
+  // The floor under it is already drawn by the slab layer and the floor strip.
+  if (OVERLAY_KINDS.has(kind)) return;
   box(g, 0, 0, w, h, PALETTE.wall[kind]);
   const floors = Math.max(1, Math.round(h / FLOOR_PX));
   const perFloorSlabs = !FULL_HEIGHT.has(kind);

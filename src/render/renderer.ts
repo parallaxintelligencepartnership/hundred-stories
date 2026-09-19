@@ -24,8 +24,8 @@ import {
 import { stressBand } from '../sim/people';
 import { ROOMS } from '../sim/rules';
 import { clockOf, TOWER_WIDTH, type Car, type Id, type Room, type RoomKind, type Shaft, type Sim, type SimKind, type StressBand, type World } from '../sim/types';
-import { roomAt, shaftAt } from '../sim/world';
-import { createArt, FLOOR_PX, TILE_PX, type Art } from './art';
+import { roomsOnFloor, shaftAt } from '../sim/world';
+import { createArt, FLOOR_PX, OVERLAY_KINDS, TILE_PX, type Art } from './art';
 import {
   createCamera,
   DEFAULT_GROUND_LINE,
@@ -75,6 +75,30 @@ export interface Renderer {
   setToolOwnsDrag(on: boolean): void;
   setReducedMotion(on: boolean): void;
   destroy(): void;
+}
+
+/**
+ * Connectors are drawn above the rooms they cover. Stairs and escalators are rooms, so
+ * they need their own layer over the room layer; a shaft has one already. See build.ts:
+ * a connector may share tiles with any room, in either order.
+ */
+export function drawsOverRooms(kind: RoomKind): boolean {
+  return OVERLAY_KINDS.has(kind);
+}
+
+/**
+ * The room a click lands on. Where a connector overlays another room both cover the
+ * tile, so the pick follows the picture: the connector is on top, so it is the one the
+ * player means. Shafts stay behind rooms in the pick, as they always have, so a lobby
+ * segment under a column can still be reached.
+ */
+export function pickRoomAt(world: World, floor: number, x: number): Room | undefined {
+  let found: Room | undefined;
+  for (const room of roomsOnFloor(world, floor)) {
+    if (x < room.x || x >= room.x + room.width) continue;
+    if (!found || drawsOverRooms(room.kind)) found = room;
+  }
+  return found;
 }
 
 const SIM_WIDTH_PX = TILE_PX; // one tile wide, matching art.ts
@@ -181,6 +205,19 @@ export function fallbackArt(_renderer: PixiRenderer | null): Art {
       return get(`room|${kind}|${width}|${height}|${variant}|${lit}`, () =>
         canvasTexture(width * TILE_PX, height * FLOOR_PX, (ctx) => {
           const base = FALLBACK_ROOM_COLORS[kind] ?? 0x3a4556;
+          // A connector is an overlay here too: a diagonal and an outline, no backing fill.
+          if (drawsOverRooms(kind)) {
+            ctx.strokeStyle = hex(base);
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(2, ctx.canvas.height - 3);
+            ctx.lineTo(ctx.canvas.width - 2, 3);
+            ctx.stroke();
+            ctx.lineWidth = 1;
+            ctx.strokeStyle = hex(0x1c232e);
+            ctx.strokeRect(0.5, 0.5, ctx.canvas.width - 1, ctx.canvas.height - 1);
+            return;
+          }
           ctx.fillStyle = hex(base);
           ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
           ctx.fillStyle = hex(lit ? 0xffd27a : 0x1a2233);
@@ -371,10 +408,13 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
   const slabLayer = new Container();
   const roomLayer = new Container();
   const shaftLayer = new Container();
+  // Stairs and escalators are rooms, but they overlay the rooms they cross, so they
+  // are drawn last of all, with no backing fill (art.ts OVERLAY_KINDS).
+  const connectorLayer = new Container();
   // Behind everything in the tower: a continuous floor across each built floor,
   // so a sim between two rooms is never walking on sky.
   const floorStrips = new Graphics();
-  layers.tower.addChild(floorStrips, slabLayer, shaftLayer, roomLayer);
+  layers.tower.addChild(floorStrips, slabLayer, roomLayer, shaftLayer, connectorLayer);
 
   const simSpriteLayer = new Container();
   layers.sims.addChild(simSpriteLayer);
@@ -625,7 +665,7 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
       let entry = roomSprites.get(room.id);
       if (!entry) {
         const sprite = new Sprite(art.room(room.kind, room.width, room.height, variant, lit));
-        roomLayer.addChild(sprite);
+        (drawsOverRooms(room.kind) ? connectorLayer : roomLayer).addChild(sprite);
         entry = { node: sprite, key };
         roomSprites.set(room.id, entry);
       } else if (entry.key !== key) {
@@ -923,7 +963,7 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
     let hit: PickHit;
     if (best) hit = { simId: best.id, floor, x: tile };
     else {
-      const room: Room | undefined = roomAt(lastWorld, floor, tile);
+      const room: Room | undefined = pickRoomAt(lastWorld, floor, tile);
       if (room) hit = { roomId: room.id, floor, x: tile };
       else {
         const shaft = shaftAt(lastWorld, floor, tile);
