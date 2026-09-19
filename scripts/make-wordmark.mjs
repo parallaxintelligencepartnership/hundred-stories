@@ -30,11 +30,30 @@ const COLOR = {
   slabEdge: 0x333333,
   windowDay: 0x7fb6e0,
   windowLit: 0xffd866,
+  windowUnlit: 0x2a3550,
   windowFrame: 0x222222,
   simCalm: 0x111111,
   bgDark: 0x0b1020,
   bgLight: 0x9fd3f5, // docs/VISUAL.md line 24, sky day top color
 };
+
+// ---------------------------------------------------------------------------
+// Seeded PRNG (mulberry32), seed constant so window lighting is reproducible
+// across runs.
+// ---------------------------------------------------------------------------
+
+const WINDOW_SEED = 100;
+const WINDOW_UNLIT_CHANCE = 0.25;
+
+function mulberry32(seed) {
+  let t = seed >>> 0;
+  return function () {
+    t += 0x6d2b79f5;
+    let r = Math.imul(t ^ (t >>> 15), 1 | t);
+    r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 function toRGB(hex) {
   return [(hex >> 16) & 0xff, (hex >> 8) & 0xff, hex & 0xff];
@@ -63,7 +82,7 @@ const LINE2 = 'STORIES';
 const LETTER_W = 5;
 const LETTER_H = 7;
 const LETTER_GAP = 1; // empty column between letters
-const LINE_GAP = 1; // empty row between the two lines
+const LINE_GAP_CELLS = 0.5; // half-cell gap between the two lines (was 1 full row)
 
 function buildLineRows(word) {
   const rows = [];
@@ -82,9 +101,7 @@ function buildBitmap() {
   const rows1 = buildLineRows(LINE1);
   const rows2 = buildLineRows(LINE2);
   const width = rows1[0].length; // both words are 7 letters, same width
-  const blankRow = '.'.repeat(width);
-  const rows = [...rows1, ...Array(LINE_GAP).fill(blankRow), ...rows2];
-  return { rows, width, height: rows.length };
+  return { rows1, rows2, width, height1: rows1.length, height2: rows2.length };
 }
 
 // ---------------------------------------------------------------------------
@@ -92,29 +109,48 @@ function buildBitmap() {
 // s = CELL / 12, so s=1 for the base SVG (CELL=12) and s=4 for the 4x PNGs (CELL=48).
 // ---------------------------------------------------------------------------
 
-function buildScene(variant, s) {
+function buildScene(variant, s, { paddingXCells = 2, paddingYCells = 2 } = {}) {
   const CELL = 12 * s;
-  const { rows, width: gridW, height: gridH } = buildBitmap();
+  const { rows1, rows2, width: gridW, height1, height2 } = buildBitmap();
   const rects = [];
 
-  const windowColor = variant === 'dark' ? COLOR.windowLit : COLOR.windowDay;
+  const rng = mulberry32(WINDOW_SEED);
+  let unlitCount = 0;
 
-  for (let gy = 0; gy < gridH; gy++) {
+  // Cell centres for both lines, in row-major order (line 1 then line 2), so
+  // the RNG is consumed in the same order every run regardless of variant.
+  const gap2Y = height1 * CELL + LINE_GAP_CELLS * CELL;
+  const cells = [];
+  for (let gy = 0; gy < height1; gy++) {
     for (let gx = 0; gx < gridW; gx++) {
-      if (rows[gy][gx] !== '#') continue;
-      const x0 = gx * CELL;
-      const y0 = gy * CELL;
-      // Room cell: outline square, cream wall inset by 1px, window band framed
-      // across the top third. All numbers below are in base-12 units times s.
-      rects.push({ x: x0, y: y0, w: 12 * s, h: 12 * s, color: COLOR.outline });
-      rects.push({ x: x0 + 1 * s, y: y0 + 1 * s, w: 10 * s, h: 10 * s, color: COLOR.cream });
-      rects.push({ x: x0 + 2 * s, y: y0 + 1 * s, w: 8 * s, h: 4 * s, color: COLOR.windowFrame });
-      rects.push({ x: x0 + 3 * s, y: y0 + 2 * s, w: 6 * s, h: 2 * s, color: windowColor });
+      if (rows1[gy][gx] === '#') cells.push({ x0: gx * CELL, y0: gy * CELL });
+    }
+  }
+  for (let gy = 0; gy < height2; gy++) {
+    for (let gx = 0; gx < gridW; gx++) {
+      if (rows2[gy][gx] === '#') cells.push({ x0: gx * CELL, y0: gap2Y + gy * CELL });
     }
   }
 
+  for (const { x0, y0 } of cells) {
+    let windowColor;
+    if (variant === 'dark') {
+      const unlit = rng() < WINDOW_UNLIT_CHANCE;
+      if (unlit) unlitCount++;
+      windowColor = unlit ? COLOR.windowUnlit : COLOR.windowLit;
+    } else {
+      windowColor = COLOR.windowDay;
+    }
+    // Room cell: outline square, cream wall inset by 1px, window band framed
+    // across the top third. All numbers below are in base-12 units times s.
+    rects.push({ x: x0, y: y0, w: 12 * s, h: 12 * s, color: COLOR.outline });
+    rects.push({ x: x0 + 1 * s, y: y0 + 1 * s, w: 10 * s, h: 10 * s, color: COLOR.cream });
+    rects.push({ x: x0 + 2 * s, y: y0 + 1 * s, w: 8 * s, h: 4 * s, color: COLOR.windowFrame });
+    rects.push({ x: x0 + 3 * s, y: y0 + 2 * s, w: 6 * s, h: 2 * s, color: windowColor });
+  }
+
   const gridPxW = gridW * CELL;
-  const gridPxH = gridH * CELL;
+  const gridPxH = gap2Y + height2 * CELL;
 
   // Slab beneath the bottom line of letters: 1px edge, then 3px slab, full width.
   const slabEdgeY = gridPxH;
@@ -137,14 +173,15 @@ function buildScene(variant, s) {
     bottom = dotY + dotH;
   }
 
-  const padding = 2 * CELL; // 2 cells of padding on every side
-  const width = gridPxW + padding * 2;
-  const height = bottom + padding * 2;
+  const paddingX = paddingXCells * CELL;
+  const paddingY = paddingYCells * CELL;
+  const width = gridPxW + paddingX * 2;
+  const height = bottom + paddingY * 2;
 
   // Shift every rect by the left/top padding.
-  const shifted = rects.map((r) => ({ ...r, x: r.x + padding, y: r.y + padding }));
+  const shifted = rects.map((r) => ({ ...r, x: r.x + paddingX, y: r.y + paddingY }));
 
-  return { width, height, rects: shifted };
+  return { width, height, rects: shifted, unlitCount };
 }
 
 // ---------------------------------------------------------------------------
@@ -255,22 +292,26 @@ function encodePNG(width, height, bgColor, rects) {
 // ---------------------------------------------------------------------------
 
 const bitmap = buildBitmap();
-console.log('HUNDRED STORIES bitmap (5x7 letters, %d x %d):', bitmap.width, bitmap.height);
-for (const row of bitmap.rows) console.log(row);
+console.log('HUNDRED STORIES bitmap (5x7 letters, %d wide, line1=%d rows, line2=%d rows):', bitmap.width, bitmap.height1, bitmap.height2);
+for (const row of bitmap.rows1) console.log(row);
+for (const row of bitmap.rows2) console.log(row);
 
 mkdirSync(outDir, { recursive: true });
 
 for (const variant of ['dark', 'light']) {
-  const svgScene = buildScene(variant, 1);
+  const svgScene = buildScene(variant, 1, { paddingXCells: 2, paddingYCells: 2 });
   const svg = buildSVG(svgScene);
   const svgPath = join(outDir, `wordmark-${variant}.svg`);
   writeFileSync(svgPath, svg);
   console.log(`wrote ${svgPath} (${svgScene.width}x${svgScene.height})`);
 
-  const pngScene = buildScene(variant, 4);
+  const pngScene = buildScene(variant, 4, { paddingXCells: 1, paddingYCells: 2 });
   const bg = variant === 'dark' ? COLOR.bgDark : COLOR.bgLight;
   const png = encodePNG(pngScene.width, pngScene.height, bg, pngScene.rects);
   const pngPath = join(outDir, `wordmark-${variant}.png`);
   writeFileSync(pngPath, png);
   console.log(`wrote ${pngPath} (${pngScene.width}x${pngScene.height}, ${png.length} bytes)`);
+  if (variant === 'dark') {
+    console.log(`  seed=${WINDOW_SEED}, unlit windows: ${pngScene.unlitCount}`);
+  }
 }
