@@ -190,11 +190,39 @@ describe('build: overlap and support', () => {
     expect(canBuild(world, 'office', 2, 154).ok).toBe(true);
   });
 
-  it('refuses a shaft that overlaps a room', () => {
+  it('refuses a shaft that overlaps a room other than a lobby', () => {
     const world = makeWorld();
     lobby(world);
     expect(build(world, 'office', 2, 100)).toEqual(OK);
+    // the office on floor 2 is in the way, the lobby segments on floor 1 are not
     expect(canBuildShaft(world, 'standard', 102, 1, 6)).toEqual({ ok: false, reason: 'Something is already there.' });
+    expect(canBuildShaft(world, 'standard', 102, -1, 1).ok).toBe(true);
+  });
+
+  it('lets a shaft run through a lobby run', () => {
+    const world = makeWorld();
+    for (let x = 150; x <= 200; x++) expect(build(world, 'lobby', 1, x)).toEqual(OK);
+    expect(canBuildShaft(world, 'standard', 176, 1, 6).ok).toBe(true);
+    expect(buildShaft(world, 'standard', 176, 1, 6)).toEqual(OK);
+    expect(onlyShaft(world).x).toBe(176);
+    // the lobby segments are untouched
+    expect(world.floorIndex.rooms.get(1)).toHaveLength(51);
+  });
+
+  it('lets a lobby segment and a sky lobby be built on shaft tiles', () => {
+    const world = makeWorld(8_000_000, 3);
+    expect(buildShaft(world, 'standard', 150, 1, 10)).toEqual(OK);
+    expect(build(world, 'lobby', 1, 151)).toEqual(OK);
+    expect(world.floorIndex.rooms.get(1)?.some((r) => r.x === 151)).toBe(true);
+    // every other kind still refuses the same tile
+    expect(build(world, 'lobby', 1, 100)).toEqual(OK);
+    expect(canBuild(world, 'office', 2, 149)).toEqual({ ok: false, reason: 'An elevator is in the way.' });
+
+    expect(buildShaft(world, 'express', 200, 1, 20)).toEqual(OK);
+    for (let f = 2; f <= 15; f++) expect(build(world, 'office', f, 100)).toEqual(OK);
+    expect(build(world, 'skyLobby', 15, 200)).toEqual(OK);
+    const sky = [...world.rooms.values()].find((r) => r.kind === 'skyLobby');
+    expect(sky?.x).toBe(200);
   });
 
   it('refuses a shaft that overlaps another shaft', () => {

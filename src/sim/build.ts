@@ -103,9 +103,28 @@ function overlapsX(aX: number, aWidth: number, bX: number, bWidth: number): bool
   return aX < bX + bWidth && bX < aX + aWidth;
 }
 
+/** Lobbies wrap around elevator shafts, so a shaft and a lobby may share tiles. */
+const SHAFT_MAY_PASS: readonly RoomKind[] = ['lobby', 'skyLobby'];
+
 function roomInTheWay(world: World, floors: readonly number[], x: number, width: number): boolean {
   for (const f of floors) {
     for (const room of roomsOnFloor(world, f)) {
+      if (overlapsX(x, width, room.x, room.width)) return true;
+    }
+  }
+  return false;
+}
+
+/** Room overlap as seen by a shaft: lobby and sky lobby tiles are passable. */
+function roomInTheWayOfShaft(
+  world: World,
+  floors: readonly number[],
+  x: number,
+  width: number,
+): boolean {
+  for (const f of floors) {
+    for (const room of roomsOnFloor(world, f)) {
+      if (SHAFT_MAY_PASS.includes(room.kind)) continue;
       if (overlapsX(x, width, room.x, room.width)) return true;
     }
   }
@@ -229,7 +248,10 @@ export function canBuild(world: World, kind: RoomKind, floor: number, x: number)
   if (!hasSupport(world, floor)) return no('Build a floor below this one first.');
 
   if (roomInTheWay(world, floors, x, rule.width)) return no('Something is already there.');
-  if (shaftInTheWay(world, floors, x, rule.width)) return no('An elevator is in the way.');
+  // A lobby or sky lobby wraps around a shaft that is already standing there.
+  if (!SHAFT_MAY_PASS.includes(kind) && shaftInTheWay(world, floors, x, rule.width)) {
+    return no('An elevator is in the way.');
+  }
 
   if (world.cash < rule.cost) return no(cannotAfford(rule.label, rule.cost));
 
@@ -259,7 +281,7 @@ export function canBuildShaft(
     return no(`You can build ${countText(LIMITS.maxShafts, 'Elevator')}.`);
   }
 
-  if (roomInTheWay(world, floors, x, rule.width)) return no('Something is already there.');
+  if (roomInTheWayOfShaft(world, floors, x, rule.width)) return no('Something is already there.');
   if (shaftInTheWay(world, floors, x, rule.width)) return no('An elevator is in the way.');
 
   if (world.cash < rule.shaftCost) return no(cannotAfford(rule.label, rule.shaftCost));
@@ -390,7 +412,9 @@ function doExtendShaft(
   }
 
   const added = floors.filter((f) => f < shaft.floorMin || f > shaft.floorMax);
-  if (roomInTheWay(world, added, shaft.x, shaft.width)) return no('Something is already there.');
+  if (roomInTheWayOfShaft(world, added, shaft.x, shaft.width)) {
+    return no('Something is already there.');
+  }
   if (shaftInTheWay(world, added, shaft.x, shaft.width, shaft.id)) {
     return no('An elevator is in the way.');
   }
