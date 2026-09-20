@@ -4,7 +4,7 @@ import { LIMITS, ROOMS, SHAFTS } from '../sim/rules';
 import { deserialize, serialize } from '../sim/save';
 import { tick } from '../sim/tick';
 import { clockOf, type Command, type CommandResult, type Id, type Shaft, type World } from '../sim/types';
-import { createWorld } from '../sim/world';
+import { createWorld, log as logEvent } from '../sim/world';
 import { SCHEDULES } from '../sim/rules';
 import { classifyPress, isTap, PRESS_SLOP_PX, TOUCH_SLOP_PX } from '../render/input';
 import type { Renderer } from '../render/renderer';
@@ -14,6 +14,9 @@ import { readSave, stashUnreadable, writeSave } from './storage';
 const TICKS_PER_SECOND_AT_1X = 10;
 const NIGHT_MULTIPLIER = 8;
 const MAX_TICKS_PER_FRAME = 240;
+// A step drains missed ticks until this much wall time has passed, then drops the rest, so a
+// slow tick becomes slow motion instead of a freeze.
+const MAX_STEP_MS = 8;
 
 // Clock constants for the autosave schedule. rules.ts holds no clock lengths, so these live
 // here next to the only code that uses them; they match clockOf in sim/types.ts.
@@ -149,6 +152,10 @@ export function createGame(seed: number): Game {
         tick(world);
         accumulator -= 1;
         n++;
+        if (performance.now() - now >= MAX_STEP_MS) {
+          accumulator -= Math.floor(accumulator); // drop the whole missed ticks, keep the fraction
+          break;
+        }
       }
       if (accumulator > MAX_TICKS_PER_FRAME) accumulator = 0;
       if (n > 0) {
@@ -161,13 +168,27 @@ export function createGame(seed: number): Game {
   // One save per batch of ticks, and never two at once: a burst of ticks that crosses several
   // boundaries, or a slow write still in flight, must not pile up writes.
   let autosaveInFlight = false;
+  // The autosave stringifies the whole tower, several MB on a big one. It runs in an idle slot,
+  // not inside the timer step, so it never stacks on top of a rush-hour tick.
+  let cancelAutosave: (() => void) | null = null;
+  function scheduleIdle(run: () => void): () => void {
+    if (typeof requestIdleCallback === 'function') {
+      const handle = requestIdleCallback(run, { timeout: 2000 });
+      return () => cancelIdleCallback(handle);
+    }
+    const handle = setTimeout(run, 0);
+    return () => clearTimeout(handle);
+  }
   function maybeAutosave(prevMinute: number, nextMinute: number): void {
     if (autosaveInFlight) return;
     if (!shouldAutosave(prevMinute, nextMinute)) return;
     autosaveInFlight = true;
     // An autosave is silent, success or failure: the player did not ask for it.
-    void saveWorld(true).finally(() => {
-      autosaveInFlight = false;
+    cancelAutosave = scheduleIdle(() => {
+      cancelAutosave = null;
+      void saveWorld(true).finally(() => {
+        autosaveInFlight = false;
+      });
     });
   }
 
@@ -175,7 +196,7 @@ export function createGame(seed: number): Game {
     try {
       await writeSave(serialize(world));
       if (!quiet) {
-        world.log.push({ minute: world.time.minute, text: 'Game saved.', level: 'info' });
+        logEvent(world, 'Game saved.', 'info');
         notify();
       }
       return { ok: true };
@@ -482,7 +503,7 @@ export function createGame(seed: number): Game {
     },
     apply(cmd: Command): CommandResult {
       const res = applyCommand(world, cmd);
-      if (!res.ok) world.log.push({ minute: world.time.minute, text: res.reason, level: 'warn' });
+      if (!res.ok) logEvent(world, res.reason, 'warn');
       else followBuild(cmd);
       notify();
       return res;
@@ -608,11 +629,11 @@ export function createGame(seed: number): Game {
       const res = deserialize(text);
       if (!res.ok) {
         stashUnreadable(text);
-        world.log.push({
-          minute: world.time.minute,
-          text: `Your saved tower could not be read: ${res.reason} A copy is kept in this browser. Starting a fresh lot.`,
-          level: 'warn',
-        });
+        logEvent(
+          world,
+          `Your saved tower could not be read: ${res.reason} A copy is kept in this browser. Starting a fresh lot.`,
+          'warn'
+        );
         notify();
         return { ok: false, reason: res.reason };
       }
@@ -698,6 +719,8 @@ export function createGame(seed: number): Game {
     stop() {
       cancelAnimationFrame(raf);
       window.clearInterval(timer);
+      cancelAutosave?.();
+      cancelAutosave = null;
       raf = 0;
       timer = 0;
     },
