@@ -1170,39 +1170,46 @@ function drawSkyLobby(g: Graphics, y0: number, w: number, h: number, v: number, 
 
 function drawStairs(g: Graphics, y0: number, w: number, h: number, v: number, lit: boolean): void {
   const by = y0 + h - SLAB_H;
-  const steps = 10;
-  const x0 = 4;
-  const x1 = w - 8;
-  const yTop = y0 + 16; // the rail and the balusters live in the 12 px above the top tread
-  const stepW = Math.max(2, Math.floor((x1 - x0) / steps));
-  const stepH = Math.max(2, Math.floor((by - 2 - yTop) / steps));
-  box(g, 0, by - 2, x0 + 2, 2, PALETTE.detail.metal); // bottom landing
-  hline(g, 0, by - 3, x0 + 2);
+  const ty = y0 + FLOOR_PX - SLAB_H;
+  const steps = 9;
+  const run = 5;
+  const rise = 4; // 9 * 4 = 36 = by - ty, so the flight lands exactly on the upper floor
+  const x0 = 6;
+  const x1 = x0 + steps * run; // 51
+  const rail = v === 0 ? PALETTE.detail.metalDark : PALETTE.detail.wood;
+
+  // the slab under the flight
+  g.poly([x0, by, x1, ty, x1, ty + 7, x0 + 9, by]).fill(PALETTE.detail.stoneDark);
+  stripe(g, x0 + 9, by, x1, ty + 7, INK, 1);
+
+  // the steps
   for (let i = 0; i < steps; i++) {
-    const x = x0 + i * stepW;
-    const y = by - 2 - (i + 1) * stepH;
-    box(g, x, y, stepW + 1, 2, PALETTE.detail.metal); // tread
-    hline(g, x, y, stepW + 1);
-    vline(g, x, y + 2, stepH - 2, PALETTE.detail.metalDark); // riser
-    vline(g, x + stepW, y + 2, stepH - 2, INK);
+    const x = x0 + i * run;
+    const top = by - (i + 1) * rise;
+    box(g, x, top, run, rise, PALETTE.detail.stone);
+    hline(g, x, top, run + 1, PALETTE.detail.marble); // tread nosing
+    vline(g, x, top, rise, INK); // riser edge
   }
-  const rail = v === 0 ? PALETTE.detail.metalDark : PALETTE.amber;
-  for (let i = 0; i <= steps; i += 2) {
-    const x = x0 + i * stepW;
-    const y = by - 2 - i * stepH;
-    const bTop = Math.max(y0 + 1, y - 12);
-    vline(g, x, bTop, y - bTop, PALETTE.detail.metal); // balusters
-  }
-  stripe(g, x0, by - 14, x0 + steps * stepW, Math.max(y0 + 2, by - 2 - steps * stepH - 12), rail, 2);
-  const topY = by - 2 - steps * stepH;
-  box(g, x0 + steps * stepW, topY, w - x0 - steps * stepW, 2, PALETTE.detail.metal); // top landing
-  hline(g, x0 + steps * stepW, topY, w - x0 - steps * stepW);
-  // a stair light over each landing, the only thing in a stair well that can glow
-  for (const lx of [1, w - 7]) {
-    const ly = lx === 1 ? y0 + 4 : topY - 9;
-    hline(g, lx, ly, 6, PALETTE.detail.metalDark); // the fitting
-    box(g, lx, ly + 1, 6, 2, lit ? PALETTE.detail.glow : PALETTE.detail.metalDark);
-    hline(g, lx, ly + 3, 6);
+
+  // flush landings
+  hline(g, 0, by, x0, PALETTE.detail.marble);
+  hline(g, x1, ty, w - x1, PALETTE.detail.marble);
+
+  // glass balustrade
+  stripe(g, x0, by - 12, x1, ty - 12, PALETTE.detail.glass, 8);
+  box(g, x1, ty - 16, w - x1, 8, PALETTE.detail.glass);
+
+  // slim posts hiding the joins
+  vline(g, x0, by - 18, 18, PALETTE.detail.metalDark);
+  vline(g, x1, ty - 18, 18, PALETTE.detail.metalDark);
+
+  // flat handrail
+  stripe(g, x0, by - 17, x1, ty - 17, rail, 2);
+  box(g, x1, ty - 18, w - x1, 2, rail);
+
+  if (lit) {
+    stripe(g, x0, by - 16, x1, ty - 16, PALETTE.detail.glow, 1);
+    hline(g, x1, ty - 16, w - x1, PALETTE.detail.glow);
   }
 }
 

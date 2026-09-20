@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { applyCommand } from '../../src/sim/build';
 import { entrances, ensureRouting, findRoute, isReachableFromLobby } from '../../src/sim/routing';
 import { LIMITS, ROOMS } from '../../src/sim/rules';
 import type { Car, Leg, Room, RoomKind, Shaft, ShaftKind, World } from '../../src/sim/types';
@@ -454,6 +455,25 @@ describe('route cache', () => {
     removeShaft(world, shaft.id);
     expect(findRoute(world, { floor: 1, x: 100 }, { floor: 5, x: 200 })).toBeNull();
     expect(isReachableFromLobby(world, 5, 200)).toBe(false);
+  });
+
+  it('drops a floor a car stops serving in the same minute', () => {
+    makeLobby(world, 100, 140);
+    const shaft = makeShaft(world, 'standard', 150, 1, 5);
+    makeRoom(world, 'office', 5, 200);
+    const car = shaft.cars[0]!;
+    expect(rides(findRoute(world, { floor: 1, x: 100 }, { floor: 5, x: 200 }) as Leg[])).toEqual([
+      { kind: 'ride', shaftId: shaft.id, fromFloor: 1, toFloor: 5 },
+    ]);
+    expect(
+      applyCommand(world, {
+        kind: 'shaft.setCarRange',
+        shaftId: shaft.id,
+        carId: car.id,
+        range: { lo: 1, hi: 3 },
+      }),
+    ).toEqual({ ok: true });
+    expect(findRoute(world, { floor: 1, x: 100 }, { floor: 5, x: 200 })).toBeNull();
   });
 
   it('answers the same for every tile on a floor and every minute', () => {

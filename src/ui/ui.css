@@ -480,6 +480,18 @@ button.hs-readout:hover {
   white-space: nowrap;
 }
 
+/* The rent row keeps its label whole; the stepper and Reset wrap to a second line when the
+   row is too narrow for all four controls, instead of squeezing the label to an ellipsis. */
+.hs-rent-row {
+  grid-template-columns: max-content minmax(0, 1fr);
+}
+
+.hs-rent-row .hs-actions {
+  min-width: 0;
+  justify-content: flex-end;
+  margin: 0;
+}
+
 .hs-note {
   margin: 0 0 8px;
   font-size: var(--size-12);

@@ -212,7 +212,7 @@ function roomPanel(roomId: Id, game: GameApi, ctx: PanelContext): PanelElement {
   let rentPlus: HTMLButtonElement | null = null;
   let rentReset: HTMLButtonElement | null = null;
   if (takesRent(room.kind)) {
-    const rentRow = el('div', 'hs-row');
+    const rentRow = el('div', 'hs-row hs-rent-row');
     rentRow.append(el('span', 'hs-row-label', 'Rent'));
     const actions = el('div', 'hs-actions');
     rentMinus = button('−', 'hs-btn', () => {

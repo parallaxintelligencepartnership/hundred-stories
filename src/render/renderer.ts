@@ -408,6 +408,15 @@ export function simIsVisible(sim: Sim): boolean {
   return sim.state !== 'gone' && sim.state !== 'outside' && sim.state !== 'riding' && sim.inCarId === null;
 }
 
+/** One sim in four gets a sprite. The simulation runs every sim; the screen shows a
+ *  sample, so a full lobby reads as busy rather than as a swarm, and a player who is
+ *  sensitive to motion is not looking at hundreds of walkers at once. Chosen by id so
+ *  a sim is either always drawn or never drawn, no popping. */
+export const CROWD_ONE_IN = 4;
+export function inCrowd(sim: Sim): boolean {
+  return sim.id % CROWD_ONE_IN === 0;
+}
+
 /** Only these states move across the floor, so only these interpolate and animate. */
 export function simMoves(sim: Sim): boolean {
   return sim.state === 'walking' || sim.state === 'waiting' || sim.state === 'leaving';
@@ -868,7 +877,7 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
 
   function reconcileSims(w: World, alpha: number): void {
     let visible = 0;
-    for (const sim of w.sims.values()) if (simIsVisible(sim)) visible++;
+    for (const sim of w.sims.values()) if (simIsVisible(sim) && inCrowd(sim)) visible++;
 
     if (!particleMode && visible > PARTICLE_THRESHOLD) enterParticleMode();
     else if (particleMode && visible < PARTICLE_RELEASE) leaveParticleMode();
@@ -887,7 +896,7 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
 
     seenSims.clear();
     for (const sim of w.sims.values()) {
-      if (!simIsVisible(sim)) continue;
+      if (!simIsVisible(sim) || !inCrowd(sim)) continue;
       const sx = sim.pos.x * TILE_PX;
       const sy = simFeetY(sim.pos.floor);
       if (sx < viewLeft || sx > viewRight || sy < viewTop || sy > viewBottom) continue;
@@ -1056,7 +1065,7 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
 
     let best: Sim | null = null;
     for (const sim of lastWorld.sims.values()) {
-      if (!simIsVisible(sim)) continue;
+      if (!simIsVisible(sim) || !inCrowd(sim)) continue;
       if (sim.pos.floor !== floor) continue;
       if (Math.abs(sim.pos.x - tileFloat) > 1.5) continue;
       if (!best || sim.id > best.id) best = sim; // the newest sim draws on top

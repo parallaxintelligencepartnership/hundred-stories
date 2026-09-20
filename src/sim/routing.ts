@@ -163,6 +163,15 @@ export function ensureRouting(world: World): void {
   }
 }
 
+/**
+ * Invariant that makes the per-minute search cache exact: runSearch reads only the
+ * graph (rooms, shafts, each car's floor range and rider setting) and the origin tile.
+ * It never reads a car's position, its door state, a hall call or a queue length. So a
+ * settled search stays correct for as long as the graph stands, and every build command
+ * that changes the graph sets world.routingDirty, which throws the whole cache away.
+ * The clear on the minute change is belt and braces, not a correctness need. If the
+ * search ever starts reading car positions or calls, this cache must go.
+ */
 function cacheOf(world: World): RoutingCache {
   ensureRouting(world);
   const cache = caches.get(world) as RoutingCache;
