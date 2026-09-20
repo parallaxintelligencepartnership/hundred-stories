@@ -2,6 +2,8 @@
 
 Written at the end of the session that shipped 0.2.3 (tag `ship-2026-09-20b`). Everything below is a claim with a check. Run the check before trusting the claim.
 
+> **Checked 2026-09-20 (next session):** section 1 route cache: exact, invariant comment and same-minute car range test added; section 1 rent row: verified in a driven browser at 390 px, and its label no longer elides; section 1 riding sims: not a bug, a riding sim is drawn by its car; section 2 vite-node pin: still matches; section 3 and 8: settled by the comment above `cacheOf`; section 5 REVIEWS heading: renamed, lint down to the long decision lines. Left as recorded: the stepOnce hack, the rent-as-percent regret, the ?perf overlay wish.
+
 ## 1. Blind spots
 
 **Claim:** The route cache in `src/sim/routing.ts` (searches keyed per origin tile and game minute, line ~277) was only proven equivalent on the three benchmark towers and the scenario tests, never on a tower with a mid-day build, a demolished shaft, or per-car range changes inside the cached minute.

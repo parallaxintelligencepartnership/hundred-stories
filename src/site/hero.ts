@@ -49,7 +49,7 @@ async function start(): Promise<void> {
 
   let renderer: Renderer;
   try {
-    renderer = await createRenderer(view, world);
+    renderer = await createRenderer(view, world, { crowd: 'all' });
   } catch (e) {
     hero.classList.remove('has-canvas');
     console.warn('hero: no tower today', e);

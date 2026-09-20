@@ -417,6 +417,31 @@ export function inCrowd(sim: Sim): boolean {
   return sim.id % CROWD_ONE_IN === 0;
 }
 
+/** How far from the tap, in tiles, a sim still counts as the thing that was tapped. */
+export const PICK_RADIUS_TILES = 1.5;
+
+/**
+ * The sim a tap lands on, or null. Only a sim the screen actually draws can be picked:
+ * a tap must never select someone the crowd sample left out, or the panel would open on
+ * a person who is not there. On a floor, within the pick radius, newest wins because the
+ * newest sim draws on top. Pure and exported so the rule is testable without a GPU.
+ */
+export function pickSimAt(
+  sims: Iterable<Sim>,
+  floor: number,
+  tileFloat: number,
+  sample = true,
+): Sim | null {
+  let best: Sim | null = null;
+  for (const sim of sims) {
+    if (!simIsVisible(sim) || (sample && !inCrowd(sim))) continue;
+    if (sim.pos.floor !== floor) continue;
+    if (Math.abs(sim.pos.x - tileFloat) > PICK_RADIUS_TILES) continue;
+    if (!best || sim.id > best.id) best = sim;
+  }
+  return best;
+}
+
 /** Only these states move across the floor, so only these interpolate and animate. */
 export function simMoves(sim: Sim): boolean {
   return sim.state === 'walking' || sim.state === 'waiting' || sim.state === 'leaving';
@@ -442,12 +467,23 @@ export function inRoomSlot(world: World, sim: Sim, slots: Map<Id, number>): [num
   return [tile * TILE_PX, simFeetY(inside ? sim.pos.floor : room.floor)];
 }
 
-export async function createRenderer(container: HTMLElement, world: World): Promise<Renderer> {
+/** 'sample' draws one sim in four (the game); 'all' draws every sim (the landing hero's hand-built crowd). */
+export type RendererOptions = { crowd?: 'sample' | 'all' };
+
+export async function createRenderer(
+  container: HTMLElement,
+  world: World,
+  options: RendererOptions = {},
+): Promise<Renderer> {
   // PixiJS 8 resolves init even when no GPU context can be made, which leaves a working HUD
   // over a blank stage. Refuse up front so main.ts can show the plain-language message instead.
   // false: a software WebGL (a VM, a remote desktop) is slow but plays; only no context refuses.
   if (!isWebGLSupported(false) && !(await isWebGPUSupported())) {
     throw new Error('This browser cannot draw the tower. WebGL is required.');
+  }
+  const sampleCrowd = options.crowd !== 'all';
+  function drawn(sim: Sim): boolean {
+    return simIsVisible(sim) && (!sampleCrowd || inCrowd(sim));
   }
   const app = new Application();
   await app.init({
@@ -877,7 +913,7 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
 
   function reconcileSims(w: World, alpha: number): void {
     let visible = 0;
-    for (const sim of w.sims.values()) if (simIsVisible(sim) && inCrowd(sim)) visible++;
+    for (const sim of w.sims.values()) if (drawn(sim)) visible++;
 
     if (!particleMode && visible > PARTICLE_THRESHOLD) enterParticleMode();
     else if (particleMode && visible < PARTICLE_RELEASE) leaveParticleMode();
@@ -896,7 +932,7 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
 
     seenSims.clear();
     for (const sim of w.sims.values()) {
-      if (!simIsVisible(sim) || !inCrowd(sim)) continue;
+      if (!drawn(sim)) continue;
       const sx = sim.pos.x * TILE_PX;
       const sy = simFeetY(sim.pos.floor);
       if (sx < viewLeft || sx > viewRight || sy < viewTop || sy > viewBottom) continue;
@@ -1063,13 +1099,7 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
     const tile = xToTile(point.x);
     const tileFloat = point.x / TILE_PX;
 
-    let best: Sim | null = null;
-    for (const sim of lastWorld.sims.values()) {
-      if (!simIsVisible(sim) || !inCrowd(sim)) continue;
-      if (sim.pos.floor !== floor) continue;
-      if (Math.abs(sim.pos.x - tileFloat) > 1.5) continue;
-      if (!best || sim.id > best.id) best = sim; // the newest sim draws on top
-    }
+    const best = pickSimAt(lastWorld.sims.values(), floor, tileFloat, sampleCrowd);
 
     let hit: PickHit;
     if (best) hit = { simId: best.id, floor, x: tile };
