@@ -108,15 +108,11 @@ The code is laid out in six parts:
 - `src/ui` is the DOM layer: the top bar, palette, panels, and keyboard shortcuts.
 - `src/game` is the shell that wires the simulation, renderer, and UI together and runs the game loop.
 - `src/site` is the landing site: one stylesheet for `index.html` and `how-to-play/index.html`, plus the hero that draws the demo tower with the game's own renderer.
-- `deploy` holds the scripts and compose files that ship the built site to pi3.
+- `deploy` holds the scripts and compose files for the fallback static host.
 
 See `docs/DESIGN.md` for the architecture contract and `docs/VISUAL.md` for the visual direction.
 
 The simulation is deterministic: the same seed plus the same list of commands always produces the same world hash. You can set the starting seed with a `?seed=` query parameter on the game URL, for example `/play/?seed=42`.
-
-## Deploy
-
-Primary: [Cloudflare Workers static assets](deploy/cloudflare-pages.md). Fallback: [pi3](deploy/README.md).
 
 ## License
 
