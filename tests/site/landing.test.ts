@@ -201,3 +201,18 @@ describe('footer', () => {
     expect(play).not.toContain('site-foot');
   });
 });
+
+describe('nav', () => {
+  const pages: Array<[string, string]> = [
+    ['landing', landing],
+    ['guide', guide],
+  ];
+
+  it.each(pages)('gives the %s page a Requests link instead of Source in the nav', (_name, html) => {
+    const nav = html.slice(html.indexOf('<nav class="site-nav"'), html.indexOf('</nav>'));
+    expect(nav).toContain(
+      '<a href="https://github.com/parallaxintelligencepartnership/hundred-stories/issues/new">Requests</a>',
+    );
+    expect(nav).not.toMatch(/<a[^>]*>Source<\/a>/);
+  });
+});
