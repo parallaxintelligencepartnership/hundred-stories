@@ -207,19 +207,9 @@ describe('scenario: growth over two quarters', () => {
     );
   });
 
-  // BUG: sim/people.ts. A visitor who needs an elevator to get out is never removed from
-  // the world; it parks at the entrance in state 'outside' and stays there for good.
-  // people.ts records "on my way out" only in sim.state ('leaving'), and boarding then
-  // alighting overwrite it ('waiting', 'riding', and finally 'walking' when elevators.ts
-  // puts the sim down), so arriveWithoutRoom cannot tell a departing sim from an arriving
-  // one and falls through to state 'outside' instead of calling finishLeave.
-  // Evidence, traced from one diner leaving a floor 2 fast food:
-  //   12:26 riding  floor=2 route=ride>walk   (state was 'leaving' one tick earlier)
-  //   12:28 walking floor=1 route=walk
-  //   12:29 outside floor=1 x=100 route=[]    and it is still there six days later.
-  // In the growth run above this leaves 1,098 stale diners in world.sims after two
-  // quarters, all of them walked by tickPeople every minute for the rest of the game.
-  // Visitors who leave from the floor they arrived on are removed correctly.
+  // This was a bug once: a departing visitor who needed an elevator lost its 'leaving'
+  // state when it boarded, and parked at the entrance for good instead of being removed.
+  // The test below guards the fix.
   it('removes a visitor who rides an elevator on the way out', { timeout: 30_000 }, () => {
     const world = createWorld(SEED);
     world.cash = CONSTRUCTION_BUDGET;

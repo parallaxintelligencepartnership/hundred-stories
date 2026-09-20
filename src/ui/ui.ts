@@ -139,7 +139,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   let panelKind: PanelKind = 'none';
   let mountedPanel: PanelElement | null = null;
   let mountedKey = '';
-  let lastLogLength = 0;
+  let lastLogTotal = 0;
   let destroyed = false;
   /** The band the chrome covers, so the chip and the bar stay out from under it. */
   let chromeBand = { top: 0, bottom: 0 };
@@ -316,7 +316,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     game.setChrome(topPx, bottomPx);
     refreshPlacement();
   });
-  lastLogLength = game.world.log.length;
+  lastLogTotal = game.world.logTotal;
   const unsubscribe = game.subscribe(() => update());
   window.addEventListener('keydown', onKeyDown);
   update();
@@ -534,13 +534,20 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
 
   /** Every unseen alert line becomes a toast, with the command button that alert needs. */
   function drainAlerts(): void {
-    const log = game.world.log;
-    if (log.length < lastLogLength) lastLogLength = 0;
-    for (let i = lastLogLength; i < log.length; i += 1) {
+    const world = game.world;
+    const log = world.log;
+    const total = world.logTotal;
+    if (total < lastLogTotal) {
+      // A different world was loaded: its old alerts are history, not news.
+      lastLogTotal = total;
+      return;
+    }
+    const fresh = Math.min(total - lastLogTotal, log.length);
+    for (let i = log.length - fresh; i < log.length; i += 1) {
       const entry = log[i];
       if (entry && entry.level === 'alert') showAlert(entry);
     }
-    lastLogLength = log.length;
+    lastLogTotal = total;
   }
 
   function showAlert(entry: LogEntry): void {

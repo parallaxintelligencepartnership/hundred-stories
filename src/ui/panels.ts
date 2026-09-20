@@ -5,7 +5,7 @@ import type { GameApi } from '../game/api';
 import type { Renderer } from '../render/renderer';
 import { composeShareImage, shareMessage, shareStats, shareText, shareUrl } from '../share/share';
 import { applyTheme, cycleTheme, readTheme, themeLabel } from '../site/theme';
-import { EVAL, LIMITS, ROOMS, SHAFTS } from '../sim/rules';
+import { ECONOMY, EVAL, LIMITS, RENT, ROOMS, SHAFTS, takesRent } from '../sim/rules';
 import { carRangeOf } from '../sim/types';
 import type {
   Car,
@@ -206,6 +206,42 @@ function roomPanel(roomId: Id, game: GameApi, ctx: PanelContext): PanelElement {
   const flags = el('div', 'hs-section');
   body.append(flags);
 
+  let rentValue: HTMLSpanElement | null = null;
+  let rentMinus: HTMLButtonElement | null = null;
+  let rentPlus: HTMLButtonElement | null = null;
+  let rentReset: HTMLButtonElement | null = null;
+  if (takesRent(room.kind)) {
+    const rentRow = el('div', 'hs-row');
+    rentRow.append(el('span', 'hs-row-label', 'Rent'));
+    const actions = el('div', 'hs-actions');
+    rentMinus = button('−', 'hs-btn', () => {
+      const now = game.world.rooms.get(roomId);
+      if (!now) return;
+      ctx.apply({ kind: 'room.setRent', roomId, rent: now.rent - RENT.step });
+    });
+    rentMinus.setAttribute('aria-label', 'Lower rent');
+    rentValue = el('span', 'hs-row-value', rentText(room.kind, RENT.default));
+    rentPlus = button('+', 'hs-btn', () => {
+      const now = game.world.rooms.get(roomId);
+      if (!now) return;
+      ctx.apply({ kind: 'room.setRent', roomId, rent: now.rent + RENT.step });
+    });
+    rentPlus.setAttribute('aria-label', 'Raise rent');
+    rentReset = button('Reset', 'hs-btn', () => {
+      ctx.apply({ kind: 'room.setRent', roomId, rent: RENT.default });
+    });
+    actions.append(rentMinus, rentValue, rentPlus, rentReset);
+    rentRow.append(actions);
+    body.append(rentRow);
+    body.append(
+      el(
+        'p',
+        'hs-note',
+        'A discount keeps tenants happier next to noise or a slow elevator. A premium pays more but wears on them.',
+      ),
+    );
+  }
+
   const refresh = (): void => {
     const room = game.world.rooms.get(roomId);
     if (!room) return;
@@ -228,6 +264,10 @@ function roomPanel(roomId: Id, game: GameApi, ctx: PanelContext): PanelElement {
       flags.dataset['flags'] = next;
       flags.replaceChildren(...wanted);
     }
+    if (rentValue) setText(rentValue, rentText(room.kind, room.rent));
+    if (rentMinus) rentMinus.disabled = room.rent <= RENT.min;
+    if (rentPlus) rentPlus.disabled = room.rent >= RENT.max;
+    if (rentReset) rentReset.hidden = room.rent === RENT.default;
   };
   refresh();
   panel.refresh = refresh;
@@ -524,6 +564,19 @@ function expressStopFloors(shaft: Shaft): number[] {
   return floors;
 }
 
+function rentText(kind: RoomKind, rent: number): string {
+  const rule = ROOMS[kind];
+  if (kind === 'condo') {
+    return `${rent}% (${formatMoney(ECONOMY.condoSalePrice * (rent / 100))} sale)`;
+  }
+  if (kind === 'hotelSingle' || kind === 'hotelTwin' || kind === 'hotelSuite') {
+    const nightly = rule.incomePerQuarter * ECONOMY.hotelNightlyIncomeFraction * (rent / 100);
+    return `${rent}% (${formatMoney(nightly)} per night)`;
+  }
+  const quarterly = rule.incomePerQuarter * (rent / 100);
+  return `${rent}% (${formatMoney(quarterly)} per quarter)`;
+}
+
 function setRowValue(node: HTMLElement, text: string): void {
   const value = node.lastElementChild;
   if (value && value.textContent !== text) value.textContent = text;
@@ -596,8 +649,9 @@ export function createLogPanel(game: GameApi, ctx: PanelContext): PanelElement {
   let shown = -1;
   const refresh = (): void => {
     const log = game.world.log;
-    if (shown === log.length) return;
-    shown = log.length;
+    const total = game.world.logTotal;
+    if (shown === total) return;
+    shown = total;
     const items = log
       .slice(-200)
       .reverse()
