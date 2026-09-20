@@ -5,6 +5,7 @@ import type { GameApi } from '../game/api';
 import type { Renderer } from '../render/renderer';
 import { composeShareImage, shareMessage, shareStats, shareText, shareUrl } from '../share/share';
 import { applyTheme, cycleTheme, readTheme, themeLabel } from '../site/theme';
+import { officeQuarterRent } from '../sim/economy';
 import { ECONOMY, EVAL, LIMITS, RENT, ROOMS, SHAFTS, takesRent } from '../sim/rules';
 import { carRangeOf } from '../sim/types';
 import type {
@@ -220,7 +221,7 @@ function roomPanel(roomId: Id, game: GameApi, ctx: PanelContext): PanelElement {
       ctx.apply({ kind: 'room.setRent', roomId, rent: now.rent - RENT.step });
     });
     rentMinus.setAttribute('aria-label', 'Lower rent');
-    rentValue = el('span', 'hs-row-value', rentText(room.kind, RENT.default));
+    rentValue = el('span', 'hs-row-value', rentText(room));
     rentPlus = button('+', 'hs-btn', () => {
       const now = game.world.rooms.get(roomId);
       if (!now) return;
@@ -264,7 +265,7 @@ function roomPanel(roomId: Id, game: GameApi, ctx: PanelContext): PanelElement {
       flags.dataset['flags'] = next;
       flags.replaceChildren(...wanted);
     }
-    if (rentValue) setText(rentValue, rentText(room.kind, room.rent));
+    if (rentValue) setText(rentValue, rentText(room));
     if (rentMinus) rentMinus.disabled = room.rent <= RENT.min;
     if (rentPlus) rentPlus.disabled = room.rent >= RENT.max;
     if (rentReset) rentReset.hidden = room.rent === RENT.default;
@@ -564,15 +565,20 @@ function expressStopFloors(shaft: Shaft): number[] {
   return floors;
 }
 
-function rentText(kind: RoomKind, rent: number): string {
-  const rule = ROOMS[kind];
-  if (kind === 'condo') {
+function rentText(room: Room): string {
+  const rent = room.rent;
+  if (room.kind === 'condo') {
     return `${rent}% (${formatMoney(ECONOMY.condoSalePrice * (rent / 100))} sale)`;
   }
-  if (kind === 'hotelSingle' || kind === 'hotelTwin' || kind === 'hotelSuite') {
+  if (room.kind === 'hotelSingle' || room.kind === 'hotelTwin' || room.kind === 'hotelSuite') {
+    const rule = ROOMS[room.kind];
     const nightly = rule.incomePerQuarter * ECONOMY.hotelNightlyIncomeFraction * (rent / 100);
     return `${rent}% (${formatMoney(nightly)} per night)`;
   }
+  if (room.kind === 'office') {
+    return `${rent}% (${formatMoney(officeQuarterRent(room))} per quarter now)`;
+  }
+  const rule = ROOMS[room.kind];
   const quarterly = rule.incomePerQuarter * (rent / 100);
   return `${rent}% (${formatMoney(quarterly)} per quarter)`;
 }

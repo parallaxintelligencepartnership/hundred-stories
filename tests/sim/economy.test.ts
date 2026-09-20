@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { createWorld, addRoom, addShaft } from '../../src/sim/world';
 import { ECONOMY, LIMITS, ROOMS, SHAFTS } from '../../src/sim/rules';
-import { onQuarterStart, recordCondoSale, recordHotelNight, recordVisit, spend } from '../../src/sim/economy';
+import {
+  officeQuarterRent,
+  onQuarterStart,
+  recordCondoSale,
+  recordHotelNight,
+  recordVisit,
+  spend,
+} from '../../src/sim/economy';
 import { deserialize, serialize } from '../../src/sim/save';
 import type { Room, RoomKind, Shaft, ShaftKind, World } from '../../src/sim/types';
 
@@ -117,6 +124,16 @@ describe('economy: onQuarterStart office rent', () => {
     addRoom(premium, makeRoom({ kind: 'office', floor: 2, x: 100, eval: 1, rent: 150 }));
     onQuarterStart(premium);
     expect(premium.stats.lastQuarter.income).toBe(Math.round(ROOMS.office.incomePerQuarter * 1.5));
+  });
+
+  it('credits exactly officeQuarterRent for a half-eval office at 80% rent', () => {
+    const world = createWorld(1);
+    world.cash = 0;
+    const room = makeRoom({ kind: 'office', floor: 2, x: 100, eval: 0.5, rent: 80 });
+    addRoom(world, room);
+    onQuarterStart(world);
+    expect(world.stats.lastQuarter.income).toBe(officeQuarterRent(room));
+    expect(officeQuarterRent(room)).toBe(6000);
   });
 });
 

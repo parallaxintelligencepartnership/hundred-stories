@@ -5,6 +5,7 @@ npm run dev (vite; landing on http://localhost:5173, the game on http://localhos
 
 ## Test
 npm test (vitest run); one file: npx vitest run <path>; npm run typecheck (tsc --noEmit)
+benchmarks: see scripts/bench/README.md (npx vite-node@6.0.0 scripts/bench/bench3.ts)
 
 ## Layout
 | Path | What lives there |

@@ -65,13 +65,68 @@ function clampBand(band: number): number {
   return Math.max(BAND_MIN, Math.min(BAND_MAX, band));
 }
 
+/** Wall time and the idle slot the loop runs on, so a test can drive both. */
+export interface GameClock {
+  now(): number;
+  scheduleIdle(run: () => void): () => void;
+}
+
+/**
+ * Run this when the browser is next idle, and hand back the cancel for it.
+ *
+ * requestIdleCallback where it exists, a zero timeout everywhere else; the timeout keeps a busy
+ * tab from postponing an autosave forever.
+ */
+export function scheduleIdle(run: () => void): () => void {
+  if (typeof requestIdleCallback === 'function') {
+    const handle = requestIdleCallback(run, { timeout: 2000 });
+    return () => cancelIdleCallback(handle);
+  }
+  const handle = setTimeout(run, 0);
+  return () => clearTimeout(handle);
+}
+
+/**
+ * Drain the whole ticks the accumulator has earned, and say how many ran.
+ *
+ * Stops at maxTicks, and at maxMs of wall time: past the box the whole missed ticks are dropped
+ * and only the fraction is kept, so a slow tick turns into slow motion instead of a freeze. An
+ * accumulator that outran the tick cap entirely (a tab asleep for minutes) is reset.
+ */
+export function drainTicks(
+  loop: { accumulator: number },
+  runTick: () => void,
+  now: () => number,
+  limits = { maxTicks: MAX_TICKS_PER_FRAME, maxMs: MAX_STEP_MS },
+): number {
+  const start = now();
+  let n = 0;
+  while (loop.accumulator >= 1 && n < limits.maxTicks) {
+    runTick();
+    loop.accumulator -= 1;
+    n++;
+    if (now() - start >= limits.maxMs) {
+      loop.accumulator -= Math.floor(loop.accumulator); // drop the whole missed ticks, keep the fraction
+      break;
+    }
+  }
+  if (loop.accumulator > limits.maxTicks) loop.accumulator = 0;
+  return n;
+}
+
 export interface Game extends GameApi {
   attach(renderer: Renderer, container: HTMLElement): void;
   start(): void;
   stop(): void;
+  /** Runs one timer step, the thing setInterval calls; exported for the loop tests. */
+  stepOnce(): void;
 }
 
-export function createGame(seed: number): Game {
+export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
+  const time: GameClock = {
+    now: clock.now ?? (() => performance.now()),
+    scheduleIdle: clock.scheduleIdle ?? scheduleIdle,
+  };
   let world: World = createWorld(seed);
   let tool: Tool = { kind: 'none' };
   let speed: Speed = 1;
@@ -85,7 +140,8 @@ export function createGame(seed: number): Game {
   let raf = 0;
   let timer = 0;
   let last = 0;
-  let accumulator = 0;
+  // Boxed so drainTicks, which frame() and the loop tests share, can spend it.
+  const loop = { accumulator: 0 };
   const subscribers = new Set<() => void>();
   const notify = () => subscribers.forEach((cb) => cb());
 
@@ -137,27 +193,20 @@ export function createGame(seed: number): Game {
     return m >= SCHEDULES.nightStart || m < SCHEDULES.nightEnd;
   }
 
+  // Hoisted so a step allocates nothing: world is read through the closure, so a load or a new
+  // game still ticks the world the shell holds now.
+  const runTick = (): void => tick(world);
   // The sim is driven by a timer, not by requestAnimationFrame, so it keeps running when the tab is
   // hidden (Chrome pauses rAF in background tabs). Rendering stays on rAF.
   function step(): void {
-    const now = performance.now();
+    const now = time.now();
     const dt = Math.min(1, (now - last) / 1000 || 0);
     last = now;
     if (speed > 0 && !world.gameOver) {
       const rate = TICKS_PER_SECOND_AT_1X * speed * (isNight() ? NIGHT_MULTIPLIER : 1);
-      accumulator += dt * rate;
+      loop.accumulator += dt * rate;
       const minuteBefore = world.time.minute;
-      let n = 0;
-      while (accumulator >= 1 && n < MAX_TICKS_PER_FRAME) {
-        tick(world);
-        accumulator -= 1;
-        n++;
-        if (performance.now() - now >= MAX_STEP_MS) {
-          accumulator -= Math.floor(accumulator); // drop the whole missed ticks, keep the fraction
-          break;
-        }
-      }
-      if (accumulator > MAX_TICKS_PER_FRAME) accumulator = 0;
+      const n = drainTicks(loop, runTick, time.now);
       if (n > 0) {
         notify();
         maybeAutosave(minuteBefore, world.time.minute);
@@ -171,20 +220,12 @@ export function createGame(seed: number): Game {
   // The autosave stringifies the whole tower, several MB on a big one. It runs in an idle slot,
   // not inside the timer step, so it never stacks on top of a rush-hour tick.
   let cancelAutosave: (() => void) | null = null;
-  function scheduleIdle(run: () => void): () => void {
-    if (typeof requestIdleCallback === 'function') {
-      const handle = requestIdleCallback(run, { timeout: 2000 });
-      return () => cancelIdleCallback(handle);
-    }
-    const handle = setTimeout(run, 0);
-    return () => clearTimeout(handle);
-  }
   function maybeAutosave(prevMinute: number, nextMinute: number): void {
     if (autosaveInFlight) return;
     if (!shouldAutosave(prevMinute, nextMinute)) return;
     autosaveInFlight = true;
     // An autosave is silent, success or failure: the player did not ask for it.
-    cancelAutosave = scheduleIdle(() => {
+    cancelAutosave = time.scheduleIdle(() => {
       cancelAutosave = null;
       void saveWorld(true).finally(() => {
         autosaveInFlight = false;
@@ -209,9 +250,9 @@ export function createGame(seed: number): Game {
     raf = requestAnimationFrame(frame);
     // Interpolate against real time since the last timer step so sprites glide at the display rate
     // instead of stepping at the timer rate.
-    const elapsed = speed > 0 && !world.gameOver ? (performance.now() - last) / 1000 : 0;
+    const elapsed = speed > 0 && !world.gameOver ? (time.now() - last) / 1000 : 0;
     const rate = TICKS_PER_SECOND_AT_1X * speed * (isNight() ? NIGHT_MULTIPLIER : 1);
-    renderer?.render(world, Math.min(1, accumulator + elapsed * rate));
+    renderer?.render(world, Math.min(1, loop.accumulator + elapsed * rate));
   }
 
   /** The shaft standing on this tile, if any. Tapping one with an elevator in hand extends it. */
@@ -710,9 +751,12 @@ export function createGame(seed: number): Game {
       // would otherwise open behind it.
       r.camera.reset();
     },
+    stepOnce() {
+      step();
+    },
     start() {
       if (raf) return;
-      last = performance.now();
+      last = time.now();
       timer = window.setInterval(step, 50);
       raf = requestAnimationFrame(frame);
     },

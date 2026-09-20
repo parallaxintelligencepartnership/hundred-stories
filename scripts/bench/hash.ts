@@ -1,12 +1,12 @@
 // Determinism check for the three bench towers: same seed, same ticks, same hash.
 // Run with `npx vite-node scripts/bench/hash.ts`. The six hashes it prints must not
 // change when the simulation is optimized; a different hash means different behaviour.
-import { applyCommand } from '/Users/matthew/parallax-private/Projects/hundred-stories/src/sim/build';
-import { ROOMS, SHAFTS } from '/Users/matthew/parallax-private/Projects/hundred-stories/src/sim/rules';
-import { createWorld } from '/Users/matthew/parallax-private/Projects/hundred-stories/src/sim/world';
-import { tick } from '/Users/matthew/parallax-private/Projects/hundred-stories/src/sim/tick';
-import { hashWorld } from '/Users/matthew/parallax-private/Projects/hundred-stories/src/sim/save';
-import type { Command, World } from '/Users/matthew/parallax-private/Projects/hundred-stories/src/sim/types';
+import { applyCommand } from '../../src/sim/build';
+import { ROOMS, SHAFTS } from '../../src/sim/rules';
+import { createWorld } from '../../src/sim/world';
+import { tick } from '../../src/sim/tick';
+import { hashWorld } from '../../src/sim/save';
+import type { Command, World } from '../../src/sim/types';
 
 // Copied from scripts/bench/bench3.ts so the two scripts build the same towers.
 function buildTower(officeFloors: number, lobbyWidth: number, shaftXs: number[]): World {

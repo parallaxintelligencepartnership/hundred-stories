@@ -23,12 +23,16 @@ export function spend(world: World, amount: number, what: string): CommandResult
   return { ok: true };
 }
 
+/** Rounded office rent for one quarter, scaled by how well the office is doing. */
+export function officeQuarterRent(room: Room): number {
+  return Math.round(ROOMS.office.incomePerQuarter * (0.5 + room.eval / 2) * (room.rent / 100));
+}
+
 export function onQuarterStart(world: World): void {
   // Office rent, scaled by how well the office is doing.
   for (const room of world.rooms.values()) {
     if (room.kind === 'office' && !room.vacant) {
-      const rent = Math.round(ROOMS.office.incomePerQuarter * (0.5 + room.eval / 2) * (room.rent / 100));
-      credit(world, 'office', rent);
+      credit(world, 'office', officeQuarterRent(room));
     }
   }
 

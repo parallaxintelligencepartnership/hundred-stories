@@ -1,10 +1,10 @@
 // Replay game.ts step() exactly, with real ticks, on a medium tower at 4x.
-import { applyCommand } from '/Users/matthew/parallax-private/Projects/hundred-stories/src/sim/build';
-import { ROOMS, SHAFTS, SCHEDULES } from '/Users/matthew/parallax-private/Projects/hundred-stories/src/sim/rules';
-import { createWorld } from '/Users/matthew/parallax-private/Projects/hundred-stories/src/sim/world';
-import { tick } from '/Users/matthew/parallax-private/Projects/hundred-stories/src/sim/tick';
-import { serialize } from '/Users/matthew/parallax-private/Projects/hundred-stories/src/sim/save';
-import { clockOf, type Command, type World } from '/Users/matthew/parallax-private/Projects/hundred-stories/src/sim/types';
+import { applyCommand } from '../../src/sim/build';
+import { ROOMS, SHAFTS, SCHEDULES } from '../../src/sim/rules';
+import { createWorld } from '../../src/sim/world';
+import { tick } from '../../src/sim/tick';
+import { serialize } from '../../src/sim/save';
+import { clockOf, type Command, type World } from '../../src/sim/types';
 
 function buildTower(officeFloors: number, lobbyWidth: number, shaftXs: number[]): World {
   const world = createWorld(4242);

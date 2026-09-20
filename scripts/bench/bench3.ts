@@ -1,9 +1,9 @@
-import { applyCommand } from '/Users/matthew/parallax-private/Projects/hundred-stories/src/sim/build';
-import { ROOMS, SHAFTS } from '/Users/matthew/parallax-private/Projects/hundred-stories/src/sim/rules';
-import { createWorld } from '/Users/matthew/parallax-private/Projects/hundred-stories/src/sim/world';
-import { tick } from '/Users/matthew/parallax-private/Projects/hundred-stories/src/sim/tick';
-import { serialize, hashWorld } from '/Users/matthew/parallax-private/Projects/hundred-stories/src/sim/save';
-import type { Command, World } from '/Users/matthew/parallax-private/Projects/hundred-stories/src/sim/types';
+import { applyCommand } from '../../src/sim/build';
+import { ROOMS, SHAFTS } from '../../src/sim/rules';
+import { createWorld } from '../../src/sim/world';
+import { tick } from '../../src/sim/tick';
+import { serialize, hashWorld } from '../../src/sim/save';
+import type { Command, World } from '../../src/sim/types';
 
 function median(a: number[]) { const s=[...a].sort((x,y)=>x-y); return s[Math.floor(s.length/2)]!; }
 
