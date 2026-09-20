@@ -1,7 +1,7 @@
 # Hundred Stories - shipped 2026-09-19
 
 ## What this is
-Hundred Stories is a free browser game and installable PWA: a tower-building sim with pixel art drawn in code, a from-scratch homage to SimTower. The code and art are original and the game design is not; there is a deterministic sim core underneath. You run a skyscraper: build a lobby, offices, homes, shops and elevators, watch it fill with people over the years, and climb the star ladder from one star to TOWER. There is no backend and no account: the whole game runs in the browser, and saves live in the player's own browser storage plus files they export themselves. The site at https://hundredstories.xyz is a static landing page with search and share metadata; the game lives at `/play/`. Source is public under AGPL-3.0-only at https://github.com/parallaxintelligencepartnership/hundred-stories.
+Hundred Stories is a free browser game and installable PWA: a tower-building sim with pixel art drawn in code, a from-scratch homage to SimTower. The code and art are original and the game design is not; there is a deterministic sim core underneath. You run a skyscraper: build a lobby, offices, homes, shops and elevators, watch it fill with people over the years, and climb the star ladder from one star to TOWER. There is no backend and no account: the whole game runs in the browser, and saves live in the player's own browser storage plus files they export themselves. The site at https://hundredstories.xyz is a static landing page with search and share metadata; the game lives at `/play/`. Source is public to read under PolyForm Strict 1.0.0 (personal, noncommercial use, no redistribution or derived products; releases tagged before 2026-09-20 remain AGPL-3.0) at https://github.com/parallaxintelligencepartnership/hundred-stories.
 
 ## How to run it
 Requirements: Node 26 (pinned in `.nvmrc`). No environment variables.
@@ -9,7 +9,7 @@ Requirements: Node 26 (pinned in `.nvmrc`). No environment variables.
 ```bash
 npm ci
 npm run dev       # landing on http://localhost:5173/, game on http://localhost:5173/play/
-npm test          # vitest run: 553 tests, 31 files
+npm test          # vitest run: 586 tests, 32 files
 npm run build     # tsc --noEmit then vite build, output in dist/ (landing, how-to-play, play, 404)
 npm run preview   # serve the production build on http://localhost:4173 (does NOT send public/_headers)
 ```
@@ -28,11 +28,11 @@ Before deploying, load `/play/` from the nginx container in headless Chrome and 
 Fallback, pi3 (`deploy/README.md`): copy `deploy/.env.example` to `deploy/.env`, set `SITE_HOST`, run `deploy/deploy.sh`.
 
 ## How to roll back
-Rehearsed on 2026-09-19 at the fourth ship: tagged `ship-2026-09-19d`, checked out the previous ship tag `ship-2026-09-19c` (commit `3fbdae3`), ran `npm run build` (green) and `npx vitest run` (470 passed, 27 files) from it, then returned to `main` at `afbe687` with a clean worktree.
+Rehearsed on 2026-09-20 at the fifth ship: checked out the previous ship tag `ship-2026-09-19d` (commit `8312553`) in a scratch worktree, ran `npm ci`, `npm run build` (green, dist/_headers present) and `npx vitest run` (553 passed, 31 files), then removed the worktree.
 
 - Cloudflare: `npx wrangler rollback` returns the live site to the previous uploaded version; `npx wrangler versions list` shows the versions. Or check out the previous tag and `npm run deploy`.
 - pi3: `deploy.sh` snapshots the live tree to `html.prev` before every sync; the swap is in `deploy/README.md` under Rollback.
-- Return target for this ship: `git checkout ship-2026-09-19d`. Previous good state: `ship-2026-09-19c`.
+- Return target for this ship: `git checkout ship-2026-09-20`. Previous good state: `ship-2026-09-19d`.
 
 ## Known limitations and accepted risks
 No finding was accepted; the accepted risks list is empty. Every finding in `.itworks/REVIEWS.md` is closed with evidence.
@@ -45,6 +45,8 @@ No finding was accepted; the accepted risks list is empty. Every finding in `.it
 - No GPU: with neither WebGL nor WebGPU the game shows "This browser cannot draw the tower. WebGL is required." (proven over CDP at this closeout with both contexts stubbed out); a software WebGL still plays, slowly.
 - Touch placement: a tap parks an outline with the name and price and a bar nudges it; proven with emulated touch at 390x844 over CDP, not yet under a thumb on a physical phone.
 - Share: the share sheet with the image attached needs a real phone browser; headless Chrome proved the panel, the 1200 px preview, the message and the link. The link preview image is the static og.png; a per-share image would need a server.
+- Unreadable save: a save the deserializer refuses (damaged bytes, or a newer format read by an older cached build) is kept under localStorage hs.save.unreadable and the log says so; the lot starts fresh. Recovery of that copy is manual (paste it into Import) and is not surfaced in the UI yet.
+- Licence: PolyForm Strict 1.0.0 from this ship. The AGPL copies of the three earlier tags cannot be recalled; GitHub counted 327 clones from 52 sources in the repo's first day against zero page views, so scrapers.
 - Theme: the choice is per browser under localStorage hs.theme; a browser that blocks storage falls back to the system setting every load.
 
 ## What breaks first and how you'd know
@@ -67,3 +69,4 @@ A PixiJS upgrade that changes how it compiles shaders, first. The site's Content
 - 2026-09-19: third ship, 0.2.0: landing page and guide rebuilt as the building's cross section, phone camera clears the palette sheet, collapsible palette, honest copy (pixel art drawn in code, from-scratch homage), renderer refuses to boot without a GPU context, icon link on /play/; tag ship-2026-09-19c
 - 2026-09-19: fourth ship, 0.2.1: two-step touch placement with a nudge bar, shaft extension by drag and panel, see-through shafts, stairs stack in a column, elevator ride cost 5 so people ride, share with screenshot and challenge link, theme toggle, the name section; tag ship-2026-09-19d
 - Published: entry twaatuch26bb | https://github.com/parallaxintelligencepartnership/itworks-site/pull/4 | 2026-09-19 (supersedes hzyq7fm6mpye, whose summary said hand-drawn)
+- 2026-09-20: fifth ship, 0.2.2: site footer, per-car elevator floor range and rider setting with leftover pickup (save format 2, v1 loads), Requests link to GitHub issues replaces Source in the nav, the name blurb in the README and guide, relicensed AGPL-3.0 to PolyForm Strict 1.0.0, unreadable saves kept and reported; tag ship-2026-09-20
