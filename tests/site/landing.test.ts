@@ -215,4 +215,8 @@ describe('nav', () => {
     );
     expect(nav).not.toMatch(/<a[^>]*>Source<\/a>/);
   });
+
+  it.each(pages)('gives the %s page the tagline', (_name, html) => {
+    expect(html).toContain("Everyone's got one.");
+  });
 });
