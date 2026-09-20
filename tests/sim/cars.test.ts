@@ -178,6 +178,19 @@ describe('dispatch by rider class', () => {
     expect(car.y).toBeLessThan(5); // gone down to its own call instead
     expect(shaft.hallCalls.get(5)?.up.has('office')).toBe(true);
   });
+
+  it('holds a hotel car with someone already aboard, even with no hotel call pending', () => {
+    const world = createWorld(3);
+    const shaft = buildShaft(world, { cars: [{ serves: 'hotel', y: 5 }] });
+    const car = carAt(shaft, 0);
+    car.passengers.push(allocId(world)); // a hotel guest already riding, no hall call needed
+    const worker = addWaiter(world, shaft, 'worker', 5, 8);
+
+    expect(isLeftoverCar(shaft, car)).toBe(false);
+    run(world, 2);
+    expect(worker.inCarId).toBeNull();
+    expect(worker.state).toBe('waiting');
+  });
 });
 
 describe('a car with a range', () => {

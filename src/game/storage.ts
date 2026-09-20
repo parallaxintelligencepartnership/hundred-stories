@@ -98,3 +98,18 @@ export const storage: SaveStorage = {
 
 export const writeSave = (text: string): Promise<void> => storage.writeSave(text);
 export const readSave = (): Promise<string | null> => storage.readSave();
+
+const UNREADABLE_KEY = 'hs.save.unreadable';
+
+// Stashes a save the deserializer refused, so the player isn't left with nothing after a
+// corrupt or foreign-version save. Silent on failure, same as the rest of this module: a full
+// quota or missing store just means no backup, not a crash.
+export function stashUnreadable(text: string): void {
+  try {
+    const ls = (globalThis as { localStorage?: Storage }).localStorage;
+    if (!ls) return;
+    ls.setItem(UNREADABLE_KEY, text);
+  } catch {
+    // a full quota, a private window, or no store at all: silent, same as writeSave
+  }
+}

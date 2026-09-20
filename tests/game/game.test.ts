@@ -4,20 +4,24 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LIMITS } from '../../src/sim/rules';
 import { hashWorld } from '../../src/sim/save';
 import { createGame, shouldAutosave } from '../../src/game/game';
+import { stashUnreadable, writeSave } from '../../src/game/storage';
 
 // The browser save slot stands in as one in memory string, so save() and load() run end to end.
 const slot = vi.hoisted(() => ({ text: null as string | null, refuse: false }));
 vi.mock('../../src/game/storage', () => ({
-  writeSave: async (text: string): Promise<void> => {
+  writeSave: vi.fn(async (text: string): Promise<void> => {
     if (slot.refuse) throw new Error('The browser refused to store the save.');
     slot.text = text;
-  },
+  }),
   readSave: async (): Promise<string | null> => slot.text,
+  stashUnreadable: vi.fn(),
 }));
 
 beforeEach(() => {
   slot.text = null;
   slot.refuse = false;
+  vi.mocked(writeSave).mockClear();
+  vi.mocked(stashUnreadable).mockClear();
 });
 
 describe('createGame in node', () => {
@@ -114,6 +118,25 @@ describe('save and load through the browser slot', () => {
     const game = createGame(11);
     const result = await game.load();
     expect(result).toEqual({ ok: false, reason: 'There is no saved game yet.' });
+  });
+
+  it('stashes an unreadable save and warns the player instead of throwing it away', async () => {
+    const game = createGame(11);
+    const saved = JSON.parse(game.exportSave()) as Record<string, unknown>;
+    saved.version = 3;
+    const text = JSON.stringify(saved);
+    slot.text = text;
+
+    const fresh = createGame(11);
+    const result = await fresh.load();
+
+    expect(result.ok).toBe(false);
+    expect(
+      fresh.world.log.some((line) => line.level === 'warn' && line.text.includes('could not be read')),
+    ).toBe(true);
+    expect(stashUnreadable).toHaveBeenCalledTimes(1);
+    expect(stashUnreadable).toHaveBeenCalledWith(text);
+    expect(writeSave).not.toHaveBeenCalled();
   });
 
   it('reports a refused write and logs nothing', async () => {

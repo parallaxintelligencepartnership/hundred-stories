@@ -9,7 +9,7 @@ import { SCHEDULES } from '../sim/rules';
 import { classifyPress, isTap, PRESS_SLOP_PX, TOUCH_SLOP_PX } from '../render/input';
 import type { Renderer } from '../render/renderer';
 import type { GameApi, Placement, PlacementRect, Speed, Tool } from './api';
-import { readSave, writeSave } from './storage';
+import { readSave, stashUnreadable, writeSave } from './storage';
 
 const TICKS_PER_SECOND_AT_1X = 10;
 const NIGHT_MULTIPLIER = 8;
@@ -605,6 +605,17 @@ export function createGame(seed: number): Game {
     async load() {
       const text = await readSave();
       if (!text) return { ok: false, reason: 'There is no saved game yet.' };
+      const res = deserialize(text);
+      if (!res.ok) {
+        stashUnreadable(text);
+        world.log.push({
+          minute: world.time.minute,
+          text: `Your saved tower could not be read: ${res.reason} A copy is kept in this browser. Starting a fresh lot.`,
+          level: 'warn',
+        });
+        notify();
+        return { ok: false, reason: res.reason };
+      }
       return api.importSave(text);
     },
     exportSave: () => serialize(world),
