@@ -2,9 +2,9 @@
 //
 // The graph is tiny (floors as nodes, shafts and stairs as edges) so it is rebuilt
 // from scratch whenever world.routingDirty is set and cached on a module level
-// WeakMap keyed by the world. Nothing here mutates the world except clearing that
-// flag, and no number is invented: costs come from the module constants below and
-// the stair limit comes from LIMITS.
+// WeakMap keyed by the world, together with the searches run against it this minute.
+// Nothing here mutates the world except clearing that flag, and no number is
+// invented: costs come from the module constants below and the stair limit from LIMITS.
 
 import { LIMITS } from './rules';
 import { carRangeOf } from './types';
@@ -34,6 +34,11 @@ interface Connector {
 
 interface RoutingGraph {
   byFloor: Map<number, Connector[]>;
+  /**
+   * A dense number per connector id, so a search state can be a number instead of a
+   * string. Connectors of one shaft share an id, exactly as the state key always did.
+   */
+  idIndex: Map<Id, number>;
 }
 
 /** Search state: standing on a floor at a tile, having climbed some stair floors. */
@@ -56,7 +61,30 @@ interface Node {
  */
 type GraphKey = RiderClass | 'all';
 
-const graphs = new WeakMap<World, Map<GraphKey, RoutingGraph>>();
+/**
+ * Everything derived from the tower's shape, thrown away together when it changes.
+ * `searches` holds the settled Dijkstra of one game minute: the expansion depends on
+ * the graph, the staff flag and where the trip starts, never on where it ends, so every
+ * trip leaving the same tile in the same minute reuses one search and only picks its own
+ * goal out of it. A morning rush asks for the same handful of origins thousands of times.
+ */
+interface RoutingCache {
+  graphs: Map<GraphKey, RoutingGraph>;
+  searches: Map<string, Map<number, Node>>;
+  /** The game minute `searches` was filled for. */
+  minute: number;
+  /** Ends of the ground lobby, and the entrances derived from them. */
+  lobby: { left: number; right: number } | null | undefined;
+  entrances: { floor: number; x: number }[] | undefined;
+  /** Which floors the ground lobby reaches at all, by the class blind graph. */
+  reachable: Map<number, boolean>;
+}
+
+const caches = new WeakMap<World, RoutingCache>();
+
+function newCache(minute: number): RoutingCache {
+  return { graphs: new Map(), searches: new Map(), minute, lobby: undefined, entrances: undefined, reachable: new Map() };
+}
 
 function walkCost(tiles: number): number {
   return Math.abs(tiles) / WALK_TILES_PER_COST;
@@ -121,33 +149,70 @@ function buildGraph(world: World, key: GraphKey): RoutingGraph {
   for (const list of byFloor.values()) {
     list.sort((a, b) => a.x - b.x || a.id - b.id);
   }
-  return { byFloor };
+  const idIndex = new Map<Id, number>();
+  for (const list of byFloor.values()) {
+    for (const connector of list) if (!idIndex.has(connector.id)) idIndex.set(connector.id, idIndex.size + 1);
+  }
+  return { byFloor, idIndex };
 }
 
 export function ensureRouting(world: World): void {
-  if (world.routingDirty || !graphs.has(world)) {
-    graphs.set(world, new Map()); // every class is rebuilt on demand
+  if (world.routingDirty || !caches.has(world)) {
+    caches.set(world, newCache(world.time.minute)); // every class is rebuilt on demand
     world.routingDirty = false;
   }
 }
 
-function graphOf(world: World, key: GraphKey): RoutingGraph {
+function cacheOf(world: World): RoutingCache {
   ensureRouting(world);
-  const cache = graphs.get(world) as Map<GraphKey, RoutingGraph>;
-  let graph = cache.get(key);
-  if (!graph) cache.set(key, (graph = buildGraph(world, key)));
+  const cache = caches.get(world) as RoutingCache;
+  // Searches are only good for the minute they were run in: cars move, and a route is
+  // planned against the graph, not the cars, but nothing should outlive a tick anyway.
+  if (cache.minute !== world.time.minute) {
+    cache.searches.clear();
+    cache.minute = world.time.minute;
+  }
+  return cache;
+}
+
+function graphOf(world: World, key: GraphKey): RoutingGraph {
+  const cache = cacheOf(world);
+  let graph = cache.graphs.get(key);
+  if (!graph) cache.graphs.set(key, (graph = buildGraph(world, key)));
   return graph;
 }
 
 /** True when a is the better of two candidate nodes: cheaper, then closer to home. */
 function better(a: Node, b: Node): boolean {
-  if (Math.abs(a.cost - b.cost) > EPSILON) return a.cost < b.cost;
-  if (Math.abs(a.firstDist - b.firstDist) > EPSILON) return a.firstDist < b.firstDist;
-  return (a.via?.id ?? 0) < (b.via?.id ?? 0);
+  return betterThan(a.cost, a.firstDist, a.via?.id ?? 0, b.cost, b.firstDist, b.via?.id ?? 0);
 }
 
-function stateKey(node: Node): string {
-  return `${node.floor}|${node.via?.id ?? 0}|${node.stairFloors}`;
+/** The same order as `better`, on loose numbers, so a candidate needs no object. */
+function betterThan(
+  aCost: number,
+  aFirstDist: number,
+  aViaId: number,
+  bCost: number,
+  bFirstDist: number,
+  bViaId: number,
+): boolean {
+  if (Math.abs(aCost - bCost) > EPSILON) return aCost < bCost;
+  if (Math.abs(aFirstDist - bFirstDist) > EPSILON) return aFirstDist < bFirstDist;
+  return aViaId < bViaId;
+}
+
+/** Stair floors a state can carry: none up to the limit. */
+const STAIR_STATES = LIMITS.stairsMaxClimbFloors + 1;
+/** Shifts the lowest basement above zero so a floor can go into a numeric key. */
+const FLOOR_OFFSET = 512;
+
+/**
+ * A search state as a number: floor, the connector id it arrived on, stair floors spent.
+ * Same identity the string key had, including two cars of one shaft sharing a state.
+ */
+function stateKey(graph: RoutingGraph, floor: number, viaId: Id, stairFloors: number): number {
+  const index = viaId === 0 ? 0 : (graph.idIndex.get(viaId) ?? 0);
+  return ((floor + FLOOR_OFFSET) * (graph.idIndex.size + 1) + index) * STAIR_STATES + stairFloors;
 }
 
 function legsFor(node: Node, toX: number): Leg[] {
@@ -180,6 +245,42 @@ export function findRoute(
   if (from.floor === to.floor) return [{ kind: 'walk', toX: to.x }];
 
   const staff = opts?.staff === true;
+  const best = searchFrom(world, graph, opts?.riderClass ?? 'all', staff, from);
+
+  let goal: Node | null = null;
+  let goalCost = 0;
+  for (const node of best.values()) {
+    if (node.floor !== to.floor || node.via === null) continue;
+    const total = node.cost + walkCost(to.x - node.x);
+    if (goal === null || betterThan(total, node.firstDist, node.via.id, goalCost, goal.firstDist, (goal.via as Connector).id)) {
+      goal = node;
+      goalCost = total;
+    }
+  }
+  if (goal === null) return null;
+  return legsFor(goal, to.x);
+}
+
+/**
+ * The settled search from one tile, cached for the current game minute. Where a trip
+ * ends never touches the expansion below, only the goal picked out of the result, so
+ * every trip starting on the same tile for the same rider shares this work.
+ */
+function searchFrom(
+  world: World,
+  graph: RoutingGraph,
+  key: GraphKey,
+  staff: boolean,
+  from: { floor: number; x: number },
+): Map<number, Node> {
+  const cache = cacheOf(world);
+  const cacheKey = `${key}|${staff ? 1 : 0}|${from.floor}|${from.x}`;
+  let best = cache.searches.get(cacheKey);
+  if (!best) cache.searches.set(cacheKey, (best = runSearch(graph, staff, from)));
+  return best;
+}
+
+function runSearch(graph: RoutingGraph, staff: boolean, from: { floor: number; x: number }): Map<number, Node> {
   const start: Node = {
     floor: from.floor,
     x: from.x,
@@ -194,9 +295,9 @@ export function findRoute(
   // Dijkstra to exhaustion over a small graph: the walk to the destination tile is
   // only known once a node on the destination floor is settled, so every reachable
   // node is expanded and the goal is picked afterwards.
-  const best = new Map<string, Node>([[stateKey(start), start]]);
+  const best = new Map<number, Node>([[stateKey(graph, start.floor, 0, 0), start]]);
   const queue: Node[] = [start];
-  const settled = new Set<string>();
+  const settled = new Set<number>();
 
   while (queue.length > 0) {
     let pick = 0;
@@ -204,76 +305,91 @@ export function findRoute(
       if (better(queue[i] as Node, queue[pick] as Node)) pick = i;
     }
     const node = queue.splice(pick, 1)[0] as Node;
-    const key = stateKey(node);
+    const key = stateKey(graph, node.floor, node.via?.id ?? 0, node.stairFloors);
     if (settled.has(key)) continue;
     if (best.get(key) !== node) continue; // superseded by a better node with the same key
     settled.add(key);
 
+    const firstDistOfNext = node.via === null ? -1 : node.firstDist;
     for (const via of graph.byFloor.get(node.floor) ?? []) {
       if (via.staffOnly && !staff) continue;
       if (via.kind === 'shaft' && via.id === node.via?.id) continue; // no point reboarding
+      const isStairs = via.kind === 'stairs';
+      const stepCost = node.cost + walkCost(via.x - node.x) + (isStairs ? 0 : TRANSFER_COST);
+      const firstDist = firstDistOfNext === -1 ? Math.abs(via.x - from.x) : firstDistOfNext;
       for (const floor of via.floors) {
         if (floor === node.floor) continue;
-        const stairFloors = via.kind === 'stairs' ? Math.abs(floor - node.floor) : 0;
+        const stairFloors = isStairs ? Math.abs(floor - node.floor) : 0;
         const totalStairs = node.stairFloors + stairFloors;
         if (totalStairs > LIMITS.stairsMaxClimbFloors) continue;
-        const cost =
-          node.cost +
-          walkCost(via.x - node.x) +
-          (via.kind === 'shaft' ? TRANSFER_COST : 0) +
-          stairFloors * STAIR_FLOOR_COST;
+        const cost = stepCost + stairFloors * STAIR_FLOOR_COST;
+        // Score the candidate before building it: most of them lose, and a losing
+        // state that never becomes an object is the bulk of the work saved here.
+        const nextKey = stateKey(graph, floor, via.id, totalStairs);
+        if (settled.has(nextKey)) continue;
+        const known = best.get(nextKey);
+        if (known && !betterThan(cost, firstDist, via.id, known.cost, known.firstDist, known.via?.id ?? 0)) continue;
         const next: Node = {
           floor,
           x: via.x,
           stairFloors: totalStairs,
           cost,
-          firstDist: node.via === null ? Math.abs(via.x - from.x) : node.firstDist,
+          firstDist,
           via,
           fromFloor: node.floor,
           parent: node,
         };
-        const nextKey = stateKey(next);
-        if (settled.has(nextKey)) continue;
-        const known = best.get(nextKey);
-        if (known && !better(next, known)) continue;
         best.set(nextKey, next);
         queue.push(next);
       }
     }
   }
+  return best;
+}
 
-  let goal: Node | null = null;
-  let goalCost = 0;
-  for (const node of best.values()) {
-    if (node.floor !== to.floor || node.via === null) continue;
-    const total = node.cost + walkCost(to.x - node.x);
-    const candidate: Node = { ...node, cost: total };
-    if (goal === null || better(candidate, { ...goal, cost: goalCost })) {
-      goal = node;
-      goalCost = total;
-    }
+/** Ends of the ground lobby, cached: a long lobby is hundreds of one tile rooms. */
+function lobbyEnds(world: World): { left: number; right: number } | null {
+  const cache = cacheOf(world);
+  if (cache.lobby !== undefined) return cache.lobby;
+  let left = Number.POSITIVE_INFINITY;
+  let right = Number.NEGATIVE_INFINITY;
+  for (const room of roomsOnFloor(world, 1)) {
+    if (room.kind !== 'lobby') continue;
+    if (room.x < left) left = room.x;
+    if (room.x + room.width - 1 > right) right = room.x + room.width - 1;
   }
-  if (goal === null) return null;
-  return legsFor(goal, to.x);
+  const ends = left === Number.POSITIVE_INFINITY ? null : { left, right };
+  cache.lobby = ends;
+  return ends;
 }
 
 export function isReachableFromLobby(world: World, floor: number, x: number): boolean {
-  const lobbies = roomsOnFloor(world, 1).filter((r) => r.kind === 'lobby');
-  if (lobbies.length === 0) return false;
-  const left = Math.min(...lobbies.map((r) => r.x));
-  return findRoute(world, { floor: 1, x: left }, { floor, x }) !== null;
+  const ends = lobbyEnds(world);
+  if (!ends) return false;
+  // The answer turns on the floor alone: the walk to x only prices a route, it never
+  // decides whether one exists, so one search per floor answers for every tile on it.
+  const cache = cacheOf(world);
+  const known = cache.reachable.get(floor);
+  if (known !== undefined) return known;
+  const answer = findRoute(world, { floor: 1, x: ends.left }, { floor, x }) !== null;
+  cache.reachable.set(floor, answer);
+  return answer;
 }
 
 export function entrances(world: World): { floor: number; x: number }[] {
-  const out: { floor: number; x: number }[] = [];
-  const lobbies = roomsOnFloor(world, 1).filter((r) => r.kind === 'lobby');
-  if (lobbies.length > 0) {
-    const left = Math.min(...lobbies.map((r) => r.x));
-    const right = Math.max(...lobbies.map((r) => r.x + r.width - 1));
-    out.push({ floor: 1, x: left });
-    if (right !== left) out.push({ floor: 1, x: right });
+  const cache = cacheOf(world);
+  let points = cache.entrances;
+  if (!points) {
+    points = [];
+    const ends = lobbyEnds(world);
+    if (ends) {
+      points.push({ floor: 1, x: ends.left });
+      if (ends.right !== ends.left) points.push({ floor: 1, x: ends.right });
+    }
+    const metro = roomsOfKind(world, 'metro')[0];
+    if (metro) points.push({ floor: metro.floor, x: metro.x + Math.floor(metro.width / 2) });
+    cache.entrances = points;
   }
-  const metro = roomsOfKind(world, 'metro')[0];
-  if (metro) out.push({ floor: metro.floor, x: metro.x + Math.floor(metro.width / 2) });
-  return out;
+  // A fresh copy every call: callers hold on to these points and some move them.
+  return points.map((p) => ({ floor: p.floor, x: p.x }));
 }

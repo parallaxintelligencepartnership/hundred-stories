@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { entrances, ensureRouting, findRoute, isReachableFromLobby } from '../../src/sim/routing';
 import { LIMITS, ROOMS } from '../../src/sim/rules';
 import type { Car, Leg, Room, RoomKind, Shaft, ShaftKind, World } from '../../src/sim/types';
-import { addRoom, addShaft, allocId, createWorld } from '../../src/sim/world';
+import { deserialize, serialize } from '../../src/sim/save';
+import { addRoom, addShaft, allocId, createWorld, removeShaft } from '../../src/sim/world';
 
 function makeRoom(world: World, kind: RoomKind, floor: number, x: number): Room {
   const rule = ROOMS[kind];
@@ -23,6 +24,7 @@ function makeRoom(world: World, kind: RoomKind, floor: number, x: number): Room 
     infested: false,
     lowEvalSinceMinute: null,
     onFire: false,
+    rent: 100,
   };
   addRoom(world, room);
   return room;
@@ -394,5 +396,89 @@ describe('stairs versus elevator', () => {
     const legs = findRoute(world, { floor: 1, x: 100 }, { floor: 3, x: 210 });
     expect(rides(legs as Leg[])).toEqual([]);
     expect(kinds(legs as Leg[])).toContain('stairs');
+  });
+});
+
+describe('route cache', () => {
+  let world: World;
+
+  beforeEach(() => {
+    world = createWorld(7);
+  });
+
+  it('routes two destinations from one origin in the same minute', () => {
+    makeLobby(world, 100, 140);
+    const shaft = makeShaft(world, 'standard', 150, 1, 10);
+    const up = findRoute(world, { floor: 1, x: 100 }, { floor: 5, x: 200 });
+    const higher = findRoute(world, { floor: 1, x: 100 }, { floor: 7, x: 300 });
+    expect(up).toEqual([
+      { kind: 'walk', toX: 150 },
+      { kind: 'ride', shaftId: shaft.id, fromFloor: 1, toFloor: 5 },
+      { kind: 'walk', toX: 200 },
+    ]);
+    expect(higher).toEqual([
+      { kind: 'walk', toX: 150 },
+      { kind: 'ride', shaftId: shaft.id, fromFloor: 1, toFloor: 7 },
+      { kind: 'walk', toX: 300 },
+    ]);
+  });
+
+  it('still prefers the shaft nearest each origin within one minute', () => {
+    makeLobby(world, 100, 340);
+    const near = makeShaft(world, 'standard', 150, 1, 10);
+    const far = makeShaft(world, 'standard', 300, 1, 10);
+    expect(rides(findRoute(world, { floor: 1, x: 100 }, { floor: 5, x: 120 }) as Leg[])).toEqual([
+      { kind: 'ride', shaftId: near.id, fromFloor: 1, toFloor: 5 },
+    ]);
+    expect(rides(findRoute(world, { floor: 1, x: 330 }, { floor: 5, x: 320 }) as Leg[])).toEqual([
+      { kind: 'ride', shaftId: far.id, fromFloor: 1, toFloor: 5 },
+    ]);
+  });
+
+  it('picks up a shaft built in the same minute', () => {
+    makeLobby(world, 100, 140);
+    expect(findRoute(world, { floor: 1, x: 100 }, { floor: 5, x: 200 })).toBeNull();
+    expect(isReachableFromLobby(world, 5, 200)).toBe(false);
+    const shaft = makeShaft(world, 'standard', 150, 1, 10);
+    expect(rides(findRoute(world, { floor: 1, x: 100 }, { floor: 5, x: 200 }) as Leg[])).toEqual([
+      { kind: 'ride', shaftId: shaft.id, fromFloor: 1, toFloor: 5 },
+    ]);
+    expect(isReachableFromLobby(world, 5, 200)).toBe(true);
+  });
+
+  it('drops a demolished shaft in the same minute', () => {
+    makeLobby(world, 100, 140);
+    const shaft = makeShaft(world, 'standard', 150, 1, 10);
+    expect(findRoute(world, { floor: 1, x: 100 }, { floor: 5, x: 200 })).not.toBeNull();
+    expect(isReachableFromLobby(world, 5, 200)).toBe(true);
+    removeShaft(world, shaft.id);
+    expect(findRoute(world, { floor: 1, x: 100 }, { floor: 5, x: 200 })).toBeNull();
+    expect(isReachableFromLobby(world, 5, 200)).toBe(false);
+  });
+
+  it('answers the same for every tile on a floor and every minute', () => {
+    makeLobby(world, 100, 140);
+    makeShaft(world, 'standard', 150, 1, 10);
+    expect(isReachableFromLobby(world, 5, 200)).toBe(true);
+    expect(isReachableFromLobby(world, 5, 20)).toBe(true);
+    expect(isReachableFromLobby(world, 40, 200)).toBe(false);
+    const first = findRoute(world, { floor: 1, x: 100 }, { floor: 5, x: 200 });
+    world.time.minute += 1;
+    expect(findRoute(world, { floor: 1, x: 100 }, { floor: 5, x: 200 })).toEqual(first);
+    expect(isReachableFromLobby(world, 5, 200)).toBe(true);
+    expect(isReachableFromLobby(world, 40, 200)).toBe(false);
+  });
+
+  it('gives a loaded world the same routes as the saved one', () => {
+    makeLobby(world, 100, 140);
+    makeShaft(world, 'standard', 150, 1, 10);
+    makeRoom(world, 'office', 5, 200);
+    const before = findRoute(world, { floor: 1, x: 100 }, { floor: 5, x: 200 });
+    const loaded = deserialize(serialize(world));
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) return;
+    expect(findRoute(loaded.world, { floor: 1, x: 100 }, { floor: 5, x: 200 })).toEqual(before);
+    expect(isReachableFromLobby(loaded.world, 5, 200)).toBe(true);
+    expect(entrances(loaded.world)).toEqual(entrances(world));
   });
 });
