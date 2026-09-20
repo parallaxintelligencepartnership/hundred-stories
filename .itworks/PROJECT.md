@@ -45,6 +45,7 @@ internet - exposure notes: live at https://hundredstories.xyz since 2026-09-19 a
 |---|---|---|
 | Simulation core | seeded headless run of a scripted build for N days asserts population, cash and stars; same seed gives identical state hash | an impossible action (overlap, no lobby, unaffordable) is rejected with a reason string and state is unchanged |
 | Elevators | unit test: a shaft with 8 cars serves a queue; average wait under threshold; express skips non-lobby floors | a sim waiting past the black threshold leaves the tower and the event log says why |
+| Dedicated cars | tests/sim/cars.test.ts: a hotel car leaves office calls to the general car, takes them only when idle with no hotel call pending, never leaves its range; routing plans no trip on the leftover rule; a version 1 save loads with cars set to Everyone and the whole shaft | a range outside the shaft, upside down, or one floor is refused with a reason and the car is unchanged; a car with people inside refuses a range change |
 | Economy and stars | test: rent lands on quarter start; star thresholds and extra conditions (VIP, suites, metro, cathedral, wedding) each covered | bankrupt tower shows a clear game-over state, not a frozen screen |
 | Save and load | round trip test: state to JSON to state produces equal hash; export file re-imports | corrupt or foreign file is refused with a message and the current game is untouched |
 | PWA offline | build served, installed, network cut, game still loads and plays | with no cache yet, the page says it needs one online load first |

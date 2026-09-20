@@ -17,7 +17,7 @@ npm test (vitest run); one file: npx vitest run <path>; npm run typecheck (tsc -
 | public/theme.js | plain script every page loads first: applies a stored theme before paint (inline scripts are blocked by the CSP) |
 | src/main.ts | entry point: reads the seed from the query string, boots game, renderer and UI, shows the WebGL message on failure; ?smoke boots the demo world instead |
 | src/sim/ | the pure simulation, no DOM: rules.ts tables, types.ts and the clock, tick.ts tick order, build, economy, elevators, evaluation, events, people, routing, stars, rng |
-| src/sim/save.ts | save format v1: serialize, deserialize with its refusal reasons, and the FNV-1a world hash |
+| src/sim/save.ts | save format v2 (v1 still loads with default car settings): serialize, deserialize with its refusal reasons, and the FNV-1a world hash |
 | src/game/game.ts | game shell: owns the world, the timer loop, tools, pointer input, save/load/export/import wiring |
 | src/game/api.ts | the contract the UI is allowed to use |
 | src/game/storage.ts | the browser save slot: IndexedDB first, localStorage as the fallback |
