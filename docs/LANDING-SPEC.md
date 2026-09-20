@@ -46,7 +46,7 @@ Head, in this order:
 ```
 Plus one JSON-LD block (`<script type="application/ld+json">`, which the CSP does not execute and does not block):
 ```
-{"@context":"https://schema.org","@type":"VideoGame","name":"Hundred Stories","url":"https://hundredstories.xyz/","description":"A free browser recreation of the 1994 tower-building sim.","applicationCategory":"Game","operatingSystem":"Any (web browser)","gamePlatform":"Web browser","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"author":{"@type":"Organization","name":"Parallax Intelligence","url":"https://parallaxintelligence.ai"},"license":"https://www.gnu.org/licenses/agpl-3.0.html"}
+{"@context":"https://schema.org","@type":"VideoGame","name":"Hundred Stories","url":"https://hundredstories.xyz/","description":"A free browser recreation of the 1994 tower-building sim.","applicationCategory":"Game","operatingSystem":"Any (web browser)","gamePlatform":"Web browser","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"author":{"@type":"Organization","name":"Parallax Intelligence","url":"https://parallaxintelligence.ai"},"license":"https://polyformproject.org/licenses/strict/1.0.0"}
 ```
 
 Body, semantic HTML, no JavaScript:
@@ -57,10 +57,10 @@ Body, semantic HTML, no JavaScript:
    - Three feature cards in a grid (`<section aria-labelledby="features">`):
      - "The original rules": "Every room, price, elevator limit and stress rule follows the 1994 ruleset. No additions, no shortcuts. If you remember what made it hard, it is still hard."
      - "Plays offline": "Install it once from your browser and it runs with no connection. Your tower is saved on your device as you play, and you can export it as a file whenever you like."
-     - "Yours, and open": "There is no account, no server and nothing tracked. The source is public under the AGPL, so you can read exactly how the tower thinks."
+     - "Yours, and private": "There is no account, no server and nothing tracked. The source is public to read, so you can see exactly how the tower thinks."
    - A short "How it plays" section: three numbered steps. "1. Start with a lobby and a little cash. 2. Rent floors to tenants and give them elevators that do not make them wait. 3. Earn stars as the tower grows. One hundred stories is the ceiling." Ends with a text link "Read the full guide" to `/how-to-play/`.
    - A "Best on a desktop" note in a muted box: "The game plays best with a mouse and a screen wider than a phone. It loads on a phone, but building is fiddly there for now."
-3. `<footer>`: "Made by Parallax Intelligence" (link `https://parallaxintelligence.ai`) · "Source on GitHub" · "AGPL-3.0". Second line, small: "This is original work. It is not affiliated with, endorsed by, or connected to Electronic Arts, Maxis, or OPeNBooK."
+3. `<footer>`: "Made by Parallax Intelligence" (link `https://parallaxintelligence.ai`) · "Source on GitHub" · "PolyForm Strict 1.0.0". Second line, small: "This is original work. It is not affiliated with, endorsed by, or connected to Electronic Arts, Maxis, or OPeNBooK."
 
 ## `how-to-play/index.html`
 

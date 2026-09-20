@@ -192,7 +192,7 @@ describe('footer', () => {
     expect(html.match(/<footer class="site-foot">/g)).toHaveLength(1);
     expect(html).toContain('href="mailto:hello@parallaxintelligence.ai"');
     expect(html).toContain('>hello@parallaxintelligence.ai<');
-    expect(html).toContain('href="https://www.gnu.org/licenses/agpl-3.0.html"');
+    expect(html).toContain('href="https://polyformproject.org/licenses/strict/1.0.0"');
     expect(flat(html)).toContain('Hundred Stories is a from-scratch homage to SimTower');
     expect(html).toContain('src="/wordmark-line-dark.svg"');
   });

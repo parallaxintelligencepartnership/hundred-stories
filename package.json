@@ -4,7 +4,7 @@
   "description": "A downtown skyscraper simulation: run and operate a tower, one hundred stories tall.",
   "private": true,
   "type": "module",
-  "license": "AGPL-3.0-only",
+  "license": "PolyForm-Strict-1.0.0",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

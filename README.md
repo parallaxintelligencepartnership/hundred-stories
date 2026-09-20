@@ -120,4 +120,6 @@ Primary: [Cloudflare Workers static assets](deploy/cloudflare-pages.md). Fallbac
 
 ## License
 
-AGPL-3.0-only. See `LICENSE`. Copyright 2026 Parallax Intelligence.
+PolyForm Strict 1.0.0. See `LICENSE`. Copyright 2026 Parallax Intelligence Partnership.
+
+The source is public so anyone can read it and run it for personal, noncommercial use. Redistributing it, changing it, or shipping it as your own product is not permitted. Releases tagged before 2026-09-20 were published under the AGPL-3.0 and remain under that licence.
