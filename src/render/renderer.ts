@@ -25,7 +25,7 @@ import {
 } from 'pixi.js';
 import { stressBand } from '../sim/people';
 import { ROOMS } from '../sim/rules';
-import { clockOf, TOWER_WIDTH, type Car, type Id, type Room, type RoomKind, type Shaft, type Sim, type SimKind, type StressBand, type World } from '../sim/types';
+import { clockOf, TOWER_WIDTH, type Car, type Id, type Room, type RoomKind, type Shaft, type ShaftKind, type Sim, type SimKind, type StressBand, type World } from '../sim/types';
 import { roomsOnFloor, shaftAt } from '../sim/world';
 import { createArt, FLOOR_PX, OVERLAY_KINDS, TILE_PX, type Art } from './art';
 import {
@@ -149,6 +149,11 @@ const FRAME_GRACE_MS = 2000; // after this the opening framing never reasserts i
 const SIM_KINDS: readonly SimKind[] = ['worker', 'resident', 'guest', 'shopper', 'diner', 'staff', 'visitor', 'vip'];
 const STRESS_BANDS: readonly StressBand[] = ['calm', 'pink', 'red'];
 
+/** A numeric stand-in for the `${kind}|${band}|${frame}` string, cheap to build every frame. */
+function simKeyOf(kind: SimKind, band: StressBand, frame: 0 | 1): number {
+  return (SIM_KINDS.indexOf(kind) * STRESS_BANDS.length + STRESS_BANDS.indexOf(band)) * 2 + frame;
+}
+
 // Flat colors for the fallback art, muted per VISUAL's world palette.
 const FALLBACK_ROOM_COLORS: Record<RoomKind, number> = {
   lobby: 0x6d6552,
@@ -189,9 +194,35 @@ interface Interp {
   minute: number; // sim minute the current target belongs to; a new minute with the same target means the sprite has settled
 }
 
-interface Keyed<T> {
-  node: T;
-  key: string;
+interface RoomEntry {
+  node: Sprite;
+  kind: RoomKind;
+  width: number;
+  height: number;
+  variant: number;
+  lit: boolean;
+}
+
+interface SlabEntry {
+  node: Sprite;
+  width: number;
+}
+
+interface ShaftEntry {
+  node: Sprite;
+  kind: ShaftKind;
+  floors: number;
+}
+
+interface CarEntry {
+  node: Sprite;
+  kind: ShaftKind;
+  doorsOpen: boolean;
+}
+
+interface SimEntry {
+  node: Sprite;
+  simKey: number;
 }
 
 function canvasTexture(width: number, height: number, draw: (ctx: CanvasRenderingContext2D) => void): Texture {
@@ -493,15 +524,24 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
   let selection: Selection | null = null;
   const pickListeners: ((hit: PickHit) => void)[] = [];
 
-  const roomSprites = new Map<Id, Keyed<Sprite>>();
-  const slabSprites = new Map<Id, Keyed<Sprite>>();
-  const shaftSprites = new Map<Id, Keyed<Sprite>>();
-  const carSprites = new Map<Id, Keyed<Sprite>>();
-  const simSprites = new Map<Id, Keyed<Sprite>>();
+  const roomSprites = new Map<Id, RoomEntry>();
+  const slabSprites = new Map<Id, SlabEntry>();
+  const shaftSprites = new Map<Id, ShaftEntry>();
+  const carSprites = new Map<Id, CarEntry>();
+  const simSprites = new Map<Id, SimEntry>();
   const fireGraphics = new Map<Id, Graphics>();
   const doorHold = new Map<Id, number>(); // car id -> time the open door texture may end
   const interp = new Map<string, Interp>();
+  const simInterp = new Map<Id, Interp>();
   let renderMinute = 0;
+
+  // Per-frame scratch sets/maps, hoisted so reconcile loops do not allocate every frame.
+  const seenRooms = new Set<Id>();
+  const seenShafts = new Set<Id>();
+  const seenCars = new Set<Id>();
+  const seenSims = new Set<Id>();
+  const seenFires = new Set<Id>();
+  const simSlots = new Map<Id, number>();
 
   const ghostSprite = new Sprite();
   ghostSprite.visible = false;
@@ -511,12 +551,12 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
 
   // Sim particle mode: one shared atlas so every particle draws from one source.
   let particles: ParticleContainer | null = null;
-  let particleAtlas: Map<string, Texture> | null = null;
+  let particleAtlas: Map<number, Texture> | null = null;
   let atlasTexture: RenderTexture | null = null;
   let particleMode = false;
   const simParticles = new Map<Id, Particle>();
 
-  function buildParticleAtlas(): Map<string, Texture> | null {
+  function buildParticleAtlas(): Map<number, Texture> | null {
     try {
       const cols = SIM_KINDS.length;
       const rows = STRESS_BANDS.length * 2;
@@ -527,7 +567,7 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
         scaleMode: 'nearest',
       });
       const staging = new Container();
-      const map = new Map<string, Texture>();
+      const map = new Map<number, Texture>();
       for (let c = 0; c < cols; c++) {
         const kind = SIM_KINDS[c] as SimKind;
         for (let b = 0; b < STRESS_BANDS.length; b++) {
@@ -539,7 +579,7 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
             sprite.setSize(SIM_WIDTH_PX, SIM_HEIGHT_PX);
             staging.addChild(sprite);
             map.set(
-              `${kind}|${band}|${frame}`,
+              simKeyOf(kind, band, frame),
               new Texture({
                 source: rt.source,
                 frame: new Rectangle(c * SIM_WIDTH_PX, row * SIM_HEIGHT_PX, SIM_WIDTH_PX, SIM_HEIGHT_PX),
@@ -588,11 +628,17 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
     particleMode = false;
   }
 
-  function interpolated(key: string, x: number, y: number, alpha: number): { x: number; y: number } {
-    let entry = interp.get(key);
+  function interpolated<K>(
+    map: Map<K, Interp>,
+    key: K,
+    x: number,
+    y: number,
+    alpha: number,
+  ): { x: number; y: number } {
+    let entry = map.get(key);
     if (!entry) {
       entry = { px: x, py: y, cx: x, cy: y, minute: renderMinute };
-      interp.set(key, entry);
+      map.set(key, entry);
     } else if (entry.cx === x && entry.cy === y) {
       // Same target on a later sim minute: the thing has stopped. Settle the previous position on it,
       // otherwise every tick would re-lerp from where it was a minute ago and a parked car bounces.
@@ -621,9 +667,9 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
   }
 
   /** Park an entity at a fixed point so it does not lerp away from it next frame. */
-  function interpolateFrom(key: string, x: number, y: number): { x: number; y: number } {
-    const entry = interp.get(key);
-    if (!entry) interp.set(key, { px: x, py: y, cx: x, cy: y, minute: renderMinute });
+  function interpolateFrom<K>(map: Map<K, Interp>, key: K, x: number, y: number): { x: number; y: number } {
+    const entry = map.get(key);
+    if (!entry) map.set(key, { px: x, py: y, cx: x, cy: y, minute: renderMinute });
     else {
       entry.px = x;
       entry.py = y;
@@ -667,7 +713,7 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
   }
 
   function reconcileRooms(w: World, night: boolean): void {
-    const seenRooms = new Set<Id>();
+    seenRooms.clear();
     for (const room of w.rooms.values()) {
       seenRooms.add(room.id);
       const lit = night && room.occupancy > 0;
@@ -681,31 +727,39 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
       const pw = room.width * TILE_PX;
       const ph = room.height * FLOOR_PX;
 
-      const slabKey = `${room.width}`;
       let slab = slabSprites.get(room.id);
       if (!slab) {
         const sprite = new Sprite(art.slab(room.width));
         slabLayer.addChild(sprite);
-        slab = { node: sprite, key: slabKey };
+        slab = { node: sprite, width: room.width };
         slabSprites.set(room.id, slab);
-      } else if (slab.key !== slabKey) {
+      } else if (slab.width !== room.width) {
         slab.node.texture = art.slab(room.width);
-        slab.key = slabKey;
+        slab.width = room.width;
       }
       const slabHeight = slab.node.texture.height || 4;
       slab.node.setSize(pw, slabHeight);
       slab.node.position.set(px, floorBaseY(room.floor) - slabHeight);
 
-      const key = `${room.kind}|${room.width}|${room.height}|${variant}|${lit ? 1 : 0}`;
       let entry = roomSprites.get(room.id);
       if (!entry) {
         const sprite = new Sprite(art.room(room.kind, room.width, room.height, variant, lit));
         (drawsOverRooms(room.kind) ? connectorLayer : roomLayer).addChild(sprite);
-        entry = { node: sprite, key };
+        entry = { node: sprite, kind: room.kind, width: room.width, height: room.height, variant, lit };
         roomSprites.set(room.id, entry);
-      } else if (entry.key !== key) {
+      } else if (
+        entry.kind !== room.kind ||
+        entry.width !== room.width ||
+        entry.height !== room.height ||
+        entry.variant !== variant ||
+        entry.lit !== lit
+      ) {
         entry.node.texture = art.room(room.kind, room.width, room.height, variant, lit);
-        entry.key = key;
+        entry.kind = room.kind;
+        entry.width = room.width;
+        entry.height = room.height;
+        entry.variant = variant;
+        entry.lit = lit;
       }
       entry.node.position.set(px, py);
       entry.node.setSize(pw, ph);
@@ -725,21 +779,21 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
   }
 
   function reconcileShaftsAndCars(w: World, alpha: number): void {
-    const seenShafts = new Set<Id>();
-    const seenCars = new Set<Id>();
+    seenShafts.clear();
+    seenCars.clear();
     for (const shaft of w.shafts.values()) {
       seenShafts.add(shaft.id);
       const floors = shaftFloorSpan(shaft);
-      const key = `${shaft.kind}|${floors}`;
       let entry = shaftSprites.get(shaft.id);
       if (!entry) {
         const sprite = new Sprite(art.shaft(shaft.kind, floors));
         shaftLayer.addChild(sprite);
-        entry = { node: sprite, key };
+        entry = { node: sprite, kind: shaft.kind, floors };
         shaftSprites.set(shaft.id, entry);
-      } else if (entry.key !== key) {
+      } else if (entry.kind !== shaft.kind || entry.floors !== floors) {
         entry.node.texture = art.shaft(shaft.kind, floors);
-        entry.key = key;
+        entry.kind = shaft.kind;
+        entry.floors = floors;
       }
       entry.node.position.set(shaft.x * TILE_PX, floorTopY(shaft.floorMax));
       entry.node.setSize(shaft.width * TILE_PX, floors * FLOOR_PX);
@@ -780,7 +834,6 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
 
   function drawCar(shaft: Shaft, car: Car, alpha: number): void {
     const doorsOpen = carDoorsOpen(car);
-    const key = `${shaft.kind}|${doorsOpen ? 1 : 0}`;
     let entry = carSprites.get(car.id);
     if (!entry) {
       const sprite = new Sprite(art.car(shaft.kind, doorsOpen));
@@ -788,13 +841,15 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
       // and this way a swap never moves the car.
       sprite.anchor.set(0.5, 1);
       layers.cars.addChild(sprite);
-      entry = { node: sprite, key };
+      entry = { node: sprite, kind: shaft.kind, doorsOpen };
       carSprites.set(car.id, entry);
-    } else if (entry.key !== key) {
+    } else if (entry.kind !== shaft.kind || entry.doorsOpen !== doorsOpen) {
       entry.node.texture = art.car(shaft.kind, doorsOpen); // texture swap only
-      entry.key = key;
+      entry.kind = shaft.kind;
+      entry.doorsOpen = doorsOpen;
     }
     const target = interpolated(
+      interp,
       `car${car.id}`,
       (shaft.x + shaft.width / 2) * TILE_PX,
       floorYFloat(car.y) + FLOOR_PX - SLAB_TOP_PX,
@@ -819,20 +874,32 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
     else if (particleMode && visible < PARTICLE_RELEASE) leaveParticleMode();
 
     // Sims standing in a room take a fixed slot, in id order, so they stop jittering.
-    const slots = new Map<Id, number>();
+    simSlots.clear();
 
-    const seen = new Set<Id>();
+    // One viewport of margin on every side of the camera, in world px; a sim further
+    // out than this gets no sprite or particle until it comes back into range.
+    const halfW = app.screen.width / camera.zoom;
+    const halfH = app.screen.height / camera.zoom;
+    const viewLeft = camera.x - halfW;
+    const viewRight = camera.x + halfW;
+    const viewTop = camera.y - halfH;
+    const viewBottom = camera.y + halfH;
+
+    seenSims.clear();
     for (const sim of w.sims.values()) {
       if (!simIsVisible(sim)) continue;
-      seen.add(sim.id);
+      const sx = sim.pos.x * TILE_PX;
+      const sy = simFeetY(sim.pos.floor);
+      if (sx < viewLeft || sx > viewRight || sy < viewTop || sy > viewBottom) continue;
+      seenSims.add(sim.id);
       const { kind, band, frame } = simTextureKey(sim);
-      const key = `${kind}|${band}|${frame}`;
+      const simKey = simKeyOf(kind, band, frame);
       const point = simMoves(sim)
         ? // Feet on the slab top, not the bottom of the floor band.
-          interpolated(`sim${sim.id}`, sim.pos.x * TILE_PX, simFeetY(sim.pos.floor), alpha)
-        : interpolateFrom(`sim${sim.id}`, ...inRoomSlot(w, sim, slots));
+          interpolated(simInterp, sim.id, sim.pos.x * TILE_PX, simFeetY(sim.pos.floor), alpha)
+        : interpolateFrom(simInterp, sim.id, ...inRoomSlot(w, sim, simSlots));
 
-      const atlasTile = particleMode && particles && particleAtlas ? particleAtlas.get(key) : undefined;
+      const atlasTile = particleMode && particles && particleAtlas ? particleAtlas.get(simKey) : undefined;
       if (particles && atlasTile) {
         let particle = simParticles.get(sim.id);
         if (!particle) {
@@ -852,37 +919,37 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
         const sprite = new Sprite(art.sim(kind, band, frame));
         sprite.anchor.set(0.5, 1);
         simSpriteLayer.addChild(sprite);
-        entry = { node: sprite, key };
+        entry = { node: sprite, simKey };
         simSprites.set(sim.id, entry);
-      } else if (entry.key !== key) {
+      } else if (entry.simKey !== simKey) {
         entry.node.texture = art.sim(kind, band, frame);
-        entry.key = key;
+        entry.simKey = simKey;
       }
       entry.node.setSize(SIM_WIDTH_PX, SIM_HEIGHT_PX);
       entry.node.position.set(point.x, point.y);
     }
 
     for (const [id, entry] of simSprites) {
-      if (seen.has(id)) continue;
+      if (seenSims.has(id)) continue;
       entry.node.destroy();
       simSprites.delete(id);
-      interp.delete(`sim${id}`);
+      simInterp.delete(id);
     }
     if (particles) {
       for (const [id, particle] of simParticles) {
-        if (seen.has(id)) continue;
+        if (seenSims.has(id)) continue;
         particles.removeParticle(particle);
         simParticles.delete(id);
-        interp.delete(`sim${id}`);
+        simInterp.delete(id);
       }
     }
   }
 
   function reconcileFires(w: World): void {
-    const seen = new Set<Id>();
+    seenFires.clear();
     for (const room of w.rooms.values()) {
       if (!room.onFire) continue;
-      seen.add(room.id);
+      seenFires.add(room.id);
       if (!fireGraphics.has(room.id)) {
         const g = new Graphics();
         layers.effects.addChild(g);
@@ -890,7 +957,7 @@ export async function createRenderer(container: HTMLElement, world: World): Prom
       }
     }
     for (const [id, g] of fireGraphics) {
-      if (seen.has(id)) continue;
+      if (seenFires.has(id)) continue;
       g.destroy();
       fireGraphics.delete(id);
     }

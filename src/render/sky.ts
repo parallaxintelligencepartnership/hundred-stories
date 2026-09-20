@@ -163,17 +163,18 @@ export function createSky(layers: SkyLayers): Sky {
   let lastMinute = -1;
   let lastW = -1;
   let lastH = -1;
+  let lastTop = NaN;
+  let lastBottom = NaN;
 
-  function redrawGradient(minuteOfDay: number, viewW: number, viewH: number): void {
-    const colors = skyAt(minuteOfDay);
+  function redrawGradient(top: number, bottom: number, viewW: number, viewH: number): void {
     const fill = new FillGradient({
       type: 'linear',
       start: { x: 0, y: 0 },
       end: { x: 0, y: 1 },
       textureSpace: 'local',
       colorStops: [
-        { offset: 0, color: colors.top },
-        { offset: 1, color: colors.bottom },
+        { offset: 0, color: top },
+        { offset: 1, color: bottom },
       ],
     });
     gradient.clear();
@@ -182,14 +183,20 @@ export function createSky(layers: SkyLayers): Sky {
 
   return {
     update(minuteOfDay, cam, viewW, viewH): void {
+      const colors = skyAt(minuteOfDay);
+      if (colors.top !== lastTop || colors.bottom !== lastBottom || viewW !== lastW || viewH !== lastH) {
+        redrawGradient(colors.top, colors.bottom, viewW, viewH);
+        lastTop = colors.top;
+        lastBottom = colors.bottom;
+        lastW = viewW;
+        lastH = viewH;
+      }
+
       const rounded = Math.round(minuteOfDay);
-      if (rounded !== lastMinute || viewW !== lastW || viewH !== lastH) {
-        redrawGradient(minuteOfDay, viewW, viewH);
+      if (rounded !== lastMinute) {
         // The horizon settles toward the night sky instead of glowing after dark.
         skyline.tint = lerpColor(0xffffff, 0x5c6f96, nightness(minuteOfDay));
         lastMinute = rounded;
-        lastW = viewW;
-        lastH = viewH;
       }
 
       layers.cityFar.scale.set(cam.zoom);
