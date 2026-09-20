@@ -2,7 +2,7 @@
 // decision that makes a tenant give up and leave. See docs/DESIGN.md section 7.
 // Every number comes from rules.ts; nothing here is inlined.
 
-import { EVAL, NOISE, ROOMS } from './rules';
+import { EVAL, NOISE, RENT, ROOMS, takesRent } from './rules';
 import { log } from './world';
 import type { Id, Room, RoomKind, World } from './types';
 
@@ -116,6 +116,10 @@ export function leaveReasonFor(world: World, room: Room): string {
       weight: EVAL.stressWeight * averageTenantStress(world, room),
       text: `Too long waiting for an elevator on floor ${room.floor}.`,
     },
+    {
+      weight: takesRent(room.kind) ? (Math.max(0, room.rent - 100) / 100) * RENT.evalWeight : 0,
+      text: `The rent on floor ${room.floor} was too high.`,
+    },
   ];
   let best = penalties[0] as { weight: number; text: string };
   for (const p of penalties) if (p.text !== '' && p.weight > best.weight) best = p;
@@ -130,7 +134,8 @@ export function evaluateRoom(world: World, room: Room): number {
   const noisePenalty = quiet ? EVAL.noisePenaltyPerNeighbor * noisyNeighborsOf(world, room).length : 0;
   const dirtyPenalty = room.dirty ? EVAL.dirtyPenalty : 0;
   const infestedPenalty = room.infested ? EVAL.infestedPenalty : 0;
-  return clamp01(1 - stressPenalty - noisePenalty - dirtyPenalty - infestedPenalty);
+  const rentTerm = takesRent(room.kind) ? ((100 - room.rent) / 100) * RENT.evalWeight : 0;
+  return clamp01(1 + rentTerm - stressPenalty - noisePenalty - dirtyPenalty - infestedPenalty);
 }
 
 function moveOut(world: World, room: Room): void {

@@ -502,6 +502,52 @@ describe('shafts: stops, cars and home floor', () => {
   });
 });
 
+describe('room.setRent', () => {
+  it('accepts every step from 50 to 150 on an office', () => {
+    const world = makeWorld();
+    lobby(world);
+    expect(build(world, 'office', 2, 100)).toEqual(OK);
+    const office = [...world.rooms.values()].find((r) => r.kind === 'office');
+    if (!office) throw new Error('no office');
+    for (let rent = 50; rent <= 150; rent += 10) {
+      expect(applyCommand(world, { kind: 'room.setRent', roomId: office.id, rent })).toEqual(OK);
+      expect(office.rent).toBe(rent);
+    }
+  });
+
+  it('refuses rent out of range or off the step', () => {
+    const world = makeWorld();
+    lobby(world);
+    expect(build(world, 'office', 2, 100)).toEqual(OK);
+    const office = [...world.rooms.values()].find((r) => r.kind === 'office');
+    if (!office) throw new Error('no office');
+    for (const rent of [45, 160, 105]) {
+      const result = applyCommand(world, { kind: 'room.setRent', roomId: office.id, rent });
+      expect(result.ok).toBe(false);
+      expect(reasonOf(result)).toBe('Rent must be between 50% and 150% in steps of 10%.');
+      expect(office.rent).toBe(100);
+    }
+  });
+
+  it('refuses rent on a room kind that has no rent', () => {
+    const world = makeWorld(20_000_000, 3);
+    lobby(world);
+    expect(build(world, 'shop', 2, 100)).toEqual(OK);
+    const shop = [...world.rooms.values()].find((r) => r.kind === 'shop');
+    if (!shop) throw new Error('no shop');
+    const result = applyCommand(world, { kind: 'room.setRent', roomId: shop.id, rent: 50 });
+    expect(result.ok).toBe(false);
+    expect(reasonOf(result)).toBe('This room has no rent to set.');
+  });
+
+  it('refuses rent on a room that does not exist', () => {
+    const world = makeWorld();
+    const result = applyCommand(world, { kind: 'room.setRent', roomId: 999, rent: 50 });
+    expect(result.ok).toBe(false);
+    expect(reasonOf(result)).toBe('No such room.');
+  });
+});
+
 describe('demolish', () => {
   it('refuses to demolish a room with people inside', () => {
     const world = makeWorld();

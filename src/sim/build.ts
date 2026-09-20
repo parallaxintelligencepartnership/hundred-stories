@@ -3,7 +3,7 @@
 
 import { spend } from './economy';
 import { handleEventCommand } from './events';
-import { LIMITS, ROOMS, SHAFTS } from './rules';
+import { LIMITS, RENT, ROOMS, SHAFTS, takesRent } from './rules';
 import { MAX_FLOOR, MIN_FLOOR, TOWER_WIDTH } from './types';
 import type {
   Car,
@@ -247,6 +247,7 @@ function makeRoom(world: World, kind: RoomKind, floor: number, x: number): Room 
     infested: false,
     lowEvalSinceMinute: null,
     onFire: false,
+    rent: RENT.default,
   };
 }
 
@@ -630,6 +631,18 @@ function doSetCarRange(
   return OK;
 }
 
+function doSetRent(world: World, roomId: number, rent: number): CommandResult {
+  const room = world.rooms.get(roomId);
+  if (!room) return no('No such room.');
+  if (!takesRent(room.kind)) return no('This room has no rent to set.');
+  if (!Number.isInteger(rent) || rent < RENT.min || rent > RENT.max || (rent - RENT.min) % RENT.step !== 0) {
+    return no('Rent must be between 50% and 150% in steps of 10%.');
+  }
+
+  room.rent = rent;
+  return OK;
+}
+
 function doSetHome(world: World, shaftId: number, floor: number): CommandResult {
   const shaft = world.shafts.get(shaftId);
   if (!shaft) return no('That elevator is gone.');
@@ -665,6 +678,8 @@ export function applyCommand(world: World, cmd: Command): CommandResult {
       return doSetCarServes(world, cmd.shaftId, cmd.carId, cmd.serves);
     case 'shaft.setCarRange':
       return doSetCarRange(world, cmd.shaftId, cmd.carId, cmd.range);
+    case 'room.setRent':
+      return doSetRent(world, cmd.roomId, cmd.rent);
     case 'bomb.pay':
     case 'fire.callHelicopter':
       return handleEventCommand(world, cmd);

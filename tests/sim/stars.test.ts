@@ -20,6 +20,7 @@ function makeRoom(overrides: Partial<Room> & { kind: RoomKind; floor: number; x:
     infested: false,
     lowEvalSinceMinute: null,
     onFire: false,
+    rent: 100,
     ...overrides,
   };
 }

@@ -21,6 +21,7 @@ function makeRoom(overrides: Partial<Room> & { kind: RoomKind; floor: number; x:
     infested: false,
     lowEvalSinceMinute: null,
     onFire: false,
+    rent: 100,
     ...overrides,
   };
 }
@@ -96,6 +97,26 @@ describe('economy: onQuarterStart office rent', () => {
     addRoom(world, makeRoom({ kind: 'office', floor: 2, x: 100, eval: 1, vacant: true }));
     onQuarterStart(world);
     expect(world.stats.lastQuarter.income).toBe(0);
+  });
+
+  it('scales full-eval office rent by the room rent setting', () => {
+    const full = createWorld(1);
+    full.cash = 0;
+    addRoom(full, makeRoom({ kind: 'office', floor: 2, x: 100, eval: 1, rent: 100 }));
+    onQuarterStart(full);
+    expect(full.stats.lastQuarter.income).toBe(ROOMS.office.incomePerQuarter);
+
+    const half = createWorld(1);
+    half.cash = 0;
+    addRoom(half, makeRoom({ kind: 'office', floor: 2, x: 100, eval: 1, rent: 50 }));
+    onQuarterStart(half);
+    expect(half.stats.lastQuarter.income).toBe(Math.round(ROOMS.office.incomePerQuarter * 0.5));
+
+    const premium = createWorld(1);
+    premium.cash = 0;
+    addRoom(premium, makeRoom({ kind: 'office', floor: 2, x: 100, eval: 1, rent: 150 }));
+    onQuarterStart(premium);
+    expect(premium.stats.lastQuarter.income).toBe(Math.round(ROOMS.office.incomePerQuarter * 1.5));
   });
 });
 

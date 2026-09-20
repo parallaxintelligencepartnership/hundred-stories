@@ -10,10 +10,13 @@
 // which we are not allowed to touch.
 
 import { createRng } from './rng';
-import { ROOMS, SHAFTS } from './rules';
+import { RENT, ROOMS, SHAFTS } from './rules';
 import { createWorld, rebuildFloorIndex } from './world';
 import { MAX_FLOOR, MIN_FLOOR, TOWER_WIDTH } from './types';
 import type { Car, LogEntry, RiderClass, Room, Shaft, Sim, SimKind, World } from './types';
+
+/** v1 and pre-rent v2 saves have no `rent`; it is normalized to RENT.default on load. */
+type SaveRoom = Omit<Room, 'rent'> & { rent?: number };
 
 export const SAVE_VERSION = 2;
 
@@ -66,13 +69,14 @@ interface SaveData {
   population: number;
   nextId: number;
   rngState: number;
-  rooms: Room[];
+  rooms: SaveRoom[];
   shafts: SaveShaft[];
   sims: Sim[];
   events: World['events'];
   stats: World['stats'];
   gameOver: World['gameOver'];
   log: LogEntry[];
+  logTotal?: number;
 }
 
 function shaftToSave(shaft: Shaft): SaveShaft {
@@ -127,6 +131,7 @@ function buildSaveData(world: World): SaveData {
     stats: world.stats,
     gameOver: world.gameOver,
     log: world.log.slice(-LOG_LIMIT),
+    logTotal: world.logTotal,
   };
 }
 
@@ -189,6 +194,7 @@ function hasShape(data: unknown): data is SaveData {
   if (!isPlainObject(d.stats)) return false;
   if (d.gameOver !== null && !isPlainObject(d.gameOver)) return false;
   if (!Array.isArray(d.log)) return false;
+  if (d.logTotal !== undefined && (typeof d.logTotal !== 'number' || !Number.isFinite(d.logTotal) || d.logTotal < 0)) return false;
   return true;
 }
 
@@ -239,6 +245,12 @@ function firstInvalidField(d: SaveData): string | null {
     if (!isFiniteNumber(room.width) || room.width <= 0) return `${at}.width`;
     if (!isFiniteNumber(room.height) || room.height <= 0) return `${at}.height`;
     if (!inRange(room.eval, 0, 1)) return `${at}.eval`;
+    if (
+      room.rent !== undefined &&
+      (!isInteger(room.rent) || room.rent < RENT.min || room.rent > RENT.max || (room.rent - RENT.min) % RENT.step !== 0)
+    ) {
+      return `${at}.rent`;
+    }
   }
 
   for (let i = 0; i < d.shafts.length; i++) {
@@ -354,7 +366,9 @@ export function deserialize(text: string): { ok: true; world: World } | { ok: fa
     world.nextId = parsed.nextId;
     world.rng = createRng(parsed.rngState);
 
-    world.rooms = new Map(parsed.rooms.map((room) => [room.id, room]));
+    world.rooms = new Map(
+      parsed.rooms.map((room): [number, Room] => [room.id, { ...room, rent: room.rent ?? RENT.default }]),
+    );
 
     world.shafts = new Map(
       parsed.shafts.map((saved) => {
@@ -391,6 +405,7 @@ export function deserialize(text: string): { ok: true; world: World } | { ok: fa
     world.stats = parsed.stats;
     world.gameOver = parsed.gameOver;
     world.log = parsed.log.slice(-LOG_LIMIT);
+    world.logTotal = typeof parsed.logTotal === 'number' ? parsed.logTotal : world.log.length;
 
     rebuildFloorIndex(world);
     world.routingDirty = true;
@@ -452,6 +467,7 @@ function roomForHash(room: Room) {
     infested: room.infested,
     lowEvalSinceMinute: room.lowEvalSinceMinute,
     onFire: room.onFire,
+    rent: room.rent,
   } satisfies Record<keyof Room, unknown>;
 }
 
@@ -513,7 +529,7 @@ function simForHash(sim: Sim) {
 // World keys the hash leaves out on purpose: the log is chatter, rng is hashed as its
 // state number, floorIndex is derived from rooms and shafts, routingDirty is a cache
 // flag, and time is hashed as `minute`.
-type UnhashedWorldKey = 'log' | 'rng' | 'floorIndex' | 'routingDirty' | 'time';
+type UnhashedWorldKey = 'log' | 'logTotal' | 'rng' | 'floorIndex' | 'routingDirty' | 'time';
 type HashedWorldKey = Exclude<keyof World, UnhashedWorldKey> | 'minute' | 'rngState';
 
 function byId<T extends { id: number }>(items: Iterable<T>): T[] {

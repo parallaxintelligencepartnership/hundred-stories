@@ -31,6 +31,7 @@ function place(world: World, kind: RoomKind, floor: number, x: number, extra: Pa
     infested: false,
     lowEvalSinceMinute: null,
     onFire: false,
+    rent: 100,
     ...extra,
   };
   addRoom(world, room);

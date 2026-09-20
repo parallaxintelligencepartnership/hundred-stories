@@ -28,6 +28,7 @@ function room(world: World, kind: RoomKind, floor: number, x: number): Room {
     infested: false,
     lowEvalSinceMinute: null,
     onFire: false,
+    rent: 100,
   };
   addRoom(world, built);
   return built;

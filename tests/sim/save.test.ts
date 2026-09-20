@@ -20,6 +20,7 @@ function buildRoom(overrides: Partial<Room> = {}): Room {
     infested: false,
     lowEvalSinceMinute: null,
     onFire: false,
+    rent: 100,
     ...overrides,
   };
 }
@@ -110,6 +111,28 @@ describe('save/deserialize round trip', () => {
     expect(result.world.rooms).toBeInstanceOf(Map);
     expect(result.world.rooms.get(1)?.kind).toBe('office');
     expect(result.world.rooms.get(2)?.kind).toBe('lobby');
+  });
+
+  it('keeps a non-default rent across a serialize/deserialize round trip', () => {
+    const world = createWorld(1);
+    addRoom(world, buildRoom({ rent: 70 }));
+    world.nextId = 2;
+    const result = deserialize(serialize(world));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.world.rooms.get(1)?.rent).toBe(70);
+  });
+
+  it('loads a save with the rent key deleted at the default rent', () => {
+    const world = createWorld(1);
+    addRoom(world, buildRoom({ rent: 70 }));
+    world.nextId = 2;
+    const parsed = JSON.parse(serialize(world));
+    delete parsed.rooms[0].rent;
+    const result = deserialize(JSON.stringify(parsed));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.world.rooms.get(1)?.rent).toBe(100);
   });
 
   it('restores shaft stops as a Set of numbers', () => {
@@ -399,6 +422,7 @@ describe('hashWorld covers every field in types.ts', () => {
       infested: (r: Room) => (r.infested = !r.infested),
       lowEvalSinceMinute: (r: Room) => (r.lowEvalSinceMinute = 7),
       onFire: (r: Room) => (r.onFire = !r.onFire),
+      rent: (r: Room) => (r.rent = 110),
     } satisfies Record<keyof Room, (room: Room) => unknown>;
 
     for (const [field, change] of Object.entries(changes)) {

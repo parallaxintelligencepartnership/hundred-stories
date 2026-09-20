@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { evaluateRoom, noisyNeighborsOf, tickEvaluation } from '../../src/sim/evaluation';
-import { EVAL, NOISE, ROOMS } from '../../src/sim/rules';
+import { evaluateRoom, leaveReasonFor, noisyNeighborsOf, tickEvaluation } from '../../src/sim/evaluation';
+import { EVAL, NOISE, RENT, ROOMS } from '../../src/sim/rules';
 import type { Room, RoomKind, Sim, World } from '../../src/sim/types';
 import { addRoom, addSim, allocId, createWorld } from '../../src/sim/world';
 
@@ -24,6 +24,7 @@ function place(world: World, kind: RoomKind, floor: number, x: number, extra: Pa
     infested: false,
     lowEvalSinceMinute: null,
     onFire: false,
+    rent: 100,
     ...extra,
   };
   addRoom(world, room);
@@ -168,6 +169,18 @@ describe('room eval', () => {
     expect(room.eval).toBe(0);
   });
 
+  it('a discount lifts eval and a premium lowers it next to one noisy neighbor', () => {
+    const discounted = place(world, 'office', 3, 100, { rent: RENT.min });
+    place(world, 'fastFood', 3, 100 + ROOMS.office.width + NOISE.fastFoodToOfficeTiles);
+    const standard = place(world, 'office', 5, 100, { rent: RENT.default });
+    place(world, 'fastFood', 5, 100 + ROOMS.office.width + NOISE.fastFoodToOfficeTiles);
+    const premium = place(world, 'office', 7, 100, { rent: RENT.max });
+    place(world, 'fastFood', 7, 100 + ROOMS.office.width + NOISE.fastFoodToOfficeTiles);
+    tickEvaluation(world);
+    expect(discounted.eval).toBeGreaterThan(standard.eval);
+    expect(standard.eval).toBeGreaterThan(premium.eval);
+  });
+
   it('evaluateRoom does not mutate the room it scores', () => {
     const office = place(world, 'office', 3, 100, { eval: 0.5 });
     expect(evaluateRoom(world, office)).toBe(1);
@@ -284,5 +297,10 @@ describe('tenants leaving', () => {
     world.time.minute = (office.lowEvalSinceMinute as number) + EVAL.leaveAfterMinutes;
     tickEvaluation(world);
     expect(world.stats.tenantsLeftReasons['Too long waiting for an elevator on floor 9.']).toBe(1);
+  });
+
+  it('names the rent when the rent is 150% and nothing else is wrong', () => {
+    const office = place(world, 'office', 11, 100, { rent: RENT.max });
+    expect(leaveReasonFor(world, office)).toBe('The rent on floor 11 was too high.');
   });
 });

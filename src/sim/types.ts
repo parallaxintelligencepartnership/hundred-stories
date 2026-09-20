@@ -77,6 +77,7 @@ export interface Room {
   infested: boolean; // hotel rooms only: cockroaches
   lowEvalSinceMinute: number | null; // when eval first dropped below the leave threshold
   onFire: boolean;
+  rent: number; // percent of the standard rate; a discount lifts the tenants' evaluation, a premium lowers it
 }
 
 export interface Car {
@@ -167,6 +168,7 @@ export type Command =
   | { kind: 'shaft.setHome'; shaftId: Id; floor: number }
   | { kind: 'shaft.setCarServes'; shaftId: Id; carId: Id; serves: Car['serves'] }
   | { kind: 'shaft.setCarRange'; shaftId: Id; carId: Id; range: { lo: number; hi: number } | null }
+  | { kind: 'room.setRent'; roomId: Id; rent: number }
   | { kind: 'bomb.pay' }
   | { kind: 'fire.callHelicopter' };
 
@@ -218,6 +220,7 @@ export interface World {
   sims: Map<Id, Sim>;
   nextId: Id;
   log: LogEntry[];
+  logTotal: number; // entries ever logged, so the UI can tell new lines from old after the log is trimmed
   events: ActiveEvent[];
   stats: Stats;
   floorIndex: FloorIndex;

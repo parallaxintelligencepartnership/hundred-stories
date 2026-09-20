@@ -91,6 +91,7 @@ function makeRoom(world: World, kind: RoomKind, floor: number, x: number, over: 
     infested: false,
     lowEvalSinceMinute: null,
     onFire: false,
+    rent: 100,
     ...over,
   };
   addRoom(world, room);

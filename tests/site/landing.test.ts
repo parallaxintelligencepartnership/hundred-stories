@@ -94,9 +94,9 @@ describe('the page is the building in cross section', () => {
 
   it('gives the guide the same shell, numbered B1 upward', () => {
     expect(guide).toContain('<div class="underground">');
-    expect(guide.match(/<section class="floor guide"/g)).toHaveLength(7);
+    expect(guide.match(/<section class="floor guide"/g)).toHaveLength(8);
     expect(guide).toContain('<p class="floor-tag">B1 &middot; ROOMS</p>');
-    expect(guide).toContain('<p class="floor-tag">B7 &middot; CONTROLS</p>');
+    expect(guide).toContain('<p class="floor-tag">B8 &middot; CONTROLS</p>');
     // Heading order survives the rebuild: one h1, then the topic h2s.
     expect(guide.match(/<h1>/g)).toHaveLength(1);
   });

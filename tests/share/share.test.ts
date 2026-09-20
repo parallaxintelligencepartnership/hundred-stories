@@ -21,6 +21,7 @@ function makeRoom(overrides: Partial<Room>): Room {
     infested: false,
     lowEvalSinceMinute: null,
     onFire: false,
+    rent: 100,
     ...overrides,
   };
 }

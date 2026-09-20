@@ -27,7 +27,7 @@ export function onQuarterStart(world: World): void {
   // Office rent, scaled by how well the office is doing.
   for (const room of world.rooms.values()) {
     if (room.kind === 'office' && !room.vacant) {
-      const rent = ROOMS.office.incomePerQuarter * (0.5 + room.eval / 2);
+      const rent = Math.round(ROOMS.office.incomePerQuarter * (0.5 + room.eval / 2) * (room.rent / 100));
       credit(world, 'office', rent);
     }
   }
@@ -95,11 +95,11 @@ export function recordVisit(world: World, room: Room): void {
 }
 
 export function recordHotelNight(world: World, room: Room): void {
-  const income = ROOMS[room.kind].incomePerQuarter * ECONOMY.hotelNightlyIncomeFraction;
+  const income = Math.round(ROOMS[room.kind].incomePerQuarter * ECONOMY.hotelNightlyIncomeFraction * (room.rent / 100));
   credit(world, room.kind, income);
 }
 
 export function recordCondoSale(world: World, room: Room): void {
   room.vacant = false;
-  credit(world, 'condo', ECONOMY.condoSalePrice);
+  credit(world, 'condo', Math.round(ECONOMY.condoSalePrice * (room.rent / 100)));
 }

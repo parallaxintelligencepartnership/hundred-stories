@@ -67,6 +67,17 @@ export const SHAFTS: Record<ShaftKind, ShaftRule> = {
   express: { label: 'Express elevator', width: 6, shaftCost: 400_000, carCost: 150_000, upkeepPerQuarterPerCar: 20_000, maxSpan: null, maxCars: 8, capacity: 42, floorsPerMinute: 2, doorOpenMinutes: 1, star: 3, expressOnly: true },
 };
 
+// Rent is a percent of a room's standard rate, 50..150 in steps of 10, default 100.
+// evalWeight: at 50% rent the bonus is +0.3, enough to offset one and a half noisy neighbours
+// at noisePenaltyPerNeighbor 0.2; at 150% it is a 0.3 penalty.
+export const RENT = { min: 50, max: 150, step: 10, default: 100, evalWeight: 0.6 };
+
+const RENTED_KINDS: readonly RoomKind[] = ['office', 'condo', 'hotelSingle', 'hotelTwin', 'hotelSuite'];
+
+export function takesRent(kind: RoomKind): boolean {
+  return RENTED_KINDS.includes(kind);
+}
+
 export const LIMITS = {
   maxShafts: 24,
   towerWidth: 375,

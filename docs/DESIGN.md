@@ -27,7 +27,7 @@ Every module is built against this document and `src/sim/types.ts`. If reality d
 
 ## 4. Entities (see types.ts for exact fields)
 
-- `Room`: id, kind (`RoomKind`), floor, x, width, height, `eval` 0..1, `occupancy`, `tenants` (sim ids), `state` flags per kind (hotel: `dirty`, `infested`; office: `vacant`), `builtAtMinute`.
+- `Room`: id, kind (`RoomKind`), floor, x, width, height, `eval` 0..1, `occupancy`, `tenants` (sim ids), `state` flags per kind (hotel: `dirty`, `infested`; office: `vacant`), `builtAtMinute`, `rent` (percent of the standard rate, office/condo/hotel rooms only).
 - `Shaft`: id, kind (`standard | express | service`), x, width, floorMin, floorMax, `stops: Set<floor>`, `cars: Car[]`, `homeFloor`.
 - `Car`: id, shaftId, `y` (float floor position), `dir` (-1, 0, 1), `state` (`idle | moving | doorsOpen`), `doorTimer`, `passengers: simId[]`, `calls: Set<floor>`.
 - `Sim`: id, kind (`worker | resident | guest | shopper | diner | staff | visitor | vip`), `homeRoomId`, `pos: { floor, x }` or `inCarId`, `route: Leg[]`, `state` (`inRoom | walking | waiting | riding | leaving | gone`), `stress` 0..1, `waitStart`, `schedule: ScheduleEntry[]`, `wallet` (for shoppers), `visibleColor` derived from stress.
@@ -83,6 +83,7 @@ Every module is built against this document and `src/sim/types.ts`. If reality d
 - Noisy kinds: fast food, restaurant, shop, cinema, party hall. Lobbies are not noisy (a lobby run is many one tile rooms and would zero anything above it). Quiet kinds: office, condo, hotel rooms.
 - A quiet room loses eval for each noisy room on the same floor within `NOISE.rangeTiles`, and for noisy rooms directly above or below overlapping in x.
 - Room eval = clamp(1 - avgTenantStressPenalty - noisePenalty - dirtyPenalty). Below `EVAL.leaveThreshold` for a full day: tenants leave with a logged reason; office becomes vacant, condo goes back on sale, hotel room stays.
+- Rent (`RENT` in rules.ts): office, condo and hotel rooms carry a `rent` percent, 50..150 in steps of 10, default 100, set via `room.setRent`. A discount below 100 adds to eval (up to `+0.3` at 50%), a premium above 100 subtracts (up to `-0.3` at 150%, `takesRent(kind)` gates which rooms use it), and the same figure scales what the room pays: office quarterly rent, hotel nightly income, and condo sale price.
 
 ## 8. Save format (sim/save.ts)
 
