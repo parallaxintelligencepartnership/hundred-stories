@@ -225,6 +225,13 @@ export interface World {
   stats: Stats;
   floorIndex: FloorIndex;
   routingDirty: boolean;
+  /**
+   * Bumped by every change to what the static tower looks like: a room or shaft built,
+   * removed or resized, a car added or removed, a room catching or losing fire, a room's
+   * occupancy crossing zero (the lit bit). The renderer reconciles rooms, slabs and shafts
+   * only when it moves. A render cache counter: never saved, never hashed.
+   */
+  structureVersion: number;
   gameOver: null | { at: number; reason: string };
 }
 

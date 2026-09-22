@@ -7,7 +7,7 @@
 
 import { ROOMS } from '../sim/rules';
 import type { Room, RoomKind, Shaft, ShaftKind, Sim, SimKind, World } from '../sim/types';
-import { addRoom, addShaft, addSim, allocId, createWorld } from '../sim/world';
+import { addRoom, addShaft, addSim, allocId, createWorld, setOnFire } from '../sim/world';
 import { createRenderer, type Renderer } from './renderer';
 
 function makeRoom(world: World, kind: RoomKind, floor: number, x: number, occupancy: number): Room {
@@ -181,7 +181,7 @@ export function animateDemo(world: World, dt: number, options: DemoAnimationOpti
     });
   }
 
-  if (state.burning) state.burning.onFire = fire && Math.floor(state.elapsed / 6000) % 2 === 1;
+  if (state.burning) setOnFire(world, state.burning, fire && Math.floor(state.elapsed / 6000) % 2 === 1);
 }
 
 /**

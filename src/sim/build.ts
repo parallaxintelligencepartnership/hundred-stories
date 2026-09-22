@@ -21,6 +21,7 @@ import {
   allocId,
   groundLobby,
   log,
+  markStructureChanged,
   rebuildFloorIndex,
   removeRoom,
   removeShaft,
@@ -490,6 +491,7 @@ function doExtendShaft(
     if (added.includes(f)) shaft.stops.add(f);
   }
   world.routingDirty = true;
+  markStructureChanged(world);
   rebuildFloorIndex(world);
 
   const name = rule.label.toLowerCase();
@@ -512,6 +514,7 @@ function doAddCar(world: World, shaftId: number): CommandResult {
 
   shaft.cars.push(makeCar(world, shaft.id, shaft.homeFloor));
   world.routingDirty = true; // routes are planned on the cars, not on the shaft alone
+  markStructureChanged(world);
   log(world, `Added a car to the ${rule.label.toLowerCase()} at ${floorName(shaft.floorMin)}.`);
   return OK;
 }
@@ -527,6 +530,7 @@ function doRemoveCar(world: World, shaftId: number): CommandResult {
 
   shaft.cars.pop();
   world.routingDirty = true;
+  markStructureChanged(world);
   const rule = SHAFTS[shaft.kind];
   log(world, `Removed a car from the ${rule.label.toLowerCase()} at ${floorName(shaft.floorMin)}.`);
   return OK;

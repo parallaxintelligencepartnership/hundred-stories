@@ -1,5 +1,6 @@
 // The tower view: one pixi Application, nine layers, and a sprite pool reconciled
-// against the world every frame. See docs/DESIGN.md section 9 and docs/VISUAL.md.
+// against the world: cars and sims every frame, the static tower when
+// world.structureVersion or the night lit bit moves. See docs/DESIGN.md section 9 and docs/VISUAL.md.
 //
 // The renderer never mutates the world and never touches world.rng: it reads the
 // world, moves sprites, and reports picks back through onPick.
@@ -587,6 +588,7 @@ export async function createRenderer(
   const seenSims = new Set<Id>();
   const seenFires = new Set<Id>();
   const simSlots = new Map<Id, number>();
+  const drawnSims: Sim[] = [];
 
   const ghostSprite = new Sprite();
   ghostSprite.visible = false;
@@ -806,9 +808,26 @@ export async function createRenderer(
     }
   }
 
-  function reconcileShaftsAndCars(w: World, alpha: number): void {
+  // The static tower (floor strips, rooms, slabs, shafts, fire markers) is reconciled only
+  // when the world's structure version, the world itself or the night lit bit moves since
+  // the last full pass. Cars, sims and the overlay are touched every frame.
+  let reconciledWorld: World | null = null;
+  let reconciledVersion = -1;
+  let lastLitState = false;
+
+  function reconcileStaticTower(w: World, night: boolean): void {
+    if (w === reconciledWorld && w.structureVersion === reconciledVersion && night === lastLitState) return;
+    reconciledWorld = w;
+    reconciledVersion = w.structureVersion;
+    lastLitState = night;
+    syncFloorStrips(w);
+    reconcileRooms(w, night);
+    reconcileShafts(w);
+    reconcileFires(w);
+  }
+
+  function reconcileShafts(w: World): void {
     seenShafts.clear();
-    seenCars.clear();
     for (const shaft of w.shafts.values()) {
       seenShafts.add(shaft.id);
       const floors = shaftFloorSpan(shaft);
@@ -825,17 +844,22 @@ export async function createRenderer(
       }
       entry.node.position.set(shaft.x * TILE_PX, floorTopY(shaft.floorMax));
       entry.node.setSize(shaft.width * TILE_PX, floors * FLOOR_PX);
-
-      for (const car of shaft.cars) {
-        seenCars.add(car.id);
-        drawCar(shaft, car, alpha);
-      }
     }
 
     for (const [id, entry] of shaftSprites) {
       if (seenShafts.has(id)) continue;
       entry.node.destroy();
       shaftSprites.delete(id);
+    }
+  }
+
+  function reconcileCars(w: World, alpha: number): void {
+    seenCars.clear();
+    for (const shaft of w.shafts.values()) {
+      for (const car of shaft.cars) {
+        seenCars.add(car.id);
+        drawCar(shaft, car, alpha);
+      }
     }
     for (const [id, entry] of carSprites) {
       if (seenCars.has(id)) continue;
@@ -889,8 +913,11 @@ export async function createRenderer(
   }
 
   function reconcileSims(w: World, alpha: number): void {
-    let visible = 0;
-    for (const sim of w.sims.values()) if (drawn(sim)) visible++;
+    // One pass over every sim: the crowd sample and visibility are decided once here, and
+    // the loop below walks only the sims that are drawn.
+    drawnSims.length = 0;
+    for (const sim of w.sims.values()) if (drawn(sim)) drawnSims.push(sim);
+    const visible = drawnSims.length;
 
     if (!particleMode && visible > PARTICLE_THRESHOLD) enterParticleMode();
     else if (particleMode && visible < PARTICLE_RELEASE) leaveParticleMode();
@@ -908,8 +935,7 @@ export async function createRenderer(
     const viewBottom = camera.y + halfH;
 
     seenSims.clear();
-    for (const sim of w.sims.values()) {
-      if (!drawn(sim)) continue;
+    for (const sim of drawnSims) {
       const sx = sim.pos.x * TILE_PX;
       const sy = simFeetY(sim.pos.floor);
       if (sx < viewLeft || sx > viewRight || sy < viewTop || sy > viewBottom) continue;
@@ -950,6 +976,7 @@ export async function createRenderer(
       entry.node.setSize(SIM_WIDTH_PX, SIM_HEIGHT_PX);
       entry.node.position.set(point.x, point.y);
     }
+    drawnSims.length = 0; // hold no sim past the frame
 
     for (const [id, entry] of simSprites) {
       if (seenSims.has(id)) continue;
@@ -1399,17 +1426,18 @@ export async function createRenderer(
       lastWorld = w;
       const clock = clockOf(w.time.minute);
       const night = isNight(clock.minuteOfDay);
-      syncFloorStrips(w);
-      reconcileRooms(w, night);
-      reconcileShaftsAndCars(w, alpha);
+      reconcileStaticTower(w, night);
+      reconcileCars(w, alpha);
       reconcileSims(w, alpha);
-      reconcileFires(w);
       drawOverlay(w);
     },
     commitMotion,
     resetMotion(): void {
       carMotion.reset();
       simMotion.reset();
+      // A replaced world is always reconciled in full on the next render.
+      reconciledWorld = null;
+      reconciledVersion = -1;
     },
     camera,
     screenToTile,

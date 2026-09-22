@@ -32,6 +32,7 @@ export function createWorld(seed: number): World {
     },
     floorIndex: { rooms: new Map(), shafts: new Map(), builtFloors: new Set() },
     routingDirty: true,
+    structureVersion: 0,
     gameOver: null,
   };
 }
@@ -46,27 +47,51 @@ export function log(world: World, text: string, level: LogEntry['level'] = 'info
   if (world.log.length > 2000) world.log.splice(0, world.log.length - 2000);
 }
 
+/** Tell the renderer the static tower changed. See World.structureVersion. */
+export function markStructureChanged(world: World): void {
+  world.structureVersion += 1;
+}
+
+/**
+ * Set a room's head count. Only the empty or occupied bit shows on screen (a lit window
+ * at night), so the structure version moves only when the count crosses zero.
+ */
+export function setOccupancy(world: World, room: Room, occupancy: number): void {
+  if ((room.occupancy > 0) !== (occupancy > 0)) markStructureChanged(world);
+  room.occupancy = occupancy;
+}
+
+/** Set or clear a room's fire, which tints the room. */
+export function setOnFire(world: World, room: Room, onFire: boolean): void {
+  if (room.onFire !== onFire) markStructureChanged(world);
+  room.onFire = onFire;
+}
+
 export function addRoom(world: World, room: Room): void {
   world.rooms.set(room.id, room);
   world.routingDirty = true;
+  markStructureChanged(world);
   rebuildFloorIndex(world);
 }
 
 export function removeRoom(world: World, roomId: Id): void {
   world.rooms.delete(roomId);
   world.routingDirty = true;
+  markStructureChanged(world);
   rebuildFloorIndex(world);
 }
 
 export function addShaft(world: World, shaft: Shaft): void {
   world.shafts.set(shaft.id, shaft);
   world.routingDirty = true;
+  markStructureChanged(world);
   rebuildFloorIndex(world);
 }
 
 export function removeShaft(world: World, shaftId: Id): void {
   world.shafts.delete(shaftId);
   world.routingDirty = true;
+  markStructureChanged(world);
   rebuildFloorIndex(world);
 }
 

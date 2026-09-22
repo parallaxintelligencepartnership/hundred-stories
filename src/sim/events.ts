@@ -6,7 +6,7 @@ import { EVENTS, STRESS } from './rules';
 import { ROOMS } from './rules';
 import { clockOf, TOWER_WIDTH } from './types';
 import type { ActiveEvent, Command, CommandResult, Id, Room, RoomKind, Sim, World } from './types';
-import { addSim, allocId, groundLobby, log, removeRoom, removeSim, roomsOfKind } from './world';
+import { addSim, allocId, groundLobby, log, removeRoom, removeSim, roomsOfKind, setOccupancy, setOnFire } from './world';
 
 // Defined here because rules.ts has no calendar constants. One tick is one minute.
 const MINUTES_PER_DAY = 1440;
@@ -119,12 +119,12 @@ function evictInto(world: World, room: Room, reason: string): void {
     if (sim.homeRoomId === room.id) sim.homeRoomId = null;
   }
   room.tenants = [];
-  room.occupancy = 0;
+  setOccupancy(world, room, 0);
 }
 
 function destroyRoom(world: World, room: Room, reason: string): void {
   evictInto(world, room, reason);
-  room.onFire = false;
+  setOnFire(world, room, false);
   removeRoom(world, room.id);
 }
 
@@ -133,7 +133,7 @@ function destroyRoom(world: World, room: Room, reason: string): void {
 export function startFire(world: World): void {
   const room = pickTargetRoom(world, 'fire');
   if (!room) return;
-  room.onFire = true;
+  setOnFire(world, room, true);
   world.events.push({
     kind: 'fire',
     roomIds: [room.id],
@@ -156,7 +156,7 @@ function spreadFire(world: World, event: Extract<ActiveEvent, { kind: 'fire' }>)
     }
   }
   for (const room of caught) {
-    room.onFire = true;
+    setOnFire(world, room, true);
     event.roomIds.push(room.id);
     log(world, `The fire spread to the ${describe(room)}.`, 'alert', { roomId: room.id });
   }
@@ -312,7 +312,7 @@ export function tickVip(world: World, event: Extract<ActiveEvent, { kind: 'vip' 
     if (suite) {
       sim.pos = { floor: suite.floor, x: suite.x };
       sim.inRoomId = suite.id;
-      suite.occupancy += 1;
+      setOccupancy(world, suite, suite.occupancy + 1);
       log(world, `The VIP checked into the ${describe(suite)}.`, 'info', { roomId: suite.id, simId: sim.id });
     } else {
       log(world, 'The VIP arrived but the suite was gone.', 'alert', { simId: sim.id });
@@ -327,7 +327,7 @@ export function tickVip(world: World, event: Extract<ActiveEvent, { kind: 'vip' 
   world.stats.vipRating = rating;
   if (suite) {
     suite.tenants = suite.tenants.filter((id) => id !== sim.id);
-    suite.occupancy = Math.max(0, suite.occupancy - 1);
+    setOccupancy(world, suite, Math.max(0, suite.occupancy - 1));
   }
   removeSim(world, sim.id);
   endEvent(world, event);

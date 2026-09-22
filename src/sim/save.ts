@@ -528,8 +528,8 @@ function simForHash(sim: Sim) {
 
 // World keys the hash leaves out on purpose: the log is chatter, rng is hashed as its
 // state number, floorIndex is derived from rooms and shafts, routingDirty is a cache
-// flag, and time is hashed as `minute`.
-type UnhashedWorldKey = 'log' | 'logTotal' | 'rng' | 'floorIndex' | 'routingDirty' | 'time';
+// flag, structureVersion is the renderer's change counter, and time is hashed as `minute`.
+type UnhashedWorldKey = 'log' | 'logTotal' | 'rng' | 'floorIndex' | 'routingDirty' | 'structureVersion' | 'time';
 type HashedWorldKey = Exclude<keyof World, UnhashedWorldKey> | 'minute' | 'rngState';
 
 function byId<T extends { id: number }>(items: Iterable<T>): T[] {

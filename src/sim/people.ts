@@ -24,7 +24,7 @@ import type {
   StressBand,
   World,
 } from './types';
-import { addSim, allocId, log, removeSim, roomsOfKind } from './world';
+import { addSim, allocId, log, removeSim, roomsOfKind, setOccupancy } from './world';
 
 /** Tiles a sim covers in one minute on foot. */
 export const WALK_TILES_PER_MINUTE = 5;
@@ -409,7 +409,7 @@ function enterRoom(world: World, sim: Sim, room: Room): void {
   sim.state = 'inRoom';
   sim.pos = { floor: room.floor, x: roomCenter(room) };
   sim.waitStart = null;
-  room.occupancy += 1;
+  setOccupancy(world, room, room.occupancy + 1);
   const stay = stayMinutesFor(sim, room);
   sim.stayUntil = stay > 0 ? world.time.minute + stay : null;
   if (COMMERCE_KINDS.has(room.kind)) recordVisit(world, room);
@@ -437,7 +437,7 @@ function arriveWithoutRoom(world: World, sim: Sim): void {
 function departRoom(world: World, sim: Sim): void {
   const room = sim.inRoomId !== null ? world.rooms.get(sim.inRoomId) : undefined;
   if (room) {
-    room.occupancy = Math.max(0, room.occupancy - 1);
+    setOccupancy(world, room, Math.max(0, room.occupancy - 1));
     if (sim.kind === 'guest' && HOTEL_KINDS.has(room.kind) && room.tenants.includes(sim.id)) {
       checkOutOfHotel(world, sim, room);
     }
@@ -647,7 +647,7 @@ function staffUpOffice(world: World, office: Room): void {
     const keeper = newSim(world, 'staff', { floor: office.floor, x: roomCenter(office) }, office.id, []);
     keeper.state = 'inRoom';
     keeper.inRoomId = office.id;
-    office.occupancy += 1;
+    setOccupancy(world, office, office.occupancy + 1);
     office.tenants.push(keeper.id);
   }
 }
@@ -771,7 +771,7 @@ function spawnResident(world: World, condo: Room): Sim {
   sim.state = 'inRoom';
   sim.inRoomId = condo.id;
   sim.nextScheduleIndex = schedule.length;
-  condo.occupancy += 1;
+  setOccupancy(world, condo, condo.occupancy + 1);
   return sim;
 }
 
