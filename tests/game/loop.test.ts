@@ -3,6 +3,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createGame, drainTicks } from '../../src/game/game';
 import { writeSave } from '../../src/game/storage';
+import type { Renderer } from '../../src/render/renderer';
 
 // The browser save slot stands in as one in memory string, the same stand-in game.test.ts uses.
 const slot = vi.hoisted(() => ({ text: null as string | null, refuse: false }));
@@ -131,5 +132,166 @@ describe('autosave through the idle slot', () => {
 
     expect(idle.pending).toHaveLength(1); // the in flight guard held: no pile of writes
     expect(writeSave).not.toHaveBeenCalled();
+  });
+});
+
+describe('drainTicks beforeLastTick', () => {
+  it('calls the hook once, immediately before the tick that leaves the accumulator under one', () => {
+    const loop = { accumulator: 5.25 };
+    const events: string[] = [];
+    let ticks = 0;
+    const n = drainTicks(loop, () => events.push(`tick${++ticks}`), () => 0, {
+      maxTicks: 240,
+      maxMs: Infinity,
+      beforeLastTick: () => events.push('hook'),
+    });
+
+    expect(n).toBe(5);
+    expect(events).toEqual(['tick1', 'tick2', 'tick3', 'tick4', 'hook', 'tick5']);
+  });
+
+  it('calls the hook before the last tick the cap allows', () => {
+    const loop = { accumulator: 10 };
+    const events: string[] = [];
+    let ticks = 0;
+    drainTicks(loop, () => events.push(`tick${++ticks}`), () => 0, {
+      maxTicks: 3,
+      maxMs: Infinity,
+      beforeLastTick: () => events.push('hook'),
+    });
+
+    expect(events).toEqual(['tick1', 'tick2', 'hook', 'tick3']);
+  });
+
+  it('does not call the hook when no tick runs', () => {
+    let hooks = 0;
+    const n = drainTicks({ accumulator: 0.9 }, () => {}, () => 0, {
+      maxTicks: 240,
+      maxMs: Infinity,
+      beforeLastTick: () => hooks++,
+    });
+
+    expect(n).toBe(0);
+    expect(hooks).toBe(0);
+  });
+});
+
+const FRAME_MS = 16.667;
+
+/**
+ * A game on a hand wound clock whose visibility the test flips, with a stub renderer that records
+ * every alpha it is handed and the world minute each time the game asks it to commit motion.
+ */
+function gameWithAFrameLoop(hidden: boolean) {
+  const clock = { ms: 0, hidden };
+  const game = createGame(11, {
+    now: () => clock.ms,
+    scheduleIdle: () => () => {},
+    hidden: () => clock.hidden,
+  });
+  const alphas: number[] = [];
+  const commits: number[] = [];
+  const renderer = {
+    render: (_w: unknown, alpha: number) => alphas.push(alpha),
+    commitMotion: () => commits.push(game.world.time.minute),
+    resetMotion: () => {},
+    camera: { reset: () => {}, ensureFloorVisible: () => {} },
+    setGhost: () => {},
+    setSelection: () => {},
+    onPick: () => {},
+    setToolOwnsDrag: () => {},
+    setReducedMotion: () => {},
+    setChrome: () => {},
+  } as unknown as Renderer;
+  game.attach(renderer, { addEventListener: () => {} } as unknown as HTMLElement);
+  /** Wind the clock one frame and run it; say how many ticks it ran. */
+  const frame = (): number => {
+    const before = game.world.time.minute;
+    clock.ms += FRAME_MS;
+    game.frameOnce();
+    return game.world.time.minute - before;
+  };
+  return { game, clock, alphas, commits, frame };
+}
+
+describe('frame driven ticks', () => {
+  it('runs 40 ticks in 60 frames at 4x by day, never two in a frame, with alpha in [0, 1)', () => {
+    const { game, alphas, frame } = gameWithAFrameLoop(false);
+    game.world.time.minute = 12 * 60; // noon: no night multiplier
+    game.setSpeed(4);
+
+    const batches: number[] = [];
+    for (let i = 0; i < 60; i++) batches.push(frame());
+
+    expect(batches.reduce((a, b) => a + b, 0)).toBe(40);
+    expect(Math.max(...batches)).toBeLessThanOrEqual(1);
+    expect(alphas).toHaveLength(60);
+    for (const alpha of alphas) {
+      expect(alpha).toBeGreaterThanOrEqual(0);
+      expect(alpha).toBeLessThan(1);
+    }
+  });
+
+  it('commits motion once per frame with ticks, one minute before the batch ends, at night 4x', () => {
+    const { game, commits, frame } = gameWithAFrameLoop(false);
+    game.world.time.minute = 23 * 60 + 5; // just after 23:00: 320 ticks a second
+    game.setSpeed(4);
+
+    const batches: number[] = [];
+    const finals: number[] = [];
+    for (let i = 0; i < 12; i++) {
+      batches.push(frame());
+      finals.push(game.world.time.minute);
+    }
+
+    // 320 ticks a second is 5.33 a frame: every batch is five or six ticks, and both happen.
+    for (const n of batches) expect([5, 6]).toContain(n);
+    expect(batches).toContain(5);
+    expect(batches).toContain(6);
+    // One commit per frame, each taken with the world one minute short of where the frame ends.
+    expect(commits).toEqual(finals.map((m) => m - 1));
+  });
+
+  it('lets the timer drive the sim while hidden, and not while visible', () => {
+    const { game, clock } = gameWithAFrameLoop(true);
+    game.world.time.minute = 12 * 60;
+    game.setSpeed(1);
+
+    const start = game.world.time.minute;
+    for (let i = 0; i < 20; i++) {
+      clock.ms += 50;
+      game.stepOnce();
+    }
+    expect(game.world.time.minute - start).toBe(10);
+
+    clock.hidden = false;
+    const accumulator = game.accumulator();
+    const minute = game.world.time.minute;
+    clock.ms += 50;
+    game.stepOnce();
+    expect(game.world.time.minute).toBe(minute);
+    expect(game.accumulator()).toBe(accumulator);
+  });
+
+  it('runs at most one tick on the first frame after a hidden second', () => {
+    const { game, clock, frame } = gameWithAFrameLoop(true);
+    game.world.time.minute = 12 * 60;
+    game.setSpeed(1);
+    for (let i = 0; i < 20; i++) {
+      clock.ms += 50;
+      game.stepOnce();
+    }
+
+    clock.hidden = false;
+    expect(frame()).toBeLessThanOrEqual(1);
+  });
+
+  it('neither advances nor renders on a frame while hidden', () => {
+    const { game, alphas, frame } = gameWithAFrameLoop(true);
+    game.world.time.minute = 12 * 60;
+    game.setSpeed(4);
+
+    for (let i = 0; i < 10; i++) expect(frame()).toBe(0);
+    expect(alphas).toHaveLength(0);
   });
 });

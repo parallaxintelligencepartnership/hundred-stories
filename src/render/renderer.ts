@@ -49,6 +49,7 @@ import {
   type FingerPair,
   type Point,
 } from './input';
+import { Motion, TELEPORT_TILES } from './interpolate';
 import { createSky, isNight, skyBackground, type Sky } from './sky';
 
 export interface PickHit {
@@ -74,7 +75,15 @@ export interface Selection {
 }
 
 export interface Renderer {
+  /** Draw the world; alpha in [0, 1] is how far each moving thing is from its commit to its target. */
   render(world: World, alpha: number): void;
+  /**
+   * Snapshot every drawn sim and car where it stands now. The game calls this immediately before
+   * the last tick of a batch, so the next render lerps across that one tick.
+   */
+  commitMotion(world: World): void;
+  /** Forget every snapshot, for a world that was replaced (a load, a new game). */
+  resetMotion(): void;
   camera: Camera;
   screenToTile(sx: number, sy: number): { floor: number; x: number };
   setGhost(g: null | Ghost): void;
@@ -143,7 +152,7 @@ const STRIP_BELOW = 0x7d818a;
 const STRIP_EDGE = 0x333333;
 const STRIP_CEILING = 0xcfcfcf;
 const DOOR_HOLD_MS = 120; // minimum time the open door texture stays up
-const TELEPORT_PX = 12 * TILE_PX; // a jump past this is a teleport, so snap instead of lerp
+const TELEPORT_PX = TELEPORT_TILES * TILE_PX; // a jump past this in one tick is a teleport, so snap instead of lerp
 const FRAME_GRACE_MS = 2000; // after this the opening framing never reasserts itself
 
 const SIM_KINDS: readonly SimKind[] = ['worker', 'resident', 'guest', 'shopper', 'diner', 'staff', 'visitor', 'vip'];
@@ -185,14 +194,6 @@ const FALLBACK_BAND_COLORS: Record<StressBand, number> = {
   pink: 0xff9ad5,
   red: 0xff4d4d,
 };
-
-interface Interp {
-  px: number;
-  py: number;
-  cx: number;
-  cy: number;
-  minute: number; // sim minute the current target belongs to; a new minute with the same target means the sprite has settled
-}
 
 interface RoomEntry {
   node: Sprite;
@@ -576,9 +577,8 @@ export async function createRenderer(
   const simSprites = new Map<Id, SimEntry>();
   const fireGraphics = new Map<Id, Graphics>();
   const doorHold = new Map<Id, number>(); // car id -> time the open door texture may end
-  const interp = new Map<string, Interp>();
-  const simInterp = new Map<Id, Interp>();
-  let renderMinute = 0;
+  const carMotion = new Motion<Id>(TELEPORT_PX);
+  const simMotion = new Motion<Id>(TELEPORT_PX);
 
   // Per-frame scratch sets/maps, hoisted so reconcile loops do not allocate every frame.
   const seenRooms = new Set<Id>();
@@ -673,55 +673,38 @@ export async function createRenderer(
     particleMode = false;
   }
 
-  function interpolated<K>(
-    map: Map<K, Interp>,
-    key: K,
-    x: number,
-    y: number,
-    alpha: number,
-  ): { x: number; y: number } {
-    let entry = map.get(key);
-    if (!entry) {
-      entry = { px: x, py: y, cx: x, cy: y, minute: renderMinute };
-      map.set(key, entry);
-    } else if (entry.cx === x && entry.cy === y) {
-      // Same target on a later sim minute: the thing has stopped. Settle the previous position on it,
-      // otherwise every tick would re-lerp from where it was a minute ago and a parked car bounces.
-      if (entry.minute !== renderMinute) {
-        entry.px = x;
-        entry.py = y;
-        entry.minute = renderMinute;
-      }
-    } else {
-      entry.minute = renderMinute;
-      // A jump this big is a teleport, not a step: entering from an entrance,
-      // alighting from a car, or several ticks landing in one frame. Snap.
-      if (Math.abs(x - entry.cx) > TELEPORT_PX || Math.abs(y - entry.cy) > TELEPORT_PX) {
-        entry.px = x;
-        entry.py = y;
-      } else {
-        entry.px = entry.cx;
-        entry.py = entry.cy;
-      }
-      entry.cx = x;
-      entry.cy = y;
-    }
-    if (reducedMotion) return { x: entry.cx, y: entry.cy };
-    const t = alpha < 0 ? 0 : alpha > 1 ? 1 : alpha;
-    return { x: entry.px + (entry.cx - entry.px) * t, y: entry.py + (entry.cy - entry.py) * t };
+  /** Target this key at (x, y) and return where to draw it at alpha. */
+  function interpolated(motion: Motion<Id>, key: Id, x: number, y: number, alpha: number): { x: number; y: number } {
+    motion.target(key, x, y);
+    if (reducedMotion) return { x, y };
+    return motion.at(key, alpha)!;
   }
 
   /** Park an entity at a fixed point so it does not lerp away from it next frame. */
-  function interpolateFrom<K>(map: Map<K, Interp>, key: K, x: number, y: number): { x: number; y: number } {
-    const entry = map.get(key);
-    if (!entry) map.set(key, { px: x, py: y, cx: x, cy: y, minute: renderMinute });
-    else {
-      entry.px = x;
-      entry.py = y;
-      entry.cx = x;
-      entry.cy = y;
-    }
+  function parked(motion: Motion<Id>, key: Id, x: number, y: number): { x: number; y: number } {
+    motion.park(key, x, y);
     return { x, y };
+  }
+
+  function carX(shaft: Shaft): number {
+    return (shaft.x + shaft.width / 2) * TILE_PX;
+  }
+
+  function carY(car: Car): number {
+    return floorYFloat(car.y) + FLOOR_PX - SLAB_TOP_PX;
+  }
+
+  function commitMotion(w: World): void {
+    for (const shaft of w.shafts.values()) {
+      const x = carX(shaft);
+      for (const car of shaft.cars) carMotion.commit(car.id, x, carY(car));
+    }
+    // Only a walking sim is lerped; a sim in a room is parked on its slot by the render anyway.
+    // commit ignores sims without an entry, so sims off screen cost a map lookup and no memory.
+    for (const sim of w.sims.values()) {
+      if (!drawn(sim) || !simMoves(sim)) continue;
+      simMotion.commit(sim.id, sim.pos.x * TILE_PX, simFeetY(sim.pos.floor));
+    }
   }
 
   // Built floor extents. Rooms never move once built, so the cache only has to
@@ -859,7 +842,7 @@ export async function createRenderer(
       entry.node.destroy();
       carSprites.delete(id);
       doorHold.delete(id);
-      interp.delete(`car${id}`);
+      carMotion.forget(id);
     }
   }
 
@@ -893,13 +876,7 @@ export async function createRenderer(
       entry.kind = shaft.kind;
       entry.doorsOpen = doorsOpen;
     }
-    const target = interpolated(
-      interp,
-      `car${car.id}`,
-      (shaft.x + shaft.width / 2) * TILE_PX,
-      floorYFloat(car.y) + FLOOR_PX - SLAB_TOP_PX,
-      alpha,
-    );
+    const target = interpolated(carMotion, car.id, carX(shaft), carY(car), alpha);
     entry.node.position.set(target.x, target.y);
   }
 
@@ -941,8 +918,8 @@ export async function createRenderer(
       const simKey = simKeyOf(kind, band, frame);
       const point = simMoves(sim)
         ? // Feet on the slab top, not the bottom of the floor band.
-          interpolated(simInterp, sim.id, sim.pos.x * TILE_PX, simFeetY(sim.pos.floor), alpha)
-        : interpolateFrom(simInterp, sim.id, ...inRoomSlot(w, sim, simSlots));
+          interpolated(simMotion, sim.id, sim.pos.x * TILE_PX, simFeetY(sim.pos.floor), alpha)
+        : parked(simMotion, sim.id, ...inRoomSlot(w, sim, simSlots));
 
       const atlasTile = particleMode && particles && particleAtlas ? particleAtlas.get(simKey) : undefined;
       if (particles && atlasTile) {
@@ -978,14 +955,14 @@ export async function createRenderer(
       if (seenSims.has(id)) continue;
       entry.node.destroy();
       simSprites.delete(id);
-      simInterp.delete(id);
+      simMotion.forget(id);
     }
     if (particles) {
       for (const [id, particle] of simParticles) {
         if (seenSims.has(id)) continue;
         particles.removeParticle(particle);
         simParticles.delete(id);
-        simInterp.delete(id);
+        simMotion.forget(id);
       }
     }
   }
@@ -1420,7 +1397,6 @@ export async function createRenderer(
   const renderer: Renderer = {
     render(w: World, alpha: number): void {
       lastWorld = w;
-      renderMinute = w.time.minute;
       const clock = clockOf(w.time.minute);
       const night = isNight(clock.minuteOfDay);
       syncFloorStrips(w);
@@ -1429,6 +1405,11 @@ export async function createRenderer(
       reconcileSims(w, alpha);
       reconcileFires(w);
       drawOverlay(w);
+    },
+    commitMotion,
+    resetMotion(): void {
+      carMotion.reset();
+      simMotion.reset();
     },
     camera,
     screenToTile,

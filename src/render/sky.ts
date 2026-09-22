@@ -165,9 +165,12 @@ export function createSky(layers: SkyLayers): Sky {
   let lastH = -1;
   let lastTop = NaN;
   let lastBottom = NaN;
+  // The gradient on screen now. A FillGradient owns a texture, so the old one is destroyed once
+  // the new one is drawn, or every colour change would leak one.
+  let fill: FillGradient | null = null;
 
   function redrawGradient(top: number, bottom: number, viewW: number, viewH: number): void {
-    const fill = new FillGradient({
+    const next = new FillGradient({
       type: 'linear',
       start: { x: 0, y: 0 },
       end: { x: 0, y: 1 },
@@ -178,7 +181,9 @@ export function createSky(layers: SkyLayers): Sky {
       ],
     });
     gradient.clear();
-    gradient.rect(0, 0, viewW, viewH).fill(fill);
+    gradient.rect(0, 0, viewW, viewH).fill(next);
+    fill?.destroy();
+    fill = next;
   }
 
   return {
@@ -204,6 +209,8 @@ export function createSky(layers: SkyLayers): Sky {
     },
     destroy(): void {
       gradient.destroy();
+      fill?.destroy();
+      fill = null;
       skyline.destroy();
       ground.destroy();
     },

@@ -13,6 +13,8 @@ import { readSave, stashUnreadable, writeSave } from './storage';
 
 const TICKS_PER_SECOND_AT_1X = 10;
 const NIGHT_MULTIPLIER = 8;
+/** The largest interpolation alpha while the clock runs: the frame never reaches the next tick's position early. */
+const ALPHA_MAX = 1 - 1e-9;
 const MAX_TICKS_PER_FRAME = 240;
 // A step drains missed ticks until this much wall time has passed, then drops the rest, so a
 // slow tick becomes slow motion instead of a freeze.
@@ -65,10 +67,20 @@ function clampBand(band: number): number {
   return Math.max(BAND_MIN, Math.min(BAND_MAX, band));
 }
 
-/** Wall time and the idle slot the loop runs on, so a test can drive both. */
+/** Wall time, the idle slot and the tab's visibility the loop runs on, so a test can drive all three. */
 export interface GameClock {
   now(): number;
   scheduleIdle(run: () => void): () => void;
+  /** True while the tab is hidden: the timer drives the sim then, the frame loop otherwise. */
+  hidden(): boolean;
+}
+
+/**
+ * Whether the tab is hidden. With no document at all (node, the tests) it counts as hidden, so
+ * the timer step, which the loop tests drive through stepOnce, keeps driving the sim.
+ */
+export function documentHidden(): boolean {
+  return typeof document === 'undefined' || document.hidden;
 }
 
 /**
@@ -86,6 +98,18 @@ export function scheduleIdle(run: () => void): () => void {
   return () => clearTimeout(handle);
 }
 
+export interface DrainLimits {
+  maxTicks: number;
+  maxMs: number;
+  /**
+   * Called at most once per drain, immediately before the tick that will leave the accumulator
+   * under one, or before the last tick maxTicks allows. The renderer snapshots positions here so
+   * it can lerp across that last tick. The time box is still checked after a tick, so a batch
+   * the box cuts short may end without this having been called.
+   */
+  beforeLastTick?: () => void;
+}
+
 /**
  * Drain the whole ticks the accumulator has earned, and say how many ran.
  *
@@ -97,11 +121,16 @@ export function drainTicks(
   loop: { accumulator: number },
   runTick: () => void,
   now: () => number,
-  limits = { maxTicks: MAX_TICKS_PER_FRAME, maxMs: MAX_STEP_MS },
+  limits: DrainLimits = { maxTicks: MAX_TICKS_PER_FRAME, maxMs: MAX_STEP_MS },
 ): number {
   const start = now();
   let n = 0;
+  let hooked = false;
   while (loop.accumulator >= 1 && n < limits.maxTicks) {
+    if (!hooked && limits.beforeLastTick && (loop.accumulator < 2 || n + 1 === limits.maxTicks)) {
+      hooked = true;
+      limits.beforeLastTick();
+    }
     runTick();
     loop.accumulator -= 1;
     n++;
@@ -120,12 +149,17 @@ export interface Game extends GameApi {
   stop(): void;
   /** Runs one timer step, the thing setInterval calls; exported for the loop tests. */
   stepOnce(): void;
+  /** Runs one animation frame, the thing requestAnimationFrame calls, without scheduling the next; for the loop tests. */
+  frameOnce(): void;
+  /** The fraction of the next tick earned so far (whole ticks while a drain is capped); for the loop tests. */
+  accumulator(): number;
 }
 
 export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
   const time: GameClock = {
     now: clock.now ?? (() => performance.now()),
     scheduleIdle: clock.scheduleIdle ?? scheduleIdle,
+    hidden: clock.hidden ?? documentHidden,
   };
   let world: World = createWorld(seed);
   let tool: Tool = { kind: 'none' };
@@ -196,22 +230,44 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
   // Hoisted so a step allocates nothing: world is read through the closure, so a load or a new
   // game still ticks the world the shell holds now.
   const runTick = (): void => tick(world);
-  // The sim is driven by a timer, not by requestAnimationFrame, so it keeps running when the tab is
-  // hidden (Chrome pauses rAF in background tabs). Rendering stays on rAF.
-  function step(): void {
+  // The renderer snapshots positions immediately before the last tick of each batch, so the next
+  // frames lerp across exactly that one tick. Hoisted with the limits so a drain allocates nothing.
+  const commitMotion = (): void => renderer?.commitMotion(world);
+  const drainLimits: DrainLimits = { maxTicks: MAX_TICKS_PER_FRAME, maxMs: MAX_STEP_MS, beforeLastTick: commitMotion };
+
+  /**
+   * Earn ticks for the wall time since the last call and run them; say how many ran.
+   *
+   * dt is capped at one second, so a driver that stalls longer than that (a throttled hidden tab)
+   * loses the rest: hidden progress is best effort, and this does not try to catch it up.
+   */
+  function advance(): number {
     const now = time.now();
     const dt = Math.min(1, (now - last) / 1000 || 0);
     last = now;
-    if (speed > 0 && !world.gameOver) {
-      const rate = TICKS_PER_SECOND_AT_1X * speed * (isNight() ? NIGHT_MULTIPLIER : 1);
-      loop.accumulator += dt * rate;
-      const minuteBefore = world.time.minute;
-      const n = drainTicks(loop, runTick, time.now);
-      if (n > 0) {
-        notify();
-        maybeAutosave(minuteBefore, world.time.minute);
-      }
+    if (speed === 0 || world.gameOver) return 0;
+    const rate = TICKS_PER_SECOND_AT_1X * speed * (isNight() ? NIGHT_MULTIPLIER : 1);
+    loop.accumulator += dt * rate;
+    const minuteBefore = world.time.minute;
+    const n = drainTicks(loop, runTick, time.now, drainLimits);
+    if (n > 0) {
+      notify();
+      maybeAutosave(minuteBefore, world.time.minute);
     }
+    return n;
+  }
+
+  // While the tab is visible the frame loop drives the sim, so ticks land on frame boundaries and
+  // the interpolation alpha is exact. Chrome pauses rAF in hidden tabs, so there the timer takes
+  // over. Exactly one of the two advances at any moment.
+  function step(): void {
+    if (!time.hidden()) return;
+    advance();
+  }
+
+  function onVisibilityChange(): void {
+    // Coming back, start the clock from now: the frame loop must not earn the hidden gap again.
+    if (!time.hidden()) last = time.now();
   }
 
   // One save per batch of ticks, and never two at once: a burst of ticks that crosses several
@@ -248,11 +304,17 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
 
   function frame(): void {
     raf = requestAnimationFrame(frame);
-    // Interpolate against real time since the last timer step so sprites glide at the display rate
-    // instead of stepping at the timer rate.
-    const elapsed = speed > 0 && !world.gameOver ? (time.now() - last) / 1000 : 0;
-    const rate = TICKS_PER_SECOND_AT_1X * speed * (isNight() ? NIGHT_MULTIPLIER : 1);
-    renderer?.render(world, Math.min(1, loop.accumulator + elapsed * rate));
+    drawFrame();
+  }
+
+  /** Advance the sim and render it. rAF should not fire in a hidden tab, but a throttled browser can. */
+  function drawFrame(): void {
+    if (time.hidden()) return;
+    advance();
+    // alpha is the fraction of the next tick already earned: each sprite reaches its target just
+    // as that tick fires. Paused or over, everything stands on its target.
+    const alpha = speed === 0 || world.gameOver ? 1 : Math.min(Math.max(loop.accumulator, 0), ALPHA_MAX);
+    renderer?.render(world, alpha);
   }
 
   /** The shaft standing on this tile, if any. Tapping one with an elevator in hand extends it. */
@@ -686,6 +748,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
       if (!res.ok) return res;
       world = res.world;
       selection = null;
+      renderer?.resetMotion(); // no sprite may lerp from the old tower into the new one
       renderer?.setSelection(null);
       notify();
       return { ok: true };
@@ -693,6 +756,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     newGame(newSeed) {
       world = createWorld(newSeed);
       selection = null;
+      renderer?.resetMotion();
       tool = { kind: 'none' };
       pending = null;
       renderer?.setSelection(null);
@@ -754,13 +818,19 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     stepOnce() {
       step();
     },
+    frameOnce() {
+      drawFrame();
+    },
+    accumulator: () => loop.accumulator,
     start() {
       if (raf) return;
       last = time.now();
       timer = window.setInterval(step, 50);
       raf = requestAnimationFrame(frame);
+      document.addEventListener('visibilitychange', onVisibilityChange);
     },
     stop() {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       cancelAnimationFrame(raf);
       window.clearInterval(timer);
       cancelAutosave?.();
