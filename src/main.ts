@@ -60,8 +60,9 @@ export async function boot(app: HTMLElement, deps: BootDeps = defaultDeps): Prom
     return;
   }
   game.attach(renderer, view);
-  const ui = deps.createUi(uiRoot, game, renderer);
-  game.subscribe(() => ui.update());
+  // The ui subscribes its own update() to the game and drops it on destroy, so boot adds
+  // no second subscription: one notify is one HUD refresh.
+  deps.createUi(uiRoot, game, renderer);
   game.start();
 }
 

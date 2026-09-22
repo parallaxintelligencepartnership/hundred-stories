@@ -19,6 +19,7 @@ import {
   starsTitle,
 } from './format';
 import { chromeInsets, isSheetLayout, placementBoxes } from './layout';
+import type { Box } from './layout';
 import {
   button,
   createFinancesPanel,
@@ -145,6 +146,18 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   let chromeBand = { top: 0, bottom: 0 };
   /** The frame loop that follows the ghost. It only runs while there is a ghost to follow. */
   let placementRaf = 0;
+  /**
+   * The sizes the chip and the bar are placed with, measured once and kept. Reading them is a
+   * forced layout, so they are measured again only after something that can change them: new
+   * words on the chip or the bar, either one shown or hidden, a resize, a font arriving. null
+   * means measure before the next use. A pan or a zoom moves the ghost, not these, and the
+   * ghost's rect is the renderer's own arithmetic, so following it measures nothing.
+   */
+  let viewSize: Box | null = null;
+  let chipSize: Box | null = null;
+  let barSize: Box | null = null;
+  /** Where the chip and the bar were last put, so an unchanged frame writes no styles. */
+  let placedKey = '';
   const timers = new Set<ReturnType<typeof setTimeout>>();
 
   const shell = el('div', 'hs-ui');
@@ -313,12 +326,16 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   // into the band the camera frames the street in.
   chromeWatch = watchChrome({ strip: top, palette, ticker, shell }, (topPx, bottomPx) => {
     chromeBand = { top: topPx, bottom: bottomPx };
+    viewSize = null; // the chrome moved, so the view may have too
     game.setChrome(topPx, bottomPx);
     refreshPlacement();
   });
   lastLogTotal = game.world.logTotal;
   const unsubscribe = game.subscribe(() => update());
   window.addEventListener('keydown', onKeyDown);
+  window.addEventListener('resize', onPlacementResize);
+  const fonts = typeof document.fonts?.addEventListener === 'function' ? document.fonts : null;
+  fonts?.addEventListener('loadingdone', onPlacementResize);
   update();
 
   function update(): void {
@@ -389,15 +406,15 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
    */
   function refreshPlacement(): void {
     const placement = game.getPlacement();
-    chip.classList.toggle('is-hidden', placement === null);
-    bar.classList.toggle('is-hidden', placement?.pending !== true);
+    if (toggleClass(chip, 'is-hidden', placement === null)) chipSize = null;
+    if (toggleClass(bar, 'is-hidden', placement?.pending !== true)) barSize = null;
     if (!placement) {
       stopPlacementLoop();
       return;
     }
 
-    setText(chipText, placementChipText(placement));
-    chip.classList.toggle('is-alert', !placement.ok);
+    if (setText(chipText, placementChipText(placement))) chipSize = null;
+    if (toggleClass(chip, 'is-alert', !placement.ok)) chipSize = null;
 
     if (placement.pending) {
       // An extension is tied to its shaft's column, so sideways is not on offer.
@@ -408,7 +425,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
       describe(upButton, '\u25b2', arrows.up);
       describe(downButton, '\u25bc', arrows.down);
       const build = placementBuildLabels(placement);
-      setText(buildButton, build.text);
+      if (setText(buildButton, build.text)) barSize = null;
       buildButton.disabled = !placement.ok;
       buildButton.title = build.title;
       buildButton.setAttribute('aria-label', build.title);
@@ -419,7 +436,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   }
 
   function describe(node: HTMLButtonElement, glyph: string, description: string): void {
-    setText(node, glyph);
+    if (setText(node, glyph)) barSize = null;
     node.title = description;
     node.setAttribute('aria-label', description);
   }
@@ -433,20 +450,37 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   function positionPlacement(): void {
     const ghost = game.getPlacementRect();
     if (!ghost) return;
-    const view = shell.getBoundingClientRect();
-    if (view.width <= 0 || view.height <= 0) return;
+    if (!viewSize) {
+      const view = sizeOf(shell);
+      if (view.width <= 0 || view.height <= 0) return; // not laid out yet: measure next time
+      viewSize = view;
+    }
+    chipSize ??= sizeOf(chip);
+    const showBar = !bar.classList.contains('is-hidden');
+    if (showBar) barSize ??= sizeOf(bar);
     const boxes = placementBoxes({
       ghost,
-      chip: sizeOf(chip),
-      bar: bar.classList.contains('is-hidden') ? null : sizeOf(bar),
-      view: { width: view.width, height: view.height },
+      chip: chipSize,
+      bar: showBar ? barSize : null,
+      view: viewSize,
       chrome: chromeBand,
     });
+    const key = `${boxes.chip.left},${boxes.chip.top},${boxes.bar ? `${boxes.bar.left},${boxes.bar.top}` : '-'}`;
+    if (key === placedKey) return;
+    placedKey = key;
     chip.style.left = `${boxes.chip.left}px`;
     chip.style.top = `${boxes.chip.top}px`;
     if (!boxes.bar) return;
     bar.style.left = `${boxes.bar.left}px`;
     bar.style.top = `${boxes.bar.top}px`;
+  }
+
+  /** The view, a media query or a font changed under the chip and the bar: measure them again. */
+  function onPlacementResize(): void {
+    viewSize = null;
+    chipSize = null;
+    barSize = null;
+    refreshPlacement();
   }
 
   // A pan or a pinch moves the ghost without telling anyone, so the chip and the bar follow
@@ -663,6 +697,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
       stopPlacementLoop();
       unsubscribe();
       window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('resize', onPlacementResize);
+      fonts?.removeEventListener('loadingdone', onPlacementResize);
       chromeWatch?.disconnect();
       for (const timer of timers) clearTimeout(timer);
       timers.clear();
@@ -754,8 +790,18 @@ function sizeOf(node: HTMLElement): { width: number; height: number } {
   return { width: box.width, height: box.height };
 }
 
-function setText(node: HTMLElement, text: string): void {
-  if (node.textContent !== text) node.textContent = text;
+/** Write the text only if it differs. True when it did, which is when the node may have resized. */
+function setText(node: HTMLElement, text: string): boolean {
+  if (node.textContent === text) return false;
+  node.textContent = text;
+  return true;
+}
+
+/** Set a class only if it differs. True when it did. */
+function toggleClass(node: HTMLElement, name: string, on: boolean): boolean {
+  if (node.classList.contains(name) === on) return false;
+  node.classList.toggle(name, on);
+  return true;
 }
 
 function setPressed(node: HTMLElement, pressed: boolean): void {

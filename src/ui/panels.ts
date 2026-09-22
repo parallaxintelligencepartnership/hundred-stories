@@ -13,6 +13,7 @@ import type {
   Command,
   CommandResult,
   Id,
+  LogEntry,
   Room,
   RoomKind,
   Shaft,
@@ -255,15 +256,16 @@ function roomPanel(roomId: Id, game: GameApi, ctx: PanelContext): PanelElement {
         ? `${formatCount(room.occupancy)} of ${formatCount(rule.capacity)}`
         : formatCount(room.occupancy),
     );
-    const wanted: HTMLSpanElement[] = [];
-    if (room.vacant) wanted.push(flag('Vacant'));
-    if (room.dirty) wanted.push(flag('Needs cleaning'));
-    if (room.infested) wanted.push(flag('Cockroaches', true));
-    if (room.onFire) wanted.push(flag('On fire', true));
-    const next = wanted.map((f) => f.textContent).join('|');
+    // The string is compared first, so a refresh that changes nothing builds nothing.
+    const wanted: [string, boolean][] = [];
+    if (room.vacant) wanted.push(['Vacant', false]);
+    if (room.dirty) wanted.push(['Needs cleaning', false]);
+    if (room.infested) wanted.push(['Cockroaches', true]);
+    if (room.onFire) wanted.push(['On fire', true]);
+    const next = wanted.map(([label]) => label).join('|');
     if (flags.dataset['flags'] !== next) {
       flags.dataset['flags'] = next;
-      flags.replaceChildren(...wanted);
+      flags.replaceChildren(...wanted.map(([label, alert]) => flag(label, alert)));
     }
     if (rentValue) setText(rentValue, rentText(room));
     if (rentMinus) rentMinus.disabled = room.rent <= RENT.min;
@@ -647,33 +649,50 @@ export function createFinancesPanel(game: GameApi, ctx: PanelContext): PanelElem
 
 // -------------------------------------------------------------- log panel
 
+/** The log panel shows this many of the newest lines, newest on top. */
+export const LOG_PANEL_LINES = 200;
+
 export function createLogPanel(game: GameApi, ctx: PanelContext): PanelElement {
   const { panel, body } = shell('Event log', ctx);
   const list = el('ul', 'hs-log-list');
   body.append(list);
 
+  const item = (entry: LogEntry): HTMLLIElement => {
+    const node = el('li', `hs-log-item is-${entry.level}`);
+    node.append(el('span', 'hs-log-time', formatTimestamp(entry.minute)), el('span', 'hs-log-text', entry.text));
+    return node;
+  };
+
   let shown = -1;
+  /** The log array the list was built from. A load swaps it, and then the old lines are not ours. */
+  let shownLog: readonly LogEntry[] | null = null;
+  let empty = false;
   const refresh = (): void => {
     const log = game.world.log;
     const total = game.world.logTotal;
-    if (shown === total) return;
+    if (shown === total && shownLog === log) return;
+    const fresh = total - shown;
+    const rebuild = shownLog !== log || shown < 0 || fresh < 0 || fresh >= LOG_PANEL_LINES || fresh > log.length;
     shown = total;
-    const items = log
-      .slice(-200)
-      .reverse()
-      .map((entry) => {
-        const item = el('li', `hs-log-item is-${entry.level}`);
-        item.append(
-          el('span', 'hs-log-time', formatTimestamp(entry.minute)),
-          el('span', 'hs-log-text', entry.text),
-        );
-        return item;
-      });
-    if (items.length === 0) {
-      list.replaceChildren(el('li', 'hs-log-item', 'Nothing has happened yet.'));
+    shownLog = log;
+    if (rebuild) {
+      const items = log.slice(-LOG_PANEL_LINES).reverse().map(item);
+      empty = items.length === 0;
+      list.replaceChildren(...(empty ? [el('li', 'hs-log-item', 'Nothing has happened yet.')] : items));
       return;
     }
-    list.replaceChildren(...items);
+    // Only the lines that landed since the last refresh are built. Oldest first, each on
+    // top, so the newest ends up first; the oldest past the cap drop off the bottom.
+    if (fresh === 0) return;
+    if (empty) {
+      list.replaceChildren();
+      empty = false;
+    }
+    for (let i = log.length - fresh; i < log.length; i += 1) {
+      const entry = log[i];
+      if (entry) list.prepend(item(entry));
+    }
+    while (list.children.length > LOG_PANEL_LINES) list.lastElementChild?.remove();
   };
   refresh();
   panel.refresh = refresh;

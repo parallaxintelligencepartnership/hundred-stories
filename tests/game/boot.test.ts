@@ -82,6 +82,39 @@ describe('boot', () => {
     expect(view?.textContent).not.toBe('This browser cannot draw the tower. WebGL is required.');
   });
 
+  it('one notify is one ui update: boot leaves the subscription to the ui', async () => {
+    const subscribers = new Set<() => void>();
+    const notify = (): void => subscribers.forEach((cb) => cb());
+    const game = {
+      world: { log: [], time: { minute: 0 } },
+      load: async () => ({ ok: false, reason: 'none' }),
+      attach: () => {},
+      start: () => {},
+      subscribe(cb: () => void) {
+        subscribers.add(cb);
+        return () => subscribers.delete(cb);
+      },
+    };
+    let updates = 0;
+    await boot(
+      fakeApp(),
+      baseDeps({
+        createGame: (() => game) as never,
+        // Stands in for the real createUi, which subscribes its own update() once.
+        createUi: ((_root: HTMLElement, g: typeof game) => {
+          const update = (): void => {
+            updates += 1;
+          };
+          g.subscribe(update);
+          return { update, destroy: () => {} };
+        }) as never,
+      }),
+    );
+    updates = 0;
+    notify();
+    expect(updates).toBe(1);
+  });
+
   it('shows the offline first-load message when offline with no service worker controller', async () => {
     const app = fakeApp();
     await boot(app, baseDeps({ online: () => false, hasController: () => false }));
