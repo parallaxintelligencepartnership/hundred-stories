@@ -5,7 +5,7 @@ npm run dev (vite; landing on http://localhost:5173, the game on http://localhos
 
 ## Test
 npm test (vitest run); one file: npx vitest run <path>; npm run typecheck (tsc --noEmit)
-benchmarks: see scripts/bench/README.md (npx vite-node@6.0.0 scripts/bench/bench3.ts)
+benchmarks: see scripts/bench/README.md (npx vite-node@6.0.0 scripts/bench/bench3.ts prints a 09:00 row and a `<label>-evening` 17:30 row per tower; scripts/bench/hash.ts prints the six hashes a performance change must not move)
 
 ## Layout
 | Path | What lives there |
@@ -19,10 +19,10 @@ benchmarks: see scripts/bench/README.md (npx vite-node@6.0.0 scripts/bench/bench
 | src/main.ts | entry point: reads the seed from the query string, boots game, renderer and UI, shows the WebGL message on failure; ?smoke boots the demo world instead |
 | src/sim/ | the pure simulation, no DOM: rules.ts tables, types.ts and the clock, tick.ts tick order, build, economy, elevators, evaluation, events, people, routing, stars, rng |
 | src/sim/save.ts | save format v2 (v1 still loads with default car settings): serialize, deserialize with its refusal reasons, and the FNV-1a world hash |
-| src/game/game.ts | game shell: owns the world, the timer loop, tools, pointer input, save/load/export/import wiring |
+| src/game/game.ts | game shell: owns the world and the loop (ticks drain from requestAnimationFrame while visible, a 50 ms timer only while hidden, a visibilitychange listener between start and stop), tools, pointer input, save/load/export/import wiring |
 | src/game/api.ts | the contract the UI is allowed to use |
 | src/game/storage.ts | the browser save slot: IndexedDB first, localStorage as the fallback |
-| src/render/ | PixiJS scene: renderer.ts (rooms, shafts, then a connector layer on top), camera.ts, input.ts press, tap, wheel and pinch classification, art.ts procedural sprites, sky.ts, smoke.ts hand built demo world (also drives the landing hero) |
+| src/render/ | PixiJS scene: renderer.ts (rooms, shafts, then a connector layer on top; the static tower reconciled only when world.structureVersion or the lit state moves), interpolate.ts (Motion: pre-tick snapshot, lerp at the fractional accumulator, teleport snap), camera.ts, input.ts press, tap, wheel and pinch classification, art.ts procedural sprites, sky.ts, smoke.ts hand built demo world (also drives the landing hero) |
 | src/ui/ | DOM overlay: ui.ts shell, input and notices, panels.ts HUD panels including save, export and import, format.ts, ui.css |
 | public/icons/, scripts/make-icons.mjs | PWA icons and the script that draws them |
 | public/og.png, scripts/make-og.mjs | the 1200x630 link preview card and the dependency free script that draws it |
@@ -30,7 +30,7 @@ benchmarks: see scripts/bench/README.md (npx vite-node@6.0.0 scripts/bench/bench
 | vite.config.ts | Vite build (three page inputs), the vitest include glob, and the vite-plugin-pwa manifest and service worker, scoped to /play/ |
 | 404.html | the custom 404 page, built as a Vite input; served by Workers static assets via not_found_handling in wrangler.jsonc |
 | wrangler.jsonc | Cloudflare Workers static-assets config: dist as the asset directory, the 404 page, custom domain routes for hundredstories.xyz and www, workers_dev and preview_urls disabled |
-| tests/ | vitest suite: sim/ unit tests, scenarios/ scripted tower runs plus helpers.ts, render/, ui/, site/, harness.test.ts |
+| tests/ | vitest suite: sim/ unit tests, scenarios/ scripted tower runs plus helpers.ts, game/ (loop.test.ts drives the frame loop on an injected clock), render/ (stub-renderer harness in reconcile.test.ts), ui/ (fake-dom.ts, a node DOM stand-in), site/, share/, harness.test.ts |
 | deploy/ | pi3 static stack: compose.yml, nginx.conf, deploy.sh with rollback, README runbook, .env.example |
 | docs/ | BRIEF-AGENTS.md implementer brief, DESIGN.md rules and tick order, VISUAL.md art direction |
 | dist/ | build output, gitignored; rebuilt by npm run build |

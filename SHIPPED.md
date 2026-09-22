@@ -9,7 +9,7 @@ Requirements: Node 26 (pinned in `.nvmrc`). No environment variables.
 ```bash
 npm ci
 npm run dev       # landing on http://localhost:5173/, game on http://localhost:5173/play/
-npm test          # vitest run: 621 tests, 35 files
+npm test          # vitest run: 672 tests, 40 files
 npm run build     # tsc --noEmit then vite build, output in dist/ (landing, how-to-play, play, 404)
 npm run preview   # serve the production build on http://localhost:4173 (does NOT send public/_headers)
 ```
@@ -28,11 +28,11 @@ Before deploying, load `/play/` from the nginx container in headless Chrome and 
 Fallback, pi3 (`deploy/README.md`): copy `deploy/.env.example` to `deploy/.env`, set `SITE_HOST`, run `deploy/deploy.sh`.
 
 ## How to roll back
-Rehearsed on 2026-09-20 at the fifth ship: checked out the previous ship tag `ship-2026-09-19d` (commit `8312553`) in a scratch worktree, ran `npm ci`, `npm run build` (green, dist/_headers present) and `npx vitest run` (553 passed, 31 files), then removed the worktree.
+Rehearsed on 2026-09-22 at the 0.3.0 ship: checked out the previous ship tag `ship-2026-09-20c` in a scratch worktree, ran `npm ci`, `npm run build` (green, dist/_headers present) and `npx vitest run` (REHEARSAL_COUNT), then removed the worktree.
 
 - Cloudflare: `npx wrangler rollback` returns the live site to the previous uploaded version; `npx wrangler versions list` shows the versions. Or check out the previous tag and `npm run deploy`.
 - pi3: `deploy.sh` snapshots the live tree to `html.prev` before every sync; the swap is in `deploy/README.md` under Rollback.
-- Return target for this ship: `git checkout ship-2026-09-20c`. Previous good state: `ship-2026-09-20b`, rehearsed at this closeout (checked out, built, returned).
+- Return target for this ship: `git checkout ship-2026-09-22`. Previous good state: `ship-2026-09-20c`, rehearsed at this closeout (checked out, built, tested, returned).
 
 ## Known limitations and accepted risks
 No finding was accepted; the accepted risks list is empty. Every finding in `.itworks/REVIEWS.md` is closed with evidence.
@@ -48,10 +48,10 @@ No finding was accepted; the accepted risks list is empty. Every finding in `.it
 - Unreadable save: a save the deserializer refuses (damaged bytes, or a newer format read by an older cached build) is kept under localStorage hs.save.unreadable and the log says so; the lot starts fresh. Recovery of that copy is manual (paste it into Import) and is not surfaced in the UI yet.
 - Licence: PolyForm Strict 1.0.0 from this ship. The AGPL copies of the three earlier tags cannot be recalled; GitHub counted 327 clones from 52 sources in the repo's first day against zero page views, so scrapers.
 - Theme: the choice is per browser under localStorage hs.theme; a browser that blocks storage falls back to the system setting every load.
-- Performance: measured on three towers built to scale (scripts/bench/README.md). Worst 5% of ticks on a 4,920-person tower went from 341 ms to 4 ms by caching the settled route search per origin and minute; the game loop drains missed ticks for at most 8 ms of wall time and drops the rest, so a slow tick reads as slow motion, never a freeze; the daily autosave stringify runs in an idle slot. Behaviour is hash-identical across the fix. Not yet measured on a phone.
-- Rent: offices, condos and hotel rooms take a rent setting from 50% to 150%; the office figure in the panel is the amount the next quarter credits at the current evaluation. Save format stays 2, rent defaults to 100% on older saves. The room panel has no DOM test (the suite has no DOM environment); it was verified by review and the sim side by tests.
+- Performance: measured on three towers built to scale (scripts/bench/README.md, morning and evening rows). The evening rush on the 4,920-person tower went from 33 ms to 0.4 ms per tick (route searches keyed by floor and connector for the life of the routing graph, per-floor goal index, binary heap). The sim ticks from the frame loop while the tab is visible and a 50 ms timer keeps it going hidden; people and cars interpolate from a snapshot taken before the last tick, so the 4x stalls and lurches are gone (docs/reviews/2026-09-22-engine-round-results.md). The static tower redraws only when world.structureVersion moves. Six bench hashes unchanged through the round.
+- Rent: offices, condos and hotel rooms take a rent setting from 50% to 150%; the office figure in the panel is the amount the next quarter credits at the current evaluation. Save format stays 2, rent defaults to 100% on older saves. The room panel is built and refreshed in tests against a node DOM stand-in (tests/ui/fake-dom.ts, tests/ui/panels.test.ts) that lays nothing out; the rent row's phone-width fit was proven in headless Chrome at 390x844.
 - The world log keeps the last 2,000 lines; the ticker, toasts and log panel follow a running count so they keep updating past the cap (fixed this ship).
-- OPEN ADVISORY (testing): the renderer's two sim draw loops (src/render/renderer.ts, reconcileSims) have no direct test; the crowd predicate and the tap picker are covered in tests/render/crowd.test.ts, the draw loops would need a stub renderer harness.
+- The renderer's sim draw loop and particle count are covered by a stub-renderer harness (tests/render/reconcile.test.ts): one visible sim in four is drawn, red when the crowd sample is removed.
 
 ## What breaks first and how you'd know
 A PixiJS upgrade that changes how it compiles shaders, first. The site's Content Security Policy forbids eval, and the renderer only starts because `src/render/renderer.ts` loads `pixi.js/unsafe-eval` before anything else; if an upgrade moves that requirement, `/play/` shows "The page's security policy blocked the tower renderer" and the browser console logs `unsafe-eval`. The pre-deploy nginx container check catches it before it is live. Second, elevator wait under load: sims leave when their wait passes the black threshold, visible as population and evaluation falling while rooms sit vacant, with event log lines naming the wait. Third, the display fonts come from Google Fonts under the CSP; a host change renders the game in system fonts with a CSP violation in the console.
@@ -76,3 +76,4 @@ A PixiJS upgrade that changes how it compiles shaders, first. The site's Content
 - 2026-09-20: fifth ship, 0.2.2: site footer, per-car elevator floor range and rider setting with leftover pickup (save format 2, v1 loads), Requests link to GitHub issues replaces Source in the nav, the name blurb in the README and guide, relicensed AGPL-3.0 to PolyForm Strict 1.0.0, unreadable saves kept and reported; tag ship-2026-09-20
 - 2026-09-20: sixth ship, 0.2.3: rush-hour freeze fixed (route search cache, tick loop time box, autosave off the step, renderer housekeeping), log ticker past 2,000 lines, per-room rent 50% to 150%; tag ship-2026-09-20b
 - 2026-09-20: 0.2.4, tag ship-2026-09-20c; one sim in four drawn, modern stairs, rent row holds on phones, route cache invariant and test, tap picker test
+- 2026-09-22: 0.3.0, tag ship-2026-09-22; engine round: frame-driven ticks with pre-tick snapshot interpolation (the 4x stalls and lurches), evening rush routing (33 ms to 0.4 ms per tick on the large tower), static tower reconcile on a structure version, one HUD refresh per notify and cached chip measurements, sky gradient leak; sweep found five, five fixed; 672 tests

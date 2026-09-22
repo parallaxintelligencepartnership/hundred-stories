@@ -1,6 +1,6 @@
 // The clock loop: the tick time box, and the autosave that runs in an idle slot.
 // Both are driven through injected clocks, so no real wall time and no real idle callback is needed.
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createGame, drainTicks } from '../../src/game/game';
 import { writeSave } from '../../src/game/storage';
 import type { Renderer } from '../../src/render/renderer';
@@ -191,10 +191,11 @@ function gameWithAFrameLoop(hidden: boolean) {
   });
   const alphas: number[] = [];
   const commits: number[] = [];
+  const resets: unknown[] = [];
   const renderer = {
     render: (_w: unknown, alpha: number) => alphas.push(alpha),
     commitMotion: () => commits.push(game.world.time.minute),
-    resetMotion: () => {},
+    resetMotion: () => resets.push(game.world),
     camera: { reset: () => {}, ensureFloorVisible: () => {} },
     setGhost: () => {},
     setSelection: () => {},
@@ -211,7 +212,7 @@ function gameWithAFrameLoop(hidden: boolean) {
     game.frameOnce();
     return game.world.time.minute - before;
   };
-  return { game, clock, alphas, commits, frame };
+  return { game, clock, alphas, commits, resets, frame };
 }
 
 describe('frame driven ticks', () => {
@@ -293,5 +294,90 @@ describe('frame driven ticks', () => {
 
     for (let i = 0; i < 10; i++) expect(frame()).toBe(0);
     expect(alphas).toHaveLength(0);
+  });
+});
+
+/**
+ * start() and stop() with the browser globals stubbed: the 50 ms timer, the frame request and the
+ * visibilitychange listener are recorded so the test can fire and inspect them.
+ */
+function stubBrowserLoop() {
+  const listeners = new Map<string, () => void>();
+  const removed: string[] = [];
+  const cleared: number[] = [];
+  const cancelled: number[] = [];
+  const intervals: { id: number; ms: number }[] = [];
+  vi.stubGlobal('window', {
+    setInterval: (_fn: () => void, ms: number) => {
+      intervals.push({ id: 7, ms });
+      return 7;
+    },
+    clearInterval: (id: number) => cleared.push(id),
+  });
+  vi.stubGlobal('document', {
+    hidden: true,
+    addEventListener: (type: string, fn: () => void) => listeners.set(type, fn),
+    removeEventListener: (type: string, fn: () => void) => {
+      if (listeners.get(type) === fn) removed.push(type);
+    },
+  });
+  vi.stubGlobal('requestAnimationFrame', () => 3);
+  vi.stubGlobal('cancelAnimationFrame', (id: number) => cancelled.push(id));
+  return { listeners, removed, cleared, cancelled, intervals };
+}
+
+describe('start and stop', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('starts the 50 ms timer and the visibility listener, and stop takes both away', () => {
+    const stubs = stubBrowserLoop();
+    const { game } = gameWithAFrameLoop(true);
+
+    game.start();
+    expect(stubs.intervals).toEqual([{ id: 7, ms: 50 }]);
+    expect(stubs.listeners.has('visibilitychange')).toBe(true);
+
+    game.stop();
+    expect(stubs.removed).toEqual(['visibilitychange']);
+    expect(stubs.cleared).toEqual([7]);
+    expect(stubs.cancelled).toEqual([3]);
+  });
+
+  it('coming back after a stalled hidden stretch runs at most one tick on the first frame', () => {
+    const stubs = stubBrowserLoop();
+    const { game, clock, frame } = gameWithAFrameLoop(true);
+    game.world.time.minute = 12 * 60;
+    game.setSpeed(4);
+    game.start();
+
+    // A throttled hidden tab: the timer never fires for 30 s, then the tab is shown again.
+    clock.ms += 30_000;
+    clock.hidden = false;
+    stubs.listeners.get('visibilitychange')?.();
+
+    expect(frame()).toBeLessThanOrEqual(1);
+    game.stop();
+  });
+});
+
+describe('motion resets when the world is replaced', () => {
+  it('resets motion on import and on a new game, with the new world already in place', () => {
+    const { game, resets } = gameWithAFrameLoop(true);
+    const text = game.exportSave();
+
+    expect(game.importSave(text)).toEqual({ ok: true });
+    expect(resets).toEqual([game.world]);
+
+    game.newGame(5);
+    expect(resets).toHaveLength(2);
+    expect(resets[1]).toBe(game.world);
+  });
+
+  it('keeps motion when an import is refused', () => {
+    const { game, resets } = gameWithAFrameLoop(true);
+    expect(game.importSave('not a save').ok).toBe(false);
+    expect(resets).toHaveLength(0);
   });
 });

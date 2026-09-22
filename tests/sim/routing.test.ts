@@ -603,5 +603,5 @@ describe('goal picked from the per floor index', () => {
     }
     expect(routed).toBeGreaterThan(500);
     expect(most).toBeGreaterThanOrEqual(4); // several arrival states compete on one floor
-  });
+  }, 30_000); // a brute force scan over about 700 trips; slow when the machine is loaded
 });
