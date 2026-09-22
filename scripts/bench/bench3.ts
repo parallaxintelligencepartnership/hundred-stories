@@ -41,5 +41,15 @@ for (const [label, floors, width, xs] of configs) {
   for (let i=0;i<200;i++){ const t=performance.now(); tick(world); tk.push(performance.now()-t); }
   const s=[...tk].sort((a,b)=>a-b);
   console.log([label, world.population, world.sims.size, world.rooms.size, median(tk).toFixed(3), s[190]!.toFixed(3), median(ser).toFixed(2), median(hsh).toFixed(2), json.length].join('\t'));
+  // evening rush: run the same world on to 17:30 on the same day, then a second 200 tick sample
+  const evening = 3 * 1440 + 17 * 60 + 30;
+  while (world.time.minute < evening && !world.gameOver) tick(world);
+  const eJson = serialize(world);
+  const eSer: number[] = [], eHsh: number[] = [], eTk: number[] = [];
+  for (let i=0;i<20;i++){ const t=performance.now(); serialize(world); eSer.push(performance.now()-t); }
+  for (let i=0;i<20;i++){ const t=performance.now(); hashWorld(world); eHsh.push(performance.now()-t); }
+  for (let i=0;i<200;i++){ const t=performance.now(); tick(world); eTk.push(performance.now()-t); }
+  const es=[...eTk].sort((a,b)=>a-b);
+  console.log([`${label}-evening`, world.population, world.sims.size, world.rooms.size, median(eTk).toFixed(3), es[190]!.toFixed(3), median(eSer).toFixed(2), median(eHsh).toFixed(2), eJson.length].join('\t'));
   console.error(`${label}: warmup ${(warmMs/1000).toFixed(1)}s for ${target} ticks`);
 }

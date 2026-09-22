@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { applyCommand } from '../../src/sim/build';
-import { entrances, ensureRouting, findRoute, isReachableFromLobby } from '../../src/sim/routing';
+import { entrances, ensureRouting, findRoute, goalScanCheck, isReachableFromLobby, SeqHeap } from '../../src/sim/routing';
 import { LIMITS, ROOMS } from '../../src/sim/rules';
 import type { Car, Leg, Room, RoomKind, Shaft, ShaftKind, World } from '../../src/sim/types';
 import { deserialize, serialize } from '../../src/sim/save';
@@ -476,6 +476,22 @@ describe('route cache', () => {
     expect(findRoute(world, { floor: 1, x: 100 }, { floor: 5, x: 200 })).toBeNull();
   });
 
+  it('keeps floor searches across minutes and still drops them on a graph change', () => {
+    makeLobby(world, 100, 340);
+    const near = makeShaft(world, 'standard', 150, 1, 10);
+    const far = makeShaft(world, 'standard', 300, 1, 10);
+    const ridesFrom = (x: number): Extract<Leg, { kind: 'ride' }>[] =>
+      rides(findRoute(world, { floor: 1, x }, { floor: 5, x: 320 }) as Leg[]);
+    expect(ridesFrom(100)).toEqual([{ kind: 'ride', shaftId: near.id, fromFloor: 1, toFloor: 5 }]);
+    world.time.minute += 7;
+    // Same floor, another tile, a later minute: the walk from this tile still decides.
+    expect(ridesFrom(330)).toEqual([{ kind: 'ride', shaftId: far.id, fromFloor: 1, toFloor: 5 }]);
+    expect(ridesFrom(100)).toEqual([{ kind: 'ride', shaftId: near.id, fromFloor: 1, toFloor: 5 }]);
+    world.time.minute += 7;
+    removeShaft(world, near.id);
+    expect(ridesFrom(100)).toEqual([{ kind: 'ride', shaftId: far.id, fromFloor: 1, toFloor: 5 }]);
+  });
+
   it('answers the same for every tile on a floor and every minute', () => {
     makeLobby(world, 100, 140);
     makeShaft(world, 'standard', 150, 1, 10);
@@ -500,5 +516,92 @@ describe('route cache', () => {
     expect(findRoute(loaded.world, { floor: 1, x: 100 }, { floor: 5, x: 200 })).toEqual(before);
     expect(isReachableFromLobby(loaded.world, 5, 200)).toBe(true);
     expect(entrances(loaded.world)).toEqual(entrances(world));
+  });
+});
+
+describe('search open set heap', () => {
+  interface Item {
+    key: number;
+    id: number;
+  }
+  const less = (a: Item, b: Item): boolean => a.key < b.key;
+
+  it('pops equal keys in the order they were pushed', () => {
+    const heap = new SeqHeap<Item>(less);
+    const keys = [3, 1, 2, 1, 3, 1, 2, 0, 2];
+    keys.forEach((key, id) => heap.push({ key, id }));
+    const popped: number[] = [];
+    while (heap.size > 0) popped.push((heap.pop() as Item).id);
+    // key 0: id 7; key 1: ids 1, 3, 5; key 2: ids 2, 6, 8; key 3: ids 0, 4
+    expect(popped).toEqual([7, 1, 3, 5, 2, 6, 8, 0, 4]);
+    expect(heap.pop()).toBeUndefined();
+  });
+
+  it('matches the old linear scan pick through interleaved pushes and pops', () => {
+    // The pick the search made before the heap: the first queued item among the best keys.
+    const oldPick = (queue: Item[]): Item => {
+      let pick = 0;
+      for (let i = 1; i < queue.length; i++) if (less(queue[i] as Item, queue[pick] as Item)) pick = i;
+      return queue.splice(pick, 1)[0] as Item;
+    };
+    let seed = 12345;
+    const rand = (n: number): number => {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      return seed % n;
+    };
+    const heap = new SeqHeap<Item>(less);
+    const queue: Item[] = [];
+    const fromHeap: number[] = [];
+    const fromScan: number[] = [];
+    for (let id = 0; id < 2000; id++) {
+      const item = { key: rand(8), id };
+      heap.push(item);
+      queue.push(item);
+      if (rand(3) === 0) {
+        fromHeap.push((heap.pop() as Item).id);
+        fromScan.push(oldPick(queue).id);
+      }
+    }
+    while (queue.length > 0) {
+      fromHeap.push((heap.pop() as Item).id);
+      fromScan.push(oldPick(queue).id);
+    }
+    expect(fromHeap).toEqual(fromScan);
+  });
+});
+
+describe('goal picked from the per floor index', () => {
+  it('matches a brute force scan of every settled state', () => {
+    const world = createWorld(7);
+    makeLobby(world, 100, 220);
+    makeShaft(world, 'standard', 110, 1, 8);
+    const split = makeShaft(world, 'standard', 150, 1, 8);
+    const second = makeCar(world, split.id, 1);
+    second.range = { lo: 1, hi: 4 };
+    split.cars.push(second);
+    makeShaft(world, 'standard', 190, 3, 8);
+    makeShaft(world, 'service', 210, 1, 8);
+    makeStairs(world, 120, 1, 5);
+    makeStairs(world, 170, 4, 8);
+
+    let routed = 0;
+    let most = 0;
+    for (const staff of [false, true]) {
+      for (let fromFloor = 1; fromFloor <= 8; fromFloor++) {
+        for (const fromX of [100, 124, 130, 150, 172, 215]) {
+          for (let toFloor = 1; toFloor <= 8; toFloor++) {
+            if (toFloor === fromFloor) continue;
+            for (const toX of [100, 160, 220]) {
+              const check = goalScanCheck(world, { floor: fromFloor, x: fromX }, { floor: toFloor, x: toX }, { staff });
+              expect(check.indexed).toEqual(check.bruteForce);
+              if (check.indexed) routed++;
+              most = Math.max(most, check.candidates);
+            }
+          }
+        }
+      }
+    }
+    expect(routed).toBeGreaterThan(500);
+    expect(most).toBeGreaterThanOrEqual(4); // several arrival states compete on one floor
   });
 });
