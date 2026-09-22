@@ -19,7 +19,7 @@ The raw still-frame figure barely moved because it counts real stops: at 1x ever
 
 Clock check: 1x advanced 100 game minutes in 10 s, 4x 400, night 4x about 3,196.
 
-Hidden tab and load checks: see the closeout section in .itworks/REVIEWS.md.
+Hidden tab: with the page frozen over CDP for 30 s (document.hidden true at every sample; a second tab did not hide the page in headless), the first 30 frames after return moved at most 9.3 px per frame, no burst, no console error. Frozen stops timers, so the hidden-timer throttling path itself is covered by the stepOnce cases in tests/game/loop.test.ts rather than in the browser. Import: after 20 s at 4x, importing the same save through the settings file input swapped the clock on the load frame with zero movement for sprites present on both sides, and at most 46.8 px per frame after; nothing slid across the tower.
 
 ## 2. Evening rush (57408c8)
 

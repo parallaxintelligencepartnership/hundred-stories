@@ -8,7 +8,7 @@ Every module is built against this document and `src/sim/types.ts`. If reality d
 2. One tick equals one game minute. `tick(world)` advances exactly one minute and mutates the world in place. The renderer only reads.
 3. Player intent is a command. `applyCommand(world, cmd)` validates, mutates, and returns `{ ok: true } | { ok: false, reason: string }`. The reason string is shown to the player verbatim, so it is plain English, US spelling, no dashes.
 4. Rules live in data. `src/sim/rules.ts` holds every number (costs, widths, thresholds, schedules). Logic modules read it; they never inline a magic number.
-5. Rendering is derived. Sprites are keyed by entity id and reconciled each frame from world state. No render-side gameplay state.
+5. Rendering is derived. Sprites are keyed by entity id and reconciled from world state: cars and sims every frame, the static tower (rooms, slabs, shafts, fire markers) only when `world.structureVersion` or the night lit state changes. No render-side gameplay state; the motion snapshots in `render/interpolate.ts` are presentation only.
 
 ## 2. Coordinates and grid
 
@@ -23,7 +23,7 @@ Every module is built against this document and `src/sim/types.ts`. If reality d
 
 - `world.time = { minute: number }` counts total game minutes from the start. Derived: `minuteOfDay = minute % 1440`, `dayOfQuarter = floor(minute / 1440) % 3` (0 and 1 weekdays, 2 weekend), `quarter = floor(minute / 4320) % 4`, `year = floor(minute / 17280) + 1`.
 - The clock shows hours 0 to 23. Quarter boundaries occur at minute 0 of day 0. `onQuarterStart(world)` runs economy and evaluation. `onYearEnd(world)` runs Santa.
-- Speed is a render concern: the loop calls `tick` N times per real second (1x = 10 ticks/s, 2x = 20, 4x = 40; night 23:00 to 06:00 auto-runs at 8x unless paused).
+- Speed is a render concern: the loop calls `tick` N times per real second (1x = 10 ticks/s, 2x = 20, 4x = 40; night 23:00 to 06:00 auto-runs at 8x unless paused). The loop lives in `game/game.ts`: while the tab is visible ticks drain from the `requestAnimationFrame` frame loop, and a 50 ms timer drives them only while the tab is hidden.
 
 ## 4. Entities (see types.ts for exact fields)
 
@@ -54,7 +54,8 @@ Every module is built against this document and `src/sim/types.ts`. If reality d
 | `sim/save.ts` | `serialize(world): SaveFile`, `deserialize(file): World`, `hashWorld(world): string` (FNV-1a over the canonical JSON), version field | |
 | `render/**` | PixiJS scene, camera, procedural art, lighting, sprite reconciliation | `createRenderer(world, canvas)` |
 | `ui/**` | DOM HUD, build palette, query panel, finances, event log, settings, save/load | `createUi(app)` |
-| `main.ts` | loop: accumulator, speed, pause, wiring | |
+| `game/game.ts` | loop: accumulator, speed, pause, frame-driven ticks with the hidden-tab timer fallback; tools, input, save and load wiring | `createGame` |
+| `main.ts` | boot: seed from the query string, game, renderer and UI wiring, the no-WebGL message | |
 
 ### Tick order (sim/tick.ts)
 
@@ -87,7 +88,7 @@ Every module is built against this document and `src/sim/types.ts`. If reality d
 
 ## 8. Save format (sim/save.ts)
 
-`{ version: 1, seed, minute, cash, rooms: [...], shafts: [...], sims: [...], rngState, nextId, stars, log: last 200 }`. Deserialize validates version and shape; a foreign or corrupt file returns `{ ok: false, reason }` and never touches the running world.
+`{ version: 2, seed, minute, cash, stars, population, nextId, rngState, rooms: [...], shafts: [...], sims: [...], events, stats, gameOver, log: last 200, logTotal }`; version 1 saves still load. Deserialize validates version and shape; a foreign or corrupt file returns `{ ok: false, reason }` and never touches the running world.
 
 ## 9. Renderer (render/**)
 
@@ -97,6 +98,7 @@ Every module is built against this document and `src/sim/types.ts`. If reality d
 - Procedural art: `render/art/*.ts` draws each room kind into a `RenderTexture` once per (kind, width, variant, lit) and reuses it. Windows light up by occupancy at night.
 - Lighting: sky gradient keyed to minuteOfDay, tower tint, window glow after dusk, headlight streaks on the ground road at rush hour.
 - Sims: 2x4 tile sprites with a stress tint, walking animation by x delta, batched in a `ParticleContainer` when more than 500.
+- Reconcile: the static tower is rewritten only when `world.structureVersion` (bumped by every sim writer of a field the tower draws, never saved or hashed), the night lit state or the world object changes. Motion: `render/interpolate.ts` snapshots car and sim positions before the last tick of a batch and draws at the fractional accumulator; a move past the teleport threshold snaps, and a replaced world resets it.
 
 ## 10. UI (ui/**)
 
@@ -112,4 +114,4 @@ Every module is built against this document and `src/sim/types.ts`. If reality d
 ## 11. Testing
 
 - `tests/sim/*.test.ts` cover each module with seeded worlds. `tests/scenarios/*.test.ts` run scripted builds (fixtures as command lists) for N days and assert population, cash, stars, and `hashWorld` determinism.
-- Rendering has no unit tests; verification is a real browser pass via the Chrome extension, recorded in `.itworks/REVIEWS.md`.
+- Rendering logic is unit tested in `tests/render/` against a stub renderer (reconcile, crowd sample, interpolation, connectors); how it looks is verified in a real browser, recorded in `.itworks/REVIEWS.md`.
