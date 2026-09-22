@@ -1,0 +1,34 @@
+# Store round spec
+
+Date: 2026-09-22. Implements docs/reviews/2026-09-22-modernisation-proposal.md section 6 and the demo cap decision. Ends submission-ready: builds, icons, listing copy, a submission runbook. Nothing is submitted (no store account exists today, decision 2026-09-22). No web deploy in this round. Licence: PolyForm Strict 1.0.0 stands. Pricing is not a concern. The wrappers must not change the game: the web bundle is the product and the shells load it.
+
+## Ship S1: the demo cap and the build flag (0.6.0)
+
+1. A build-time flag `VITE_EDITION` with values `web` (default, no cap today) , `demo` and `full`. Read once in src/sim/rules.ts as `EDITION` (import.meta.env, with a node fallback to `full` so tests and the bench are the full game). The cap: `DEMO_MAX_FLOOR` and `DEMO_MAX_WIDTH_TILES` in rules.ts, the figures from .itworks/DECISIONS.md (recorded after the look round). `applyCommand` refuses a build above the floor cap or outside the width band with a reason `demoCap`, and `canBuildAt` reports the same so the ghost shows it. Everything else (stars, rooms, events, saves, share) stays open.
+2. The cap card: when a `demoCap` refusal fires the first time in a session, a card (panel pattern) says the demo stops at N floors and M tiles, names the stores, and carries the store links from `STORE_LINKS` in a new src/site/stores.ts (empty strings until the listings exist; a link with an empty href is rendered as "coming soon" text). The landing page (index.html) gets a store row driven by the same file.
+3. The hashes: `EDITION` defaults to full in node, so the six hashes are unchanged. Add a test that with the demo cap on a build above the cap is refused and one under it is allowed, and that the full edition allows both.
+4. The web deploy keeps `VITE_EDITION=web` (uncapped) until Matt flips it; `npm run build:demo` and `npm run build:full` scripts set the flag.
+
+## Ship S2: Capacitor shells, iOS and Android (0.6.1)
+
+1. `npm install --save-exact @capacitor/core @capacitor/cli @capacitor/ios @capacitor/android @capacitor/preferences @capacitor/filesystem @capacitor/splash-screen @capacitor/status-bar` (latest stable at the time, pinned exact, `npm ci` clean afterwards). `capacitor.config.ts` with appId `xyz.hundredstories.app`, appName `Hundred Stories`, webDir `dist`, the server scheme https, and the splash and status bar plugins configured (dark steel `#1c232e` background, the amber wordmark from public/icons as the splash image).
+2. The game at the app root: the shells load `dist/play/index.html`, not the landing page. Set `capacitor.config.ts` `webDir` to a `dist-app` folder produced by `npm run build:app`, which runs the full edition build and copies `dist/play/` to the root of `dist-app` with asset paths rewritten (or configure a Vite `base` for the app build so /play/ is the root; pick the one that keeps the service worker out of the app, the app does not need it).
+3. Save path: src/game/storage.ts gets a third backend, Capacitor Preferences (or Filesystem for size; saves are 0.7 to 3.3 MB serialized, Preferences on iOS has practical limits, so use Filesystem in the app data directory, one file `autosave.json`, with the same interface as the IndexedDB slot). Chosen at boot by `Capacitor.isNativePlatform()`. Export and import keep working through the share sheet (Capacitor Share plugin, add it pinned) and the file picker.
+4. `npx cap add ios` and `npx cap add android`, `npx cap sync`. Icons and splash from scripts/make-icons.mjs extended to write the iOS and Android icon sets (1024 master, adaptive Android foreground and background). Xcode and Android Studio projects are committed (the platform folders), signing left to the account (documented).
+5. Verify on this Mac: `npx cap build ios` or open the Xcode project and build for the simulator if Xcode and a simulator exist (`xcode-select -p`, `xcrun simctl list devices`); if Xcode is missing, record it as not verified and say what command verifies it. Android: `./gradlew assembleDebug` under android/ if a JDK and the SDK exist (check `sdkmanager` or `ANDROID_HOME`); else record.
+6. Tests: the storage backend selection from a stub Capacitor global, the Filesystem slot round trip against a stub.
+
+## Ship S3: Tauri shell for Steam (0.6.2)
+
+1. Tauri 2: `cargo` and `rustup` present? (`cargo --version`). If not, install the toolchain through rustup (user-local, no sudo) and say so. `npm install --save-exact @tauri-apps/cli @tauri-apps/api`, `npx tauri init` with the app build folder as the frontend dist, window 1440 by 900 minimum 960 by 640, title Hundred Stories, identifier `xyz.hundredstories.desktop`, icons from the 1024 master.
+2. Save path: a fourth storage backend through the Tauri fs plugin in the app data directory, chosen when `window.__TAURI__` exists, same interface. Export and import through the Tauri dialog plugin.
+3. Steamworks: add the `steamworks` Rust crate behind a cargo feature `steam` (off by default so the build works without the SDK), with an achievements stub that maps the six stars to six achievement ids and a no-op when the feature is off. The SDK itself is not vendored (licence); the runbook says where it goes.
+4. Build on this Mac: `npx tauri build` for the macOS target; report the bundle path and size. Windows and Linux builds are documented as CI or cross-compile steps in the runbook, not run here.
+5. Tests: the storage backend selection for Tauri, the achievement map.
+
+## Ship S4: listings and the submission runbook (0.6.3)
+
+1. `store/` at the repo root: `listing.md` with the shared copy (name, subtitle, short and long descriptions in the landing page's voice, keywords, category, age rating answers for a sim with no violence beyond a fire event, privacy answers: no accounts, no tracking, no ads, saves on device), `ios.md`, `android.md`, `steam.md` with the per-store fields, screenshot sizes required by each store and a script `scripts/make-store-shots.mjs` that produces them from the production build over CDP at the required sizes (iPhone 6.9 and 6.5 inch, iPad 13 inch, Android phone and tablet, Steam 1920 by 1080 and the 616 by 353 capsule from public/og.png).
+2. `store/SUBMISSION.md`: the runbook, step by step, from opening the developer account to pressing submit for each store, with the commands from S2 and S3, the signing steps, the TestFlight and internal testing tracks, and a checklist of what Matt has to do himself (accounts, certificates, bank and tax forms, pricing). The document says pricing is Matt's and leaves the field blank.
+3. README.md: no store or deploy detail (the README is public and says nothing about hosting; store links appear only when live, through src/site/stores.ts).
+4. Tests: the screenshot script runs against a local preview and writes the expected file set (skipped when Chrome is absent, with a clear skip reason).
