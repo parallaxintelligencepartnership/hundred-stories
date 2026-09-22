@@ -151,7 +151,7 @@ The PolyForm Strict licence chosen on 2026-09-20 fits all three.
 3. UX round (section 5): first run and goals, then overlays, then controls.
 4. Store round (section 6): Capacitor iOS first because the account is ready, Android second, Steam last.
 
-Each round ends with the itworks closeout as before.
+Each round ends with the itworks closeout as before. Mandate (Matt, 2026-09-22): the implementing session runs all four rounds top to bottom without waiting for a go between them, closing out and deploying each; it stops only for store account actions, pricing, or a new licence question. Wall publishes still need a separate explicit yes.
 
 ## 8. Questions and answers
 
