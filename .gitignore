@@ -19,3 +19,6 @@ dist-app/
 
 # Tauri build output (src-tauri/.gitignore also covers it)
 src-tauri/target/
+
+# Store screenshots and graphics (npm run store:shots)
+store/shots/

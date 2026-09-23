@@ -101,14 +101,13 @@ One build serves three pages. The landing site is at `/`, the guide is at
 `/how-to-play/`, and the game itself is at `/play/`, so in development the
 tower is at `http://localhost:5173/play/`.
 
-The code is laid out in six parts:
+The code is laid out in five parts:
 
 - `src/sim` is the simulation. It is pure and deterministic: no rendering, DOM, or randomness outside its own seeded generator.
 - `src/render` draws the tower with PixiJS, reading the simulation state each frame.
 - `src/ui` is the DOM layer: the top bar, palette, panels, and keyboard shortcuts.
 - `src/game` is the shell that wires the simulation, renderer, and UI together and runs the game loop.
 - `src/site` is the landing site: one stylesheet for `index.html` and `how-to-play/index.html`, plus the hero that draws the demo tower with the game's own renderer.
-- `deploy` holds the scripts and compose files for the fallback static host.
 
 See `docs/DESIGN.md` for the architecture contract and `docs/VISUAL.md` for the visual direction.
 
