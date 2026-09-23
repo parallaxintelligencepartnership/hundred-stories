@@ -22,3 +22,11 @@ src-tauri/target/
 
 # Store screenshots and graphics (npm run store:shots)
 store/shots/
+
+# Signing material and store ids never enter the repo (store/SUBMISSION.md keeps them in ~/keys and the keychain)
+*.jks
+*.keystore
+*.p12
+*.p8
+*.mobileprovision
+steam_appid.txt

@@ -88,7 +88,7 @@ Every module is built against this document and `src/sim/types.ts`. If reality d
 
 ## 8. Save format (sim/save.ts)
 
-`{ version: 2, seed, minute, cash, stars, population, nextId, rngState, rooms: [...], shafts: [...], sims: [...], events, stats, gameOver, log: last 200, logTotal }`; version 1 saves still load. Deserialize validates version and shape; a foreign or corrupt file returns `{ ok: false, reason }` and never touches the running world.
+`{ version: 3, seed, minute, cash, stars, population, nextId, rngState, rooms: [...], shafts: [...], sims: [...], events, stats, gameOver, log: last 200, logTotal, quarterStartCash, dayStartPopulation }`; version 1 and 2 saves still load (the two status bar baselines load as null from an older save), and the world hash still names version 2 because it leaves the baselines out. Deserialize validates version and shape; a foreign or corrupt file returns `{ ok: false, reason }` and never touches the running world.
 
 ## 9. Renderer (render/**)
 

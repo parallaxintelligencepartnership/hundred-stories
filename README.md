@@ -94,6 +94,8 @@ npm run dev       # start the dev server
 npm test          # run the test suite
 npm run build      # type check and build for production
 npm run preview    # preview the production build locally
+npm run build:demo # the demo edition, with the size cap on
+npm run build:app  # the game page alone, for the phone and desktop app shells
 npm run og        # redraw public/og.png, the link preview card
 ```
 
@@ -101,12 +103,14 @@ One build serves three pages. The landing site is at `/`, the guide is at
 `/how-to-play/`, and the game itself is at `/play/`, so in development the
 tower is at `http://localhost:5173/play/`.
 
-The code is laid out in five parts:
+The code is laid out in seven parts:
 
 - `src/sim` is the simulation. It is pure and deterministic: no rendering, DOM, or randomness outside its own seeded generator.
 - `src/render` draws the tower with PixiJS, reading the simulation state each frame.
 - `src/ui` is the DOM layer: the top bar, palette, panels, and keyboard shortcuts.
 - `src/game` is the shell that wires the simulation, renderer, and UI together and runs the game loop.
+- `src/audio` is the sound: short effects synthesised with the Web Audio API, off until you turn it on.
+- `src/steam` reports star achievements from the desktop app; it does nothing in a browser.
 - `src/site` is the landing site: one stylesheet for `index.html` and `how-to-play/index.html`, plus the hero that draws the demo tower with the game's own renderer.
 
 See `docs/DESIGN.md` for the architecture contract and `docs/VISUAL.md` for the visual direction.

@@ -170,6 +170,20 @@ describe('the Tauri slot', () => {
     await expect(slot.writeSave('new')).rejects.toThrow('The device refused to store the save.');
     expect(await slot.readSave()).toBe('good');
   });
+
+  it('tries the directory again on the next save after making it failed once', async () => {
+    const fs = stubTauriFs();
+    const make = fs.ensureDir;
+    fs.ensureDir = async () => {
+      fs.ensureDir = make;
+      throw new Error('EACCES');
+    };
+    const slot = createTauriStorage(fs);
+    await expect(slot.writeSave('first')).rejects.toThrow('The device refused to store the save.');
+    await slot.writeSave('second');
+    expect(await slot.readSave()).toBe('second');
+    expect(fs.dirs).toBe(1);
+  });
 });
 
 describe('export and import through the dialog plugin', () => {

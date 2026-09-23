@@ -1,7 +1,7 @@
 # Map
 
 ## Run
-npm run dev (vite; landing on http://localhost:5173, the game on http://localhost:5173/play/); npm run build (tsc --noEmit && vite build) then npm run preview for the static bundle; no env vars needed
+npm run dev (vite; landing on http://localhost:5173, the game on http://localhost:5173/play/); npm run build (tsc --noEmit && vite build, the web edition into dist) then npm run preview; npm run build:demo (VITE_EDITION=demo, the capped demo, also into dist) and build:full; npm run build:app (the game page alone into dist-app for the shells), cap:sync (build:app then cap sync), npx tauri build [--features steam] from the root; no env vars needed (VITE_EDITION is set by the scripts)
 
 ## Test
 npm test (vitest run); one file: npx vitest run <path>; npm run typecheck (tsc --noEmit)
@@ -13,27 +13,33 @@ benchmarks: see scripts/bench/README.md (npx vite-node@6.0.0 scripts/bench/bench
 | index.html | landing page at /: semantic markup, no framework, one module script (src/site/hero.ts) |
 | how-to-play/index.html | the guide at /how-to-play/: rooms, elevators, stress, the quarter, stars, saving, controls |
 | play/index.html | the game shell at /play/; the only script tag loads src/main.ts |
-| src/site/ | landing site: site.css (same tokens as ui.css), hero.ts (the demo tower drawn by the game renderer, imports challenge.ts), challenge.ts (the friend greeting from a shared link), theme.ts and theme-init.ts (the system, light or dark choice under localStorage hs.theme) |
+| src/site/ | landing site: site.css (same tokens as ui.css), hero.ts (the demo tower drawn by the game renderer, imports challenge.ts), challenge.ts (the friend greeting from a shared link), theme.ts and theme-init.ts (the system, light or dark choice under localStorage hs.theme), stores.ts (the store links, empty until a listing exists, drawn as coming soon) |
+| privacy/index.html | the privacy page at /privacy/, linked from every site footer and the sitemap |
 | src/share/share.ts | share feature, pure: stats from the world, message, link with floors, people and stars in the query, parseChallenge, and the PNG composer |
 | public/theme.js | plain script every page loads first: applies a stored theme before paint (inline scripts are blocked by the CSP) |
 | src/main.ts | entry point: reads the seed from the query string, boots game, renderer and UI, shows the WebGL message on failure; ?smoke boots the demo world instead |
-| src/sim/ | the pure simulation, no DOM: rules.ts tables, types.ts and the clock, tick.ts tick order, build, economy, elevators, evaluation, events, people, routing, stars, rng |
-| src/sim/save.ts | save format v2 (v1 still loads with default car settings): serialize, deserialize with its refusal reasons, and the FNV-1a world hash |
+| src/sim/ | the pure simulation, no DOM: rules.ts tables plus EDITION (from VITE_EDITION; node is full) and the demo cap box, types.ts and the clock, tick.ts tick order, build (refuses outside the cap in the demo), economy, elevators, evaluation, events, people, routing, stars, rng |
+| src/sim/save.ts | save format v3 (v1 and v2 still load; v3 adds the status bar baselines, the hash projection stays v2): serialize, deserialize with its refusal reasons, and the FNV-1a world hash |
 | src/game/game.ts | game shell: owns the world and the loop (ticks drain from requestAnimationFrame while visible, a 50 ms timer only while hidden, a visibilitychange listener between start and stop), tools, pointer input, save/load/export/import wiring |
 | src/game/api.ts | the contract the UI is allowed to use |
-| src/game/storage.ts | the browser save slot: IndexedDB first, localStorage as the fallback |
-| src/render/ | PixiJS scene: renderer.ts (rooms, shafts, then a connector layer on top; the static tower reconciled only when world.structureVersion or the lit state moves), interpolate.ts (Motion: pre-tick snapshot, lerp at the fractional accumulator, teleport snap), camera.ts, input.ts press, tap, wheel and pinch classification, art.ts procedural sprites, sky.ts, smoke.ts hand built demo world (also drives the landing hero) |
-| src/ui/ | DOM overlay: ui.ts shell, input and notices, panels.ts HUD panels including save, export and import, format.ts, ui.css |
-| public/icons/, scripts/make-icons.mjs | PWA icons and the script that draws them |
+| src/game/events.ts | the game event stream (log lines, builds, rent day, stars) the sound and Steam modules listen to |
+| src/game/storage.ts | the save slot per platform: Tauri app data file, Capacitor Filesystem file, else IndexedDB with localStorage fallback; export and import through the desktop dialogs and the phone share sheet |
+| src/render/ | PixiJS scene: renderer.ts (the static tower reconciled only when world.structureVersion or the lit state moves), interpolate.ts (Motion snapshots and lerp), grid.ts (16 px tiles, 72 px floors), palette.ts (colour tokens), art.ts procedural sprites baked at the DPR, light.ts (hour tint and window states), anim.ts (doors, walk cycle), ambient.ts, buildfx.ts, overlays.ts (the information view tints), thumbnail.ts (palette tiles), camera.ts, input.ts, sky.ts (low horizon), smoke.ts demo world (also the landing hero) |
+| src/ui/ | DOM overlay: ui.ts shell, panels.ts (save, export, import), palette.ts tiles, status.ts bar, icons.ts, cards.ts and onboarding.ts (intro, guided first tower, tips, goals), prefs.ts, overlays.ts views, hover.ts cards, explain.ts refusals, keys.ts, minimap.ts, demo.ts cap card, format.ts, layout.ts, ui.css |
+| src/audio/audio.ts, src/steam/steam.ts | Web Audio synth, off by default (no AudioContext until on); Steam star reports through the Tauri report_star command, inert outside Tauri |
+| capacitor.config.ts, ios/, android/ | Capacitor 8 shells (xyz.hundredstories.app) loading dist-app; signing is not configured in the repo |
+| src-tauri/ | Tauri 2 desktop shell (xyz.hundredstories.desktop): tauri.conf.json with its own CSP, capabilities/default.json (app data fs, dialogs), achievements.rs behind the steam cargo feature, Cargo.lock |
+| store/, scripts/make-store-shots.mjs | listing copy, per-store notes, SUBMISSION.md runbook, the screenshot fixture; npm run store:shots writes store/shots/ (gitignored) |
+| public/icons/, scripts/make-icons.mjs | PWA icons, and the script that draws them plus the iOS, Android and Tauri icons and splashes |
 | public/og.png, scripts/make-og.mjs | the 1200x630 link preview card and the dependency free script that draws it |
-| public/robots.txt, public/sitemap.xml | crawler files for the three pages |
-| vite.config.ts | Vite build (three page inputs), the vitest include glob, and the vite-plugin-pwa manifest and service worker, scoped to /play/ |
+| public/robots.txt, public/sitemap.xml | crawler files for the site pages |
+| vite.config.ts | Vite build (site pages as inputs; --mode app builds the game page alone into dist-app with no service worker and drops site-only public files), the vitest include glob, and the vite-plugin-pwa manifest and service worker, scoped to /play/ |
 | 404.html | the custom 404 page, built as a Vite input; served by Workers static assets via not_found_handling in wrangler.jsonc |
 | wrangler.jsonc | Cloudflare Workers static-assets config: dist as the asset directory, the 404 page, custom domain routes for hundredstories.xyz and www, workers_dev and preview_urls disabled |
-| tests/ | vitest suite: sim/ unit tests, scenarios/ scripted tower runs plus helpers.ts, game/ (loop.test.ts drives the frame loop on an injected clock), render/ (stub-renderer harness in reconcile.test.ts), ui/ (fake-dom.ts, a node DOM stand-in), site/, share/, harness.test.ts |
+| tests/ | vitest suite: sim/ unit tests, scenarios/ scripted tower runs plus helpers.ts, game/ (loop.test.ts drives the frame loop on an injected clock; storage-*.test.ts the native slots on stub plugins), render/ (stub-renderer harness in reconcile.test.ts), ui/ (fake-dom.ts, a node DOM stand-in), audio/, site/, share/, store/, harness.test.ts |
 | deploy/ | pi3 static stack: compose.yml, nginx.conf, deploy.sh with rollback, README runbook, .env.example |
 | docs/ | BRIEF-AGENTS.md implementer brief, DESIGN.md rules and tick order, VISUAL.md art direction |
-| dist/ | build output, gitignored; rebuilt by npm run build |
+| dist/, dist-app/ | build output, gitignored; npm run build (or build:demo) and npm run build:app |
 
 ## Environment
 - Dev machine: Matt's Mac, arm64 macOS 27, Node 26, npm 11, Xcode 27 with an iPhone 17 simulator, Rust 1.98.1 via rustup in ~/.cargo (installed 2026-09-22 for the Tauri shell, no sudo, shell profile untouched); no JDK and no Android SDK, so the Android shell builds elsewhere
