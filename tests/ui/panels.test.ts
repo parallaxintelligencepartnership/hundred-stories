@@ -60,9 +60,10 @@ describe('log panel', () => {
     expect(list.children.length).toBe(LOG_PANEL_LINES);
     expect(texts(list)[0]).toBe('line 299');
     expect(texts(list)[LOG_PANEL_LINES - 1]).toBe('line 100');
-    // Everything in the panel: the header (a title and a close button), the body, the list,
-    // and three nodes per line (the li, its time and its text).
-    expect(node(panel).descendants().length).toBe(3 + 1 + 1 + LOG_PANEL_LINES * 3);
+    // Everything in the panel: the header (the head, its title holding an icon svg with its
+    // <use> and the title text, and a close button), the body, the list, and three nodes per
+    // line (the li, its time and its text).
+    expect(node(panel).descendants().length).toBe(6 + 1 + 1 + LOG_PANEL_LINES * 3);
   });
 
   it('builds only the lines that landed, and keeps the ones already shown', () => {
@@ -199,5 +200,40 @@ describe('settings panel sound section', () => {
   it('has no sound section when the shell made no sound module', () => {
     const panel = node(createSettingsPanel(settingsGame, ctx));
     expect(panel.descendants().some((n) => n.textContent === 'Sound')).toBe(false);
+  });
+});
+
+describe('panel header', () => {
+  const head = (panel: unknown): FakeElement => {
+    const found = node(panel).children.find((n) => n.className === 'hs-panel-head');
+    if (!found) throw new Error('no header');
+    return found;
+  };
+
+  it('gives every panel the same header: a section icon, the title, and Close', () => {
+    const { game } = logGame();
+    const room = {
+      world: {
+        rooms: new Map([[1, { id: 1, kind: 'office', floor: 2, height: 1, eval: 0.5, tenants: [], occupancy: 0, vacant: true, rent: RENT.default }]]),
+        shafts: new Map(),
+        sims: new Map(),
+      },
+    } as never;
+    const cases: [unknown, string, string][] = [
+      [createLogPanel(game, ctx), 'Event log', 'log'],
+      [createSettingsPanel({ world: { seed: 1, log: [], logTotal: 0 } } as never, ctx), 'Settings', 'settings'],
+      [createQueryPanel(room, { roomId: 1 }, ctx), 'Office', 'room'],
+      [createQueryPanel(room, { roomId: 99 }, ctx), 'Nothing selected', 'query'],
+    ];
+    for (const [panel, title, section] of cases) {
+      const [name, close] = head(panel).children;
+      expect(name?.tagName).toBe('H2');
+      const svg = name?.children[0] as FakeElement;
+      expect(svg.getAttribute('aria-hidden')).toBe('true');
+      expect(svg.children[0]?.getAttribute('href')).toBe(`#hs-icon-${section}`);
+      expect(name?.textContent).toBe(title);
+      expect(close?.textContent).toBe('Close');
+      expect(close?.getAttribute('aria-label')).toBe(`Close ${title.toLowerCase()}`);
+    }
   });
 });

@@ -11,8 +11,10 @@ export function createWorld(seed: number): World {
     rng: createRng(seed),
     time: { minute: 6 * 60 }, // a new game opens at 06:00 on the first weekday
     cash: LIMITS.startingCash,
+    quarterStartCash: LIMITS.startingCash, // a new game opens inside its first quarter
     stars: 1,
     population: 0,
+    dayStartPopulation: 0,
     rooms: new Map(),
     shafts: new Map(),
     sims: new Map(),

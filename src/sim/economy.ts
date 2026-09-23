@@ -74,6 +74,14 @@ export function onQuarterStart(world: World): void {
   } else {
     world.stats.badQuarterStreak = 0;
   }
+
+  // The status bar's quarter delta counts from here: cash once the quarter is settled.
+  world.quarterStartCash = world.cash;
+}
+
+/** The day boundary: the status bar's population change counts from the population now. */
+export function onDayStart(world: World): void {
+  world.dayStartPopulation = world.population;
 }
 
 export function recordVisit(world: World, room: Room): void {

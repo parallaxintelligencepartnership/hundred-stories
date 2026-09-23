@@ -7,18 +7,9 @@ import './ui.css';
 import { createSound } from '../audio/audio';
 import type { GameApi, Placement, Speed, Tool } from '../game/api';
 import type { Renderer } from '../render/renderer';
-import { ROOMS, SHAFTS } from '../sim/rules';
-import type { Command, LogEntry, RoomKind, ShaftKind, Star } from '../sim/types';
-import {
-  formatClock,
-  formatCount,
-  formatDate,
-  formatFloorShort,
-  formatMoney,
-  formatTimestamp,
-  starsGlyphs,
-  starsTitle,
-} from './format';
+import type { Command, LogEntry } from '../sim/types';
+import { formatFloorShort, formatMoney, formatTimestamp } from './format';
+import { createIconSheet } from './icons';
 import { chromeInsets, isSheetLayout, placementBoxes } from './layout';
 import type { Box } from './layout';
 import {
@@ -31,6 +22,9 @@ import {
   el,
 } from './panels';
 import type { PanelContext, PanelElement } from './panels';
+import { applyRowState, buildPalette, paintThumbnail, sameTool, toolRowState } from './palette';
+import type { PaletteRow } from './palette';
+import { createStatusBar } from './status';
 
 export interface Ui {
   destroy(): void;
@@ -38,23 +32,6 @@ export interface Ui {
 }
 
 type PanelKind = 'none' | 'finances' | 'log' | 'settings' | 'share';
-
-interface PaletteRow {
-  node: HTMLButtonElement;
-  cost: HTMLSpanElement;
-  tool: Tool;
-  star: Star;
-  label: string;
-  costText: string;
-}
-
-/** The palette's own parts: the tool rows, and the header row that folds them away. */
-interface PaletteParts {
-  rows: PaletteRow[];
-  toggle: HTMLButtonElement;
-  current: HTMLSpanElement;
-  chevron: HTMLSpanElement;
-}
 
 /** The live measurement of the chrome: stop it, or ask it to measure again. */
 interface ChromeWatch {
@@ -112,16 +89,6 @@ export function placementBuildLabels(placement: Placement): { text: string; titl
   };
 }
 
-const GROUPS: { title: string; source: 'rooms' | 'shafts' | 'tools'; group?: string }[] = [
-  { title: 'Structure', source: 'rooms', group: 'structure' },
-  { title: 'Elevators', source: 'shafts' },
-  { title: 'Residential', source: 'rooms', group: 'residential' },
-  { title: 'Hotel', source: 'rooms', group: 'hotel' },
-  { title: 'Commercial', source: 'rooms', group: 'commercial' },
-  { title: 'Services', source: 'rooms', group: 'services' },
-  { title: 'Tools', source: 'tools' },
-];
-
 /**
  * Should this load show the controls hint, and what does the counter become?
  *
@@ -164,36 +131,27 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   const timers = new Set<ReturnType<typeof setTimeout>>();
 
   const shell = el('div', 'hs-ui');
+  // The icon symbols, once for the whole chrome; every icon() refers to them by id.
+  shell.append(createIconSheet() as unknown as HTMLElement);
   const top = el('header', 'hs-top');
+  // Status bar, left to right: cash, population, stars, then the clock, then speed and menu.
+  // On a phone the first group is the first row and the clock and controls the second.
   const readouts = el('div', 'hs-readouts');
+  const clockGroup = el('div', 'hs-clock-group');
   const actions = el('div', 'hs-top-actions');
-  top.append(readouts, actions);
+  top.append(readouts, clockGroup, actions);
 
   // Readouts: segmented indicator faces, the one place the mono readout type appears.
-  const cashValue = el('span', 'hs-readout-value');
-  const cashButton = button('', 'hs-readout', () => setPanel(panelKind === 'finances' ? 'none' : 'finances'));
-  cashButton.replaceChildren(el('span', 'hs-readout-label', 'Cash'), cashValue);
-  cashButton.title = 'Open finances';
-
-  const popValue = el('span', 'hs-readout-value');
-  const popReadout = el('div', 'hs-readout');
-  popReadout.append(el('span', 'hs-readout-label', 'Population'), popValue);
-
-  const starsValue = el('span', 'hs-readout-value hs-stars');
-  const starsReadout = el('div', 'hs-readout');
-  starsReadout.append(el('span', 'hs-readout-label', 'Stars'), starsValue);
-
-  const clockValue = el('span', 'hs-readout-value');
-  const dateValue = el('span', 'hs-readout-sub');
-  const clockReadout = el('div', 'hs-readout');
-  clockReadout.append(clockValue, dateValue);
+  const status = createStatusBar();
+  status.cash.addEventListener('click', () => setPanel(panelKind === 'finances' ? 'none' : 'finances'));
 
   const hoverValue = el('span', 'hs-readout-value');
-  const hoverReadout = el('div', 'hs-readout is-hidden');
+  const hoverReadout = el('div', 'hs-readout hs-status-hover is-hidden');
   hoverReadout.title = 'Floor under the cursor';
-  hoverReadout.append(hoverValue);
+  hoverReadout.append(el('span', 'hs-readout-label', 'Cursor'), hoverValue);
 
-  readouts.append(cashButton, popReadout, starsReadout, clockReadout, hoverReadout);
+  readouts.append(status.cash, status.population, status.stars);
+  clockGroup.append(status.clock, hoverReadout);
 
   const speedBar = el('div', 'hs-speed');
   speedBar.setAttribute('role', 'group');
@@ -220,7 +178,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   const menuButton = button('Menu', 'hs-btn', () =>
     setPanel(panelKind === 'settings' ? 'none' : 'settings'),
   );
-  actions.append(speedBar, shareButton, menuButton);
+  actions.append(status.mode, speedBar, shareButton, menuButton);
 
   // Palette: a building directory board, with a header row that folds it away.
   const palette = el('nav', 'hs-palette');
@@ -229,7 +187,13 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   let chromeWatch: ChromeWatch | null = null;
   const paletteParts = buildPalette(
     palette,
-    (tool) => {
+    (row) => {
+      // A locked tile keeps focus so a keyboard can read it, but it does not pick anything up.
+      if (game.world.stars < row.star) {
+        notice(`${row.label} ${row.star === 1 ? 'needs 1 star' : `needs ${row.star} stars`}.`);
+        return;
+      }
+      const tool = row.tool;
       game.setTool(sameTool(tool, game.getTool()) ? { kind: 'none' } : tool);
       // A sheet sits over the tower. Once a tool is in hand there is nothing left to pick,
       // so the board folds away and the player can see where they are placing it. Their own
@@ -239,6 +203,11 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     },
     () => setPaletteCollapsed(!paletteCollapsed, true),
   );
+  // Thumbnails are cut from the renderer's art a few per frame, and only while the board is
+  // open, so opening the game does not stall on thirty GPU reads at once.
+  let thumbQueue: PaletteRow[] = [];
+  let thumbRaf = 0;
+  let thumbDpr = 0;
   const rows = paletteParts.rows;
   applyPaletteCollapsed();
 
@@ -338,30 +307,23 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   const unsubscribe = game.subscribe(() => update());
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('resize', onPlacementResize);
+  window.addEventListener('resize', onThumbResize);
   const fonts = typeof document.fonts?.addEventListener === 'function' ? document.fonts : null;
   fonts?.addEventListener('loadingdone', onPlacementResize);
+  queueThumbnails();
   update();
 
   function update(): void {
     if (destroyed) return;
     const world = game.world;
+    const speed = game.getSpeed();
 
-    setText(cashValue, formatMoney(world.cash));
-    setText(popValue, formatCount(world.population));
-    setText(starsValue, starsGlyphs(world.stars));
-    const title = starsTitle(world.stars);
-    if (starsReadout.title !== title) {
-      starsReadout.title = title;
-      starsValue.setAttribute('aria-label', title);
-    }
-    setText(clockValue, formatClock(world.time.minute));
-    setText(dateValue, formatDate(world.time.minute));
+    status.update(world, speed);
 
     const hover = game.getHover();
     hoverReadout.classList.toggle('is-hidden', hover === null);
     if (hover) setText(hoverValue, formatFloorShort(hover.floor));
 
-    const speed = game.getSpeed();
     for (const entry of speedButtons) {
       setPressed(entry.node, entry.speed === speed);
     }
@@ -369,14 +331,9 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     const tool = game.getTool();
     let held = '';
     for (const row of rows) {
-      const locked = world.stars < row.star;
-      if (row.node.disabled !== locked) row.node.disabled = locked;
-      row.node.classList.toggle('is-locked', locked);
-      setText(row.cost, locked ? needsStars(row.star) : row.costText);
-      const active = !locked && sameTool(row.tool, tool);
-      row.node.classList.toggle('is-active', active);
-      setPressed(row.node, active);
-      if (active) held = row.label;
+      const state = toolRowState(row, world, tool);
+      applyRowState(row, state);
+      if (state.selected) held = row.label;
     }
     // Collapsed, the header row is the only thing left to say what is in hand.
     setText(paletteParts.current, held);
@@ -385,6 +342,40 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     refreshPanel();
     refreshTicker();
     drainAlerts();
+  }
+
+  /** Queue every tile's thumbnail to be drawn (again), at the current device pixel ratio. */
+  function queueThumbnails(): void {
+    if (typeof renderer.thumbnail !== 'function') return; // a renderer without art (tests, fallbacks)
+    thumbDpr = window.devicePixelRatio || 1;
+    thumbQueue = rows.filter((row) => row.thumb !== null);
+    drawThumbnailsSoon();
+  }
+
+  function drawThumbnailsSoon(): void {
+    if (thumbRaf || destroyed || thumbQueue.length === 0 || paletteCollapsed) return;
+    thumbRaf = requestAnimationFrame(drawSomeThumbnails);
+  }
+
+  function drawSomeThumbnails(): void {
+    thumbRaf = 0;
+    if (destroyed) return;
+    for (let i = 0; i < 4 && thumbQueue.length > 0; i += 1) {
+      const row = thumbQueue.shift() as PaletteRow;
+      if (!row.thumb || !row.kind) continue;
+      try {
+        paintThumbnail(row.thumb, renderer.thumbnail(row.kind), thumbDpr);
+      } catch (error) {
+        // A failed read leaves the tile without a picture; its name and price still say it all.
+        console.warn('ui: palette thumbnail failed', row.kind, error);
+      }
+    }
+    drawThumbnailsSoon();
+  }
+
+  /** A move to a screen with another pixel ratio redraws the thumbnails sharp for it. */
+  function onThumbResize(): void {
+    if ((window.devicePixelRatio || 1) !== thumbDpr) queueThumbnails();
   }
 
   /** Is the tool in hand an elevator? Its up and down arrows stretch a span instead of moving it. */
@@ -671,6 +662,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     paletteParts.toggle.setAttribute('aria-expanded', paletteCollapsed ? 'false' : 'true');
     setText(paletteParts.chevron, paletteCollapsed ? '\u25b8' : '\u25be');
     chromeWatch?.measure(); // the board just changed height, so the camera's band did too
+    drawThumbnailsSoon(); // opened: finish any pictures still to draw
   }
 
   function onKeyDown(event: KeyboardEvent): void {
@@ -703,6 +695,9 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
       sound.destroy();
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('resize', onPlacementResize);
+      window.removeEventListener('resize', onThumbResize);
+      if (thumbRaf) cancelAnimationFrame(thumbRaf);
+      status.destroy();
       fonts?.removeEventListener('loadingdone', onPlacementResize);
       chromeWatch?.disconnect();
       for (const timer of timers) clearTimeout(timer);
@@ -715,80 +710,6 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
 }
 
 // ------------------------------------------------------------------ parts
-
-/**
- * Fill the palette: a header row that folds the board away, then a row per tool.
- *
- * The header is the whole board when it is collapsed, so it carries the tool in hand as
- * well as its own name; update() keeps that text current.
- */
-function buildPalette(
-  palette: HTMLElement,
-  onPick: (tool: Tool) => void,
-  onToggle: () => void,
-): PaletteParts {
-  const current = el('span', 'hs-palette-current');
-  const chevron = el('span', 'hs-palette-chevron', '\u25be');
-  chevron.setAttribute('aria-hidden', 'true');
-  const toggle = button('', 'hs-palette-toggle', onToggle);
-  toggle.replaceChildren(el('span', 'hs-palette-title', 'Build'), current, chevron);
-  toggle.setAttribute('aria-expanded', 'true');
-  toggle.title = 'Show or hide the build tools';
-  palette.append(toggle);
-
-  const rows: PaletteRow[] = [];
-  for (const group of GROUPS) {
-    palette.append(el('h2', 'hs-group-title', group.title));
-    if (group.source === 'rooms') {
-      for (const kind of Object.keys(ROOMS) as RoomKind[]) {
-        const rule = ROOMS[kind];
-        if (rule.group !== group.group) continue;
-        rows.push(
-          addRow(palette, rule.label, formatMoney(rule.cost), rule.star, { kind: 'room', room: kind }, onPick),
-        );
-      }
-    } else if (group.source === 'shafts') {
-      for (const kind of Object.keys(SHAFTS) as ShaftKind[]) {
-        const rule = SHAFTS[kind];
-        rows.push(
-          addRow(palette, rule.label, formatMoney(rule.shaftCost), rule.star, { kind: 'shaft', shaft: kind }, onPick),
-        );
-      }
-    } else {
-      rows.push(addRow(palette, 'Demolish', '', 1, { kind: 'demolish' }, onPick));
-      rows.push(addRow(palette, 'Query', '', 1, { kind: 'query' }, onPick));
-    }
-  }
-  return { rows, toggle, current, chevron };
-}
-
-function addRow(
-  palette: HTMLElement,
-  label: string,
-  costText: string,
-  star: Star,
-  tool: Tool,
-  onPick: (tool: Tool) => void,
-): PaletteRow {
-  const node = button('', 'hs-tool', () => onPick(tool));
-  const cost = el('span', 'hs-tool-cost', costText);
-  node.title = label;
-  node.replaceChildren(el('span', 'hs-tool-label', label), cost);
-  node.setAttribute('aria-pressed', 'false');
-  palette.append(node);
-  return { node, cost, tool, star, label, costText };
-}
-
-function needsStars(star: Star): string {
-  return star === 1 ? 'Needs 1 star' : `Needs ${star} stars`;
-}
-
-function sameTool(a: Tool, b: Tool): boolean {
-  if (a.kind !== b.kind) return false;
-  if (a.kind === 'room' && b.kind === 'room') return a.room === b.room;
-  if (a.kind === 'shaft' && b.kind === 'shaft') return a.shaft === b.shaft;
-  return true;
-}
 
 function sizeOf(node: HTMLElement): { width: number; height: number } {
   const box = node.getBoundingClientRect();

@@ -18,10 +18,19 @@ import type { Car, LogEntry, RiderClass, Room, Shaft, Sim, SimKind, World } from
 /** v1 and pre-rent v2 saves have no `rent`; it is normalized to RENT.default on load. */
 type SaveRoom = Omit<Room, 'rent'> & { rent?: number };
 
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
-/** Versions this loader understands. v1 has no per car settings and boolean hall calls. */
-const READABLE_VERSIONS = [1, 2];
+/**
+ * Versions this loader understands. v1 has no per car settings and boolean hall calls.
+ * v2 has no status bar baselines (quarterStartCash, dayStartPopulation): they load as null.
+ */
+const READABLE_VERSIONS = [1, 2, 3];
+
+/**
+ * The version the hash projection names. It stays at 2 because v3 only added the two display
+ * baselines, which the hash leaves out, so a v3 world hashes exactly as it did under v2.
+ */
+const HASH_VERSION = 2;
 
 /** A v1 hall call was one bit per direction: anyone waiting there was everyone. */
 const ALL_CLASSES: readonly RiderClass[] = ['hotel', 'office', 'other'];
@@ -77,6 +86,8 @@ interface SaveData {
   gameOver: World['gameOver'];
   log: LogEntry[];
   logTotal?: number;
+  quarterStartCash?: number | null; // absent before v3
+  dayStartPopulation?: number | null; // absent before v3
 }
 
 function shaftToSave(shaft: Shaft): SaveShaft {
@@ -132,6 +143,8 @@ function buildSaveData(world: World): SaveData {
     gameOver: world.gameOver,
     log: world.log.slice(-LOG_LIMIT),
     logTotal: world.logTotal,
+    quarterStartCash: world.quarterStartCash,
+    dayStartPopulation: world.dayStartPopulation,
   };
 }
 
@@ -221,6 +234,8 @@ function firstInvalidField(d: SaveData): string | null {
   if (!isFiniteNumber(d.cash)) return 'cash';
   if (!isInteger(d.stars) || d.stars < 1 || d.stars > 6) return 'stars';
   if (!isInteger(d.nextId)) return 'nextId';
+  if (d.quarterStartCash != null && !isFiniteNumber(d.quarterStartCash)) return 'quarterStartCash';
+  if (d.dayStartPopulation != null && !isFiniteNumber(d.dayStartPopulation)) return 'dayStartPopulation';
 
   // Ids come from one counter in world.ts, so they are unique across rooms, shafts,
   // cars and sims alike, and nextId is always past the highest one handed out.
@@ -363,6 +378,9 @@ export function deserialize(text: string): { ok: true; world: World } | { ok: fa
     world.cash = parsed.cash;
     world.stars = parsed.stars;
     world.population = parsed.population;
+    // A save older than v3 never recorded them: unknown until the next boundary sets them.
+    world.quarterStartCash = parsed.quarterStartCash ?? null;
+    world.dayStartPopulation = parsed.dayStartPopulation ?? null;
     world.nextId = parsed.nextId;
     world.rng = createRng(parsed.rngState);
 
@@ -529,7 +547,18 @@ function simForHash(sim: Sim) {
 // World keys the hash leaves out on purpose: the log is chatter, rng is hashed as its
 // state number, floorIndex is derived from rooms and shafts, routingDirty is a cache
 // flag, structureVersion is the renderer's change counter, and time is hashed as `minute`.
-type UnhashedWorldKey = 'log' | 'logTotal' | 'rng' | 'floorIndex' | 'routingDirty' | 'structureVersion' | 'time';
+// quarterStartCash and dayStartPopulation are the status bar's display baselines: nothing in
+// the sim reads them, so they are saved but not hashed, and the bench hashes stay put.
+type UnhashedWorldKey =
+  | 'log'
+  | 'logTotal'
+  | 'rng'
+  | 'floorIndex'
+  | 'routingDirty'
+  | 'structureVersion'
+  | 'time'
+  | 'quarterStartCash'
+  | 'dayStartPopulation';
 type HashedWorldKey = Exclude<keyof World, UnhashedWorldKey> | 'minute' | 'rngState';
 
 function byId<T extends { id: number }>(items: Iterable<T>): T[] {
@@ -538,7 +567,7 @@ function byId<T extends { id: number }>(items: Iterable<T>): T[] {
 
 export function hashWorld(world: World): string {
   const projection = {
-    version: SAVE_VERSION,
+    version: HASH_VERSION,
     seed: world.seed,
     minute: world.time.minute,
     cash: world.cash,

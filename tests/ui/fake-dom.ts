@@ -189,6 +189,8 @@ export class FakeDom {
       head: this.head,
       body: this.body,
       createElement: (tag: string) => this.createElement(tag),
+      // SVG icons and the clock dial: the namespace does not matter to a tree that lays nothing out.
+      createElementNS: (_ns: string, tag: string) => this.createElement(tag),
       getElementById: () => null,
     };
     g['window'] = {

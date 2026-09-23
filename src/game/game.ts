@@ -8,12 +8,11 @@ import { createWorld, log as logEvent } from '../sim/world';
 import { SCHEDULES } from '../sim/rules';
 import { classifyPress, isTap, PRESS_SLOP_PX, TOUCH_SLOP_PX } from '../render/input';
 import type { Renderer } from '../render/renderer';
-import type { GameApi, Placement, PlacementRect, Speed, Tool } from './api';
+import { NIGHT_MULTIPLIER, type GameApi, type Placement, type PlacementRect, type Speed, type Tool } from './api';
 import { readSave, stashUnreadable, writeSave } from './storage';
 import { createTap, drainTap, isBuildCommand, primeTap, type GameEvent, type GameEventListener } from './events';
 
 const TICKS_PER_SECOND_AT_1X = 10;
-const NIGHT_MULTIPLIER = 8;
 /** The largest interpolation alpha while the clock runs: the frame never reaches the next tick's position early. */
 const ALPHA_MAX = 1 - 1e-9;
 const MAX_TICKS_PER_FRAME = 240;

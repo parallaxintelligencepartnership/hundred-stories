@@ -408,8 +408,8 @@ describe('saves', () => {
   it('keeps serves, range and the hall call classes through a round trip', () => {
     const { world, shaftId } = worldWithSettings();
     const text = serialize(world);
-    expect(JSON.parse(text).version).toBe(2);
-    expect(SAVE_VERSION).toBe(2);
+    expect(JSON.parse(text).version).toBe(3);
+    expect(SAVE_VERSION).toBe(3);
 
     const result = deserialize(text);
     expect(result.ok).toBe(true);

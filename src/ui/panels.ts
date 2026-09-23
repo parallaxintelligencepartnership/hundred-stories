@@ -34,6 +34,7 @@ import {
   stressBandLabel,
   stressBandOf,
 } from './format';
+import { icon, type IconName } from './icons';
 
 /** A panel element may expose a cheap refresh that rewrites live numbers without rebuilding. */
 export type PanelElement = HTMLDivElement & { refresh?: () => void };
@@ -121,10 +122,20 @@ function flag(label: string, alert = false): HTMLSpanElement {
   return el('span', alert ? 'hs-flag is-alert' : 'hs-flag', label);
 }
 
-function shell(title: string, ctx: PanelContext): { panel: PanelElement; body: HTMLDivElement } {
+/**
+ * Every panel's frame: one header of section icon, title and Close, then the body.
+ *
+ * The icon is drawn from the shared symbol sheet (icons.ts) and is decorative: the title
+ * beside it is the label. Close stays a word, not a cross, so it needs no explaining.
+ */
+function shell(title: string, section: IconName, ctx: PanelContext): { panel: PanelElement; body: HTMLDivElement } {
   const panel = el('div', 'hs-panel') as PanelElement;
   const head = el('div', 'hs-panel-head');
-  head.append(el('h2', 'hs-panel-title', title), button('Close', 'hs-btn', () => ctx.close()));
+  const name = el('h2', 'hs-panel-title');
+  name.append(icon(section, 'hs-panel-icon') as unknown as HTMLElement, el('span', 'hs-panel-title-text', title));
+  const close = button('Close', 'hs-btn hs-panel-close', () => ctx.close());
+  close.setAttribute('aria-label', `Close ${title.toLowerCase()}`);
+  head.append(name, close);
   const body = el('div', 'hs-panel-body');
   panel.append(head, body);
   return { panel, body };
@@ -175,7 +186,7 @@ export function createQueryPanel(
   if (shaftId !== undefined && world.shafts.has(shaftId)) return shaftPanel(shaftId, game, ctx);
   if (simId !== undefined && world.sims.has(simId)) return simPanel(simId, game, ctx);
 
-  const { panel, body } = shell('Nothing selected', ctx);
+  const { panel, body } = shell('Nothing selected', 'query', ctx);
   body.append(el('p', 'hs-note', 'That part of the tower is gone.'));
   return panel;
 }
@@ -183,7 +194,7 @@ export function createQueryPanel(
 function roomPanel(roomId: Id, game: GameApi, ctx: PanelContext): PanelElement {
   const room = game.world.rooms.get(roomId) as Room;
   const rule = ROOMS[room.kind];
-  const { panel, body } = shell(rule.label, ctx);
+  const { panel, body } = shell(rule.label, 'room', ctx);
 
   const where =
     room.height > 1
@@ -282,7 +293,7 @@ function roomPanel(roomId: Id, game: GameApi, ctx: PanelContext): PanelElement {
 
 function simPanel(simId: Id, game: GameApi, ctx: PanelContext): PanelElement {
   const sim = game.world.sims.get(simId) as Sim;
-  const { panel, body } = shell(SIM_KINDS[sim.kind], ctx);
+  const { panel, body } = shell(SIM_KINDS[sim.kind], 'population', ctx);
   const where = row('Position', formatFloor(sim.pos.floor));
   const state = row('Doing', SIM_STATES[sim.state]);
   const stress = row('Stress', stressBandLabel(stressBandOf(sim.stress)));
@@ -311,7 +322,7 @@ function simPanel(simId: Id, game: GameApi, ctx: PanelContext): PanelElement {
 function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement {
   const shaft = game.world.shafts.get(shaftId) as Shaft;
   const rule = SHAFTS[shaft.kind];
-  const { panel, body } = shell(rule.label, ctx);
+  const { panel, body } = shell(rule.label, 'elevator', ctx);
   body.append(el('p', 'hs-note', formatFloorRange(shaft.floorMin, shaft.floorMax)));
 
   const cars = row('Cars', `${formatCount(shaft.cars.length)} of ${formatCount(rule.maxCars)}`);
@@ -596,7 +607,7 @@ function setRowValue(node: HTMLElement, text: string): void {
 // --------------------------------------------------------- finances panel
 
 export function createFinancesPanel(game: GameApi, ctx: PanelContext): PanelElement {
-  const { panel, body } = shell('Finances', ctx);
+  const { panel, body } = shell('Finances', 'finance', ctx);
   const stats = game.world.stats;
   const lastQuarter = (): { income: number; upkeep: number; net: number } =>
     game.world.stats.lastQuarter;
@@ -656,7 +667,7 @@ export function createFinancesPanel(game: GameApi, ctx: PanelContext): PanelElem
 export const LOG_PANEL_LINES = 200;
 
 export function createLogPanel(game: GameApi, ctx: PanelContext): PanelElement {
-  const { panel, body } = shell('Event log', ctx);
+  const { panel, body } = shell('Event log', 'log', ctx);
   const list = el('ul', 'hs-log-list');
   body.append(list);
 
@@ -705,7 +716,7 @@ export function createLogPanel(game: GameApi, ctx: PanelContext): PanelElement {
 // --------------------------------------------------------- settings panel
 
 export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElement {
-  const { panel, body } = shell('Settings', ctx);
+  const { panel, body } = shell('Settings', 'settings', ctx);
 
   const controls = section('Controls');
   for (const line of CONTROL_LINES) controls.append(el('p', 'hs-note', line));
@@ -859,7 +870,7 @@ function soundSection(sound: Sound): HTMLDivElement {
 // ----------------------------------------------------------- share panel
 
 export function createSharePanel(game: GameApi, renderer: Renderer, ctx: PanelContext): PanelElement {
-  const { panel, body } = shell('Share', ctx);
+  const { panel, body } = shell('Share', 'share', ctx);
 
   const stats = shareStats(game.world);
   const text = shareText(stats);

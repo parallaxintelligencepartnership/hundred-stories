@@ -123,7 +123,7 @@ describe('save and load through the browser slot', () => {
   it('stashes an unreadable save and warns the player instead of throwing it away', async () => {
     const game = createGame(11);
     const saved = JSON.parse(game.exportSave()) as Record<string, unknown>;
-    saved.version = 3;
+    saved.version = 99; // a version from the future: this build cannot read it
     const text = JSON.stringify(saved);
     slot.text = text;
 

@@ -213,8 +213,19 @@ export interface World {
   rng: Rng;
   time: { minute: number };
   cash: number; // dollars
+  /**
+   * Cash when the current quarter began (after its settlement), for the status bar's
+   * quarter delta. null until the first quarter boundary on a save older than v3.
+   * Saved, never hashed: a display baseline, not simulation state.
+   */
+  quarterStartCash: number | null;
   stars: Star;
   population: number;
+  /**
+   * Population at the last day boundary (00:00), for the status bar's daily change.
+   * null until the first day boundary on a save older than v3. Saved, never hashed.
+   */
+  dayStartPopulation: number | null;
   rooms: Map<Id, Room>;
   shafts: Map<Id, Shaft>;
   sims: Map<Id, Sim>;

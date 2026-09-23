@@ -13,6 +13,9 @@ export type Tool =
 
 export type Speed = 0 | 1 | 2 | 4;
 
+/** From 23:00 to 06:00 the clock runs this many times faster than the chosen speed. */
+export const NIGHT_MULTIPLIER = 8;
+
 /**
  * Where the tool in hand would land, priced and judged before a dollar is spent.
  *

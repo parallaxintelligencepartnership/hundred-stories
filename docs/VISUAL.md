@@ -43,17 +43,21 @@ Type:
 Layout:
 ```
 +-------------------------------------------------------------+
-| [cash 000000] [pop 0000] [stars] [clock day]  [speed] [menu]|  top strip, 44px
+| [cash, delta] [pop, trend] [stars] [dial clock day] [speed] |  status bar, 56px
 +------+------------------------------------------------------+
 | pal  |                                                      |
 | ette |                 TOWER VIEW (canvas)                   |
-| 200  |                                                      |
+| 232  |                                                      |
 | px   |                                            [query]   |  right panel slides in on click
 +------+------------------------------------------------------+
 | event ticker (one line, newest, click to open the log)      |  28px
 +-------------------------------------------------------------+
 ```
-Left aligned. The palette is a building directory board: groups as bold rows, tools as indented rows with the cost right aligned, locked tools show the star needed instead of a cost. On phone width the palette becomes a bottom sheet and the top strip wraps to two rows.
+Left aligned. The palette is a building directory board: groups as bold rows, then a tile per tool (since 0.4.3): the room's own day art as a 72 by 36 thumbnail, the name at 14 px, the footprint and cost at 12 px, 88 px tall. Selected is amber with `aria-pressed`; locked is dim with `aria-disabled`, still focusable, showing the stars needed and a 4 px bar of stars now over stars needed; unaffordable shows the cost in alert with "Short $X" and stays selectable. On phone width the palette becomes a bottom sheet with two tiles to a row, 104 px tall.
+
+Status bar (since 0.4.3), 56 px, readouts as hairline separated columns of label, value (20 px readout face) and meta (12 px): cash with its change since the quarter began, population with an arrow and its change since midnight (a dash until the first boundary on an older save), six star icons with a tooltip of the next star's requirements, a 24 hour dial (midnight at the top, 23:00 to 06:00 shaded) with the time and date, then the night mode ("Night x8, effective x16") beside the speed buttons, Share and Menu. On a phone: two 56 px rows, cash, population and stars, then the clock and the controls.
+
+Icons: one inline SVG symbol sheet in the DOM, referenced by `<use>`, no icon font, 16 px line drawings in the current color. Every panel header is section icon, title and Close; the icon never stands without its words.
 
 Motion:
 - One page-load moment: the tower view fades from black as the sky rises to the current hour, 900 ms. Nothing else animates on load.

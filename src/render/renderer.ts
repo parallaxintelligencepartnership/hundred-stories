@@ -66,6 +66,7 @@ import {
 import { Motion, TELEPORT_TILES } from './interpolate';
 import { floorsWithPeople, LIGHT_ALPHA, lightBand, lightTintAt, windowStateOf, windowStatesFor, type WindowState } from './light';
 import { createSky, isNight, skyBackground, type Sky } from './sky';
+import { createThumbnails, type ThumbnailKind } from './thumbnail';
 
 export interface PickHit {
   roomId?: Id;
@@ -127,6 +128,8 @@ export interface Renderer {
   /** A still image of the current view, for sharing. Throws if extraction fails. */
   snapshot(): HTMLCanvasElement;
   destroy(): void;
+  /** The daytime art of a room or shaft kind as a canvas for the palette, extracted once per kind. */
+  thumbnail(kind: ThumbnailKind): HTMLCanvasElement;
 }
 
 /**
@@ -1611,6 +1614,7 @@ export async function createRenderer(
       particleAtlas = null;
       app.destroy({ removeView: true }, { children: true });
     },
+    thumbnail: createThumbnails({ art: () => art, extract: (t) => app.renderer.extract.canvas(t) as HTMLCanvasElement }),
   };
 
   return renderer;

@@ -463,3 +463,59 @@ describe('hashWorld covers every field in types.ts', () => {
     expect(hashWorld(world)).not.toBe(before);
   });
 });
+
+describe('status bar baselines (save v3)', () => {
+  it('writes version 3 and round trips both baselines, set or not yet known', () => {
+    expect(SAVE_VERSION).toBe(3);
+    const world = richWorld();
+    world.quarterStartCash = 100_000;
+    world.dayStartPopulation = 42;
+    const text = serialize(world);
+    expect(JSON.parse(text).version).toBe(3);
+    const result = deserialize(text);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.world.quarterStartCash).toBe(100_000);
+    expect(result.world.dayStartPopulation).toBe(42);
+
+    world.quarterStartCash = null;
+    world.dayStartPopulation = null;
+    const unknown = deserialize(serialize(world));
+    expect(unknown.ok && unknown.world.quarterStartCash).toBe(null);
+    expect(unknown.ok && unknown.world.dayStartPopulation).toBe(null);
+  });
+
+  it('loads a v2 save without the fields, and both baselines are unknown until a boundary', () => {
+    const data = JSON.parse(serialize(richWorld()));
+    data.version = 2;
+    delete data.quarterStartCash;
+    delete data.dayStartPopulation;
+    const result = deserialize(JSON.stringify(data));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.world.quarterStartCash).toBe(null);
+    expect(result.world.dayStartPopulation).toBe(null);
+    expect(result.world.cash).toBe(123456);
+  });
+
+  it('refuses a v3 save whose baseline is not a number', () => {
+    const data = JSON.parse(serialize(richWorld()));
+    data.quarterStartCash = 'lots';
+    const result = deserialize(JSON.stringify(data));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toContain('(quarterStartCash)');
+  });
+
+  it('leaves both baselines out of the hash, and the hash projection at version 2', () => {
+    const world = richWorld();
+    world.quarterStartCash = 1;
+    world.dayStartPopulation = 1;
+    const before = hashWorld(world);
+    world.quarterStartCash = 999_999;
+    world.dayStartPopulation = null;
+    expect(hashWorld(world)).toBe(before);
+    world.cash += 1; // and the hash still sees real state
+    expect(hashWorld(world)).not.toBe(before);
+  });
+});

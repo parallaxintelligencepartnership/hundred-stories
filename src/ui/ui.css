@@ -23,7 +23,14 @@
   --size-20: 20px;
   --size-28: 28px;
 
-  --top-h: 44px;
+  /* Status bar (0.4.3): a 56 px strip of readouts, one row on a desktop and two on a phone. */
+  --status-h: 56px;
+  --status-gap: 12px;
+  --status-value: 20px;
+  --status-meta: 12px;
+  --star-size: 16px;
+  --clock-size: 40px;
+  --top-h: var(--status-h);
   --palette-w: 232px;
   --ticker-h: 28px;
   --panel-w: 320px;
@@ -135,71 +142,240 @@ body {
   min-height: calc(var(--top-h) + var(--safe-top));
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: var(--pad);
+  align-items: stretch;
+  gap: var(--status-gap);
   padding: var(--safe-top) calc(var(--pad) + var(--safe-right)) 0 calc(var(--pad) + var(--safe-left));
   background: var(--steel);
   border-bottom: 1px solid var(--line);
   pointer-events: auto;
 }
 
-.hs-readouts {
+.hs-readouts,
+.hs-clock-group {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--pad);
-  flex: 1 1 auto;
-  min-height: var(--top-h);
+  align-items: stretch;
+  gap: var(--status-gap);
+  min-height: var(--status-h);
 }
 
+.hs-clock-group {
+  flex: 1 1 auto;
+}
+
+/* A readout is a column of the directory board: label, value, meta, split by hairlines. */
 .hs-readout {
   display: flex;
-  align-items: baseline;
-  gap: 6px;
-  padding: 3px 8px;
-  background: var(--steel-2);
-  border: 1px solid var(--line);
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  padding: 0 var(--status-gap) 0 0;
+  background: transparent;
+  border: 0;
+  border-right: 1px solid var(--line);
+  text-align: left;
 }
 
 button.hs-readout {
   cursor: pointer;
 }
 
-button.hs-readout:hover {
-  border-color: var(--amber);
+button.hs-readout:hover .hs-readout-label {
+  color: var(--amber);
 }
 
-.hs-readout-label {
-  font-size: var(--size-12);
+.hs-status-cash {
+  flex: 0 0 160px;
+}
+
+.hs-status-pop {
+  flex: 0 0 112px;
+}
+
+.hs-readout-label,
+.hs-readout-meta {
+  font-size: var(--status-meta);
+  line-height: 1.2;
   color: var(--ink-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hs-readout-meta.is-up {
+  color: var(--indicator);
+}
+
+.hs-readout-meta.is-down {
+  color: var(--alert);
 }
 
 .hs-readout-value {
   font-family: var(--font-readout);
-  font-size: var(--size-16);
+  font-size: var(--status-value);
   line-height: 1.1;
   letter-spacing: 0.04em;
   color: var(--indicator);
-}
-
-.hs-readout-value.hs-stars {
-  color: var(--amber);
+  white-space: nowrap;
 }
 
 .hs-readout.is-hidden {
   display: none;
 }
 
-.hs-readout-sub {
-  font-size: var(--size-12);
+/* Stars: six icons, amber earned and outline unearned, with what the next one needs. */
+.hs-status-stars {
+  position: relative;
+  padding: 0;
+}
+
+.hs-stars-button {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: 100%;
+  padding: 0 var(--status-gap) 0 0;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hs-star-row {
+  display: flex;
+  gap: 2px;
+  padding: 3px 0;
+}
+
+.hs-star {
+  width: var(--star-size);
+  height: var(--star-size);
+  fill: none;
   color: var(--ink-dim);
 }
 
+.hs-star.is-earned {
+  fill: var(--amber);
+  color: var(--amber);
+}
+
+.hs-tip {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 5;
+  display: none;
+  width: 280px;
+  padding: var(--pad);
+  background: var(--steel);
+  border: 1px solid var(--line);
+  font-size: var(--size-12);
+}
+
+.hs-status-stars:hover .hs-tip,
+.hs-status-stars:focus-within .hs-tip,
+.hs-status-stars.is-open .hs-tip {
+  display: block;
+}
+
+.hs-tip-title {
+  margin: 0 0 4px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.hs-tip-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hs-tip-item {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: var(--pad);
+  padding: 3px 0;
+  border-top: 1px solid var(--line);
+  color: var(--ink);
+}
+
+.hs-tip-mark {
+  color: var(--ink-dim);
+}
+
+.hs-tip-item.is-met .hs-tip-mark {
+  color: var(--indicator);
+}
+
+/* Clock: a 24 hour dial with midnight at the top and the night arc shaded. */
+.hs-status-clock {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--pad);
+}
+
+.hs-dial {
+  flex: 0 0 auto;
+  width: var(--clock-size);
+  height: var(--clock-size);
+}
+
+.hs-dial-face {
+  fill: var(--steel-2);
+  stroke: var(--line);
+  stroke-width: 1.5;
+}
+
+.hs-dial-night {
+  fill: var(--ink-dim);
+  opacity: 0.45;
+}
+
+.hs-dial-tick {
+  stroke: var(--ink-dim);
+  stroke-width: 1.5;
+}
+
+.hs-dial-hand {
+  stroke: var(--indicator);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.hs-dial-pin {
+  fill: var(--indicator);
+}
+
+.hs-clock-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.hs-speed-mode {
+  padding: 3px 8px;
+  border: 1px solid var(--amber);
+  font-size: var(--size-12);
+  color: var(--amber);
+  white-space: nowrap;
+}
+
+.hs-speed-mode.is-hidden {
+  display: none;
+}
+
+.hs-icon-sheet {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
 .hs-top-actions {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 4px;
-  min-height: var(--top-h);
+  min-height: var(--status-h);
 }
 
 .hs-speed {
@@ -325,57 +501,157 @@ button.hs-readout:hover {
   border-bottom: 1px solid var(--line);
 }
 
+/* A tool tile: the room's own art, its name and footprint, its cost, and while locked a bar of
+   stars now over stars needed. Selected is amber; locked is dim but still takes focus. */
 .hs-tool {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--pad);
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  grid-template-rows: auto auto auto;
+  column-gap: var(--pad);
+  row-gap: 4px;
+  align-items: center;
   width: 100%;
   max-width: 100%;
-  padding: 6px var(--pad) 6px 16px;
+  min-height: 88px;
+  padding: var(--pad);
   background: transparent;
   border: 0;
   border-bottom: 1px solid var(--line);
-  border-left: 3px solid transparent;
   text-align: left;
   cursor: pointer;
 }
 
-.hs-tool:hover:not(:disabled) {
-  color: var(--amber);
+.hs-tool-thumb {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  display: block;
+  width: 72px;
+  height: 36px;
+  image-rendering: pixelated;
 }
 
-.hs-tool.is-active {
-  background: var(--amber);
-  color: var(--on-amber);
-  border-left-color: var(--amber);
-}
-
-.hs-tool:disabled {
+.hs-tool-thumb.is-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
   color: var(--ink-dim);
-  cursor: default;
 }
 
-.hs-tool-label {
-  flex: 1 1 auto;
+.hs-tool-icon {
+  width: 20px;
+  height: 20px;
+}
+
+.hs-tool-text {
+  grid-column: 2;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+}
+
+.hs-tool-name,
+.hs-tool-footprint {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
-.hs-tool-cost {
-  flex: 0 0 78px;
-  font-family: var(--font-readout);
+.hs-tool-name {
+  font-size: var(--size-14);
+  line-height: 1.3;
+}
+
+.hs-tool-footprint {
   font-size: var(--size-12);
-  text-align: right;
+  line-height: 1.3;
+  color: var(--ink-dim);
+}
+
+.hs-tool-costline {
+  grid-column: 2;
+  grid-row: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 6px;
+  min-width: 0;
+  font-size: var(--size-12);
+  line-height: 1.3;
+}
+
+.hs-tool-cost {
+  font-family: var(--font-readout);
   white-space: nowrap;
 }
 
+.hs-tool-short {
+  color: var(--alert);
+  white-space: nowrap;
+}
+
+.hs-tool.is-short .hs-tool-cost {
+  color: var(--alert);
+}
+
 .hs-tool.is-locked .hs-tool-cost {
-  /* "Needs 3 stars" is wider than the price column, so this one sizes to its text. */
-  flex: 0 0 auto;
   font-family: var(--font-ui);
+}
+
+.hs-tool-progress {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  display: block;
+  height: 4px;
+  background: var(--steel-2);
+}
+
+.hs-tool-progress[hidden] {
+  display: none;
+}
+
+.hs-tool-progress-fill {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: var(--amber);
+}
+
+.hs-tool:hover:not([aria-disabled='true']):not([aria-pressed='true']) .hs-tool-name {
+  color: var(--amber);
+}
+
+.hs-tool:focus-visible {
+  outline-offset: -2px;
+}
+
+.hs-tool[aria-pressed='true'] {
+  background: var(--amber);
+  color: var(--on-amber);
+}
+
+.hs-tool[aria-pressed='true'] .hs-tool-footprint,
+.hs-tool[aria-pressed='true'] .hs-tool-cost,
+.hs-tool[aria-pressed='true'] .hs-tool-short {
+  color: var(--on-amber);
+}
+
+.hs-tool[aria-pressed='true'] .hs-tool-short {
+  font-weight: 600;
+}
+
+.hs-tool[aria-pressed='true']:focus-visible {
+  outline-color: var(--on-amber);
+}
+
+.hs-tool[aria-disabled='true'] {
+  color: var(--ink-dim);
+  cursor: default;
+}
+
+.hs-tool[aria-disabled='true'] .hs-tool-thumb {
+  opacity: 0.45;
 }
 
 /* Scrolling chrome: a hairline scrollbar, never a system slab. */
@@ -430,14 +706,33 @@ button.hs-readout:hover {
   align-items: center;
   justify-content: space-between;
   gap: var(--pad);
+  min-height: 44px;
   padding: 6px var(--pad);
   border-bottom: 1px solid var(--line);
 }
 
 .hs-panel-title {
+  display: flex;
+  align-items: center;
+  gap: var(--pad);
+  min-width: 0;
   margin: 0;
   font-size: var(--size-16);
   font-weight: 600;
+}
+
+.hs-panel-icon {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  color: var(--amber);
+}
+
+.hs-panel-title-text {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .hs-panel-body {
@@ -836,8 +1131,92 @@ button.hs-readout:hover {
 /* Phone width ---------------------------------------------------------- */
 
 @media (max-width: 720px) {
+  /* Two 56 px rows: cash, population and stars; then the clock and the controls. */
   .hs-top {
-    min-height: calc(var(--top-h) * 2 + var(--safe-top));
+    min-height: calc(var(--status-h) * 2 + var(--safe-top));
+    column-gap: var(--pad);
+    row-gap: 0;
+  }
+
+  .hs-readouts {
+    flex: 1 1 100%;
+    gap: var(--pad);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .hs-readout,
+  .hs-stars-button {
+    padding-right: var(--pad);
+  }
+
+  .hs-status-cash {
+    flex: 1 1 0;
+  }
+
+  .hs-status-pop {
+    flex: 0 1 104px;
+  }
+
+  .hs-status-stars {
+    border-right: 0;
+  }
+
+  .hs-status-clock {
+    border-right: 0;
+  }
+
+  .hs-clock-group {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .hs-top-actions .hs-btn {
+    padding: 5px 6px;
+  }
+
+  .hs-speed .hs-btn {
+    min-width: 32px;
+  }
+
+  /* The second row is tight: the time stays, the date moves into the clock's tooltip. */
+  .hs-status-clock .hs-readout-meta {
+    display: none;
+  }
+
+  .hs-status-clock {
+    gap: 6px;
+    padding-right: 0;
+  }
+
+  /* No room beside the speed buttons on a phone: the night mode hangs just under them. */
+  .hs-speed-mode {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 4px;
+    background: var(--steel);
+  }
+
+  .hs-tip {
+    width: min(280px, calc(100vw - 16px));
+    left: auto;
+    right: 0;
+  }
+
+  /* The sheet lays the tiles out two to a row. */
+  .hs-palette {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-content: start;
+  }
+
+  .hs-palette.is-collapsed {
+    display: block;
+  }
+
+  .hs-palette-toggle,
+  .hs-group-title {
+    grid-column: 1 / -1;
   }
 
   /* A bottom sheet: it takes the lower part of the screen and scrolls inside itself, so the
@@ -872,10 +1251,27 @@ button.hs-readout:hover {
     min-height: 44px;
   }
 
-  /* A finger needs a target it can hit: 44 px is the smallest comfortable one. */
+  /* A 104 px tile: the picture and the price, then the name and footprint across the tile. */
   .hs-tool {
-    min-height: 44px;
-    align-items: center;
+    min-height: 104px;
+    border-right: 1px solid var(--line);
+  }
+
+  .hs-tool-thumb {
+    grid-row: 1;
+  }
+
+  .hs-tool-costline {
+    grid-column: 2;
+    grid-row: 1;
+    flex-direction: column;
+    align-items: flex-end;
+    text-align: right;
+  }
+
+  .hs-tool-text {
+    grid-column: 1 / -1;
+    grid-row: 2;
   }
 
   .hs-panel {

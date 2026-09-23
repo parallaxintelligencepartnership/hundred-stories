@@ -1,5 +1,5 @@
 // One game minute. The order matters and is documented in docs/DESIGN.md section 5.
-import { onQuarterStart } from './economy';
+import { onDayStart, onQuarterStart } from './economy';
 import { tickElevators } from './elevators';
 import { tickEvaluation } from './evaluation';
 import { tickEvents } from './events';
@@ -17,6 +17,7 @@ export function tick(world: World): void {
   if (clock.minuteOfDay % 60 === 30) tickEvaluation(world);
   if (clock.dayOfQuarter === 0 && clock.minuteOfDay === SCHEDULES.quarterStartMinuteOfDay) onQuarterStart(world);
   if (clock.minuteOfDay % 60 === 0) recomputeStars(world);
+  if (clock.minuteOfDay === 0) onDayStart(world); // after recomputeStars, so the count is fresh
   world.time.minute += 1;
 }
 
