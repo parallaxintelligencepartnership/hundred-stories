@@ -12,6 +12,7 @@ import { ROOMS, SHAFTS } from '../sim/rules';
 import type { RoomKind, ShaftKind, Star } from '../sim/types';
 import { formatMoney } from './format';
 import { icon, type IconName } from './icons';
+import { assignLetters, keysLabel } from './keys';
 
 /** The thumbnail box, in css pixels. */
 export const THUMB_W = 72;
@@ -30,6 +31,10 @@ export interface PaletteRow {
   /** The price in dollars, or null for a tool that costs nothing to pick up. */
   price: number | null;
   kind: ThumbnailKind | null;
+  /** Index into GROUPS; the number key is one more. */
+  group: number;
+  /** The letter that picks this tile once its group is active; the tile shows it. */
+  letter: string;
 }
 
 export interface PaletteParts {
@@ -146,38 +151,46 @@ export function buildPalette(palette: HTMLElement, onPick: (row: PaletteRow) => 
   palette.append(toggle);
 
   const rows: PaletteRow[] = [];
-  for (const group of GROUPS) {
-    palette.append(el('h2', 'hs-group-title', group.title));
+  GROUPS.forEach((group, groupIndex) => {
+    const title = el('h2', 'hs-group-title');
+    const number = el('span', 'hs-group-key', String(groupIndex + 1));
+    number.setAttribute('aria-hidden', 'true');
+    title.append(number, el('span', 'hs-group-name', group.title));
+    palette.append(title);
+    const specs: RowSpec[] = [];
     if (group.source === 'rooms') {
       for (const kind of Object.keys(ROOMS) as RoomKind[]) {
         const rule = ROOMS[kind];
         if (rule.group !== group.group) continue;
-        rows.push(addRow(palette, rule.label, footprintText(kind), rule.cost, rule.star, { kind: 'room', room: kind }, kind, null, onPick));
+        specs.push({ label: rule.label, footprint: footprintText(kind), price: rule.cost, star: rule.star, tool: { kind: 'room', room: kind }, kind, glyph: null });
       }
     } else if (group.source === 'shafts') {
       for (const kind of Object.keys(SHAFTS) as ShaftKind[]) {
         const rule = SHAFTS[kind];
-        rows.push(addRow(palette, rule.label, footprintText(kind), rule.shaftCost, rule.star, { kind: 'shaft', shaft: kind }, kind, null, onPick));
+        specs.push({ label: rule.label, footprint: footprintText(kind), price: rule.shaftCost, star: rule.star, tool: { kind: 'shaft', shaft: kind }, kind, glyph: null });
       }
     } else {
-      rows.push(addRow(palette, 'Demolish', 'Removes what you click', null, 1, { kind: 'demolish' }, null, 'demolish', onPick));
-      rows.push(addRow(palette, 'Query', 'Shows what you click', null, 1, { kind: 'query' }, null, 'query', onPick));
+      specs.push({ label: 'Demolish', footprint: 'Removes what you click', price: null, star: 1, tool: { kind: 'demolish' }, kind: null, glyph: 'demolish' });
+      specs.push({ label: 'Query', footprint: 'Shows what you click', price: null, star: 1, tool: { kind: 'query' }, kind: null, glyph: 'query' });
     }
-  }
+    const letters = assignLetters(specs.map((spec) => spec.label));
+    specs.forEach((spec, i) => rows.push(addRow(palette, spec, groupIndex, letters[i] ?? '', onPick)));
+  });
   return { rows, toggle, current, chevron };
 }
 
-function addRow(
-  palette: HTMLElement,
-  label: string,
-  footprint: string,
-  price: number | null,
-  star: Star,
-  tool: Tool,
-  kind: ThumbnailKind | null,
-  glyph: IconName | null,
-  onPick: (row: PaletteRow) => void,
-): PaletteRow {
+interface RowSpec {
+  label: string;
+  footprint: string;
+  price: number | null;
+  star: Star;
+  tool: Tool;
+  kind: ThumbnailKind | null;
+  glyph: IconName | null;
+}
+
+function addRow(palette: HTMLElement, spec: RowSpec, group: number, letter: string, onPick: (row: PaletteRow) => void): PaletteRow {
+  const { label, footprint, price, star, tool, kind, glyph } = spec;
   const node = el('button', 'hs-tool');
   node.type = 'button';
   node.setAttribute('aria-pressed', 'false');
@@ -208,9 +221,15 @@ function addRow(
   const progressFill = el('span', 'hs-tool-progress-fill');
   progress.append(progressFill);
   node.append(text, costLine, progress);
+  if (letter) {
+    const key = el('span', 'hs-tool-key', letter);
+    key.setAttribute('aria-hidden', 'true'); // the title and aria-keyshortcuts say it in words
+    node.append(key);
+    node.setAttribute('aria-keyshortcuts', `${group + 1} ${letter}`);
+  }
   palette.append(node);
 
-  const row: PaletteRow = { node, thumb, cost, short, progress, progressFill, tool, star, label, price, kind };
+  const row: PaletteRow = { node, thumb, cost, short, progress, progressFill, tool, star, label, price, kind, group, letter };
   node.addEventListener('click', () => onPick(row));
   return row;
 }
@@ -224,7 +243,7 @@ export function applyRowState(row: PaletteRow, state: ToolRowState): void {
   row.node.classList.toggle('is-short', state.short > 0);
   setText(row.cost, state.costText);
   setText(row.short, state.shortText);
-  const title = state.locked ? `${row.label}: ${state.costText.toLowerCase()}` : state.short > 0 ? `${row.label}: ${state.shortText.toLowerCase()}` : row.label;
+  const title = tileTitle(row, state);
   if (row.node.title !== title) row.node.title = title;
   row.progress.hidden = state.progress === null;
   if (state.progress) {
@@ -235,6 +254,12 @@ export function applyRowState(row: PaletteRow, state: ToolRowState): void {
     const width = `${Math.round((value / max) * 100)}%`;
     if (row.progressFill.style.width !== width) row.progressFill.style.width = width;
   }
+}
+
+/** A tile's tooltip: its name, why it cannot be had right now if so, and its keys. */
+export function tileTitle(row: Pick<PaletteRow, 'label' | 'group' | 'letter'>, state: Pick<ToolRowState, 'locked' | 'short' | 'costText' | 'shortText'>): string {
+  const base = state.locked ? `${row.label}: ${state.costText.toLowerCase()}` : state.short > 0 ? `${row.label}: ${state.shortText.toLowerCase()}` : row.label;
+  return `${base} (keys ${keysLabel(row.group, row.letter)})`;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, text?: string): HTMLElementTagNameMap[K] {

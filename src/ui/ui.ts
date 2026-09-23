@@ -42,7 +42,9 @@ import {
   el,
 } from './panels';
 import type { PanelContext, PanelElement } from './panels';
-import { applyRowState, buildPalette, paintThumbnail, sameTool, toolRowState } from './palette';
+import { GROUPS, applyRowState, buildPalette, paintThumbnail, sameTool, toolRowState } from './palette';
+import { hasTextField, isFormField, keyAction, stepSpeed } from './keys';
+import { createMinimap, type Minimap } from './minimap';
 import type { PaletteRow } from './palette';
 import { createStatusBar, speedModeText } from './status';
 import { placementNote } from './explain';
@@ -231,22 +233,11 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   palette.setAttribute('aria-label', 'Build palette');
   let paletteCollapsed = readPaletteCollapsed();
   let chromeWatch: ChromeWatch | null = null;
+  /** The palette group last picked by a number key or a tile, for letters with nothing in hand. */
+  let lastGroup: number | null = null;
   const paletteParts = buildPalette(
     palette,
-    (row) => {
-      // A locked tile keeps focus so a keyboard can read it, but it does not pick anything up.
-      if (game.world.stars < row.star) {
-        notice(`${row.label} ${row.star === 1 ? 'needs 1 star' : `needs ${row.star} stars`}.`);
-        return;
-      }
-      const tool = row.tool;
-      game.setTool(sameTool(tool, game.getTool()) ? { kind: 'none' } : tool);
-      // A sheet sits over the tower. Once a tool is in hand there is nothing left to pick,
-      // so the board folds away and the player can see where they are placing it. Their own
-      // choice of collapsed or not is not overwritten: this one is not remembered.
-      if (game.getTool().kind !== 'none' && inSheetLayout()) setPaletteCollapsed(true, false);
-      update();
-    },
+    (row) => pickRow(row, true),
     () => setPaletteCollapsed(!paletteCollapsed, true),
   );
   // Thumbnails are cut from the renderer's art a few per frame, and only while the board is
@@ -255,6 +246,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   let thumbRaf = 0;
   let thumbDpr = 0;
   const rows = paletteParts.rows;
+  /** Each group's tile letters, in tile order, for the keyboard map. */
+  const keyGroups = GROUPS.map((_, group) => rows.filter((row) => row.group === group).map((row) => row.letter));
   applyPaletteCollapsed();
 
   const panelSlot = el('div', 'hs-panel-slot');
@@ -332,7 +325,19 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   toasts.setAttribute('aria-live', 'polite');
 
   // The card follows the palette in the tree: on a phone the open sheet hides it by selector.
-  shell.append(top, palette, card.node, hint, chip, bar, panelSlot, ticker, toasts);
+  // The minimap reads the camera the renderer already exposes; a renderer without one (tests,
+  // fallbacks) simply gets no map.
+  const minimap: Minimap | null = renderer.camera
+    ? createMinimap({
+        camera: renderer.camera,
+        getWorld: () => game.world,
+        getChrome: () => chromeBand,
+        onMove: () => refreshPlacement(),
+      })
+    : null;
+  shell.append(top, palette, card.node, hint, chip, bar, panelSlot, ticker);
+  if (minimap) shell.append(minimap.node);
+  shell.append(toasts);
   root.append(shell);
 
   // The hover card: a preview of the shaft or room under the pointer, or under the tap.
@@ -378,7 +383,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   });
   lastLogTotal = game.world.logTotal;
   const unsubscribe = game.subscribe(() => update());
-  window.addEventListener('keydown', onKeyDown);
+  // Capture, so a card with a text field open can hold the camera's keys back as well.
+  window.addEventListener('keydown', onKeyDown, { capture: true });
   window.addEventListener('resize', onPlacementResize);
   window.addEventListener('resize', onThumbResize);
   const fonts = typeof document.fonts?.addEventListener === 'function' ? document.fonts : null;
@@ -886,24 +892,71 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     drawThumbnailsSoon(); // opened: finish any pictures still to draw
   }
 
+  /**
+   * Pick up a tile's tool. A click toggles it; a number key always picks. A locked tile keeps
+   * focus so a keyboard can read it, but it does not pick anything up.
+   */
+  function pickRow(row: PaletteRow, toggle: boolean): void {
+    lastGroup = row.group;
+    if (game.world.stars < row.star) {
+      notice(`${row.label} ${row.star === 1 ? 'needs 1 star' : `needs ${row.star} stars`}.`);
+      return;
+    }
+    const tool = row.tool;
+    game.setTool(toggle && sameTool(tool, game.getTool()) ? { kind: 'none' } : tool);
+    // A sheet sits over the tower. Once a tool is in hand there is nothing left to pick,
+    // so the board folds away and the player can see where they are placing it. Their own
+    // choice of collapsed or not is not overwritten: this one is not remembered.
+    if (game.getTool().kind !== 'none' && inSheetLayout()) setPaletteCollapsed(true, false);
+    update();
+  }
+
+  /** The group of the tool in hand, else the group last picked. Letters pick inside it. */
+  function activeGroup(): number | null {
+    const tool = game.getTool();
+    if (tool.kind !== 'none') {
+      const held = rows.find((row) => sameTool(row.tool, tool));
+      if (held) return held.group;
+    }
+    return lastGroup;
+  }
+
   function onKeyDown(event: KeyboardEvent): void {
-    if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
-    if (isTyping(event.target)) return;
-    if (event.key === ' ' || event.code === 'Space') {
-      event.preventDefault();
-      game.togglePause();
-      update();
+    if (event.defaultPrevented) return;
+    if (isFormField(event.target)) return;
+    // A card with a text field is open: no key is ours, and none is the camera's either.
+    if (mountedPanel && hasTextField(mountedPanel)) {
+      event.stopImmediatePropagation();
       return;
     }
-    if (event.key === '1' || event.key === '2' || event.key === '3') {
-      const speed: Speed = event.key === '1' ? 1 : event.key === '2' ? 2 : 4;
-      game.setSpeed(speed);
-      update();
-      return;
-    }
-    if (event.key === 'Escape') {
-      game.setTool({ kind: 'none' });
-      update();
+    const action = keyAction(event, keyGroups, activeGroup());
+    if (!action) return;
+    switch (action.kind) {
+      case 'pause':
+        event.preventDefault();
+        game.togglePause();
+        update();
+        return;
+      case 'speed':
+        game.setSpeed(stepSpeed(game.getSpeed(), action.step));
+        update();
+        return;
+      case 'clear':
+        game.setTool({ kind: 'none' });
+        update();
+        return;
+      case 'group': {
+        // The first tool of the group the player can have; a group all locked says why.
+        const inGroup = rows.filter((row) => row.group === action.group);
+        const first = inGroup.find((row) => game.world.stars >= row.star) ?? inGroup[0];
+        if (first) pickRow(first, false);
+        return;
+      }
+      case 'tool': {
+        const row = rows.filter((r) => r.group === action.group)[action.index];
+        if (row) pickRow(row, true);
+        return;
+      }
     }
   }
 
@@ -915,7 +968,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
       stopPlacementLoop();
       unsubscribe();
       sound.destroy();
-      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keydown', onKeyDown, { capture: true });
+      minimap?.destroy();
       window.removeEventListener('resize', onPlacementResize);
       window.removeEventListener('resize', onThumbResize);
       if (thumbRaf) cancelAnimationFrame(thumbRaf);
@@ -962,17 +1016,6 @@ function toggleClass(node: HTMLElement, name: string, on: boolean): boolean {
 function setPressed(node: HTMLElement, pressed: boolean): void {
   const value = pressed ? 'true' : 'false';
   if (node.getAttribute('aria-pressed') !== value) node.setAttribute('aria-pressed', value);
-}
-
-function isTyping(target: EventTarget | null): boolean {
-  const node = target as HTMLElement | null;
-  if (!node || !node.tagName) return false;
-  return (
-    node.tagName === 'INPUT' ||
-    node.tagName === 'TEXTAREA' ||
-    node.tagName === 'SELECT' ||
-    node.isContentEditable === true
-  );
 }
 
 function ensureFonts(): void {

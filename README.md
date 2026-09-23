@@ -15,7 +15,7 @@ Open the site in a browser. To start:
 1. Build a lobby by dragging along the ground floor.
 2. Drag an elevator shaft upward through the lobby to reach the floors above.
 3. Place offices, homes, and other rooms off the shaft.
-4. Press 1, 2, or 3 to set the simulation speed, or space to pause.
+4. Press comma or period to slow down or speed up the simulation one step, or space to pause.
 5. Click any room, car, or person to inspect it in the query panel.
 
 ### The star ladder

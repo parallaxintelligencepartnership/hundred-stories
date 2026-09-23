@@ -35,6 +35,8 @@ import {
   stressBandOf,
 } from './format';
 import { icon, type IconName } from './icons';
+import { keyHelpLines } from './keys';
+import { GROUPS } from './palette';
 
 /** A panel element may expose a cheap refresh that rewrites live numbers without rebuilding. */
 export type PanelElement = HTMLDivElement & { refresh?: () => void };
@@ -66,8 +68,7 @@ const CONTROL_LINES: readonly string[] = [
   'Keys: W A S D or the arrow keys move the view.',
   'Touch: one finger moves the view, pinch zooms, tap places, two fingers drag to pan while sizing a lobby or an elevator.',
   'Place a room: pick it from the palette, then click where it goes. A click that does not move places; a press that moves pans.',
-  'Speed: 1, 2, 3 set the clock speed, space pauses.',
-  'Escape drops the current tool.',
+  ...keyHelpLines(GROUPS.length),
 ];
 
 const SIM_KINDS: Record<SimKind, string> = {

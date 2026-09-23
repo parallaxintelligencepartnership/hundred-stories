@@ -1575,3 +1575,113 @@ a.hs-btn {
     transition: none;
   }
 }
+
+/* Keys and the minimap (0.5.2) ----------------------------------------- */
+
+/* The group's number key before its title, and each tile's letter in its top right corner. */
+.hs-group-key {
+  display: inline-block;
+  min-width: 16px;
+  margin-right: 6px;
+  padding: 0 3px;
+  border: 1px solid var(--line);
+  font-family: var(--font-readout);
+  font-weight: 400;
+  text-align: center;
+  line-height: 14px;
+}
+
+.hs-tool {
+  position: relative;
+}
+
+.hs-tool-key {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  min-width: 14px;
+  padding: 0 2px;
+  border: 1px solid var(--line);
+  font-family: var(--font-readout);
+  font-size: var(--size-12);
+  line-height: 14px;
+  text-align: center;
+  color: var(--ink-dim);
+}
+
+.hs-tool[aria-pressed='true'] .hs-tool-key {
+  color: inherit;
+  border-color: currentColor;
+}
+
+.hs-palette.is-collapsed .hs-group-key {
+  display: none;
+}
+
+/* The minimap: bottom right of the view, above the ticker, 96 px wide. The width and the
+   height are set inline from the tower's floors; the two canvases stack. */
+.hs-minimap {
+  position: absolute;
+  right: calc(var(--pad) + var(--safe-right));
+  bottom: calc(var(--ticker-h) + var(--safe-bottom) + var(--pad));
+  width: 96px;
+  box-sizing: content-box;
+  background: var(--steel);
+  border: 1px solid var(--line);
+  pointer-events: auto;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.hs-minimap.is-hidden {
+  display: none;
+}
+
+.hs-minimap canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+  image-rendering: pixelated;
+}
+
+/* A panel owns the right edge, so the map steps left of it. */
+.hs-ui.is-panel-open .hs-minimap {
+  right: calc(var(--panel-w) + var(--pad) + var(--safe-right));
+}
+
+/* Toasts share the bottom right, so they step left of a visible map. */
+.hs-minimap:not(.is-hidden) ~ .hs-toasts {
+  right: calc(96px + 2 * var(--pad) + 2px + var(--safe-right));
+}
+
+@media (max-width: 720px) {
+  /* A phone's bottom belongs to the sheet and the side card, so the map sits top right,
+     under the status bar and clear of the controls hint while it shows. */
+  .hs-minimap {
+    top: calc(var(--top-actual, calc(var(--top-h) * 2 + var(--safe-top))) + var(--pad));
+    bottom: auto;
+    width: 64px;
+  }
+
+  .hs-hint:not(.is-hidden) ~ .hs-minimap {
+    top: calc(var(--top-actual, calc(var(--top-h) * 2 + var(--safe-top))) + var(--pad) + 40px);
+  }
+
+  /* A panel is the whole phone screen's business while it is open. */
+  .hs-ui.is-panel-open .hs-minimap {
+    display: none;
+  }
+
+  .hs-minimap:not(.is-hidden) ~ .hs-toasts {
+    right: calc(var(--pad) + var(--safe-right));
+  }
+}
+
+/* A phone, or any touch screen, has no keys to name: the sheet's corners belong to the price. */
+@media (max-width: 720px), (pointer: coarse) {
+  .hs-tool-key,
+  .hs-group-key {
+    display: none;
+  }
+}
