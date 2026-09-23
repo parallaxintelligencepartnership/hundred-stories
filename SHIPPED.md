@@ -30,7 +30,7 @@ Before deploying, load `/play/` from the nginx container in headless Chrome and 
 Fallback, pi3 (`deploy/README.md`): copy `deploy/.env.example` to `deploy/.env`, set `SITE_HOST`, run `deploy/deploy.sh`.
 
 ## How to roll back
-Rehearsed on 2026-09-22 at the 0.4.7 ship: checked out the previous ship tag `ship-2026-09-22` in a scratch worktree, ran `npm ci`, `npm run build` (green, dist/_headers present) and `npx vitest run` (REHEARSAL_COUNT), then removed the worktree.
+Rehearsed on 2026-09-22 at the 0.4.7 ship: checked out the previous ship tag `ship-2026-09-22` in a scratch worktree, ran `npm ci`, `npm run build` (green, dist/_headers present) and `npx vitest run` (672 passed, 40 files), then removed the worktree.
 
 - Cloudflare: `npx wrangler rollback` returns the live site to the previous uploaded version; `npx wrangler versions list` shows the versions. Or check out the previous tag and `npm run deploy`.
 - pi3: `deploy.sh` snapshots the live tree to `html.prev` before every sync; the swap is in `deploy/README.md` under Rollback.
