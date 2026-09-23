@@ -1,7 +1,7 @@
 // The boot sequence, driven through injected deps so it runs in node: no real DOM, no
 // real network, no real renderer. See src/main.ts for the browser wiring these deps stand in for.
 import { describe, expect, it, vi } from 'vitest';
-import { boot, type BootDeps } from '../../src/main';
+import { boot, inShell, type BootDeps } from '../../src/main';
 import { createGame } from '../../src/game/game';
 
 vi.mock('../../src/game/storage', () => ({
@@ -138,5 +138,36 @@ describe('boot', () => {
     expect(app.textContent).not.toBe('Hundred Stories needs one online load before it can play offline.');
     expect(rendererAsked).toBe(true);
     expect((app as unknown as { querySelector(s: string): HTMLElement | null }).querySelector('#view')).not.toBeNull();
+  });
+
+  it('counts the Tauri desktop shell as a shell for the offline gate, beside Capacitor', () => {
+    expect(inShell({ __TAURI_INTERNALS__: {} })).toBe(true);
+    expect(inShell({ __TAURI__: {} })).toBe(true);
+    expect(inShell({ Capacitor: { isNativePlatform: () => true } })).toBe(true);
+    expect(inShell({ Capacitor: { isNativePlatform: () => false } })).toBe(false);
+    expect(inShell({})).toBe(false);
+  });
+
+  it('hands the running game to the Steam hook once, after it starts', async () => {
+    const order: string[] = [];
+    const game = {
+      world: { log: [], time: { minute: 0 } },
+      load: async () => ({ ok: false, reason: 'none' }),
+      attach: () => {},
+      start: () => order.push('start'),
+    };
+    const seen: unknown[] = [];
+    await boot(
+      fakeApp(),
+      baseDeps({
+        createGame: (() => game) as never,
+        createSteam: (g) => {
+          order.push('steam');
+          seen.push(g);
+        },
+      }),
+    );
+    expect(seen).toEqual([game]);
+    expect(order).toEqual(['start', 'steam']);
   });
 });

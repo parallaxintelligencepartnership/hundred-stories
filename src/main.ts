@@ -1,6 +1,7 @@
 import { createRenderer } from './render/renderer';
 import { createUi } from './ui/ui';
 import { createGame } from './game/game';
+import { createSteam } from './steam/steam';
 
 export interface BootDeps {
   createRenderer: typeof createRenderer;
@@ -10,8 +11,17 @@ export interface BootDeps {
   online: () => boolean;
   hasController: () => boolean;
   search: () => string;
-  /** True inside the iOS or Android shell, where the game ships in the app bundle. */
+  /** True inside the iOS, Android or desktop shell, where the game ships in the app bundle. */
   native?: () => boolean;
+  /** Steam achievements; inert outside the Tauri desktop shell. Called once the game runs. */
+  createSteam?: (game: ReturnType<typeof createGame>) => unknown;
+}
+
+// The globals the shells inject before the page loads, read directly so the web bundle imports
+// neither Capacitor nor Tauri (src/game/storage.ts asks the same questions for the save backend).
+export function inShell(global: object = globalThis): boolean {
+  const g = global as { Capacitor?: { isNativePlatform?: () => boolean }; __TAURI__?: unknown; __TAURI_INTERNALS__?: unknown };
+  return g.__TAURI__ != null || g.__TAURI_INTERNALS__ != null || g.Capacitor?.isNativePlatform?.() === true;
 }
 
 const defaultDeps: BootDeps = {
@@ -22,9 +32,8 @@ const defaultDeps: BootDeps = {
   online: () => navigator.onLine,
   hasController: () => !!navigator.serviceWorker?.controller,
   search: () => location.search,
-  // The Capacitor global the native bridge injects; read directly so the web bundle does not
-  // import Capacitor (src/game/storage.ts asks the same question for the save backend).
-  native: () => (globalThis as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.() === true,
+  native: () => inShell(),
+  createSteam,
 };
 
 export async function boot(app: HTMLElement, deps: BootDeps = defaultDeps): Promise<void> {
@@ -70,6 +79,7 @@ export async function boot(app: HTMLElement, deps: BootDeps = defaultDeps): Prom
   // no second subscription: one notify is one HUD refresh.
   deps.createUi(uiRoot, game, renderer);
   game.start();
+  deps.createSteam?.(game);
 }
 
 if (!import.meta.env.TEST) {

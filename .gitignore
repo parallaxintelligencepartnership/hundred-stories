@@ -16,3 +16,6 @@ coverage/
 
 # Capacitor app bundle (npm run build:app); ios/ and android/ carry their own .gitignore for native build outputs
 dist-app/
+
+# Tauri build output (src-tauri/.gitignore also covers it)
+src-tauri/target/

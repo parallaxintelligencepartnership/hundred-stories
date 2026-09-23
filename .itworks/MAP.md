@@ -36,7 +36,7 @@ benchmarks: see scripts/bench/README.md (npx vite-node@6.0.0 scripts/bench/bench
 | dist/ | build output, gitignored; rebuilt by npm run build |
 
 ## Environment
-- Dev machine: Matt's Mac, arm64 macOS 27, Node 26, npm 11
+- Dev machine: Matt's Mac, arm64 macOS 27, Node 26, npm 11, Xcode 27 with an iPhone 17 simulator, Rust 1.98.1 via rustup in ~/.cargo (installed 2026-09-22 for the Tauri shell, no sudo, shell profile untouched); no JDK and no Android SDK, so the Android shell builds elsewhere
 - Primary hosting: Cloudflare Workers static assets (successor to Pages; no Worker code, asset requests free and unlimited), custom domains hundredstories.xyz and www attached via wrangler.jsonc routes, workers_dev and preview_urls disabled
 - Fallback hosting target pi3: x86_64 Ubuntu 24.04 (not a Raspberry Pi), standalone docker compose, Traefik with letsencrypt, public sites are nginx static containers
 - No backend, no database, no secrets
