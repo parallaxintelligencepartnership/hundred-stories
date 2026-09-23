@@ -1,6 +1,7 @@
 // The log and room panels on a fake DOM: what a refresh builds, and what it leaves alone.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createLogPanel, createQueryPanel, LOG_PANEL_LINES, type PanelContext } from '../../src/ui/panels';
+import { createLogPanel, createQueryPanel, createSettingsPanel, LOG_PANEL_LINES, type PanelContext } from '../../src/ui/panels';
+import type { Sound } from '../../src/audio/audio';
 import { RENT } from '../../src/sim/rules';
 import type { LogEntry } from '../../src/sim/types';
 import { FakeDom, type FakeElement } from './fake-dom';
@@ -148,5 +149,55 @@ describe('room panel flags', () => {
     room['onFire'] = true;
     panel.refresh?.();
     expect(flags(panel).map((n) => [n.textContent, n.className])).toEqual([['On fire', 'hs-flag is-alert']]);
+  });
+});
+
+describe('settings panel sound section', () => {
+  function stubSound() {
+    const calls: string[] = [];
+    const settings = { on: false, effects: 70, ambient: 50 };
+    const sound: Sound = {
+      settings,
+      hasContext: false,
+      setEnabled: (on) => {
+        settings.on = on;
+        calls.push(`on:${on}`);
+      },
+      setEffects: (n) => calls.push(`effects:${n}`),
+      setAmbient: (n) => calls.push(`ambient:${n}`),
+      destroy: () => {},
+    };
+    return { sound, calls };
+  }
+  const fire = (target: FakeElement, type: string): void => {
+    for (const fn of target.listeners.get(type) ?? []) fn({});
+  };
+  const settingsGame = { world: { seed: 1, log: [], logTotal: 0 } } as never;
+
+  it('shows the switch off and both levels disabled by default, and wires them to the sound module', () => {
+    const { sound, calls } = stubSound();
+    const panel = node(createSettingsPanel(settingsGame, { ...ctx, sound }));
+    const all = panel.descendants();
+    expect(all.some((n) => n.className === 'hs-section-title' && n.textContent === 'Sound')).toBe(true);
+    const box = all.find((n) => n.id === 'hs-sound') as unknown as FakeElement & { checked: boolean };
+    const effects = all.find((n) => n.id === 'hs-sound-effects') as unknown as FakeElement & { value: string; disabled: boolean };
+    const ambient = all.find((n) => n.id === 'hs-sound-ambient') as unknown as FakeElement & { value: string; disabled: boolean };
+    expect(box.checked).toBe(false);
+    expect([effects.value, ambient.value]).toEqual(['70', '50']);
+    expect([effects.disabled, ambient.disabled]).toEqual([true, true]);
+
+    box.checked = true;
+    fire(box, 'change');
+    expect([effects.disabled, ambient.disabled]).toEqual([false, false]);
+    effects.value = '25';
+    fire(effects, 'input');
+    ambient.value = '0';
+    fire(ambient, 'input');
+    expect(calls).toEqual(['on:true', 'effects:25', 'ambient:0']);
+  });
+
+  it('has no sound section when the shell made no sound module', () => {
+    const panel = node(createSettingsPanel(settingsGame, ctx));
+    expect(panel.descendants().some((n) => n.textContent === 'Sound')).toBe(false);
   });
 });

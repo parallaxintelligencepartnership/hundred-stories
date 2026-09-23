@@ -1,6 +1,7 @@
 // Panel builders. Each one returns a detached element that the shell in ui.ts mounts.
 // Panels read the world through GameApi only and never reach into the sim modules.
 
+import type { Sound } from '../audio/audio';
 import type { GameApi } from '../game/api';
 import type { Renderer } from '../render/renderer';
 import { composeShareImage, shareMessage, shareStats, shareText, shareUrl } from '../share/share';
@@ -46,6 +47,8 @@ export interface PanelContext {
   close(): void;
   reducedMotion: boolean;
   setReducedMotion(on: boolean): void;
+  /** The sound module, when the shell made one; the settings panel shows its switches. */
+  sound?: Sound;
 }
 
 export type Selection = { roomId?: Id; simId?: Id; shaftId?: Id };
@@ -800,8 +803,57 @@ export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElem
   motion.append(themeField);
 
   body.append(motion);
+  if (ctx.sound) body.append(soundSection(ctx.sound));
 
   return panel;
+}
+
+/** The sound switch and its two levels. Off by default; nothing plays until it is on. */
+function soundSection(sound: Sound): HTMLDivElement {
+  const node = section('Sound');
+  const field = el('div', 'hs-field');
+  const box = el('input');
+  box.type = 'checkbox';
+  box.id = 'hs-sound';
+  box.checked = sound.settings.on;
+  const label = el('label', 'hs-row-label', 'Sound');
+  label.htmlFor = box.id;
+  field.append(box, label);
+  node.append(field);
+
+  const levels: HTMLInputElement[] = [];
+  const level = (id: string, name: string, value: number, set: (n: number) => void): HTMLDivElement => {
+    const row = el('div', 'hs-field hs-level');
+    const input = el('input');
+    input.type = 'range';
+    input.id = id;
+    input.min = '0';
+    input.max = '100';
+    input.step = '5';
+    input.value = String(value);
+    input.disabled = !sound.settings.on;
+    const text = el('label', 'hs-row-label', name);
+    text.htmlFor = input.id;
+    const readout = el('span', 'hs-level-value', String(value));
+    input.addEventListener('input', () => {
+      set(Number(input.value));
+      readout.textContent = input.value;
+    });
+    levels.push(input);
+    row.append(text, input, readout);
+    return row;
+  };
+  node.append(
+    level('hs-sound-effects', 'Effects', sound.settings.effects, (n) => sound.setEffects(n)),
+    level('hs-sound-ambient', 'Ambient', sound.settings.ambient, (n) => sound.setAmbient(n)),
+    el('p', 'hs-note', 'Effects mark elevators, builds, rent day, events and stars. Ambient follows the hour: traffic by day, crickets at night.'),
+  );
+
+  box.addEventListener('change', () => {
+    sound.setEnabled(box.checked);
+    for (const input of levels) input.disabled = !box.checked;
+  });
+  return node;
 }
 
 // ----------------------------------------------------------- share panel

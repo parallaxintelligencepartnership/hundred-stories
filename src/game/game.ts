@@ -10,6 +10,7 @@ import { classifyPress, isTap, PRESS_SLOP_PX, TOUCH_SLOP_PX } from '../render/in
 import type { Renderer } from '../render/renderer';
 import type { GameApi, Placement, PlacementRect, Speed, Tool } from './api';
 import { readSave, stashUnreadable, writeSave } from './storage';
+import { createTap, drainTap, isBuildCommand, primeTap, type GameEvent, type GameEventListener } from './events';
 
 const TICKS_PER_SECOND_AT_1X = 10;
 const NIGHT_MULTIPLIER = 8;
@@ -178,6 +179,14 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
   const loop = { accumulator: 0 };
   const subscribers = new Set<() => void>();
   const notify = () => subscribers.forEach((cb) => cb());
+  // The event stream. The tap is primed when the first listener arrives and on every world
+  // swap, and compared after each tick batch and command only while someone listens.
+  const eventListeners = new Set<GameEventListener>();
+  const tap = createTap(world);
+  const emit = (event: GameEvent): void => eventListeners.forEach((fn) => fn(event));
+  function drainEvents(): void {
+    if (eventListeners.size > 0) drainTap(tap, world, emit);
+  }
 
   // Drag state for lobby segments (horizontal), new shafts (vertical), and the drag that
   // stretches a shaft that is already standing.
@@ -251,6 +260,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     const minuteBefore = world.time.minute;
     const n = drainTicks(loop, runTick, time.now, drainLimits);
     if (n > 0) {
+      drainEvents();
       notify();
       maybeAutosave(minuteBefore, world.time.minute);
     }
@@ -608,6 +618,8 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
       const res = applyCommand(world, cmd);
       if (!res.ok) logEvent(world, res.reason, 'warn');
       else followBuild(cmd);
+      if (res.ok && eventListeners.size > 0 && isBuildCommand(cmd.kind)) emit({ kind: 'build', command: cmd.kind });
+      drainEvents();
       notify();
       return res;
     },
@@ -747,6 +759,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
       const res = deserialize(text);
       if (!res.ok) return res;
       world = res.world;
+      primeTap(tap, world);
       selection = null;
       renderer?.resetMotion(); // no sprite may lerp from the old tower into the new one
       renderer?.setSelection(null);
@@ -755,6 +768,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     },
     newGame(newSeed) {
       world = createWorld(newSeed);
+      primeTap(tap, world);
       selection = null;
       renderer?.resetMotion();
       tool = { kind: 'none' };
@@ -777,6 +791,13 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     subscribe(cb) {
       subscribers.add(cb);
       return () => subscribers.delete(cb);
+    },
+    subscribeEvents(listener) {
+      if (eventListeners.size === 0) primeTap(tap, world); // what happened while nobody listened is not news
+      eventListeners.add(listener);
+      return () => {
+        eventListeners.delete(listener);
+      };
     },
     attach(r, el) {
       renderer = r;

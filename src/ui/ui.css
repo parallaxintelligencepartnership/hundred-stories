@@ -620,6 +620,23 @@ button.hs-readout:hover {
   border: 1px solid var(--line);
 }
 
+.hs-level input[type='range'] {
+  flex: 1 1 auto;
+  min-width: 0;
+  accent-color: var(--amber);
+}
+
+.hs-level .hs-row-label {
+  flex: 0 0 64px;
+}
+
+.hs-level-value {
+  flex: 0 0 3ch;
+  text-align: right;
+  font-family: var(--font-readout);
+  color: var(--ink-dim);
+}
+
 .hs-log-list {
   margin: 0;
   padding: 0;

@@ -4,6 +4,7 @@
 
 import './ui.css';
 
+import { createSound } from '../audio/audio';
 import type { GameApi, Placement, Speed, Tool } from '../game/api';
 import type { Renderer } from '../render/renderer';
 import { ROOMS, SHAFTS } from '../sim/rules';
@@ -137,6 +138,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   ensureFonts();
 
   let reducedMotion = readReducedMotion();
+  // Sound is off by default and builds nothing until the player turns it on and touches the page.
+  const sound = createSound(game);
   let panelKind: PanelKind = 'none';
   let mountedPanel: PanelElement | null = null;
   let mountedKey = '';
@@ -318,6 +321,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     setReducedMotion(on: boolean) {
       applyReducedMotion(on);
     },
+    sound,
   };
 
   applyReducedMotion(reducedMotion);
@@ -696,6 +700,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
       destroyed = true;
       stopPlacementLoop();
       unsubscribe();
+      sound.destroy();
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('resize', onPlacementResize);
       fonts?.removeEventListener('loadingdone', onPlacementResize);

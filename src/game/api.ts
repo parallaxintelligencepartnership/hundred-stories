@@ -1,5 +1,8 @@
 // The surface the UI talks to. Implemented by game/game.ts; the UI never touches the sim modules directly.
 import type { Command, CommandResult, Id, RoomKind, ShaftKind, World } from '../sim/types';
+import type { GameEvent, GameEventListener } from './events';
+
+export type { GameEvent, GameEventListener };
 
 export type Tool =
   | { kind: 'none' }
@@ -81,4 +84,10 @@ export interface GameApi {
    */
   setChrome(topPx: number, bottomPx: number): void;
   subscribe(cb: () => void): () => void; // called after each tick batch and on any state change
+  /**
+   * Moments rather than state: new log lines, accepted builds, rent day, star changes, car
+   * doors opening and closing. Read only. Fed after each tick batch and each command; the
+   * world is only compared while at least one listener is subscribed.
+   */
+  subscribeEvents(listener: GameEventListener): () => void;
 }
