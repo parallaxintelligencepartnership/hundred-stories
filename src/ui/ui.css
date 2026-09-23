@@ -1138,6 +1138,14 @@ a.hs-btn {
   margin: 0 0 8px;
 }
 
+/* The demo cap card's store row: one listing (or "coming soon" line) per row. */
+.hs-demo-cap .hs-demo-stores {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 12px 0;
+}
+
 /* The side card: the query panel's slot, as tall as it needs, under the status bar. */
 .hs-card {
   position: absolute;

@@ -17,6 +17,31 @@ const APP_MODE = 'app';
 // game page (play/index.html) references it.
 const APP_UNUSED_PUBLIC_FILES = ['_headers', 'robots.txt', 'sitemap.xml', 'og.png'];
 
+// The Capacitor and Tauri plugin code only ever loads inside a shell, through the dynamic imports
+// in src/game/storage.ts and src/steam/steam.ts. Each package gets a stable chunk named
+// native-<scope>-<package> so the web service worker can leave the whole family out of its
+// precache (globIgnores below). src/steam/steam.ts itself is not one of them: main.ts imports it
+// statically on every platform, and it reaches Tauri only through the dynamic import this rule
+// already names.
+const NATIVE_PACKAGE = /[\\/]node_modules[\\/]@(capacitor|tauri-apps)[\\/]([^\\/]+)[\\/]/;
+
+export function nativeChunk(id: string): string | undefined {
+  const match = NATIVE_PACKAGE.exec(id);
+  if (!match) return undefined;
+  const scope = match[1] === 'tauri-apps' ? 'tauri' : 'capacitor';
+  return `native-${scope}-${match[2]}`;
+}
+
+// Rolldown's manual chunk groups (the Vite 8 form of Rollup's manualChunks). A group takes its
+// members' dependencies with it, and Vite adds its preload helper to every module with a dynamic
+// import, the Capacitor plugins included; left alone the helper lands in a native chunk and the
+// play page imports that chunk statically, which would break the offline boot. The helper's own
+// group outranks the native ones, so it stays in a chunk the precache keeps.
+const CHUNK_GROUPS = [
+  { name: 'preload-helper', test: /vite[\\/]preload-helper/, priority: 2 },
+  { name: (id: string) => nativeChunk(id) ?? null, test: NATIVE_PACKAGE, priority: 1 },
+];
+
 function gameAtRoot(): Plugin {
   let outDir = 'dist-app';
   return {
@@ -93,6 +118,8 @@ export default defineConfig(({ mode }) => {
             workbox: {
               navigateFallback: '/play/index.html',
               globPatterns: ['**/*.{js,css,html,png,svg,woff2}'],
+              // App-only chunks (nativeChunk above): the web never loads them.
+              globIgnores: ['**/node_modules/**', 'assets/native-*'],
             },
           }),
         ],
@@ -110,6 +137,7 @@ export default defineConfig(({ mode }) => {
               privacy: 'privacy/index.html',
               notfound: '404.html',
             },
+        output: { codeSplitting: { groups: CHUNK_GROUPS } },
       },
     },
     test: {

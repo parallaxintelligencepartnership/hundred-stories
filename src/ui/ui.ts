@@ -166,6 +166,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   let populationWatch = { population: 0, since: 0 };
   let bandKey = '';
   let hintKey = '';
+  /** The hover tile the readout and the chip last showed, so a move within one tile does nothing. */
+  let hoverKey = '';
 
   const shell = el('div', 'hs-ui');
   // The icon symbols, once for the whole chrome; every icon() refers to them by id.
@@ -382,6 +384,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   window.addEventListener('keydown', onKeyDown, { capture: true });
   window.addEventListener('resize', onPlacementResize);
   window.addEventListener('resize', onThumbResize);
+  window.addEventListener('pointermove', onHoverMove);
   const fonts = typeof document.fonts?.addEventListener === 'function' ? document.fonts : null;
   fonts?.addEventListener('loadingdone', onPlacementResize);
   queueThumbnails();
@@ -395,9 +398,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
 
     status.update(world, speed);
 
-    const hover = game.getHover();
-    hoverReadout.classList.toggle('is-hidden', hover === null);
-    if (hover) setText(hoverValue, formatFloorShort(hover.floor));
+    refreshHoverReadout();
 
     for (const entry of speedButtons) {
       setPressed(entry.node, entry.speed === speed);
@@ -421,6 +422,30 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     showNextTip();
     refreshTicker();
     drainAlerts();
+  }
+
+  function refreshHoverReadout(): void {
+    const hover = game.getHover();
+    hoverKey = hover ? `${hover.floor},${hover.x}` : '';
+    hoverReadout.classList.toggle('is-hidden', hover === null);
+    if (hover) setText(hoverValue, formatFloorShort(hover.floor));
+  }
+
+  /**
+   * The game re-aims its ghost on the canvas's pointermove, before the window hears the event,
+   * but only a tick batch notifies, and a paused game runs none. So while nothing ticks, the ui
+   * follows the pointer here: a new tile rewrites the floor readout and the chip. The chip keeps
+   * its cached sizes (measured again only if its words change) and the ghost rect is the
+   * renderer's arithmetic, so a move costs no layout. The hover card follows on its own
+   * listener (src/ui/hover.ts). While the game runs, the tick notify does all of this.
+   */
+  function onHoverMove(): void {
+    if (destroyed) return;
+    if (game.getSpeed() !== 0 && !game.world.gameOver) return;
+    const hover = game.getHover();
+    if ((hover ? `${hover.floor},${hover.x}` : '') === hoverKey) return;
+    refreshHoverReadout();
+    refreshPlacement();
   }
 
   // ---------------------------------------------------------- first run
@@ -966,6 +991,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
       window.removeEventListener('keydown', onKeyDown, { capture: true });
       minimap?.destroy();
       window.removeEventListener('resize', onPlacementResize);
+      window.removeEventListener('pointermove', onHoverMove);
       window.removeEventListener('resize', onThumbResize);
       if (thumbRaf) cancelAnimationFrame(thumbRaf);
       status.destroy();

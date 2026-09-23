@@ -52,11 +52,8 @@ export function createDemoCapCard(host: { append(node: HTMLElement): void }): De
       panel.classList.add('hs-demo-cap');
       body.append(el('h3', 'hs-card-title', 'Where the demo stops'));
       for (const line of demoCapLines()) body.append(el('p', 'hs-intro-line', line));
+      // Laid out by .hs-demo-cap .hs-demo-stores in ui.css.
       const stores = el('div', 'hs-demo-stores');
-      stores.style.display = 'flex';
-      stores.style.flexDirection = 'column';
-      stores.style.gap = '4px';
-      stores.style.margin = '12px 0';
       for (const item of storeLinkNodes(document as unknown as StoreDoc)) {
         const itemNode = item as unknown as HTMLElement;
         // A live listing is a button-like link; "coming soon" stays quiet text.

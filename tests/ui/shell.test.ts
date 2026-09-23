@@ -20,6 +20,8 @@ interface FakeGame {
   placement: Placement | null;
   rect: { x: number; y: number; w: number; h: number } | null;
   minute: number;
+  hover: { floor: number; x: number } | null;
+  speed: number;
 }
 
 function fakeGame(): FakeGame {
@@ -31,6 +33,8 @@ function fakeGame(): FakeGame {
     placement: null,
     rect: null,
     minute: 0,
+    hover: null,
+    speed: 1,
   };
   const world = {
     cash: 1_000_000,
@@ -54,8 +58,8 @@ function fakeGame(): FakeGame {
       subscribers.add(cb);
       return () => subscribers.delete(cb);
     },
-    getHover: () => null,
-    getSpeed: () => 1,
+    getHover: () => state.hover,
+    getSpeed: () => state.speed,
     getTool: () => (state.placement ? { kind: 'room', room: 'office' } : { kind: 'none' }),
     setTool: () => {},
     getPlacement: () => state.placement,
@@ -140,5 +144,54 @@ describe('placement chip measurement', () => {
     game.notify();
     dom.runFrame();
     expect(dom.measures).toBe(afterResize);
+  });
+});
+
+// The game re-aims the ghost on the canvas pointermove before the window hears the event, but
+// only a tick batch notifies, and a paused game runs none. The ui follows the pointer itself.
+describe('paused hover', () => {
+  const byClass = (root: FakeElement, name: string): FakeElement => {
+    const node = root.descendants().find((n) => n.className.split(' ').includes(name));
+    if (!node) throw new Error(`no ${name}`);
+    return node;
+  };
+
+  it('a hover change updates the chip text and the floor readout without a notify', () => {
+    const game = fakeGame();
+    game.speed = 0;
+    game.hover = { floor: 2, x: 10 };
+    game.placement = office;
+    game.rect = { x: 100, y: 200, w: 60, h: 40 };
+    const { root } = mount(game);
+    const chip = byClass(root, 'hs-place-chip');
+    const readout = byClass(root, 'hs-status-hover');
+    const before = chip.textContent;
+    const readoutBefore = readout.textContent;
+    expect(readout.className.split(' ')).not.toContain('is-hidden');
+
+    // The pointer moves onto a refused spot three floors up; nothing notifies.
+    const refused: Placement = { ...office, floor: 5, floorMin: 5, floorMax: 5, ok: false, reason: 'Build a floor below this one first.' };
+    game.hover = { floor: 5, x: 30 };
+    game.placement = refused;
+    dom.measures = 0;
+    dom.fireWindow('pointermove', { clientX: 400, clientY: 300, pointerType: 'mouse', target: null });
+
+    expect(chip.textContent).not.toBe(before);
+    expect(byClass(root, 'hs-place-chip').className.split(' ')).toContain('is-alert');
+    expect(byClass(root, 'hs-place-chip-note').textContent).toContain('Floor 5');
+    expect(readout.textContent).not.toBe(readoutBefore);
+    expect(dom.measures).toBe(1); // the chip's new words only: the view and the ghost rect are cached
+
+    // A move within the same tile rewrites nothing and measures nothing.
+    dom.measures = 0;
+    dom.fireWindow('pointermove', { clientX: 402, clientY: 301, pointerType: 'mouse', target: null });
+    expect(dom.measures).toBe(0);
+
+    // The pointer leaves the tower: the readout hides.
+    game.hover = null;
+    game.placement = null;
+    dom.fireWindow('pointermove', { clientX: 5, clientY: 5, pointerType: 'mouse', target: null });
+    expect(readout.className.split(' ')).toContain('is-hidden');
+    expect(byClass(root, 'hs-place-chip').className.split(' ')).toContain('is-hidden');
   });
 });

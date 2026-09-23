@@ -1,5 +1,6 @@
 // The demo cap card on a fake DOM: what it says, and that the ui opens it once per session when a
 // stub game logs demo cap refusals.
+import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DEMO_CAP_REASON } from '../../src/sim/rules';
 import type { LogEntry } from '../../src/sim/types';
@@ -81,6 +82,24 @@ describe('the demo cap card', () => {
     expect(text).toContain('Google Play: coming soon');
     expect(text).toContain('Steam: coming soon');
     expect(host.descendants().some((n) => n.tagName === 'A')).toBe(false);
+  });
+
+  it('sets no inline style: the store row is laid out by the ui.css rule', () => {
+    const host = dom.createElement('div');
+    createDemoCapCard(host as never).offer();
+    const nodes = host.descendants();
+    expect(nodes.some((n) => n.className.split(' ').includes('hs-demo-stores'))).toBe(true);
+    const styled = nodes.filter(
+      (n) => n.attributes.has('style') || Object.keys(n.style).some((key) => key !== 'setProperty'),
+    );
+    expect(styled.map((n) => n.className)).toEqual([]);
+
+    const css = readFileSync(new URL('../../src/ui/ui.css', import.meta.url), 'utf8');
+    const rule = /\.hs-demo-cap \.hs-demo-stores \{([^}]*)\}/.exec(css)?.[1] ?? '';
+    expect(rule).toContain('display: flex;');
+    expect(rule).toContain('flex-direction: column;');
+    expect(rule).toContain('gap: 4px;');
+    expect(rule).toContain('margin: 12px 0;');
   });
 
   it('opens once: a second offer does nothing, even after it was closed', () => {
