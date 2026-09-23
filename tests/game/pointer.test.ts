@@ -300,6 +300,46 @@ describe('the pending placement a finger parks', () => {
   });
 });
 
+describe('connectors over rooms through the pointer', () => {
+  // A connector may share tiles with any room (docs/DESIGN.md), and the pointer path is
+  // the one a player uses: a lobby on floor 1, an office above it, then an elevator and stairs.
+  function over(): ReturnType<typeof started> {
+    const parts = started(byY);
+    parts.game.world.cash = 1e9;
+    for (let x = 101; x < 140; x++) parts.game.apply({ kind: 'build', room: 'lobby', floor: 1, x });
+    expect(parts.game.apply({ kind: 'build', room: 'office', floor: 2, x: 100 })).toEqual({ ok: true });
+    return parts;
+  }
+
+  it('builds an elevator dragged up from the lobby through the office', () => {
+    const { game, host } = over();
+    game.setTool({ kind: 'shaft', shaft: 'standard' });
+    expect(game.canBuildAt({ kind: 'shaft', shaft: 'standard' }, 1, 104)).toEqual({ ok: true });
+    host.fire('pointerdown', { ...press(104 * 8 + 4, atFloor(1)), pointerId: 1 });
+    host.fire('pointerup', { ...press(104 * 8 + 4, atFloor(3)), pointerId: 1 });
+    expect([...game.world.shafts.values()].map((s) => [s.x, s.floorMin, s.floorMax])).toEqual([[104, 1, 3]]);
+  });
+
+  it('parks and builds an elevator a finger tapped on the lobby', () => {
+    const { game, host } = over();
+    game.setTool({ kind: 'shaft', shaft: 'standard' });
+    host.fire('pointerdown', finger(104 * 8 + 4, 0, 1, atFloor(1)));
+    host.fire('pointerup', finger(104 * 8 + 4, 60, 1, atFloor(1)));
+    expect(game.getPlacement()).toMatchObject({ floorMin: 1, floorMax: 2, ok: true, pending: true });
+    expect(game.confirmPending()).toEqual({ ok: true });
+    expect(game.world.shafts.size).toBe(1);
+  });
+
+  it('builds stairs clicked on the lobby under the office', () => {
+    const { game, host } = over();
+    game.setTool({ kind: 'room', room: 'stairs' });
+    expect(game.canBuildAt({ kind: 'room', room: 'stairs' }, 1, 110)).toEqual({ ok: true });
+    host.fire('pointerdown', { ...press(110 * 8 + 4, atFloor(1)), pointerId: 1 });
+    host.fire('pointerup', { ...press(110 * 8 + 4, atFloor(1)), pointerId: 1 });
+    expect([...game.world.rooms.values()].filter((r) => r.kind === 'stairs').map((r) => [r.floor, r.x])).toEqual([[1, 110]]);
+  });
+});
+
 describe('moving and sizing a pending placement', () => {
   it('steps over the floor that does not exist, in either direction', () => {
     const { game, host } = started(byY);

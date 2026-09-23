@@ -7,7 +7,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { Graphics, Rectangle } from 'pixi.js';
 import type { Renderer as PixiRenderer, Texture } from 'pixi.js';
 import { FLOOR_PX, LINE_PX, TILE_PX, createArt } from '../../src/render/art';
-import { drawsOverRooms } from '../../src/render/renderer';
+import { drawsOverRooms, pickTargetAt } from '../../src/render/renderer';
+import { applyCommand } from '../../src/sim/build';
+import { createWorld } from '../../src/sim/world';
 import type { RoomKind } from '../../src/sim/types';
 
 interface Rect {
@@ -78,5 +80,36 @@ describe('connector layering', () => {
     for (const kind of ['office', 'lobby', 'skyLobby', 'condo', 'shop'] as const) {
       expect(drawsOverRooms(kind)).toBe(false);
     }
+  });
+});
+
+describe('what a click on the tower picks', () => {
+  // An elevator standing in a lobby with an office above it: the shaft is drawn over both,
+  // and the hover card names it, so a click opens its panel (extend, cars, riders).
+  function tower(): ReturnType<typeof createWorld> {
+    const world = createWorld(1);
+    world.cash = 1e9;
+    for (let x = 100; x < 140; x++) applyCommand(world, { kind: 'build', room: 'lobby', floor: 1, x });
+    expect(applyCommand(world, { kind: 'build', room: 'office', floor: 2, x: 100 })).toEqual({ ok: true });
+    expect(applyCommand(world, { kind: 'shaft.build', shaft: 'standard', x: 104, floorMin: 1, floorMax: 3 })).toEqual({ ok: true });
+    expect(applyCommand(world, { kind: 'build', room: 'stairs', floor: 1, x: 120 })).toEqual({ ok: true });
+    return world;
+  }
+
+  it('picks the elevator over the lobby and the office behind it', () => {
+    const world = tower();
+    const shaft = [...world.shafts.values()][0]!;
+    expect(pickTargetAt(world, 1, 105)).toEqual({ shaftId: shaft.id });
+    expect(pickTargetAt(world, 2, 105)).toEqual({ shaftId: shaft.id });
+    expect(pickTargetAt(world, 3, 105)).toEqual({ shaftId: shaft.id });
+  });
+
+  it('picks the stairs over the lobby, and the room beside a connector', () => {
+    const world = tower();
+    const stairs = [...world.rooms.values()].find((r) => r.kind === 'stairs')!;
+    const office = [...world.rooms.values()].find((r) => r.kind === 'office')!;
+    expect(pickTargetAt(world, 1, 121)).toEqual({ roomId: stairs.id });
+    expect(pickTargetAt(world, 2, 101)).toEqual({ roomId: office.id });
+    expect(pickTargetAt(world, 5, 300)).toBe(null);
   });
 });

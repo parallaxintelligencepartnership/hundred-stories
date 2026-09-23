@@ -173,8 +173,7 @@ export function drawsOverRooms(kind: RoomKind): boolean {
 /**
  * The room a click lands on. Where a connector overlays another room both cover the
  * tile, so the pick follows the picture: the connector is on top, so it is the one the
- * player means. Shafts stay behind rooms in the pick, as they always have, so a lobby
- * segment under a column can still be reached.
+ * player means.
  */
 export function pickRoomAt(world: World, floor: number, x: number): Room | undefined {
   let found: Room | undefined;
@@ -183,6 +182,21 @@ export function pickRoomAt(world: World, floor: number, x: number): Room | undef
     if (!found || drawsOverRooms(room.kind)) found = room;
   }
   return found;
+}
+
+/**
+ * The room or shaft a click lands on, in the order the picture stacks them and the hover
+ * card reads them (src/ui/hover.ts hoverTargetAt): stairs and escalators, then shafts, then
+ * the rooms behind them. A shaft may stand in front of any room, so a pick that put rooms
+ * first would leave an elevator with an office behind every floor with no panel to open.
+ * A lobby tile under a shaft is reached from the lobby tile beside it.
+ */
+export function pickTargetAt(world: World, floor: number, x: number): { roomId: Id } | { shaftId: Id } | null {
+  const room = pickRoomAt(world, floor, x);
+  if (room && drawsOverRooms(room.kind)) return { roomId: room.id };
+  const shaft = shaftAt(world, floor, x);
+  if (shaft) return { shaftId: shaft.id };
+  return room ? { roomId: room.id } : null;
 }
 
 const SIM_WIDTH_PX = SIM_W; // one tile wide, matching art.ts
@@ -1311,12 +1325,8 @@ export async function createRenderer(
     let hit: PickHit;
     if (best) hit = { simId: best.id, floor, x: tile };
     else {
-      const room: Room | undefined = pickRoomAt(lastWorld, floor, tile);
-      if (room) hit = { roomId: room.id, floor, x: tile };
-      else {
-        const shaft = shaftAt(lastWorld, floor, tile);
-        hit = shaft ? { shaftId: shaft.id, floor, x: tile } : { floor, x: tile };
-      }
+      const target = pickTargetAt(lastWorld, floor, tile);
+      hit = target ? { ...target, floor, x: tile } : { floor, x: tile };
     }
     for (const cb of pickListeners) cb(hit);
   }
