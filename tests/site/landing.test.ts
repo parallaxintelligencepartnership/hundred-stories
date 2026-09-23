@@ -171,10 +171,11 @@ describe('privacy page', () => {
     expect(privacy).toContain('<link rel="canonical" href="https://hundredstories.xyz/privacy/" />');
   });
 
-  it('states the one network request and the last-updated date', () => {
+  it('states that the game makes no network requests, and the last-updated date', () => {
     expect(flat(privacy)).toContain(
-      "The web pages and the store apps both load two typefaces from Google Fonts when they open. That is a request to Google's servers, subject to Google's privacy policy, and it is the only network request the game makes.",
+      'The game makes no network requests of its own.',
     );
+    expect(privacy).not.toContain('Google');
     expect(privacy).toContain('Last updated 2026-09-22.');
   });
 });

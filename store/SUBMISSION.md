@@ -78,9 +78,8 @@ The screenshot script, scripts/make-store-shots.mjs:
 - The demo tower is eight floors. A taller fixture would make stronger store shots; replace
   store/fixtures/demo-tower.json with any exported save.
 
-Fonts: the game loads its two typefaces from Google Fonts at runtime. Before submitting, decide
-whether to bundle them (listing.md, privacy answers). This affects the privacy forms on all three
-stores.
+Fonts: the two typefaces are bundled (public/fonts/, SIL Open Font License texts alongside). The
+game makes no network requests, which is what the privacy forms on all three stores state.
 
 ## 3. App Store
 
@@ -397,7 +396,7 @@ Leave SetLive empty and set the build live on a branch by hand in Steamworks, St
 Collected from above, none verifiable from the repo or this Mac:
 
 - Apple: required screenshot sizes, the export compliance answer, the TestFlight export method
-  name, the new age rating tiers, whether the Google Fonts request needs declaring.
+  name, the new age rating tiers.
 - Google: the fee, the closed testing rule for new personal accounts, the minimum target SDK, the
   injected signing properties with the project's Android Gradle Plugin, tablet screenshot rules,
   store tags, data safety wording.

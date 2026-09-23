@@ -19,7 +19,6 @@ Things the copy must not say:
   not affiliated line; store metadata that names another app or trademark is a common rejection
   reason (App Store guideline 2.3.7), so the listings leave it out. Check at submission whether
   Matt wants the not affiliated line in the long description anyway.
-- "Plays offline" without the font caveat below.
 
 ## Name
 
@@ -130,20 +129,16 @@ What the app does with data, from the code in this repo:
   file dialog. It is the player's own file and never reaches us.
 - Steam (desktop, only in the build with the steam feature): achievements are reported to the
   Steam client on the player's machine. Steam's own data practice is Valve's.
-- Network: the game requests its two typefaces from Google Fonts (fonts.googleapis.com and
-  fonts.gstatic.com) when it opens. That request carries the device's IP address to Google like
-  any web font request, and without a connection the game falls back to system fonts and still
-  plays. This is the one network call the app makes. Check at submission whether the privacy
-  forms need it declared; bundling the two fonts in the app removes the question (that is a code
-  change, not made in this round).
+- Network: the app makes no network requests. Its two typefaces (Bricolage Grotesque and Share
+  Tech Mono, SIL Open Font License) are bundled in the app, and it plays fully offline.
 
 Form answers that follow:
 
-- App Store privacy label: Data Not Collected (see the font note above: check at submission).
+- App Store privacy label: Data Not Collected.
 - App Tracking Transparency: not needed, the app does not track.
 - Google Play data safety: no data collected, no data shared; data is not encrypted in transit
-  because none is sent (the font request is HTTPS); no account, so no deletion request path is
-  needed. Check at submission.
+  because none is sent (the app makes no network requests); no account, so no deletion
+  request path is needed. Check at submission.
 - Steam: no privacy form in the store page; the privacy policy URL below covers it.
 
 A privacy policy URL is required by Apple and Google even for an app that collects nothing.

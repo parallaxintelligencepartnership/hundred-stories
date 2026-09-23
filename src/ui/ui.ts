@@ -64,9 +64,6 @@ interface ChromeWatch {
   disconnect(): void;
 }
 
-const FONT_LINK_ID = 'hs-google-fonts';
-const FONT_HREF =
-  'https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600&family=Share+Tech+Mono&display=swap';
 /** The controls hint rides along for the first three loads, then gets out of the way. */
 const HINT_LOADS = 3;
 const HINT_TEXT = 'Move: drag, scroll, or W A S D. Zoom: ctrl + scroll or pinch. Click to place.';
@@ -124,8 +121,6 @@ export function nextHintSeen(stored: string | null): { show: boolean; seen: numb
 }
 
 export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): Ui {
-  ensureFonts();
-
   let reducedMotion = readReducedMotion();
   // Sound is off by default and builds nothing until the player turns it on and touches the page.
   const sound = createSound(game);
@@ -1016,15 +1011,6 @@ function toggleClass(node: HTMLElement, name: string, on: boolean): boolean {
 function setPressed(node: HTMLElement, pressed: boolean): void {
   const value = pressed ? 'true' : 'false';
   if (node.getAttribute('aria-pressed') !== value) node.setAttribute('aria-pressed', value);
-}
-
-function ensureFonts(): void {
-  if (document.getElementById(FONT_LINK_ID)) return;
-  const link = document.createElement('link');
-  link.id = FONT_LINK_ID;
-  link.rel = 'stylesheet';
-  link.href = FONT_HREF;
-  document.head.append(link);
 }
 
 /**

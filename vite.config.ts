@@ -93,19 +93,6 @@ export default defineConfig(({ mode }) => {
             workbox: {
               navigateFallback: '/play/index.html',
               globPatterns: ['**/*.{js,css,html,png,svg,woff2}'],
-              // Google Fonts are fetched at runtime; cache them so the installed app keeps its faces offline.
-              runtimeCaching: [
-                {
-                  urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
-                  handler: 'StaleWhileRevalidate',
-                  options: { cacheName: 'google-fonts-stylesheets' },
-                },
-                {
-                  urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
-                  handler: 'CacheFirst',
-                  options: { cacheName: 'google-fonts-webfonts', expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 * 24 * 365 }, cacheableResponse: { statuses: [0, 200] } },
-                },
-              ],
             },
           }),
         ],

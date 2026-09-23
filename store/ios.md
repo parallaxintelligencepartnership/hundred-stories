@@ -34,7 +34,7 @@ question stops coming back (a one line Info.plist change, not made here).
 | Subtitle | 30 characters | Build a tower. Run it well. |
 | Primary category | | Games, subcategory Simulation |
 | Secondary category | | Games, subcategory Strategy |
-| Content rights | | The app contains no third party content (the fonts are Google Fonts under the SIL Open Font License, loaded at runtime; check at submission how Apple wants that answered) |
+| Content rights | | The app contains no third party content beyond two bundled typefaces under the SIL Open Font License (public/fonts/, licence texts alongside) |
 | Age rating | questionnaire | From listing.md, "Age rating answers" |
 | Copyright | | 2026 Parallax Intelligence Partnership |
 | Price | | (blank: Matt's call) |
@@ -54,8 +54,8 @@ question stops coming back (a one line Info.plist change, not made here).
 | Screenshots | see below | store/shots/ios/ |
 | App previews (video) | optional | none |
 
-App privacy (the nutrition label): Data Not Collected, from listing.md "Privacy answers", with the
-Google Fonts note as check at submission.
+App privacy (the nutrition label): Data Not Collected, from listing.md "Privacy answers". The app
+makes no network requests.
 
 App review information: no sign in is needed, so no demo account. Notes for the reviewer, as a
 suggestion: "Hundred Stories is a single player tower simulation. No account, no network features.
