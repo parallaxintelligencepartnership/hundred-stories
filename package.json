@@ -1,6 +1,6 @@
 {
   "name": "hundred-stories",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "A downtown skyscraper simulation: run and operate a tower, one hundred stories tall.",
   "private": true,
   "type": "module",
@@ -8,6 +8,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "build:demo": "tsc --noEmit && VITE_EDITION=demo vite build",
+    "build:full": "tsc --noEmit && VITE_EDITION=full vite build",
     "build:app": "tsc --noEmit && VITE_EDITION=full vite build --mode app",
     "cap:sync": "npm run build:app && cap sync",
     "preview": "vite preview",

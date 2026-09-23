@@ -3,6 +3,7 @@
 // or were silent the value is marked "our call" and can be tuned without touching logic.
 
 import type { RoomKind, ShaftKind, Star } from './types';
+import { TOWER_WIDTH } from './types';
 
 export interface RoomRule {
   label: string; // UI name, sentence case, US spelling
@@ -176,3 +177,41 @@ export const EVENTS = {
   santa: { minuteOfDay: 20 * 60, tilesPerMinute: 6 },
   wedding: { weekendMinuteOfDay: 12 * 60, durationMinutes: 180 },
 };
+
+// ---------------------------------------------------------------------------
+// Edition and the demo cap (decision 2026-09-22: floors 1 to 20, basements to -2, 150 tiles of 375)
+// ---------------------------------------------------------------------------
+
+/** `web` is the site build (uncapped today), `demo` the capped store demo, `full` the store game. */
+export type Edition = 'web' | 'demo' | 'full';
+
+/**
+ * The build flag, or the fallback when it is unset: node (vitest, the bench) is the full game so
+ * the hashes never move, and a browser build with no flag is the web edition.
+ */
+export function resolveEdition(raw: unknown, inNode: boolean): Edition {
+  if (raw === 'web' || raw === 'demo' || raw === 'full') return raw;
+  return inNode ? 'full' : 'web';
+}
+
+const IN_NODE =
+  typeof (globalThis as { process?: { versions?: { node?: unknown } } }).process?.versions?.node === 'string';
+
+/** Read once: `VITE_EDITION` at build time. */
+export const EDITION: Edition = resolveEdition(import.meta.env.VITE_EDITION, IN_NODE);
+
+export const DEMO_MAX_FLOOR = 20;
+export const DEMO_MIN_FLOOR = -2;
+export const DEMO_MAX_WIDTH_TILES = 150;
+/** The band's first tile: the 150 tiles centred on the lot (225 spare tiles, 112 to the left). */
+export const DEMO_X_MIN = Math.floor((TOWER_WIDTH - DEMO_MAX_WIDTH_TILES) / 2);
+/** The band's last tile, inclusive: tiles 112 to 261. */
+export const DEMO_X_MAX = DEMO_X_MIN + DEMO_MAX_WIDTH_TILES - 1;
+
+/** The refusal the demo gives, in the player's words; the result also carries `code: 'demoCap'`. */
+export const DEMO_CAP_REASON = `The demo builds up to floor ${DEMO_MAX_FLOOR}, down to basement ${-DEMO_MIN_FLOOR}, and across the middle ${DEMO_MAX_WIDTH_TILES} tiles.`;
+
+/** Does this span sit inside the demo's box? Floors inclusive, `x` the left tile, `width` in tiles. */
+export function insideDemoCap(floorMin: number, floorMax: number, x: number, width: number): boolean {
+  return floorMin >= DEMO_MIN_FLOOR && floorMax <= DEMO_MAX_FLOOR && x >= DEMO_X_MIN && x + width - 1 <= DEMO_X_MAX;
+}

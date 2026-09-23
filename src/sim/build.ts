@@ -3,7 +3,7 @@
 
 import { spend } from './economy';
 import { handleEventCommand } from './events';
-import { LIMITS, RENT, ROOMS, SHAFTS, takesRent } from './rules';
+import { DEMO_CAP_REASON, EDITION, insideDemoCap, LIMITS, RENT, ROOMS, SHAFTS, takesRent } from './rules';
 import { MAX_FLOOR, MIN_FLOOR, TOWER_WIDTH } from './types';
 import type {
   Car,
@@ -34,6 +34,12 @@ const OK: CommandResult = { ok: true };
 
 function no(reason: string): CommandResult {
   return { ok: false, reason };
+}
+
+/** The demo edition's box; every other edition builds the whole lot. */
+function demoCapRefusal(floorMin: number, floorMax: number, x: number, width: number): CommandResult | null {
+  if (EDITION !== 'demo' || insideDemoCap(floorMin, floorMax, x, width)) return null;
+  return { ok: false, reason: DEMO_CAP_REASON, code: 'demoCap' };
 }
 
 // ---------------------------------------------------------------------------
@@ -266,6 +272,8 @@ export function canBuild(world: World, kind: RoomKind, floor: number, x: number)
   const floors = floorsCovered(floor, rule.height);
   if (floors.some((f) => !floorExists(f))) return no('That does not fit inside the tower.');
   if (x < 0 || x + rule.width > TOWER_WIDTH) return no('That does not fit inside the tower.');
+  const capped = demoCapRefusal(floors[0] ?? floor, floors[floors.length - 1] ?? floor, x, rule.width);
+  if (capped) return capped;
 
   if (rule.placement === 'aboveGround' && floors.some((f) => f < 1)) {
     return no(`${plural(rule.label)} must go above ground.`);
@@ -312,6 +320,8 @@ export function canBuildShaft(
   if (!floorExists(floorMin) || !floorExists(floorMax)) return no('That floor does not exist.');
   if (floorMin >= floorMax) return no('An elevator must serve at least two floors.');
   if (x < 0 || x + rule.width > TOWER_WIDTH) return no('That does not fit inside the tower.');
+  const capped = demoCapRefusal(floorMin, floorMax, x, rule.width);
+  if (capped) return capped;
 
   const floors = shaftFloors(floorMin, floorMax);
   if (rule.maxSpan !== null && floors.length > rule.maxSpan) {
@@ -451,6 +461,8 @@ export function canExtendShaft(
   if (floorMin === shaft.floorMin && floorMax === shaft.floorMax) {
     return no('That elevator already reaches those floors.');
   }
+  const capped = demoCapRefusal(floorMin, floorMax, shaft.x, shaft.width);
+  if (capped) return capped;
 
   const rule = SHAFTS[shaft.kind];
   const floors = shaftFloors(floorMin, floorMax);

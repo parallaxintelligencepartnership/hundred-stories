@@ -9,6 +9,7 @@ import type { GameApi, Placement, Speed, Tool } from '../game/api';
 import type { Renderer } from '../render/renderer';
 import type { Command, LogEntry, World } from '../sim/types';
 import { createIntroPanel, createSideCard, createTipToast } from './cards';
+import { createDemoCapCard, isDemoCapEntry } from './demo';
 import { formatFloorShort, formatMoney, formatTimestamp } from './format';
 import {
   GUIDE_DONE,
@@ -257,6 +258,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   applyPaletteCollapsed();
 
   const panelSlot = el('div', 'hs-panel-slot');
+  // The demo edition's cap card, once per session, over whatever the slot holds.
+  const demoCap = createDemoCapCard(panelSlot);
 
   // The side card: the guide's steps, then the goals, in the query panel's slot.
   const card = createSideCard({
@@ -790,6 +793,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     for (let i = log.length - fresh; i < log.length; i += 1) {
       const entry = log[i];
       if (entry && entry.level === 'alert') showAlert(entry);
+      if (entry && !demoCap.offered && isDemoCapEntry(entry)) demoCap.offer();
     }
     lastLogTotal = total;
   }

@@ -174,7 +174,8 @@ export type Command =
 
 export type CommandKind = Command['kind'];
 
-export type CommandResult = { ok: true } | { ok: false; reason: string };
+/** `code` tags a refusal the ui reacts to beyond showing the reason (today only the demo cap). */
+export type CommandResult = { ok: true } | { ok: false; reason: string; code?: 'demoCap' };
 
 export interface LogEntry {
   minute: number;

@@ -786,3 +786,35 @@ p {
     scroll-behavior: auto !important;
   }
 }
+
+/* Store row: one slab per store, a link once the listing exists, "coming soon" until then. */
+
+.store-lead {
+  margin: 20px 0 8px;
+}
+
+.store-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.store-link {
+  display: inline-block;
+  padding: 8px 14px;
+  background: var(--w-lobby);
+  color: var(--w-text);
+  border: 2px solid var(--w-outline);
+  box-shadow: 3px 3px 0 var(--w-outline);
+  font-family: var(--font-ui);
+  font-size: var(--size-15);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.store-link.is-soon {
+  background: var(--w-security);
+  color: var(--w-concrete-line);
+  box-shadow: none;
+  font-weight: 500;
+}
