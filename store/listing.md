@@ -147,8 +147,8 @@ Form answers that follow:
 - Steam: no privacy form in the store page; the privacy policy URL below covers it.
 
 A privacy policy URL is required by Apple and Google even for an app that collects nothing.
-There is no privacy page on the site today. Matt's call where it lives; the text can be the
-"Yours, and private" paragraph above plus the font note.
+
+privacyUrl: https://hundredstories.xyz/privacy/
 
 ## Support and contact
 

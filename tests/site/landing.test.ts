@@ -8,6 +8,7 @@ import notfound from '../../404.html?raw';
 import guide from '../../how-to-play/index.html?raw';
 import landing from '../../index.html?raw';
 import play from '../../play/index.html?raw';
+import privacy from '../../privacy/index.html?raw';
 import robots from '../../public/robots.txt?raw';
 import sitemap from '../../public/sitemap.xml?raw';
 import { describe, expect, it } from 'vitest';
@@ -152,11 +153,29 @@ describe('crawler files', () => {
     );
   });
 
-  it('the sitemap lists all three pages', () => {
-    expect(sitemap.match(/<url>/g)).toHaveLength(3);
-    for (const path of ['/', '/how-to-play/', '/play/']) {
+  it('the sitemap lists all four pages', () => {
+    expect(sitemap.match(/<url>/g)).toHaveLength(4);
+    for (const path of ['/', '/how-to-play/', '/play/', '/privacy/']) {
       expect(sitemap).toContain(`<loc>https://hundredstories.xyz${path}</loc>`);
     }
+  });
+});
+
+describe('privacy page', () => {
+  it('exists and carries the title', () => {
+    expect(privacy).toContain('<title>Privacy</title>');
+    expect(privacy).toContain('<h1>Privacy</h1>');
+  });
+
+  it('points at itself', () => {
+    expect(privacy).toContain('<link rel="canonical" href="https://hundredstories.xyz/privacy/" />');
+  });
+
+  it('states the one network request and the last-updated date', () => {
+    expect(flat(privacy)).toContain(
+      "The web pages and the store apps both load two typefaces from Google Fonts when they open. That is a request to Google's servers, subject to Google's privacy policy, and it is the only network request the game makes.",
+    );
+    expect(privacy).toContain('Last updated 2026-09-22.');
   });
 });
 
@@ -199,6 +218,11 @@ describe('footer', () => {
 
   it('keeps the footer off the game shell', () => {
     expect(play).not.toContain('site-foot');
+  });
+
+  it.each(pages)('links to /privacy/ from the %s footer', (_name, html) => {
+    const footer = html.slice(html.indexOf('<footer class="site-foot">'));
+    expect(footer).toContain('href="/privacy/"');
   });
 });
 

@@ -120,6 +120,7 @@ export default defineConfig(({ mode }) => {
               main: 'index.html',
               howto: 'how-to-play/index.html',
               play: 'play/index.html',
+              privacy: 'privacy/index.html',
               notfound: '404.html',
             },
       },
