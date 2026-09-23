@@ -265,6 +265,10 @@ export function createStatusBar(): StatusBar {
   );
   const clockText = h('span', 'hs-clock-text');
   const clockValue = h('span', 'hs-readout-value');
+  // The digits and AM or PM apart, so a phone can stack the suffix under the digits.
+  const clockDigits = h('span', 'hs-clock-digits');
+  const clockAmPm = h('span', 'hs-clock-ampm');
+  clockValue.append(clockDigits, clockAmPm);
   const dateValue = h('span', 'hs-readout-meta');
   clockText.append(clockValue, dateValue);
   clock.append(dial as unknown as HTMLElement, clockText);
@@ -321,7 +325,10 @@ export function createStatusBar(): StatusBar {
       hand.setAttribute('y2', String(tipPoint.y));
       clock.classList.toggle('is-night', isNightMinute(minuteOfDay));
     }
-    setText(clockValue, formatClock(world.time.minute));
+    const time = formatClock(world.time.minute);
+    const split = time.lastIndexOf(' ');
+    setText(clockDigits, time.slice(0, split));
+    setText(clockAmPm, time.slice(split));
     const date = formatDate(world.time.minute);
     setText(dateValue, date);
     setAttr(clock, 'title', date); // a phone hides the date line; the tooltip keeps it

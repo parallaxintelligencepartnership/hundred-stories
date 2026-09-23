@@ -1426,8 +1426,19 @@ a.hs-btn {
   }
 
   .hs-status-clock {
+    --clock-size: 32px;
     gap: 6px;
     padding-right: 0;
+  }
+
+  /* The widest time, 12:59 PM, is 93 px on one line and there are 105 px beside the controls:
+     the digits keep the value size and AM or PM sits under them at the meta size. */
+  .hs-clock-ampm {
+    display: block;
+    font-size: var(--status-meta);
+    line-height: 1.2;
+    letter-spacing: 0;
+    color: var(--ink-dim);
   }
 
   /* No room beside the speed buttons on a phone: the night mode hangs just under them. */
