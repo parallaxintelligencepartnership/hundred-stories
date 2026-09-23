@@ -10,6 +10,8 @@ export interface BootDeps {
   online: () => boolean;
   hasController: () => boolean;
   search: () => string;
+  /** True inside the iOS or Android shell, where the game ships in the app bundle. */
+  native?: () => boolean;
 }
 
 const defaultDeps: BootDeps = {
@@ -20,6 +22,9 @@ const defaultDeps: BootDeps = {
   online: () => navigator.onLine,
   hasController: () => !!navigator.serviceWorker?.controller,
   search: () => location.search,
+  // The Capacitor global the native bridge injects; read directly so the web bundle does not
+  // import Capacitor (src/game/storage.ts asks the same question for the save backend).
+  native: () => (globalThis as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.() === true,
 };
 
 export async function boot(app: HTMLElement, deps: BootDeps = defaultDeps): Promise<void> {
@@ -29,7 +34,8 @@ export async function boot(app: HTMLElement, deps: BootDeps = defaultDeps): Prom
     return;
   }
   app.innerHTML = '';
-  if (!deps.online() && !deps.hasController()) {
+  // The shells serve the game from the app bundle, so offline is fine without a service worker.
+  if (!deps.native?.() && !deps.online() && !deps.hasController()) {
     app.textContent = 'Hundred Stories needs one online load before it can play offline.';
     return;
   }

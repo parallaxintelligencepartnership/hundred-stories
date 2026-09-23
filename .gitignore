@@ -13,3 +13,6 @@ coverage/
 !.dev.vars.example
 !.env.example
 .claude/worktrees/
+
+# Capacitor app bundle (npm run build:app); ios/ and android/ carry their own .gitignore for native build outputs
+dist-app/

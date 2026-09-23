@@ -120,4 +120,23 @@ describe('boot', () => {
     await boot(app, baseDeps({ online: () => false, hasController: () => false }));
     expect(app.textContent).toBe('Hundred Stories needs one online load before it can play offline.');
   });
+
+  it('boots offline in the native shell, which serves the game from the app bundle and has no service worker', async () => {
+    const app = fakeApp();
+    let rendererAsked = false;
+    const deps = baseDeps({
+      online: () => false,
+      hasController: () => false,
+      native: () => true,
+      // Stops boot at the renderer: reaching it proves the offline gate let the shell through.
+      createRenderer: async () => {
+        rendererAsked = true;
+        throw new Error('stop here');
+      },
+    });
+    await boot(app, deps);
+    expect(app.textContent).not.toBe('Hundred Stories needs one online load before it can play offline.');
+    expect(rendererAsked).toBe(true);
+    expect((app as unknown as { querySelector(s: string): HTMLElement | null }).querySelector('#view')).not.toBeNull();
+  });
 });
