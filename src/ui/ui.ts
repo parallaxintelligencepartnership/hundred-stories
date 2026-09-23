@@ -44,6 +44,9 @@ import type { PanelContext, PanelElement } from './panels';
 import { applyRowState, buildPalette, paintThumbnail, sameTool, toolRowState } from './palette';
 import type { PaletteRow } from './palette';
 import { createStatusBar, speedModeText } from './status';
+import { placementNote } from './explain';
+import { createHoverCard } from './hover';
+import { createViewControl } from './overlays';
 
 export interface Ui {
   destroy(): void;
@@ -186,8 +189,14 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   hoverReadout.title = 'Floor under the cursor';
   hoverReadout.append(el('span', 'hs-readout-label', 'Cursor'), hoverValue);
 
+  // View: the information layers, one at a time or none, with the legend under the choice.
+  // Off by default and not remembered. A renderer without the method (tests) ignores it.
+  const view = createViewControl((kind) => {
+    if (typeof renderer.setOverlay === 'function') renderer.setOverlay(kind);
+  });
+
   readouts.append(status.cash, status.population, status.stars);
-  clockGroup.append(status.clock, hoverReadout);
+  clockGroup.append(status.clock, view.root, hoverReadout);
 
   const speedBar = el('div', 'hs-speed');
   speedBar.setAttribute('role', 'group');
@@ -290,7 +299,9 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   const chip = el('div', 'hs-place-chip is-hidden');
   chip.setAttribute('role', 'status');
   chip.setAttribute('aria-live', 'polite');
-  chip.append(chipText);
+  // The second line: the floors an elevator will serve, or what to do about a common refusal.
+  const chipNote = el('span', 'hs-place-chip-note is-hidden');
+  chip.append(chipText, chipNote);
 
   const bar = el('div', 'hs-place-bar is-hidden');
   bar.setAttribute('role', 'group');
@@ -320,6 +331,10 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   // The card follows the palette in the tree: on a phone the open sheet hides it by selector.
   shell.append(top, palette, card.node, hint, chip, bar, panelSlot, ticker, toasts);
   root.append(shell);
+
+  // The hover card: a preview of the shaft or room under the pointer, or under the tap.
+  const hoverCard = createHoverCard(shell, game, () => chromeBand);
+  shell.append(hoverCard.node);
 
   const ctx: PanelContext = {
     apply(cmd: Command) {
@@ -395,6 +410,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     setText(paletteParts.current, held);
 
     refreshPlacement();
+    hoverCard.update();
     refreshPanel();
     refreshOnboarding(world);
     watchForTips(world, speed);
@@ -599,6 +615,9 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     }
 
     if (setText(chipText, placementChipText(placement))) chipSize = null;
+    const note = placementNote(placement, game.getTool(), game.world);
+    if (setText(chipNote, note)) chipSize = null;
+    if (toggleClass(chipNote, 'is-hidden', note === '')) chipSize = null;
     if (toggleClass(chip, 'is-alert', !placement.ok)) chipSize = null;
 
     if (placement.pending) {
@@ -897,6 +916,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
       window.removeEventListener('resize', onThumbResize);
       if (thumbRaf) cancelAnimationFrame(thumbRaf);
       status.destroy();
+      hoverCard.destroy();
       fonts?.removeEventListener('loadingdone', onPlacementResize);
       chromeWatch?.disconnect();
       for (const timer of timers) clearTimeout(timer);

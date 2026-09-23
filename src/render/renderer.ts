@@ -81,6 +81,7 @@ import {
 import { createBuildFx } from './buildfx';
 import { Motion, TELEPORT_TILES } from './interpolate';
 import { floorsWithPeople, LIGHT_ALPHA, lightBand, lightTintAt, windowStateOf, windowStatesFor, type WindowState } from './light';
+import { createOverlayPass, type OverlayKind, type ViewRect } from './overlays';
 import { createSky, isNight, skyBackground, type Sky } from './sky';
 import { createThumbnails, type ThumbnailKind } from './thumbnail';
 
@@ -98,6 +99,8 @@ export interface Ghost {
   floor: number;
   x: number;
   ok: boolean;
+  /** Set when the ghost is an elevator: the overlay pass bands the floors it will stop at. */
+  shaft?: ShaftKind;
 }
 
 export interface Selection {
@@ -121,6 +124,11 @@ export interface Renderer {
    * tiles (both ends inclusive), drawn in the overlay layer under the ghost. Null clears it.
    */
   setGuideBand(band: { floorMin: number; floorMax: number; xMin: number; xMax: number } | null): void;
+  /**
+   * Tint every room by one of the information views (src/render/overlays.ts), or none. Drawn
+   * every frame while on, outside the structure-version gate; off costs one branch a frame.
+   */
+  setOverlay(kind: OverlayKind | null): void;
   camera: Camera;
   screenToTile(sx: number, sy: number): { floor: number; x: number };
   setGhost(g: null | Ghost): void;
@@ -743,7 +751,13 @@ export async function createRenderer(
   ghostSprite.visible = false;
   const selectionBox = new Graphics();
   selectionBox.visible = false;
-  layers.overlay.addChild(ghostSprite, selectionBox);
+  // The information views tint under the ghost and the selection ring, above the light layer so
+  // their colours read the same at midnight as at noon.
+  const overlayTint = new Graphics();
+  overlayTint.visible = false;
+  layers.overlay.addChild(overlayTint, ghostSprite, selectionBox);
+  const overlayPass = createOverlayPass(overlayTint);
+  const overlayView: ViewRect = { left: 0, top: 0, right: 0, bottom: 0 };
 
   // Sim particle mode: one shared atlas so every particle draws from one source.
   let particles: ParticleContainer | null = null;
@@ -1583,7 +1597,8 @@ export async function createRenderer(
 
     worldRoot.scale.set(camera.zoom);
     worldRoot.position.set(width / 2 - camera.x * camera.zoom, height / 2 - camera.y * camera.zoom);
-    // The overlay (ghost, selection, guide band) sits above the light layer but shares the camera.
+    // The overlay (ghost, selection, information tint) lives above the light layer but is drawn
+    // in world pixels, so it takes the same camera transform.
     overlayRoot.scale.set(camera.zoom);
     overlayRoot.position.copyFrom(worldRoot.position);
 
@@ -1642,6 +1657,14 @@ export async function createRenderer(
       reconcileCars(w, alpha);
       reconcileSims(w, alpha);
       drawOverlay(w);
+      // The information views: every frame while one is on, whatever the structure version says.
+      const halfW = app.screen.width / 2 / camera.zoom;
+      const halfH = app.screen.height / 2 / camera.zoom;
+      overlayView.left = camera.x - halfW;
+      overlayView.right = camera.x + halfW;
+      overlayView.top = camera.y - halfH;
+      overlayView.bottom = camera.y + halfH;
+      overlayPass.draw(w, overlayView, ghost);
     },
     commitMotion,
     resetMotion(): void {
@@ -1676,6 +1699,9 @@ export async function createRenderer(
         band.visible = true;
       };
     })(),
+    setOverlay(kind): void {
+      overlayPass.set(kind);
+    },
     camera,
     screenToTile,
     setGhost(g): void {

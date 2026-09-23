@@ -5,7 +5,7 @@
 // spirit of connectors.test.ts: no GPU, no DOM, real pixi Containers and Sprites.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Container, ParticleContainer, Sprite, Texture } from 'pixi.js';
+import { Container, Graphics, ParticleContainer, Sprite, Texture } from 'pixi.js';
 import type { Art } from '../../src/render/art';
 import { doorFrameOf } from '../../src/render/anim';
 import { CROWD_ONE_IN, createRenderer, type Renderer } from '../../src/render/renderer';
@@ -602,5 +602,55 @@ describe('motion (look round L3)', () => {
     markStructureChanged(world);
     renderer.render(world, 1);
     expect(effectsSprites(stage)).toHaveLength(0);
+  });
+});
+
+describe('information view tint (setOverlay)', () => {
+  /** The tint Graphics: the first child of the overlay layer, under the ghost and the ring. */
+  function tintOf(stage: Container): Graphics {
+    const overlayRoot = stage.children[5] as Container;
+    const overlay = overlayRoot.children[0] as Container;
+    return overlay.children[0] as Graphics;
+  }
+
+  it('redraws every frame while a view is on, outside the structure-version gate, and stops when off', async () => {
+    const { world, room } = officeWorld(NOON);
+    room.vacant = true;
+    const { renderer, stage } = await mount(world);
+    const tint = tintOf(stage);
+    expect(tint).toBeInstanceOf(Graphics);
+    const clear = vi.spyOn(tint, 'clear');
+    renderer.render(world, 1);
+    renderer.render(world, 1);
+    expect(clear).not.toHaveBeenCalled(); // off: the pass returns before it reads anything
+    expect(tint.visible).toBe(false);
+
+    renderer.setOverlay('vacancy');
+    const version = world.structureVersion;
+    renderer.render(world, 1);
+    renderer.render(world, 1);
+    renderer.render(world, 1);
+    expect(world.structureVersion).toBe(version);
+    expect(clear).toHaveBeenCalledTimes(3);
+    expect(tint.visible).toBe(true);
+
+    renderer.setOverlay(null);
+    renderer.render(world, 1);
+    renderer.render(world, 1);
+    expect(clear).toHaveBeenCalledTimes(4); // one clear to wipe it, then nothing
+    expect(tint.visible).toBe(false);
+  });
+
+  it('puts the overlay (ghost, selection, tint) under the same camera transform as the tower', async () => {
+    const { world } = officeWorld(NOON);
+    const { renderer, stage, frame } = await mount(world);
+    renderer.camera.centerOn(5, 180);
+    frame(16);
+    const worldRoot = stage.children[3] as Container;
+    const overlayRoot = stage.children[5] as Container;
+    expect(worldRoot.position.y).not.toBe(0);
+    expect(overlayRoot.scale.x).toBe(worldRoot.scale.x);
+    expect(overlayRoot.position.x).toBe(worldRoot.position.x);
+    expect(overlayRoot.position.y).toBe(worldRoot.position.y);
   });
 });

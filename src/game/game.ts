@@ -446,12 +446,15 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
         ? ROOMS[tool.room].height
         : bandOf(placement.floorMax) - bandOf(placement.floorMin) + 1;
     const shaft = placement.shaftId === undefined ? null : world.shafts.get(placement.shaftId);
+    // An elevator ghost carries its kind, so the renderer can band the floors it will stop at.
+    const shaftKind = shaft ? shaft.kind : tool.kind === 'shaft' ? tool.shaft : undefined;
     renderer.setGhost({
       widthTiles: shaft ? shaft.width : toolWidth(),
       heightFloors,
       floor: placement.floorMin,
       x: placement.x,
       ok: placement.ok,
+      ...(shaftKind ? { shaft: shaftKind } : {}),
     });
   }
 
@@ -477,6 +480,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
         floor: span.floorMin,
         x: shaft.x,
         ok: res.ok,
+        shaft: shaft.kind,
       });
       return;
     }
@@ -490,7 +494,14 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
       const floorMax = drag ? Math.max(drag.floor, floor) : floor;
       const sx = drag ? drag.x : x;
       const res = canBuildShaft(world, tool.shaft, sx, floorMin, floorMax);
-      renderer.setGhost({ widthTiles: rule.width, heightFloors: floorMax - floorMin + 1, floor: floorMin, x: sx, ok: res.ok });
+      renderer.setGhost({
+        widthTiles: rule.width,
+        heightFloors: floorMax - floorMin + 1,
+        floor: floorMin,
+        x: sx,
+        ok: res.ok,
+        shaft: tool.shaft,
+      });
     } else {
       renderer.setGhost(null);
     }

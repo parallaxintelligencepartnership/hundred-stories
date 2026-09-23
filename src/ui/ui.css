@@ -1222,9 +1222,157 @@ a.hs-btn {
   border-color: var(--line);
 }
 
+/* View: the information layers (0.5.1) --------------------------------- */
+
+/* A readout column like the others: the label, the choice as one segmented control, then the
+   legend for the view that is on. */
+.hs-status-view {
+  flex: 0 0 auto;
+  gap: 2px;
+}
+
+.hs-view {
+  display: flex;
+  border: 1px solid var(--line);
+  width: max-content;
+}
+
+.hs-view .hs-view-btn {
+  border: 0;
+  padding: 1px 8px;
+  font-size: var(--size-12);
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.hs-view .hs-view-btn + .hs-view-btn {
+  border-left: 1px solid var(--line);
+}
+
+.hs-view .hs-view-btn:hover:not([aria-pressed='true']) {
+  color: var(--amber);
+}
+
+.hs-view-legend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--size-12);
+  line-height: 1.2;
+  color: var(--ink-dim);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.hs-view-legend.is-hidden {
+  display: none;
+}
+
+.hs-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.hs-legend-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 1px solid var(--line);
+}
+
+/* The chip's second line: served floors, or what to do about a refusal. */
+.hs-place-chip-note {
+  display: block;
+  color: var(--ink-dim);
+}
+
+.hs-place-chip-note.is-hidden {
+  display: none;
+}
+
+/* Hover card: a fixed width and one line a row, so new numbers never change its size and the
+   ui measures it only when its row count changes (hover.ts). */
+.hs-hover-card {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 248px;
+  padding: 6px 8px;
+  background: var(--steel);
+  border: 1px solid var(--line);
+  font-size: var(--size-12);
+  line-height: 1.4;
+  color: var(--ink);
+  pointer-events: none;
+}
+
+.hs-hover-card.is-hidden {
+  display: none;
+}
+
+.hs-hover-title {
+  margin: 0 0 4px;
+  font-size: var(--size-14);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hs-hover-rows {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 8px;
+  margin: 0;
+}
+
+.hs-hover-label,
+.hs-hover-value {
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hs-hover-label {
+  color: var(--ink-dim);
+}
+
+.hs-hover-value {
+  text-align: right;
+  font-family: var(--font-readout);
+}
+
 /* Phone width ---------------------------------------------------------- */
 
 @media (max-width: 720px) {
+  /* The View control takes its own row under the clock and the controls. */
+  .hs-clock-group {
+    display: contents;
+  }
+
+  .hs-status-clock {
+    flex: 1 1 0;
+  }
+
+  .hs-status-view {
+    order: 10;
+    flex: 1 1 100%;
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: wrap;
+    column-gap: var(--pad);
+    min-height: 32px;
+    padding: 4px 0;
+    border-right: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .hs-hover-card {
+    width: 224px;
+  }
+
   /* Two 56 px rows: cash, population and stars; then the clock and the controls. */
   .hs-top {
     min-height: calc(var(--status-h) * 2 + var(--safe-top));
