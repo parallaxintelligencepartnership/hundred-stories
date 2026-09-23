@@ -1,6 +1,8 @@
 import { defineConfig } from 'vitest/config';
 import type { Plugin } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
+import { readdirSync, readFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 
 // `vite build --mode app` (npm run build:app) is the bundle the iOS and Android shells load
 // (capacitor.config.ts webDir). It builds the game page only: no landing site, no how-to or 404
@@ -9,10 +11,20 @@ import { VitePWA } from 'vite-plugin-pwa';
 // /theme.js, /icons/...) and the shell serves dist-app at its origin root, so nothing is rewritten.
 const APP_MODE = 'app';
 
+// Files copied verbatim from public/ into dist-app that the app shells never load: the
+// landing site's Cloudflare headers, crawler files, social preview image and wordmark
+// exports. theme.js is not on this list — it is left for closeBundle to decide, since the
+// game page (play/index.html) references it.
+const APP_UNUSED_PUBLIC_FILES = ['_headers', 'robots.txt', 'sitemap.xml', 'og.png'];
+
 function gameAtRoot(): Plugin {
+  let outDir = 'dist-app';
   return {
     name: 'hundred-stories-game-at-root',
     apply: 'build',
+    configResolved(config) {
+      outDir = config.build.outDir;
+    },
     // After Vite's own html plugin, which emits the page in its generateBundle.
     enforce: 'post',
     generateBundle(_options, bundle) {
@@ -20,6 +32,28 @@ function gameAtRoot(): Plugin {
       if (!page || page.type !== 'asset') return this.error('app build: play/index.html was not emitted');
       delete bundle['play/index.html'];
       this.emitFile({ type: 'asset', fileName: 'index.html', source: page.source });
+    },
+    closeBundle() {
+      let entries: string[];
+      try {
+        entries = readdirSync(outDir);
+      } catch {
+        return;
+      }
+      let indexHtml = '';
+      try {
+        indexHtml = readFileSync(join(outDir, 'index.html'), 'utf8');
+      } catch {
+        // no-op: if index.html is missing something else already failed the build.
+      }
+      const keepThemeJs = indexHtml.includes('theme.js');
+      for (const name of entries) {
+        const isUnusedFile = APP_UNUSED_PUBLIC_FILES.includes(name) || name.startsWith('wordmark');
+        const isThemeJs = name === 'theme.js' && !keepThemeJs;
+        if (isUnusedFile || isThemeJs) {
+          rmSync(join(outDir, name), { force: true });
+        }
+      }
     },
   };
 }
