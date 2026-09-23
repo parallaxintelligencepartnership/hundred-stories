@@ -14,7 +14,8 @@ export type IconName =
   | 'share'
   | 'star'
   | 'demolish'
-  | 'query';
+  | 'query'
+  | 'help';
 
 /** A 16 by 16 drawing per icon, 1.5 px lines in the current text color. */
 const LINE = 'fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"';
@@ -31,6 +32,7 @@ const SYMBOLS: Record<IconName, string> = {
   star: `<path d="M8 1.5l1.9 4.1 4.5.5-3.35 3 .95 4.4L8 11.2l-4 2.3.95-4.4-3.35-3 4.5-.5z" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/>`,
   demolish: `<rect x="1.75" y="1.75" width="12.5" height="12.5" ${LINE}/><path d="M5 5l6 6M11 5l-6 6" ${LINE}/>`,
   query: `<circle cx="7" cy="7" r="4.5" ${LINE}/><path d="M10.5 10.5l3.75 3.75" ${LINE}/>`,
+  help: `<circle cx="8" cy="8" r="6.25" ${LINE}/><path d="M6.25 6.25a1.75 1.75 0 1 1 2.5 1.6c-.5.25-.75.6-.75 1.15v.5M8 11.5v.25" ${LINE}/>`,
 };
 
 export const ICON_NAMES = Object.keys(SYMBOLS) as IconName[];

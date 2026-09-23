@@ -35,6 +35,7 @@ export function createWorld(seed: number): World {
     floorIndex: { rooms: new Map(), shafts: new Map(), builtFloors: new Set() },
     routingDirty: true,
     structureVersion: 0,
+    longWaits: emptyLongWaits(),
     gameOver: null,
   };
 }
@@ -47,6 +48,32 @@ export function log(world: World, text: string, level: LogEntry['level'] = 'info
   world.logTotal += 1;
   world.log.push({ minute: world.time.minute, text, level, ...extra });
   if (world.log.length > 2000) world.log.splice(0, world.log.length - 2000);
+}
+
+/** A hall wait longer than this many minutes counts as a long wait. */
+export const LONG_WAIT_MINUTES = 5;
+const LONG_WAIT_SLOTS = 24;
+
+function emptyLongWaits(): World['longWaits'] {
+  return { hour: new Array<number>(LONG_WAIT_SLOTS).fill(-1), count: new Array<number>(LONG_WAIT_SLOTS).fill(0) };
+}
+
+/** Count one wait that just passed LONG_WAIT_MINUTES, in the current game hour. */
+export function recordLongWait(world: World): void {
+  const hour = Math.floor(world.time.minute / 60);
+  const slot = hour % LONG_WAIT_SLOTS;
+  const ring = world.longWaits;
+  if (ring.hour[slot] !== hour) {
+    ring.hour[slot] = hour;
+    ring.count[slot] = 0;
+  }
+  ring.count[slot] = (ring.count[slot] ?? 0) + 1;
+}
+
+/** Long waits counted in one absolute game hour (minute / 60), or 0 once it left the ring. */
+export function longWaitsInHour(world: Pick<World, 'longWaits'>, hour: number): number {
+  const slot = ((hour % LONG_WAIT_SLOTS) + LONG_WAIT_SLOTS) % LONG_WAIT_SLOTS;
+  return world.longWaits.hour[slot] === hour ? (world.longWaits.count[slot] ?? 0) : 0;
 }
 
 /** Tell the renderer the static tower changed. See World.structureVersion. */

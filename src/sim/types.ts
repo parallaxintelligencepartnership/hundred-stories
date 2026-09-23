@@ -243,6 +243,13 @@ export interface World {
    * only when it moves. A render cache counter: never saved, never hashed.
    */
   structureVersion: number;
+  /**
+   * Waits at a hall call that passed LONG_WAIT_MINUTES, per game hour: a ring of the last
+   * 24 hours, slot `hour % 24`, with the absolute hour each slot counts so a stale slot reads
+   * as zero. Bumped by the people pass where the wait is measured; read by the goals card.
+   * A display counter like structureVersion: never saved, never hashed.
+   */
+  longWaits: { hour: number[]; count: number[] };
   gameOver: null | { at: number; reason: string };
 }
 

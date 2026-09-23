@@ -50,7 +50,12 @@ export interface PanelContext {
   setReducedMotion(on: boolean): void;
   /** The sound module, when the shell made one; the settings panel shows its switches. */
   sound?: Sound;
+  /** Show the intro again, from Help in the settings panel. */
+  openIntro?: () => void;
 }
+
+/** The long form of the rules, one page away. */
+export const HOW_TO_PLAY_HREF = '/how-to-play/';
 
 export type Selection = { roomId?: Id; simId?: Id; shaftId?: Id };
 
@@ -128,7 +133,7 @@ function flag(label: string, alert = false): HTMLSpanElement {
  * The icon is drawn from the shared symbol sheet (icons.ts) and is decorative: the title
  * beside it is the label. Close stays a word, not a cross, so it needs no explaining.
  */
-function shell(title: string, section: IconName, ctx: PanelContext): { panel: PanelElement; body: HTMLDivElement } {
+export function panelShell(title: string, section: IconName, ctx: Pick<PanelContext, 'close'>): { panel: PanelElement; body: HTMLDivElement } {
   const panel = el('div', 'hs-panel') as PanelElement;
   const head = el('div', 'hs-panel-head');
   const name = el('h2', 'hs-panel-title');
@@ -186,7 +191,7 @@ export function createQueryPanel(
   if (shaftId !== undefined && world.shafts.has(shaftId)) return shaftPanel(shaftId, game, ctx);
   if (simId !== undefined && world.sims.has(simId)) return simPanel(simId, game, ctx);
 
-  const { panel, body } = shell('Nothing selected', 'query', ctx);
+  const { panel, body } = panelShell('Nothing selected', 'query', ctx);
   body.append(el('p', 'hs-note', 'That part of the tower is gone.'));
   return panel;
 }
@@ -194,7 +199,7 @@ export function createQueryPanel(
 function roomPanel(roomId: Id, game: GameApi, ctx: PanelContext): PanelElement {
   const room = game.world.rooms.get(roomId) as Room;
   const rule = ROOMS[room.kind];
-  const { panel, body } = shell(rule.label, 'room', ctx);
+  const { panel, body } = panelShell(rule.label, 'room', ctx);
 
   const where =
     room.height > 1
@@ -293,7 +298,7 @@ function roomPanel(roomId: Id, game: GameApi, ctx: PanelContext): PanelElement {
 
 function simPanel(simId: Id, game: GameApi, ctx: PanelContext): PanelElement {
   const sim = game.world.sims.get(simId) as Sim;
-  const { panel, body } = shell(SIM_KINDS[sim.kind], 'population', ctx);
+  const { panel, body } = panelShell(SIM_KINDS[sim.kind], 'population', ctx);
   const where = row('Position', formatFloor(sim.pos.floor));
   const state = row('Doing', SIM_STATES[sim.state]);
   const stress = row('Stress', stressBandLabel(stressBandOf(sim.stress)));
@@ -322,7 +327,7 @@ function simPanel(simId: Id, game: GameApi, ctx: PanelContext): PanelElement {
 function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement {
   const shaft = game.world.shafts.get(shaftId) as Shaft;
   const rule = SHAFTS[shaft.kind];
-  const { panel, body } = shell(rule.label, 'elevator', ctx);
+  const { panel, body } = panelShell(rule.label, 'elevator', ctx);
   body.append(el('p', 'hs-note', formatFloorRange(shaft.floorMin, shaft.floorMax)));
 
   const cars = row('Cars', `${formatCount(shaft.cars.length)} of ${formatCount(rule.maxCars)}`);
@@ -607,7 +612,7 @@ function setRowValue(node: HTMLElement, text: string): void {
 // --------------------------------------------------------- finances panel
 
 export function createFinancesPanel(game: GameApi, ctx: PanelContext): PanelElement {
-  const { panel, body } = shell('Finances', 'finance', ctx);
+  const { panel, body } = panelShell('Finances', 'finance', ctx);
   const stats = game.world.stats;
   const lastQuarter = (): { income: number; upkeep: number; net: number } =>
     game.world.stats.lastQuarter;
@@ -667,7 +672,7 @@ export function createFinancesPanel(game: GameApi, ctx: PanelContext): PanelElem
 export const LOG_PANEL_LINES = 200;
 
 export function createLogPanel(game: GameApi, ctx: PanelContext): PanelElement {
-  const { panel, body } = shell('Event log', 'log', ctx);
+  const { panel, body } = panelShell('Event log', 'log', ctx);
   const list = el('ul', 'hs-log-list');
   body.append(list);
 
@@ -716,11 +721,29 @@ export function createLogPanel(game: GameApi, ctx: PanelContext): PanelElement {
 // --------------------------------------------------------- settings panel
 
 export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElement {
-  const { panel, body } = shell('Settings', 'settings', ctx);
+  const { panel, body } = panelShell('Settings', 'settings', ctx);
 
-  const controls = section('Controls');
+  // Help: the intro again, the guide page, and the controls list.
+  const help = section('Help');
+  const helpActions = el('div', 'hs-actions');
+  const openIntro = ctx.openIntro;
+  if (openIntro) {
+    const intro = button('Intro', 'hs-btn', () => openIntro());
+    intro.title = 'Show the three intro screens again';
+    helpActions.append(intro);
+  }
+  const guide = el('a', 'hs-btn hs-link', 'How to play');
+  guide.href = HOW_TO_PLAY_HREF;
+  guide.target = '_blank';
+  guide.rel = 'noopener';
+  guide.title = 'The full guide, in a new tab';
+  helpActions.append(guide);
+  help.append(helpActions);
+  const controls = el('div', 'hs-help-controls');
+  controls.append(el('h4', 'hs-section-title', 'Controls'));
   for (const line of CONTROL_LINES) controls.append(el('p', 'hs-note', line));
-  body.append(controls);
+  help.append(controls);
+  body.append(help);
 
   const saves = el('div', 'hs-actions');
   saves.append(
@@ -870,7 +893,7 @@ function soundSection(sound: Sound): HTMLDivElement {
 // ----------------------------------------------------------- share panel
 
 export function createSharePanel(game: GameApi, renderer: Renderer, ctx: PanelContext): PanelElement {
-  const { panel, body } = shell('Share', 'share', ctx);
+  const { panel, body } = panelShell('Share', 'share', ctx);
 
   const stats = shareStats(game.world);
   const text = shareText(stats);

@@ -24,7 +24,7 @@ import type {
   StressBand,
   World,
 } from './types';
-import { addSim, allocId, log, removeSim, roomsOfKind, setOccupancy } from './world';
+import { addSim, allocId, LONG_WAIT_MINUTES, log, recordLongWait, removeSim, roomsOfKind, setOccupancy } from './world';
 
 /** Tiles a sim covers in one minute on foot. */
 export const WALK_TILES_PER_MINUTE = 5;
@@ -462,6 +462,8 @@ function checkOutOfHotel(world: World, sim: Sim, room: Room): void {
 function updateStress(world: World): void {
   for (const sim of [...world.sims.values()]) {
     if (sim.state === 'waiting') {
+      // The goals card's count of waits over five minutes: each counts once, the minute it passes.
+      if (sim.waitStart !== null && world.time.minute - sim.waitStart === LONG_WAIT_MINUTES + 1) recordLongWait(world);
       sim.stress = Math.min(STRESS.giveUp, sim.stress + STRESS.perWaitingMinute);
       // A sim can abandon a trip once a day. On the way out, or on the way home after
       // giving up, there is nothing left to abandon: giving up again would clear the

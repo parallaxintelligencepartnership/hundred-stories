@@ -546,7 +546,8 @@ function simForHash(sim: Sim) {
 
 // World keys the hash leaves out on purpose: the log is chatter, rng is hashed as its
 // state number, floorIndex is derived from rooms and shafts, routingDirty is a cache
-// flag, structureVersion is the renderer's change counter, and time is hashed as `minute`.
+// flag, structureVersion is the renderer's change counter, longWaits is the goals card's
+// counter of long hall waits, and time is hashed as `minute`.
 // quarterStartCash and dayStartPopulation are the status bar's display baselines: nothing in
 // the sim reads them, so they are saved but not hashed, and the bench hashes stay put.
 type UnhashedWorldKey =
@@ -556,6 +557,7 @@ type UnhashedWorldKey =
   | 'floorIndex'
   | 'routingDirty'
   | 'structureVersion'
+  | 'longWaits'
   | 'time'
   | 'quarterStartCash'
   | 'dayStartPopulation';

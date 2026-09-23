@@ -1099,6 +1099,100 @@ button.hs-readout:hover .hs-readout-label {
   cursor: not-allowed;
 }
 
+/* First run: the intro, the side card, the lit tile, the tip ------------ */
+
+.hs-btn.is-primary {
+  background: var(--amber);
+  border-color: var(--amber);
+  color: var(--on-amber);
+  font-weight: 600;
+}
+
+a.hs-btn {
+  display: inline-block;
+  text-decoration: none;
+  font-size: var(--size-14);
+}
+
+.hs-card-meta {
+  margin: 0 0 4px;
+  font-size: var(--size-12);
+  color: var(--ink-dim);
+}
+
+.hs-card-title {
+  margin: 0 0 6px;
+  font-size: var(--size-16);
+  font-weight: 600;
+}
+
+.hs-card-text,
+.hs-intro-line {
+  margin: 0 0 8px;
+  font-size: var(--size-14);
+  line-height: 1.4;
+}
+
+.hs-intro-lines {
+  margin: 0 0 8px;
+}
+
+/* The side card: the query panel's slot, as tall as it needs, under the status bar. */
+.hs-card {
+  position: absolute;
+  top: var(--top-actual, calc(var(--top-h) + var(--safe-top)));
+  right: 0;
+  width: var(--panel-w);
+  max-width: 100vw;
+  max-height: calc(100% - var(--top-actual, var(--top-h)) - var(--ticker-h) - var(--safe-bottom));
+  box-sizing: border-box;
+  overflow-y: auto;
+  background: var(--steel);
+  border-left: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  pointer-events: auto;
+}
+
+.hs-card.is-hidden,
+.hs-ui.is-panel-open .hs-card {
+  display: none;
+}
+
+.hs-card.is-collapsed .hs-panel-body {
+  display: none;
+}
+
+.hs-card-icon {
+  display: inline-flex;
+}
+
+.hs-card-sheet-only {
+  display: none;
+}
+
+.hs-goals {
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.hs-goal.is-done .hs-row-value {
+  color: var(--amber);
+}
+
+.hs-card-nudge {
+  margin: 8px 0 0;
+  padding: 6px 8px;
+  border-left: 2px solid var(--amber);
+  font-size: var(--size-14);
+}
+
+/* The palette tile the guide points at: an amber outline, still, as the chrome never moves. */
+.hs-tool.hs-tool-hint {
+  outline: 2px solid var(--amber);
+  outline-offset: -2px;
+}
+
 /* Toasts --------------------------------------------------------------- */
 
 .hs-toasts {
@@ -1295,6 +1389,28 @@ button.hs-readout:hover .hs-readout-label {
   /* The sheet and a panel share the bottom of a phone screen, so only one shows at a time. */
   .hs-ui.is-panel-open .hs-palette {
     display: none;
+  }
+
+  /* The side card is a sheet on the folded palette; the open palette takes its place. */
+  .hs-card {
+    top: auto;
+    bottom: var(--chrome-bottom, calc(var(--ticker-h) + var(--safe-bottom)));
+    left: 0;
+    width: 100vw;
+    max-height: 45vh;
+    border-left: 0;
+    border-bottom: 0;
+    border-top: 1px solid var(--line);
+    touch-action: pan-y;
+    overscroll-behavior: contain;
+  }
+
+  .hs-palette:not(.is-collapsed) ~ .hs-card {
+    display: none;
+  }
+
+  .hs-card-sheet-only {
+    display: flex;
   }
 }
 

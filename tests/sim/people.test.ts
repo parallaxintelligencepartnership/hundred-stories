@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ECONOMY, ROOMS, SCHEDULES, STRESS } from '../../src/sim/rules';
 import type { Car, Id, Leg, Room, RoomKind, Shaft, Sim, World } from '../../src/sim/types';
-import { addRoom, addShaft, addSim, allocId, createWorld } from '../../src/sim/world';
+import { addRoom, addShaft, addSim, allocId, createWorld, LONG_WAIT_MINUTES, longWaitsInHour } from '../../src/sim/world';
 
 const mocks = vi.hoisted(() => ({
   ensureRouting: vi.fn(),
@@ -535,6 +535,31 @@ describe('movement', () => {
 
     expect(mocks.findRoute).toHaveBeenCalled();
     expect(sim.state).toBe('waiting'); // routing offered the same shaft, so it waits again
+  });
+
+  it('counts a hall wait once, the minute it passes five minutes, in that hour of the ring', () => {
+    const world = makeTower();
+    const shaft = makeShaft(world);
+    shaftRoutes(shaft.id);
+    makeSim(world, {
+      pos: { floor: 1, x: SHAFT_X },
+      route: [{ kind: 'ride', shaftId: shaft.id, fromFloor: 1, toFloor: 5 }],
+    });
+    const total = (): number => {
+      let sum = 0;
+      for (let h = 0; h <= Math.floor(world.time.minute / 60); h++) sum += longWaitsInHour(world, h);
+      return sum;
+    };
+
+    run(world, 1); // at the doors: the wait starts
+    run(world, LONG_WAIT_MINUTES);
+    expect(total()).toBe(0); // five minutes is not over five minutes yet
+
+    run(world, 1);
+    expect(total()).toBe(1);
+
+    run(world, SILENT_RETRY_MINUTES - LONG_WAIT_MINUTES - 3); // still the same wait, before the reroute
+    expect(total()).toBe(1);
   });
 
   it('requests one hall call when it reaches a ride leg', () => {

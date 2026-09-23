@@ -116,6 +116,11 @@ export interface Renderer {
   commitMotion(world: World): void;
   /** Forget every snapshot, for a world that was replaced (a load, a new game). */
   resetMotion(): void;
+  /**
+   * The guide's translucent amber band over where the next step can be built, in floors and
+   * tiles (both ends inclusive), drawn in the overlay layer under the ghost. Null clears it.
+   */
+  setGuideBand(band: { floorMin: number; floorMax: number; xMin: number; xMax: number } | null): void;
   camera: Camera;
   screenToTile(sx: number, sy: number): { floor: number; x: number };
   setGhost(g: null | Ghost): void;
@@ -1645,6 +1650,29 @@ export async function createRenderer(
       reconciledWorld = null;
       reconciledVersion = -1;
     },
+    // The band is static world geometry under the shared camera, so it is drawn once per change
+    // and never per frame. Its Graphics is made on first use and sits under the ghost.
+    setGuideBand: (() => {
+      let band: Graphics | null = null;
+      return (next: { floorMin: number; floorMax: number; xMin: number; xMax: number } | null): void => {
+        if (!next) {
+          if (band) band.visible = false;
+          return;
+        }
+        if (!band) {
+          band = new Graphics();
+          layers.overlay.addChildAt(band, 0);
+        }
+        const x = next.xMin * TILE_PX;
+        const y = floorTopY(next.floorMax);
+        const w = (next.xMax - next.xMin + 1) * TILE_PX;
+        const h = (next.floorMax - next.floorMin + 1) * FLOOR_PX;
+        band.clear();
+        band.rect(x, y, w, h).fill({ color: 0xf4b942, alpha: 0.22 });
+        band.rect(x, y, w, h).stroke({ width: 2, color: 0xf4b942, alpha: 0.85, alignment: 1 });
+        band.visible = true;
+      };
+    })(),
     camera,
     screenToTile,
     setGhost(g): void {

@@ -7,8 +7,27 @@ import './ui.css';
 import { createSound } from '../audio/audio';
 import type { GameApi, Placement, Speed, Tool } from '../game/api';
 import type { Renderer } from '../render/renderer';
-import type { Command, LogEntry } from '../sim/types';
+import type { Command, LogEntry, World } from '../sim/types';
+import { createIntroPanel, createSideCard, createTipToast } from './cards';
 import { formatFloorShort, formatMoney, formatTimestamp } from './format';
+import {
+  GUIDE_DONE,
+  TIP_TEXT,
+  TipQueue,
+  goalsFor,
+  goalsNudge,
+  guideBand,
+  guideCopy,
+  guideStep,
+  isNight,
+  newLeaveReason,
+  nudgeCounts,
+  type GuideBand,
+  type GuideStep,
+  type Tip,
+  type TipId,
+} from './onboarding';
+import { PREF_KEYS, addToList, getFlag, getList, getPref, setFlag, setPref } from './prefs';
 import { createIconSheet } from './icons';
 import { chromeInsets, isSheetLayout, placementBoxes } from './layout';
 import type { Box } from './layout';
@@ -24,14 +43,14 @@ import {
 import type { PanelContext, PanelElement } from './panels';
 import { applyRowState, buildPalette, paintThumbnail, sameTool, toolRowState } from './palette';
 import type { PaletteRow } from './palette';
-import { createStatusBar } from './status';
+import { createStatusBar, speedModeText } from './status';
 
 export interface Ui {
   destroy(): void;
   update(): void;
 }
 
-type PanelKind = 'none' | 'finances' | 'log' | 'settings' | 'share';
+type PanelKind = 'none' | 'finances' | 'log' | 'settings' | 'share' | 'intro';
 
 /** The live measurement of the chrome: stop it, or ask it to measure again. */
 interface ChromeWatch {
@@ -42,9 +61,6 @@ interface ChromeWatch {
 const FONT_LINK_ID = 'hs-google-fonts';
 const FONT_HREF =
   'https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600&family=Share+Tech+Mono&display=swap';
-const REDUCED_MOTION_KEY = 'hundredStories.reducedMotion';
-const PALETTE_COLLAPSED_KEY = 'hs.palette.collapsed';
-const HINT_KEY = 'hs.hintSeen';
 /** The controls hint rides along for the first three loads, then gets out of the way. */
 const HINT_LOADS = 3;
 const HINT_TEXT = 'Move: drag, scroll, or W A S D. Zoom: ctrl + scroll or pinch. Click to place.';
@@ -130,6 +146,26 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   let placedKey = '';
   const timers = new Set<ReturnType<typeof setTimeout>>();
 
+  // First run: the intro, the guided first tower, then the goals, and the tips once each.
+  let introSeen = getFlag(PREF_KEYS.introSeen) === true;
+  let guideDone = getFlag(PREF_KEYS.guideDone) === true;
+  let goalsCollapsed = getFlag(PREF_KEYS.goalsCollapsed) === true;
+  /** The intro was on screen in this session, which is one way the guide gets offered. */
+  let introShownThisSession = false;
+  let guideOffered = false;
+  /** The step the card last showed, so a phone folds its palette once per new step, not per tick. */
+  let shownStep: GuideStep | -1 = -1;
+  const tips = new TipQueue(getList(PREF_KEYS.tips));
+  let tipToast: { id: TipId; node: HTMLElement } | null = null;
+  /** The world the watchers below were primed on; a load or a new game primes them again. */
+  let seenWorld: World | null = null;
+  let leaveCounts: Record<string, number> = {};
+  let leaveTotal = 0;
+  let lastQuarterSeen: unknown = null;
+  let populationWatch = { population: 0, since: 0 };
+  let bandKey = '';
+  let hintKey = '';
+
   const shell = el('div', 'hs-ui');
   // The icon symbols, once for the whole chrome; every icon() refers to them by id.
   shell.append(createIconSheet() as unknown as HTMLElement);
@@ -213,6 +249,20 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
 
   const panelSlot = el('div', 'hs-panel-slot');
 
+  // The side card: the guide's steps, then the goals, in the query panel's slot.
+  const card = createSideCard({
+    skipGuide: () => finishGuide(),
+    openTools: () => {
+      setPaletteCollapsed(false, false);
+      update();
+    },
+    toggleGoals: () => {
+      goalsCollapsed = !goalsCollapsed;
+      setFlag(PREF_KEYS.goalsCollapsed, goalsCollapsed);
+      update();
+    },
+  });
+
   const ticker = el('button', 'hs-ticker');
   ticker.type = 'button';
   ticker.title = 'Open the event log';
@@ -267,7 +317,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   toasts.setAttribute('role', 'status');
   toasts.setAttribute('aria-live', 'polite');
 
-  shell.append(top, palette, hint, chip, bar, panelSlot, ticker, toasts);
+  // The card follows the palette in the tree: on a phone the open sheet hides it by selector.
+  shell.append(top, palette, card.node, hint, chip, bar, panelSlot, ticker, toasts);
   root.append(shell);
 
   const ctx: PanelContext = {
@@ -291,6 +342,9 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
       applyReducedMotion(on);
     },
     sound,
+    openIntro() {
+      setPanel('intro');
+    },
   };
 
   applyReducedMotion(reducedMotion);
@@ -299,6 +353,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   // into the band the camera frames the street in.
   chromeWatch = watchChrome({ strip: top, palette, ticker, shell }, (topPx, bottomPx) => {
     chromeBand = { top: topPx, bottom: bottomPx };
+    shell.style.setProperty('--chrome-bottom', `${Math.round(bottomPx)}px`); // the phone card sits on it
     viewSize = null; // the chrome moved, so the view may have too
     game.setChrome(topPx, bottomPx);
     refreshPlacement();
@@ -317,6 +372,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     if (destroyed) return;
     const world = game.world;
     const speed = game.getSpeed();
+    if (world !== seenWorld) onWorld(world);
 
     status.update(world, speed);
 
@@ -340,8 +396,142 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
 
     refreshPlacement();
     refreshPanel();
+    refreshOnboarding(world);
+    watchForTips(world, speed);
+    showNextTip();
     refreshTicker();
     drainAlerts();
+  }
+
+  // ---------------------------------------------------------- first run
+
+  /**
+   * A world arrived: the first one, a load or a new game. Prime the tip watchers on it so what
+   * is already true is not news, and on an empty tower show the intro if it was never seen.
+   */
+  function onWorld(world: World): void {
+    seenWorld = world;
+    leaveCounts = { ...(world.stats?.tenantsLeftReasons ?? {}) };
+    leaveTotal = sumCounts(leaveCounts);
+    lastQuarterSeen = world.stats?.lastQuarter ?? null;
+    populationWatch = { population: world.population, since: world.time.minute };
+    const empty = world.rooms.size === 0 && world.shafts.size === 0;
+    if (empty && !introSeen) {
+      introShownThisSession = true;
+      panelKind = 'intro';
+    }
+    if (!guideDone && (introShownThisSession || empty)) guideOffered = true;
+  }
+
+  function markIntroSeen(): void {
+    if (!introSeen) setFlag(PREF_KEYS.introSeen, true);
+    introSeen = true;
+    introShownThisSession = true;
+    if (!guideDone) guideOffered = true;
+  }
+
+  function finishGuide(): void {
+    guideDone = true;
+    guideOffered = false;
+    setFlag(PREF_KEYS.guideDone, true);
+    update();
+  }
+
+  function guideActive(): boolean {
+    return guideOffered && !guideDone;
+  }
+
+  /** The side card, the lit palette tile and the band on the tower, all read from the world. */
+  function refreshOnboarding(world: World): void {
+    if (guideActive()) {
+      const step = guideStep(world);
+      if (step === GUIDE_DONE) {
+        guideDone = true;
+        guideOffered = false;
+        setFlag(PREF_KEYS.guideDone, true);
+      } else {
+        const copy = guideCopy(world, step);
+        card.showGuide(step, copy);
+        setHintedTool(copy.tool);
+        setBand(guideBand(world, step));
+        if (step !== shownStep) {
+          shownStep = step;
+          // On a phone the card and the open sheet share the bottom: show the step first.
+          if (panelKind === 'none' && inSheetLayout()) setPaletteCollapsed(true, false);
+        }
+        return;
+      }
+    }
+    setHintedTool(null);
+    setBand(null);
+    if (world.population !== populationWatch.population) {
+      populationWatch = { population: world.population, since: world.time.minute };
+    }
+    const counts = nudgeCounts(world);
+    const nudge = goalsNudge({ ...counts, populationStillFor: world.time.minute - populationWatch.since });
+    card.showGoals(goalsFor(world), nudge, goalsCollapsed);
+  }
+
+  function setHintedTool(tool: Tool | null): void {
+    const key = tool ? JSON.stringify(tool) : '';
+    if (key === hintKey) return;
+    hintKey = key;
+    for (const row of rows) row.node.classList.toggle('hs-tool-hint', tool !== null && sameTool(row.tool, tool));
+  }
+
+  function setBand(band: GuideBand | null): void {
+    const key = band ? `${band.floorMin},${band.floorMax},${band.xMin},${band.xMax}` : '';
+    if (key === bandKey) return;
+    bandKey = key;
+    if (typeof renderer.setGuideBand === 'function') renderer.setGuideBand(band);
+  }
+
+  /** Look for each tip's moment in the world. Found ones queue; the queue decides when to show. */
+  function watchForTips(world: World, speed: Speed): void {
+    if (!tips.has('longWait')) {
+      const counts = nudgeCounts(world);
+      if (counts.longWaitsThisHour + counts.longWaitsLastHour > 0) offerTip({ id: 'longWait', text: TIP_TEXT.longWait() });
+    }
+    const reasons = world.stats?.tenantsLeftReasons;
+    if (reasons) {
+      const total = sumCounts(reasons);
+      if (total !== leaveTotal) {
+        const reason = total > leaveTotal ? newLeaveReason(leaveCounts, reasons) : null;
+        if (reason && !tips.has('tenantLeft')) offerTip({ id: 'tenantLeft', text: TIP_TEXT.tenantLeft(reason) });
+        leaveCounts = { ...reasons };
+        leaveTotal = total;
+      }
+    }
+    // The quarter settles at 05:00 by writing a fresh lastQuarter; that is when rent has landed.
+    const lastQuarter = world.stats?.lastQuarter;
+    if (lastQuarter && lastQuarter !== lastQuarterSeen) {
+      lastQuarterSeen = lastQuarter;
+      if (lastQuarter.income > 0 && !tips.has('firstRent')) offerTip({ id: 'firstRent', text: TIP_TEXT.firstRent(lastQuarter.income) });
+    }
+    if (world.events.length > 0 && !tips.has('firstEvent')) offerTip({ id: 'firstEvent', text: TIP_TEXT.firstEvent() });
+    if (speed !== 0 && !tips.has('nightSpeed') && isNight(world.time.minute)) {
+      offerTip({ id: 'nightSpeed', text: TIP_TEXT.nightSpeed(speedModeText(speed, world.time.minute)) });
+    }
+  }
+
+  function offerTip(tip: Tip): void {
+    tips.offer(tip);
+  }
+
+  /** One tip at a time, and none over the intro or a guide step: they wait their turn. */
+  function showNextTip(): void {
+    if (tipToast) return;
+    const tip = tips.next(panelKind === 'intro' || guideActive());
+    if (!tip) return;
+    const node = createTipToast(tip, () => {
+      tips.done(tip.id);
+      addToList(PREF_KEYS.tips, tip.id);
+      node.remove();
+      tipToast = null;
+      update();
+    });
+    tipToast = { id: tip.id, node };
+    toasts.append(node);
   }
 
   /** Queue every tile's thumbnail to be drawn (again), at the current device pixel ratio. */
@@ -524,8 +714,14 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     shell.classList.toggle('is-panel-open', key !== '');
     if (key === '') return;
 
+    if (panelKind !== 'intro' && !tips.has('firstPanel')) offerTip({ id: 'firstPanel', text: TIP_TEXT.firstPanel() });
     const panel =
-      panelKind === 'finances'
+      panelKind === 'intro'
+        ? createIntroPanel(() => {
+            markIntroSeen();
+            setPanel('none');
+          })
+        : panelKind === 'finances'
         ? createFinancesPanel(game, ctx)
         : panelKind === 'log'
           ? createLogPanel(game, ctx)
@@ -634,6 +830,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   }
 
   function setPanel(kind: PanelKind): void {
+    // Any way out of the intro (Skip, Close, finishing, another panel) counts as seen.
+    if (panelKind === 'intro' && kind !== 'intro') markIntroSeen();
     panelKind = kind;
     update();
   }
@@ -690,6 +888,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     update,
     destroy() {
       destroyed = true;
+      if (bandKey !== '' && typeof renderer.setGuideBand === 'function') renderer.setGuideBand(null);
       stopPlacementLoop();
       unsubscribe();
       sound.destroy();
@@ -710,6 +909,12 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
 }
 
 // ------------------------------------------------------------------ parts
+
+function sumCounts(counts: Readonly<Record<string, number>>): number {
+  let total = 0;
+  for (const value of Object.values(counts)) total += value;
+  return total;
+}
 
 function sizeOf(node: HTMLElement): { width: number; height: number } {
   const box = node.getBoundingClientRect();
@@ -813,13 +1018,9 @@ function coarsePointer(): boolean {
 }
 
 function readReducedMotion(): boolean {
-  try {
-    const stored = window.localStorage.getItem(REDUCED_MOTION_KEY);
-    if (stored === 'true') return true;
-    if (stored === 'false') return false;
-  } catch {
-    // Private browsing or a blocked store: fall back to the system preference.
-  }
+  // A stored choice wins; with none, or a store that will not answer, the system preference.
+  const stored = getFlag(PREF_KEYS.reducedMotion);
+  if (stored !== null) return stored;
   try {
     return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   } catch {
@@ -829,44 +1030,22 @@ function readReducedMotion(): boolean {
 
 /** Was the board left folded away? A store that will not answer means expanded. */
 function readPaletteCollapsed(): boolean {
-  try {
-    const stored = window.localStorage.getItem(PALETTE_COLLAPSED_KEY);
-    if (stored === 'true') return true;
-    if (stored === 'false') return false;
-  } catch {
-    // Private browsing or a blocked store: the board opens expanded, as it does by default.
-  }
-  return false;
+  return getFlag(PREF_KEYS.paletteCollapsed) === true;
 }
 
 function writePaletteCollapsed(on: boolean): void {
-  try {
-    window.localStorage.setItem(PALETTE_COLLAPSED_KEY, on ? 'true' : 'false');
-  } catch {
-    // Nothing to do: the choice stays for this session only.
-  }
+  setFlag(PREF_KEYS.paletteCollapsed, on);
 }
 
+/** A blocked store means the hint shows again, which is the safe way to fail. */
 export function readHintSeen(): string | null {
-  try {
-    return window.localStorage.getItem(HINT_KEY);
-  } catch {
-    return null; // a blocked store means the hint shows again, which is the safe way to fail
-  }
+  return getPref(PREF_KEYS.hintSeen);
 }
 
 export function writeHintSeen(count: number): void {
-  try {
-    window.localStorage.setItem(HINT_KEY, String(count));
-  } catch {
-    // Nothing to do: the hint stays for this session only.
-  }
+  setPref(PREF_KEYS.hintSeen, String(count));
 }
 
 function writeReducedMotion(on: boolean): void {
-  try {
-    window.localStorage.setItem(REDUCED_MOTION_KEY, on ? 'true' : 'false');
-  } catch {
-    // Nothing to do: the setting stays for this session only.
-  }
+  setFlag(PREF_KEYS.reducedMotion, on);
 }
