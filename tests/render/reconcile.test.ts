@@ -7,6 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Container, ParticleContainer, Sprite, Texture } from 'pixi.js';
 import type { Art } from '../../src/render/art';
+import { doorFrameOf } from '../../src/render/anim';
 import { CROWD_ONE_IN, createRenderer, type Renderer } from '../../src/render/renderer';
 import { ROOMS } from '../../src/sim/rules';
 import type { Car, Room, RoomKind, Sim, World } from '../../src/sim/types';
@@ -14,7 +15,9 @@ import { addRoom, addShaft, addSim, allocId, createWorld, markStructureChanged, 
 import { floorTopY } from '../../src/render/camera';
 
 // Every fake application, newest last, so a test can walk the stage createRenderer built.
-const apps = vi.hoisted(() => [] as { stage: import('pixi.js').Container }[]);
+const apps = vi.hoisted(
+  () => [] as { stage: import('pixi.js').Container; frames: (() => void)[]; ticker: { deltaMS: number } }[],
+);
 
 vi.mock('pixi.js', async (importOriginal) => {
   const pixi = await importOriginal<typeof import('pixi.js')>();
@@ -27,7 +30,14 @@ vi.mock('pixi.js', async (importOriginal) => {
       removeEventListener: (): void => {},
     };
     renderer = { background: { color: 0 }, render: (): void => {} };
-    ticker = { add: (): void => {}, remove: (): void => {}, deltaMS: 16 };
+    frames: (() => void)[] = [];
+    ticker = {
+      add: (fn: () => void): void => {
+        this.frames.push(fn);
+      },
+      remove: (): void => {},
+      deltaMS: 16,
+    };
     constructor() {
       apps.push(this);
     }
@@ -48,13 +58,19 @@ const stubArt: Art = {
   room: (kind, width, height, variant, state) => tex(`room|${kind}|${width}|${height}|${variant}|${state}`),
   slab: (width) => tex(`slab|${width}`),
   shaft: (kind, floors) => tex(`shaft|${kind}|${floors}`),
-  car: (kind, doorsOpen) => tex(`car|${kind}|${doorsOpen}`),
-  sim: (kind, band, frame) => tex(`sim|${kind}|${band}|${frame}`),
+  car: (kind, door) => tex(`car|${kind}|${doorFrameOf(door)}`),
+  sim: (kind, band, frame, outfit) => tex(`sim|${kind}|${band}|${frame}|${outfit ?? -1}`),
   ghost: (w, h, ok) => tex(`ghost|${w}|${h}|${ok}`),
 };
 vi.mock('../../src/render/art', async (importOriginal) => {
   const art = await importOriginal<typeof import('../../src/render/art')>();
   return { ...art, createArt: () => stubArt };
+});
+
+// The sky's gradient needs a DOM canvas; the frame loop tests only need the sky to exist.
+vi.mock('../../src/render/sky', async (importOriginal) => {
+  const sky = await importOriginal<typeof import('../../src/render/sky')>();
+  return { ...sky, createSky: () => ({ update: (): void => {}, destroy: (): void => {} }) };
 });
 
 const NOON = 12 * 60;
@@ -70,13 +86,21 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-async function mount(world: World, options: { crowd?: 'all' } = {}): Promise<{ renderer: Renderer; stage: Container }> {
+async function mount(
+  world: World,
+  options: { crowd?: 'all' } = {},
+): Promise<{ renderer: Renderer; stage: Container; frame: (dtMs: number) => void }> {
   const container = { appendChild: () => {} } as unknown as HTMLElement;
   const renderer = await createRenderer(container, world, options);
   renderers.push(renderer);
   const app = apps[apps.length - 1];
   if (!app) throw new Error('no application was created');
-  return { renderer, stage: app.stage };
+  // One tick of the pixi frame loop, dtMs of real time after the last.
+  const frame = (dtMs: number): void => {
+    app.ticker.deltaMS = dtMs;
+    for (const fn of app.frames) fn();
+  };
+  return { renderer, stage: app.stage, frame };
 }
 
 function spritesWith(root: Container, prefix: string): Sprite[] {
@@ -393,5 +417,165 @@ describe('light and time (look round L2)', () => {
     renderer.render(world, 1);
     expect(cable.scale.y).toBeLessThan(before);
     expect(cable.scale.y).toBeGreaterThan(0);
+  });
+});
+
+function shaftWorld(): { world: World; car: Car } {
+  const world = createWorld(5);
+  world.time.minute = NOON;
+  const id = allocId(world);
+  const car: Car = {
+    id: allocId(world),
+    shaftId: id,
+    y: 2,
+    dir: 0,
+    state: 'idle',
+    doorTimer: 0,
+    idleSince: null,
+    passengers: [],
+    calls: new Set(),
+    serves: 'any',
+    range: null,
+  };
+  const stops = new Set<number>([1, 2, 3, 4, 5, 6]);
+  addShaft(world, { id, kind: 'standard', x: 180, width: 4, floorMin: 1, floorMax: 6, stops, homeFloor: 1, cars: [car], hallCalls: new Map() });
+  return { world, car };
+}
+
+function effectsSprites(stage: Container): Sprite[] {
+  // the effects layer is the last child of the world root, which holds the room layers
+  const out: Sprite[] = [];
+  const walk = (node: Container): void => {
+    if (node instanceof Sprite && node.texture === Texture.WHITE) out.push(node);
+    for (const child of node.children) walk(child as Container);
+  };
+  const worldRoot = stage.children.find((c) => (c as Container).children.length === 5) as Container;
+  walk(worldRoot.children[4] as Container);
+  return out;
+}
+
+describe('motion (look round L3)', () => {
+  it('slides the doors open over 240 ms from the car state, on the frame loop', async () => {
+    const { world, car } = shaftWorld();
+    const { renderer, stage, frame } = await mount(world);
+    renderer.render(world, 1);
+    const sprite = spritesWith(stage, 'car|')[0]!;
+    expect(sprite.texture.label).toBe('car|standard|0');
+    car.state = 'doorsOpen';
+    renderer.render(world, 1);
+    expect(sprite.texture.label).toBe('car|standard|0'); // no time has passed
+    frame(60);
+    expect(sprite.texture.label).toBe('car|standard|1');
+    frame(60);
+    expect(sprite.texture.label).toBe('car|standard|2');
+    frame(120);
+    expect(sprite.texture.label).toBe('car|standard|4');
+    car.state = 'moving';
+    renderer.render(world, 1);
+    frame(120);
+    expect(sprite.texture.label).toBe('car|standard|2');
+    frame(120);
+    expect(sprite.texture.label).toBe('car|standard|0');
+  });
+
+  it('opens the doors all the way for a one tick stop', async () => {
+    const { world, car } = shaftWorld();
+    const { renderer, stage, frame } = await mount(world);
+    renderer.render(world, 1);
+    const sprite = spritesWith(stage, 'car|')[0]!;
+    car.state = 'doorsOpen';
+    renderer.render(world, 1);
+    car.state = 'moving'; // the next tick closes them before a frame has passed
+    renderer.render(world, 1);
+    const seen = new Set<string>();
+    for (let i = 0; i < 40; i++) {
+      frame(16);
+      seen.add(sprite.texture.label!);
+    }
+    expect(seen.has('car|standard|4')).toBe(true);
+    expect(sprite.texture.label).toBe('car|standard|0');
+  });
+
+  it('snaps the doors under reduced motion, holding a one tick stop open for the tween time', async () => {
+    const { world, car } = shaftWorld();
+    const { renderer, stage, frame } = await mount(world);
+    renderer.setReducedMotion(true);
+    renderer.render(world, 1);
+    const sprite = spritesWith(stage, 'car|')[0]!;
+    car.state = 'doorsOpen';
+    renderer.render(world, 1);
+    expect(sprite.texture.label).toBe('car|standard|4'); // open at once, no frame in between
+    car.state = 'moving';
+    renderer.render(world, 1);
+    const seen = new Set<string>();
+    for (let i = 0; i < 20; i++) {
+      frame(16);
+      seen.add(sprite.texture.label!);
+    }
+    expect([...seen].sort()).toEqual(['car|standard|0', 'car|standard|4']);
+    expect(sprite.texture.label).toBe('car|standard|0');
+  });
+
+  it('walks a walker through the three frames on real time, in its own outfit', async () => {
+    const world = createWorld(9);
+    world.time.minute = NOON;
+    makeRoom(world, 'lobby', 1, 180);
+    const walker = makeWalker(world, 1, 180);
+    walker.id = 4; // one the crowd sample draws
+    world.sims.clear();
+    addSim(world, walker);
+    const { renderer, stage } = await mount(world);
+    const labels = new Set<string>();
+    const now = vi.spyOn(performance, 'now');
+    for (let t = 0; t < 720; t += 40) {
+      now.mockReturnValue(10_000 + t);
+      walker.pos.x = 180 + t / 400; // on the move
+      renderer.render(world, 1);
+      labels.add(spritesWith(stage, 'sim|')[0]!.texture.label!);
+    }
+    // stopped (a paused game), the walker stands instead of walking on the spot
+    for (let t = 720; t < 1440; t += 40) {
+      now.mockReturnValue(10_000 + t);
+      renderer.render(world, 1);
+    }
+    expect(spritesWith(stage, 'sim|')[0]!.texture.label!.split('|')[3]).toBe('0');
+    now.mockRestore();
+    const frames = new Set([...labels].map((l) => l.split('|')[3]));
+    expect([...frames].sort()).toEqual(['0', '1', '2']);
+    const outfits = new Set([...labels].map((l) => l.split('|')[4]));
+    expect(outfits.size).toBe(1);
+    expect(Number([...outfits][0])).toBeGreaterThanOrEqual(0);
+  });
+
+  it('plays the build feedback on a room placed after the first pass, not on the rooms loaded with the world', async () => {
+    const { world } = officeWorld(NOON);
+    const { renderer, stage, frame } = await mount(world);
+    renderer.render(world, 1);
+    expect(effectsSprites(stage)).toHaveLength(0);
+    const added = makeRoom(world, 'office', 4, 180);
+    markStructureChanged(world);
+    renderer.render(world, 1);
+    const sprite = spritesWith(stage, 'room|office').find((s) => s.y < floorTopY(4))!;
+    expect(sprite.y).toBe(floorTopY(added.floor) - 4); // four pixels up, settling
+    expect(effectsSprites(stage).length).toBe(1 + 6); // the flash and six specks
+    frame(400);
+    expect(sprite.y).toBe(floorTopY(added.floor));
+    expect(effectsSprites(stage)).toHaveLength(0);
+  });
+
+  it('skips the build feedback and the ambient emitters under reduced motion', async () => {
+    const { world } = officeWorld(NOON);
+    makeRoom(world, 'shop', 6, 180);
+    makeRoom(world, 'restaurant', 7, 180);
+    const { renderer, stage, frame } = await mount(world);
+    renderer.render(world, 1);
+    expect(effectsSprites(stage).length).toBe(1 + 3); // a sign strip and three steam puffs
+    renderer.setReducedMotion(true);
+    frame(16);
+    expect(effectsSprites(stage)).toHaveLength(0);
+    makeRoom(world, 'office', 5, 180);
+    markStructureChanged(world);
+    renderer.render(world, 1);
+    expect(effectsSprites(stage)).toHaveLength(0);
   });
 });

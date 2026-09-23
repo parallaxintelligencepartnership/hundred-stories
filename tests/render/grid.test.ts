@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { Rectangle } from 'pixi.js';
 import type { Renderer as PixiRenderer, Texture } from 'pixi.js';
 import { FLOOR_PX, SLAB_PX, SLAB_SHADOW_PX, TEXTURE_SIZE, TILE_PX, bakeResolution, createArt } from '../../src/render/art';
+import { DOOR_FRAMES } from '../../src/render/anim';
 import { WINDOW_STATES } from '../../src/render/light';
 import { ROOMS, SHAFTS } from '../../src/sim/rules';
 import type { RoomKind, ShaftKind } from '../../src/sim/types';
@@ -70,7 +71,7 @@ describe('every drawer bakes on the grid', () => {
       const shaft = recorder();
       createArt(shaft.renderer).shaft(kind, 5);
       expect(shaft.last()).toMatchObject({ width: SHAFTS[kind].width * TILE_PX, height: 5 * FLOOR_PX });
-      for (const open of [false, true]) {
+      for (const open of DOOR_FRAMES) {
         const car = recorder();
         createArt(car.renderer).car(kind, open);
         // body SHAFTS width * TILE_PX - 8 by FLOOR_PX - 12, with the 4 px cast shadow on top

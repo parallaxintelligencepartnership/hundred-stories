@@ -8,11 +8,12 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { Graphics, Rectangle } from 'pixi.js';
 import type { Renderer as PixiRenderer, Texture } from 'pixi.js';
 import { SIM_H, SIM_W, TILE_PX, createArt } from '../../src/render/art';
+import { OUTFIT_COUNT, SIM_FRAMES, type SimFrame } from '../../src/render/anim';
 import type { SimKind, StressBand } from '../../src/sim/types';
 
 const KINDS: readonly SimKind[] = ['worker', 'resident', 'guest', 'shopper', 'diner', 'staff', 'visitor', 'vip'];
 const BANDS: readonly StressBand[] = ['calm', 'pink', 'red'];
-const FRAMES = [0, 1] as const;
+const FRAMES = SIM_FRAMES;
 
 interface Rect {
   x: number;
@@ -34,7 +35,7 @@ afterEach(() => {
 });
 
 /** Bakes one sim texture and returns the requested texture size plus every rectangle drawn into it. */
-function bakeSim(kind: SimKind, band: StressBand, frame: 0 | 1): Baked {
+function bakeSim(kind: SimKind, band: StressBand, frame: SimFrame, outfit?: number): Baked {
   const rects: Rect[] = [];
   Graphics.prototype.rect = function patched(this: Graphics, x: number, y: number, w: number, h: number) {
     rects.push({ x, y, w, h });
@@ -47,7 +48,7 @@ function bakeSim(kind: SimKind, band: StressBand, frame: 0 | 1): Baked {
       return {} as Texture;
     },
   } as unknown as PixiRenderer;
-  createArt(renderer).sim(kind, band, frame);
+  createArt(renderer).sim(kind, band, frame, outfit);
   Graphics.prototype.rect = originalRect;
   return { width: size.width, height: size.height, rects };
 }
@@ -114,10 +115,47 @@ describe('sim sprite size', () => {
     }
   });
 
-  it('keeps the two walk frames distinct', () => {
+  it('keeps the three walk frames distinct', () => {
     const still = silhouette(bakeSim('worker', 'calm', 0));
     const step = silhouette(bakeSim('worker', 'calm', 1));
+    const mirrored = silhouette(bakeSim('worker', 'calm', 2));
     expect(step).not.toEqual(still);
+    expect(mirrored).not.toEqual(still);
+    expect(mirrored).not.toEqual(step);
+  });
+
+  it('draws the third frame as the stride mirrored', () => {
+    // the visitor carries nothing, so its figure is the limbs alone
+    const step = silhouette(bakeSim('visitor', 'calm', 1));
+    const mirrored = silhouette(bakeSim('visitor', 'calm', 2));
+    expect(mirrored).toEqual(step.map((row) => [...row].reverse().join('')));
+  });
+
+  it('keeps every outfit inside the box, on every frame', () => {
+    for (let outfit = 0; outfit < OUTFIT_COUNT; outfit++) {
+      for (const frame of FRAMES) {
+        for (const kind of ['worker', 'vip', 'visitor'] as const) {
+          const baked = bakeSim(kind, 'calm', frame, outfit);
+          expect(baked).toMatchObject({ width: SIM_W, height: SIM_H });
+          for (const rect of baked.rects) {
+            expect(rect.x).toBeGreaterThanOrEqual(0);
+            expect(rect.y).toBeGreaterThanOrEqual(0);
+            expect(rect.x + rect.w).toBeLessThanOrEqual(SIM_W);
+            expect(rect.y + rect.h).toBeLessThanOrEqual(SIM_H);
+          }
+        }
+      }
+    }
+  });
+
+  it('gives every hat, bag and coat combination its own shape', () => {
+    // the four colour sets share a shape, so the rectangles alone tell eight looks apart
+    const looks = new Set<string>();
+    for (let outfit = 0; outfit < OUTFIT_COUNT; outfit++) {
+      const rects = bakeSim('visitor', 'calm', 0, outfit).rects;
+      looks.add(JSON.stringify(rects));
+    }
+    expect(looks.size).toBe(OUTFIT_COUNT / 4);
   });
 
   it('tints the stress bands without changing the figure', () => {

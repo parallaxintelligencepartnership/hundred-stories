@@ -63,6 +63,22 @@ import {
   type FingerPair,
   type Point,
 } from './input';
+import { createAmbient } from './ambient';
+import {
+  DOOR_FRAMES,
+  doorFrameOf,
+  isStepping,
+  outfitCodeOf,
+  PARTICLE_OUTFITS,
+  particleOutfitOf,
+  poseAt,
+  SIM_FRAMES,
+  stepDoor,
+  type DoorFrame,
+  type Pose,
+  type SimFrame,
+} from './anim';
+import { createBuildFx } from './buildfx';
 import { Motion, TELEPORT_TILES } from './interpolate';
 import { floorsWithPeople, LIGHT_ALPHA, lightBand, lightTintAt, windowStateOf, windowStatesFor, type WindowState } from './light';
 import { createSky, isNight, skyBackground, type Sky } from './sky';
@@ -169,7 +185,6 @@ const STRIP_ABOVE = 0xeaeaea;
 const STRIP_BELOW = 0x7d818a;
 const STRIP_EDGE = 0x333333;
 const STRIP_CEILING = 0xcfcfcf;
-const DOOR_HOLD_MS = 120; // minimum time the open door texture stays up
 const TELEPORT_PX = TELEPORT_TILES * TILE_PX; // a jump past this in one tick is a teleport, so snap instead of lerp
 /** The selection ring's weight and its gap around a sim, two art lines so it reads at zoom 1. */
 const SELECT_PAD_PX = 2 * LINE_PX;
@@ -210,9 +225,34 @@ export function bakeRoomStates(art: Art, world: World): number {
 const SIM_KINDS: readonly SimKind[] = ['worker', 'resident', 'guest', 'shopper', 'diner', 'staff', 'visitor', 'vip'];
 const STRESS_BANDS: readonly StressBand[] = ['calm', 'pink', 'red'];
 
-/** A numeric stand-in for the `${kind}|${band}|${frame}` string, cheap to build every frame. */
-function simKeyOf(kind: SimKind, band: StressBand, frame: 0 | 1): number {
-  return (SIM_KINDS.indexOf(kind) * STRESS_BANDS.length + STRESS_BANDS.indexOf(band)) * 2 + frame;
+/** How many outfit codes a sprite key has room for (anim.ts OUTFIT_COUNT), plus one for none. */
+const OUTFIT_SLOTS = 33;
+
+/** A numeric stand-in for the `${kind}|${band}|${frame}|${outfit}` string, cheap to build every frame. */
+export function simKeyOf(kind: SimKind, band: StressBand, frame: SimFrame, outfit: number): number {
+  const base = (SIM_KINDS.indexOf(kind) * STRESS_BANDS.length + STRESS_BANDS.indexOf(band)) * SIM_FRAMES.length + frame;
+  return base * OUTFIT_SLOTS + (outfit + 1);
+}
+
+/**
+ * The crowd atlas: every kind, band and walk frame, in the PARTICLE_OUTFITS outfits the atlas
+ * carries (colour set and coat; hat and bag are sprite only). Sized so the texture stays inside
+ * ATLAS_BUDGET_PX device pixels on a side at a device pixel ratio of 2: 8 kinds by 8 outfits is
+ * 64 cells of 16 px, 1024 css px, 2048 device px wide; 3 bands by 3 frames is 9 rows of 48 px.
+ * Carrying all 32 outfits would need 8192 device px, past what a phone GPU is promised.
+ */
+export const ATLAS_BUDGET_PX = 2048;
+export const ATLAS_COLS = SIM_KINDS.length * PARTICLE_OUTFITS;
+export const ATLAS_ROWS = STRESS_BANDS.length * SIM_FRAMES.length;
+
+/**
+ * What a drawn person is doing, for the walk cycle, the sway and the shuffle. A walker walks
+ * only while it is actually moving (`stepping`); stopped, it stands.
+ */
+export function poseOf(sim: Sim, band: StressBand, stepping: boolean): Pose {
+  if (sim.state === 'walking' || sim.state === 'leaving') return stepping ? 'walk' : 'still';
+  if (sim.state === 'waiting') return band === 'red' ? 'fret' : 'wait';
+  return 'still';
 }
 
 // Flat colors for the fallback art, muted per VISUAL's world palette.
@@ -272,7 +312,14 @@ interface CarEntry {
   /** The hoist cable from the car's roof to the top of the shaft, a 2 px line scaled to length. */
   cable: Graphics;
   kind: ShaftKind;
-  doorsOpen: boolean;
+  /** Where the doors are, 0 closed to 1 open, tweened on the frame loop. */
+  door: number;
+  /** The baked door frame the sprite shows now. */
+  frame: DoorFrame;
+  /** The sim's car state asks for open doors. */
+  open: boolean;
+  /** Set when the sim opens the doors, cleared once they are fully open: a one tick flap still opens them all the way. */
+  latch: boolean;
 }
 
 interface SimEntry {
@@ -373,7 +420,8 @@ export function fallbackArt(_renderer: PixiRenderer | null): Art {
         }),
       );
     },
-    car(kind, doorsOpen) {
+    car(kind, door) {
+      const doorsOpen = door >= 0.5;
       return get(`car|${kind}|${doorsOpen}`, () =>
         canvasTexture(TEXTURE_SIZE.car(kind).width, TEXTURE_SIZE.car(kind).height, (ctx) => {
           const line = LINE_PX;
@@ -390,7 +438,7 @@ export function fallbackArt(_renderer: PixiRenderer | null): Art {
           ctx.fillStyle = hex(FALLBACK_BAND_COLORS[band]);
           const u = SIM_WIDTH_PX / 8; // the figure is eight units wide
           ctx.fillRect(2 * u, 2 * u, 4 * u, 3 * u); // head
-          ctx.fillRect((frame === 0 ? 2 : 1) * u, 5 * u, 4 * u, SIM_HEIGHT_PX - 5 * u); // body and legs, a unit over on the step
+          ctx.fillRect((frame === 0 ? 2 : frame === 1 ? 1 : 3) * u, 5 * u, 4 * u, SIM_HEIGHT_PX - 5 * u); // body and legs, a unit over on the step
         }),
       );
     },
@@ -426,8 +474,8 @@ function guardArt(primary: Art, backup: Art): Art {
     room: (kind, width, height, variant, state) => call('room', (a) => a.room(kind, width, height, variant, state)),
     slab: (widthTiles) => call('slab', (a) => a.slab(widthTiles)),
     shaft: (kind, floors) => call('shaft', (a) => a.shaft(kind, floors)),
-    car: (kind, doorsOpen) => call('car', (a) => a.car(kind, doorsOpen)),
-    sim: (kind, band, frame) => call('sim', (a) => a.sim(kind, band, frame)),
+    car: (kind, door) => call('car', (a) => a.car(kind, door)),
+    sim: (kind, band, frame, outfit) => call('sim', (a) => a.sim(kind, band, frame, outfit)),
     ghost: (widthTiles, heightFloors, ok) => call('ghost', (a) => a.ghost(widthTiles, heightFloors, ok)),
   };
 }
@@ -620,6 +668,14 @@ export async function createRenderer(
   const fadeCover = new Graphics();
   app.stage.addChild(fadeCover);
 
+  // Ambient life (shop signs, restaurant steam, the cinema marquee) and build feedback, both in
+  // the effects layer over the rooms and both off under reduced motion.
+  const ambientLayer = new Container();
+  const buildFxLayer = new Container();
+  layers.effects.addChild(ambientLayer, buildFxLayer);
+  const ambient = createAmbient(ambientLayer);
+  const buildFx = createBuildFx(buildFxLayer);
+
   let art: Art;
   const backup = fallbackArt(app.renderer as PixiRenderer);
   try {
@@ -664,9 +720,10 @@ export async function createRenderer(
   const carSprites = new Map<Id, CarEntry>();
   const simSprites = new Map<Id, SimEntry>();
   const fireGraphics = new Map<Id, Graphics>();
-  const doorHold = new Map<Id, number>(); // car id -> time the open door texture may end
   const carMotion = new Motion<Id>(TELEPORT_PX);
   const simMotion = new Motion<Id>(TELEPORT_PX);
+  /** Per drawn sim: the x it was last seen at, and the real time that x last changed. */
+  const simSteps = new Map<Id, { x: number; at: number }>();
 
   // Per-frame scratch sets/maps, hoisted so reconcile loops do not allocate every frame.
   const seenRooms = new Set<Id>();
@@ -692,8 +749,8 @@ export async function createRenderer(
 
   function buildParticleAtlas(): Map<number, Texture> | null {
     try {
-      const cols = SIM_KINDS.length;
-      const rows = STRESS_BANDS.length * 2;
+      const cols = ATLAS_COLS;
+      const rows = ATLAS_ROWS;
       const rt = RenderTexture.create({
         width: cols * SIM_WIDTH_PX,
         height: rows * SIM_HEIGHT_PX,
@@ -704,17 +761,18 @@ export async function createRenderer(
       const staging = new Container();
       const map = new Map<number, Texture>();
       for (let c = 0; c < cols; c++) {
-        const kind = SIM_KINDS[c] as SimKind;
+        const kind = SIM_KINDS[Math.floor(c / PARTICLE_OUTFITS)] as SimKind;
+        const outfit = c % PARTICLE_OUTFITS;
         for (let b = 0; b < STRESS_BANDS.length; b++) {
           const band = STRESS_BANDS[b] as StressBand;
-          for (const frame of [0, 1] as const) {
-            const row = b * 2 + frame;
-            const sprite = new Sprite(art.sim(kind, band, frame));
+          for (const frame of SIM_FRAMES) {
+            const row = b * SIM_FRAMES.length + frame;
+            const sprite = new Sprite(art.sim(kind, band, frame, outfit));
             sprite.position.set(c * SIM_WIDTH_PX, row * SIM_HEIGHT_PX);
             sprite.setSize(SIM_WIDTH_PX, SIM_HEIGHT_PX);
             staging.addChild(sprite);
             map.set(
-              simKeyOf(kind, band, frame),
+              simKeyOf(kind, band, frame, outfit),
               new Texture({
                 source: rt.source,
                 frame: new Rectangle(c * SIM_WIDTH_PX, row * SIM_HEIGHT_PX, SIM_WIDTH_PX, SIM_HEIGHT_PX),
@@ -830,7 +888,7 @@ export async function createRenderer(
     rebuildFloorStrips(w);
   }
 
-  function reconcileRooms(w: World, night: boolean): void {
+  function reconcileRooms(w: World, night: boolean, animateNew: boolean): void {
     seenRooms.clear();
     const peopleFloors = night ? floorsWithPeople(w) : NO_FLOORS;
     for (const room of w.rooms.values()) {
@@ -859,6 +917,7 @@ export async function createRenderer(
       slab.node.position.set(px, floorBaseY(room.floor) - SLAB_TOP_PX);
 
       let entry = roomSprites.get(room.id);
+      const placed = !entry;
       if (!entry) {
         const sprite = new Sprite(art.room(room.kind, room.width, room.height, variant, state));
         (drawsOverRooms(room.kind) ? connectorLayer : roomLayer).addChild(sprite);
@@ -881,6 +940,9 @@ export async function createRenderer(
       entry.node.position.set(px, py);
       entry.node.setSize(pw, ph);
       entry.node.tint = room.onFire ? 0xff8a72 : 0xffffff;
+      // A room the player just placed settles, puffs dust and flashes; one loaded with the
+      // world, or drawn on the first pass, simply appears. Nothing under reduced motion.
+      if (placed && animateNew && !reducedMotion) buildFx.start([entry.node, slab.node], px, py, pw, ph);
     }
 
     for (const [id, entry] of roomSprites) {
@@ -908,11 +970,13 @@ export async function createRenderer(
   function reconcileStaticTower(w: World, night: boolean, minuteOfDay: number): void {
     const band = lightBand(night, minuteOfDay);
     if (w === reconciledWorld && w.structureVersion === reconciledVersion && band === lastLitState) return;
+    const animateNew = w === reconciledWorld;
     reconciledWorld = w;
     reconciledVersion = w.structureVersion;
     lastLitState = band;
     syncFloorStrips(w);
-    reconcileRooms(w, night);
+    reconcileRooms(w, night, animateNew);
+    ambient.sync(w, reducedMotion);
     reconcileShafts(w);
     reconcileFires(w);
   }
@@ -957,45 +1021,50 @@ export async function createRenderer(
       entry.node.destroy();
       entry.cable.destroy();
       carSprites.delete(id);
-      doorHold.delete(id);
       carMotion.forget(id);
     }
   }
 
-  /** Doors read as open for at least DOOR_HOLD_MS, so a one tick flap cannot strobe. */
-  function carDoorsOpen(car: Car): boolean {
-    const now = performance.now();
-    if (car.state === 'doorsOpen') {
-      doorHold.set(car.id, now + DOOR_HOLD_MS);
-      return true;
+  /**
+   * Slide a car's doors toward where the sim wants them, by `dtMs` of real time: 240 ms each way.
+   * The target comes from the sim's car state; the latch holds it open until the doors have
+   * opened fully, so a one tick stop still reads as a stop. Under reduced motion the doors snap
+   * between closed and open, with the same hold, so a one tick stop cannot strobe.
+   */
+  function stepCarDoors(entry: CarEntry, dtMs: number): void {
+    const target = entry.open || entry.latch;
+    entry.door = stepDoor(entry.door, target, dtMs, false);
+    if (entry.door >= 1) entry.latch = false;
+    const frame = doorFrameOf(reducedMotion ? (target ? 1 : 0) : entry.door);
+    if (frame !== entry.frame) {
+      entry.frame = frame;
+      entry.node.texture = art.car(entry.kind, DOOR_FRAMES[frame]);
     }
-    const until = doorHold.get(car.id);
-    if (until === undefined) return false;
-    if (now < until) return true;
-    doorHold.delete(car.id);
-    return false;
   }
 
   function drawCar(shaft: Shaft, car: Car, alpha: number): void {
-    const doorsOpen = carDoorsOpen(car);
+    const open = car.state === 'doorsOpen';
     let entry = carSprites.get(car.id);
     if (!entry) {
-      const sprite = new Sprite(art.car(shaft.kind, doorsOpen));
-      // Bottom center on the slab line: the two door textures may differ in size,
-      // and this way a swap never moves the car.
+      // A car first seen with its doors open shows them open: there was no closing to watch.
+      const door = open ? 1 : 0;
+      const sprite = new Sprite(art.car(shaft.kind, door));
+      // Bottom center on the slab line, so a door frame swap never moves the car.
       sprite.anchor.set(0.5, 1);
       carSpriteLayer.addChild(sprite);
       // Drawn once a pixel tall and stretched to length each frame, so a moving car costs a
       // scale, not a Graphics rebuild.
       const cable = new Graphics().rect(-CABLE_PX / 2, 0, CABLE_PX, 1).fill(CABLE_COLOR);
       cableLayer.addChild(cable);
-      entry = { node: sprite, cable, kind: shaft.kind, doorsOpen };
+      entry = { node: sprite, cable, kind: shaft.kind, door, frame: doorFrameOf(door), open, latch: false };
       carSprites.set(car.id, entry);
-    } else if (entry.kind !== shaft.kind || entry.doorsOpen !== doorsOpen) {
-      entry.node.texture = art.car(shaft.kind, doorsOpen); // texture swap only
+    } else if (entry.kind !== shaft.kind) {
       entry.kind = shaft.kind;
-      entry.doorsOpen = doorsOpen;
+      entry.node.texture = art.car(shaft.kind, DOOR_FRAMES[entry.frame]); // texture swap only
     }
+    entry.open = open;
+    if (open) entry.latch = true; // seen open once, even for a tick: the doors open all the way
+    if (reducedMotion) stepCarDoors(entry, 0); // doors snap, as they always did
     const target = interpolated(carMotion, car.id, carX(shaft), carY(car), alpha);
     entry.node.position.set(target.x, target.y);
     // From the car's roof (under its cast shadow) up to the top of the shaft.
@@ -1004,14 +1073,6 @@ export async function createRenderer(
     entry.cable.position.set(target.x, shaftTop);
     entry.cable.scale.y = Math.max(0, roof - shaftTop);
     entry.cable.visible = roof > shaftTop;
-  }
-
-  function simTextureKey(sim: Sim): { kind: SimKind; band: StressBand; frame: 0 | 1 } {
-    const band = stressBand(sim.stress);
-    // Frame alternates every two tiles walked, so the step follows distance, not ticks.
-    const frame: 0 | 1 =
-      !reducedMotion && simMoves(sim) ? ((Math.floor(sim.pos.x * 0.5) & 1) as 0 | 1) : 0;
-    return { kind: sim.kind, band, frame };
   }
 
   function reconcileSims(w: World, alpha: number): void {
@@ -1037,19 +1098,36 @@ export async function createRenderer(
     const viewBottom = camera.y + halfH;
 
     seenSims.clear();
+    const now = performance.now();
     for (const sim of drawnSims) {
       const sx = sim.pos.x * TILE_PX;
       const sy = simFeetY(sim.pos.floor);
       if (sx < viewLeft || sx > viewRight || sy < viewTop || sy > viewBottom) continue;
       seenSims.add(sim.id);
-      const { kind, band, frame } = simTextureKey(sim);
-      const simKey = simKeyOf(kind, band, frame);
+      const kind = sim.kind;
+      const band = stressBand(sim.stress);
+      // The walk cycle, the sway and the shuffle run on real time; the outfit is the id's.
+      let step = simSteps.get(sim.id);
+      if (!step) simSteps.set(sim.id, (step = { x: sim.pos.x, at: -Infinity }));
+      else if (step.x !== sim.pos.x) {
+        step.x = sim.pos.x;
+        step.at = now;
+      }
+      const pose = poseAt(poseOf(sim, band, isStepping(step.at, now)), sim.id, now, reducedMotion);
+      const frame = pose.frame;
+      const outfit = outfitCodeOf(sim.id);
+      const simKey = simKeyOf(kind, band, frame, outfit);
       const point = simMoves(sim)
         ? // Feet on the slab top, not the bottom of the floor band.
           interpolated(simMotion, sim.id, sim.pos.x * TILE_PX, simFeetY(sim.pos.floor), alpha)
         : parked(simMotion, sim.id, ...inRoomSlot(w, sim, simSlots));
+      const drawX = point.x + pose.dx;
+      const drawY = point.y + pose.dy;
 
-      const atlasTile = particleMode && particles && particleAtlas ? particleAtlas.get(simKey) : undefined;
+      const atlasTile =
+        particleMode && particles && particleAtlas
+          ? particleAtlas.get(simKeyOf(kind, band, frame, particleOutfitOf(outfit)))
+          : undefined;
       if (particles && atlasTile) {
         let particle = simParticles.get(sim.id);
         if (!particle) {
@@ -1059,24 +1137,24 @@ export async function createRenderer(
         } else if (particle.texture !== atlasTile) {
           particle.texture = atlasTile;
         }
-        particle.x = point.x;
-        particle.y = point.y;
+        particle.x = drawX;
+        particle.y = drawY;
         continue;
       }
 
       let entry = simSprites.get(sim.id);
       if (!entry) {
-        const sprite = new Sprite(art.sim(kind, band, frame));
+        const sprite = new Sprite(art.sim(kind, band, frame, outfit));
         sprite.anchor.set(0.5, 1);
         simSpriteLayer.addChild(sprite);
         entry = { node: sprite, simKey };
         simSprites.set(sim.id, entry);
       } else if (entry.simKey !== simKey) {
-        entry.node.texture = art.sim(kind, band, frame);
+        entry.node.texture = art.sim(kind, band, frame, outfit);
         entry.simKey = simKey;
       }
       entry.node.setSize(SIM_WIDTH_PX, SIM_HEIGHT_PX);
-      entry.node.position.set(point.x, point.y);
+      entry.node.position.set(drawX, drawY);
     }
     drawnSims.length = 0; // hold no sim past the frame
 
@@ -1085,6 +1163,7 @@ export async function createRenderer(
       entry.node.destroy();
       simSprites.delete(id);
       simMotion.forget(id);
+      simSteps.delete(id);
     }
     if (particles) {
       for (const [id, particle] of simParticles) {
@@ -1092,6 +1171,7 @@ export async function createRenderer(
         particles.removeParticle(particle);
         simParticles.delete(id);
         simMotion.forget(id);
+        simSteps.delete(id);
       }
     }
   }
@@ -1475,6 +1555,7 @@ export async function createRenderer(
 
   // Per frame: camera, transforms, sky, ambient motion.
   let fadeLeft = reducedMotion ? 0 : LOAD_FADE_MS;
+  let ambientReduced = reducedMotion;
   let flickerLeft = 0;
   let lastBackground = -1;
   let lastLightMinute = -1;
@@ -1512,6 +1593,18 @@ export async function createRenderer(
       lastBackground = background;
     }
 
+    for (const entry of carSprites.values()) stepCarDoors(entry, dt);
+    if (reducedMotion !== ambientReduced) {
+      // Everything ambient stops at once when reduced motion comes on: the emitters go and
+      // running build feedback lands. (Their sprites live in layers.effects, so app.destroy
+      // takes them with it.)
+      ambientReduced = reducedMotion;
+      ambient.sync(lastWorld, reducedMotion);
+      if (reducedMotion) buildFx.clear();
+    }
+    ambient.update(dt, isNight(clock.minuteOfDay));
+    buildFx.update(dt);
+
     if (fireGraphics.size > 0) {
       flickerLeft -= dt;
       if (flickerLeft <= 0) {
@@ -1546,6 +1639,8 @@ export async function createRenderer(
     resetMotion(): void {
       carMotion.reset();
       simMotion.reset();
+      simSteps.clear();
+      buildFx.clear();
       // A replaced world is always reconciled in full on the next render.
       reconciledWorld = null;
       reconciledVersion = -1;
