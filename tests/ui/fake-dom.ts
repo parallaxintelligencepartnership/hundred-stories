@@ -121,6 +121,11 @@ export class FakeElement {
     this.listeners.set(type, (this.listeners.get(type) ?? []).filter((f) => f !== fn));
   }
 
+  /** Records the click on the dom (a download link's click is how the web export fires). */
+  click(): void {
+    this.dom.clicked.push(this);
+  }
+
   getBoundingClientRect(): { width: number; height: number; top: number; left: number; right: number; bottom: number } {
     this.dom.measures += 1;
     const { width, height } = this.dom.sizeOf(this);
@@ -143,6 +148,8 @@ export class FakeDom {
   measures = 0;
   /** Elements created since the last reset. */
   created = 0;
+  /** Every element click() was called on, in order. */
+  readonly clicked: FakeElement[] = [];
   readonly head: FakeElement;
   readonly body: FakeElement;
   /** Frame callbacks waiting for the next runFrame. */

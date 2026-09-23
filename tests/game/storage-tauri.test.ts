@@ -7,6 +7,7 @@ import {
   exportSaveWithDialog,
   importSaveWithDialog,
   isTauri,
+  savePlatform,
   selectStorage,
   EXPORT_FILE_NAME,
   FILE_SLOT_NAME,
@@ -77,6 +78,17 @@ describe('isTauri', () => {
 
   it('reads the real global by default, which in node has no Tauri', () => {
     expect(isTauri()).toBe(false);
+  });
+});
+
+describe('savePlatform', () => {
+  it('asks Tauri first, then Capacitor, else the web', () => {
+    expect(savePlatform({ __TAURI_INTERNALS__: {}, ...nativeCapacitor })).toBe('tauri');
+    expect(savePlatform({ __TAURI__: {} })).toBe('tauri');
+    expect(savePlatform(nativeCapacitor)).toBe('capacitor');
+    expect(savePlatform({ Capacitor: { isNativePlatform: () => false } })).toBe('web');
+    expect(savePlatform({})).toBe('web');
+    expect(savePlatform()).toBe('web');
   });
 });
 

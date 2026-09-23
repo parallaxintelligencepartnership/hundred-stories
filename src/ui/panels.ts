@@ -3,6 +3,7 @@
 
 import type { Sound } from '../audio/audio';
 import type { GameApi } from '../game/api';
+import { exportSaveWithDialog, importSaveWithDialog, savePlatform, shareSave } from '../game/storage';
 import type { Renderer } from '../render/renderer';
 import { composeShareImage, shareMessage, shareStats, shareText, shareUrl } from '../share/share';
 import { applyTheme, cycleTheme, readTheme, themeLabel } from '../site/theme';
@@ -759,35 +760,32 @@ export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElem
       });
     }),
     button('Export', 'hs-btn', () => {
-      downloadSave(game.exportSave(), ctx);
+      exportSave(game.exportSave(), ctx);
     }),
   );
   body.append(section('Saved games'), saves);
 
-  const file = el('input');
-  file.type = 'file';
-  file.accept = 'application/json,.json';
-  file.className = 'hs-file';
-  file.setAttribute('aria-label', 'Import a saved game file');
-  file.addEventListener('change', () => {
-    const chosen = file.files && file.files.length > 0 ? file.files[0] : null;
-    if (!chosen) return;
-    void chosen
-      .text()
-      .then((text) => {
-        const result = game.importSave(text);
-        ctx.notice(result.ok ? 'Game imported.' : result.reason);
-      })
-      .catch(() => ctx.notice('That file could not be read.'))
-      .finally(() => {
-        file.value = '';
-      });
-  });
-  file.id = 'hs-import';
   const importField = el('div', 'hs-field');
   const importLabel = el('label', 'hs-row-label', 'Import');
-  importLabel.htmlFor = file.id;
-  importField.append(importLabel, file);
+  if (savePlatform() === 'tauri') {
+    // The desktop shell: a system open dialog, not a file input.
+    const pick = button('Import', 'hs-btn', () => {
+      void importSaveWithDialog()
+        .then((text) => {
+          if (text === null) return;
+          const result = game.importSave(text);
+          ctx.notice(result.ok ? 'Game imported.' : result.reason);
+        })
+        .catch(() => ctx.notice('That file could not be read.'));
+    });
+    pick.id = 'hs-import';
+    pick.setAttribute('aria-label', 'Import a saved game file');
+    importLabel.htmlFor = pick.id;
+    importField.append(importLabel, pick);
+  } else {
+    importField.append(importLabel, importFileInput(game, ctx));
+    importLabel.htmlFor = 'hs-import';
+  }
   body.append(importField);
 
   const seedField = el('div', 'hs-field');
@@ -995,6 +993,56 @@ export function createSharePanel(game: GameApi, renderer: Renderer, ctx: PanelCo
   };
 
   return panel;
+}
+
+/** The web and phone import: a file input (the system picker in both native shells). */
+function importFileInput(game: GameApi, ctx: PanelContext): HTMLInputElement {
+  const file = el('input');
+  file.type = 'file';
+  file.accept = 'application/json,.json';
+  file.className = 'hs-file';
+  file.setAttribute('aria-label', 'Import a saved game file');
+  file.addEventListener('change', () => {
+    const chosen = file.files && file.files.length > 0 ? file.files[0] : null;
+    if (!chosen) return;
+    void chosen
+      .text()
+      .then((text) => {
+        const result = game.importSave(text);
+        ctx.notice(result.ok ? 'Game imported.' : result.reason);
+      })
+      .catch(() => ctx.notice('That file could not be read.'))
+      .finally(() => {
+        file.value = '';
+      });
+  });
+  file.id = 'hs-import';
+  return file;
+}
+
+/**
+ * Export by platform (storage.ts decides which): the desktop save dialog, the phone share sheet,
+ * or the browser download. A cancelled dialog or share sheet says nothing.
+ */
+function exportSave(text: string, ctx: PanelContext): void {
+  const platform = savePlatform();
+  if (platform === 'tauri') {
+    void exportSaveWithDialog(text)
+      .then((written) => {
+        if (written) ctx.notice('Save exported.');
+      })
+      .catch(() => ctx.notice('The save could not be exported.'));
+  } else if (platform === 'capacitor') {
+    void shareSave(text)
+      .then(() => ctx.notice('Save exported.'))
+      .catch((err: unknown) => {
+        // The Share plugin rejects with "Share canceled" when the player dismisses the sheet.
+        if (/cancel/i.test(String((err as { message?: unknown } | null)?.message ?? err))) return;
+        ctx.notice('The save could not be exported.');
+      });
+  } else {
+    downloadSave(text, ctx);
+  }
 }
 
 function downloadSave(text: string, ctx: PanelContext): void {

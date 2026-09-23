@@ -173,12 +173,26 @@ async function loadCapacitorFs(): Promise<FileSlotFs> {
  * stray Capacitor global can never send a desktop save to a plugin that is not there.
  */
 export function selectStorage(deps: SelectDeps = {}): SaveStorage {
-  if (isTauri(deps.global)) return createTauriStorage((deps.loadTauriFs ?? loadTauriFs)());
-  if (isNativePlatform(deps.global)) return createFileStorage((deps.loadFs ?? loadCapacitorFs)());
+  const platform = savePlatform(deps.global);
+  if (platform === 'tauri') return createTauriStorage((deps.loadTauriFs ?? loadTauriFs)());
+  if (platform === 'capacitor') return createFileStorage((deps.loadFs ?? loadCapacitorFs)());
   return {
     writeSave: (text: string) => createStorage(globalDeps()).writeSave(text),
     readSave: () => createStorage(globalDeps()).readSave(),
   };
+}
+
+export type SavePlatform = 'tauri' | 'capacitor' | 'web';
+
+/**
+ * Which shell the save lives in, in the order selectStorage asks: Tauri first (so a stray
+ * Capacitor global never wins on the desktop), then a Capacitor native platform, else the web.
+ * The settings panel asks this to pick its export and import path; it never detects itself.
+ */
+export function savePlatform(g: object = globalThis): SavePlatform {
+  if (isTauri(g)) return 'tauri';
+  if (isNativePlatform(g as CapacitorGlobal)) return 'capacitor';
+  return 'web';
 }
 
 interface TauriGlobal {
