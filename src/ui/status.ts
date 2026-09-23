@@ -285,12 +285,15 @@ export function createStatusBar(): StatusBar {
     setText(cashMeta, quarterDeltaText(world));
     cashMeta.classList.toggle('is-down', delta !== null && delta < 0);
     setAttr(cashMeta, 'title', delta === null ? 'Change this quarter, known from the next quarter on' : 'Change since the quarter began');
+    // Under 400 px the delta lines are hidden (ui.css), so each readout's tooltip carries its change.
+    setAttr(cash, 'title', `Open finances. ${quarterDeltaText(world)}`);
 
     setText(popValue, formatCount(world.population));
     const trend = populationTrend(world);
     setText(popMeta, trend.text);
     setAttr(popMeta, 'aria-label', trend.label);
     setAttr(popMeta, 'title', trend.label);
+    setAttr(population, 'title', trend.label);
     popMeta.classList.toggle('is-down', trend.arrow === 'down');
     popMeta.classList.toggle('is-up', trend.arrow === 'up');
 

@@ -1441,6 +1441,26 @@ a.hs-btn {
     color: var(--ink-dim);
   }
 
+  /* Under 400 px, $47,522,007 at the 20 px value token is wider than the cash column beside
+     population and the six stars: the values drop to 16 px and the cash and population
+     changes move into those readouts' tooltips. Population then needs only 72 px, which
+     leaves cash room for $123,456,789. */
+  @media (max-width: 399px) {
+    .hs-status-pop {
+      flex: 0 1 72px;
+    }
+
+    .hs-status-cash .hs-readout-value,
+    .hs-status-pop .hs-readout-value {
+      font-size: var(--size-16);
+    }
+
+    .hs-status-cash .hs-readout-meta,
+    .hs-status-pop .hs-readout-meta {
+      display: none;
+    }
+  }
+
   /* No room beside the speed buttons on a phone: the night mode hangs just under them. */
   .hs-speed-mode {
     position: absolute;

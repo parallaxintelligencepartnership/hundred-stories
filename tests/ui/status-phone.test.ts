@@ -28,6 +28,18 @@ function phoneBlock(): string {
   throw new Error('no phone block');
 }
 
+/** The body of a block nested in another, e.g. the under-400 px block inside the phone block. */
+function nestedBlock(outer: string, head: string): string {
+  const start = outer.indexOf(head);
+  if (start < 0) throw new Error(`no ${head}`);
+  let depth = 0;
+  for (let i = outer.indexOf('{', start); i < outer.length; i += 1) {
+    if (outer[i] === '{') depth += 1;
+    if (outer[i] === '}' && --depth === 0) return outer.slice(outer.indexOf('{', start) + 1, i);
+  }
+  throw new Error(`unclosed ${head}`);
+}
+
 /** Every declaration for an exact selector inside a block, later rules winning. */
 function rule(block: string, selector: string): Record<string, string> {
   const out: Record<string, string> = {};
@@ -53,7 +65,7 @@ const find = (root: FakeElement, c: string): FakeElement => {
   return node;
 };
 
-function mount(minute: number): FakeElement {
+function mount(minute: number, extra: Record<string, unknown> = {}): FakeElement {
   const world = {
     cash: 2_000_000,
     population: 0,
@@ -65,6 +77,7 @@ function mount(minute: number): FakeElement {
     shafts: new Map(),
     sims: new Map(),
     events: [],
+    ...extra,
   };
   const api = {
     world,
@@ -115,5 +128,43 @@ describe('status bar at phone width', () => {
     const ampm = rule(phoneBlock(), '.hs-clock-ampm');
     expect([ampm.display, ampm['font-size']]).toEqual(['block', 'var(--status-meta)']);
     expect(rule(phoneBlock(), '.hs-status-clock')['--clock-size']).toBe('32px');
+  });
+
+  it('at 360 px fits cash, population and the six stars on row one: 16 px values, the changes in the tooltips', () => {
+    // At 360 px the cash column is 102 px beside population (104) and the stars (122):
+    // $47,522,007 is 119 px at the 20 px value token and 95 px at 16 px, so under 400 px
+    // the values drop to 16 px and both change lines move into their readout's tooltip.
+    const narrow = nestedBlock(phoneBlock(), '@media (max-width: 399px)');
+    for (const c of ['.hs-status-cash', '.hs-status-pop']) {
+      expect(rule(narrow, `${c} .hs-readout-value`)['font-size']).toBe('var(--size-16)');
+      expect(rule(narrow, `${c} .hs-readout-meta`).display).toBe('none');
+    }
+    // The clock keeps its 20 px digits; only the first row's values shrink.
+    expect(rule(narrow, '.hs-readout-value')).toEqual({});
+
+    const root = mount(9 * 60, { cash: 47_522_007, quarterStartCash: 47_000_000, population: 177, dayStartPopulation: 170 });
+    const cash = find(root, 'hs-status-cash');
+    const pop = find(root, 'hs-status-pop');
+    expect(find(cash, 'hs-readout-value').textContent).toBe('$47,522,007');
+    expect(find(cash, 'hs-readout-meta').textContent).toBe('+$522,007 this quarter');
+    expect(cash.getAttribute('title')).toBe('Open finances. +$522,007 this quarter');
+    expect(find(pop, 'hs-readout-value').textContent).toBe('177');
+    expect(pop.getAttribute('title')).toBe('Up 7 today');
+  });
+
+  it('at 360 px leaves cash room for a nine digit figure, population narrowed to 72 px', () => {
+    const narrow = nestedBlock(phoneBlock(), '@media (max-width: 399px)');
+    expect(rule(narrow, '.hs-status-pop').flex).toBe('0 1 72px');
+    const root = mount(9 * 60, { cash: 123_456_789, quarterStartCash: 123_000_000 });
+    const cash = find(root, 'hs-status-cash');
+    const value = find(cash, 'hs-readout-value').textContent;
+    expect(value).toBe('$123,456,789');
+    expect(cash.getAttribute('title')).toBe('Open finances. +$456,789 this quarter');
+    // The budget at 360 px, from the Chrome measure: 8 px padding each side, two 8 px gaps,
+    // population 72, stars 122, and the cash column's own 8 px right padding. Share Tech Mono
+    // advances 0.5 em plus the 0.04 em letter spacing, 8.64 px a character at 16 px.
+    const room = 360 - 2 * 8 - 2 * 8 - 72 - 122 - 8;
+    expect(room).toBe(126);
+    expect(value.length * 16 * 0.54).toBeLessThanOrEqual(room);
   });
 });
