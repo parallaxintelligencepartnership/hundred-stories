@@ -1583,6 +1583,9 @@ export async function createRenderer(
 
     worldRoot.scale.set(camera.zoom);
     worldRoot.position.set(width / 2 - camera.x * camera.zoom, height / 2 - camera.y * camera.zoom);
+    // The overlay (ghost, selection, guide band) sits above the light layer but shares the camera.
+    overlayRoot.scale.set(camera.zoom);
+    overlayRoot.position.copyFrom(worldRoot.position);
 
     const clock = clockOf(lastWorld.time.minute);
     sky.update(clock.minuteOfDay, camera, width, height, reducedMotion ? 0 : dt);

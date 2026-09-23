@@ -382,6 +382,31 @@ describe('light and time (look round L2)', () => {
     expect(front.some((c) => spritesWith(c, 'ghost|').length > 0)).toBe(true);
   });
 
+  it('moves the overlay root with the world root when the camera pans and zooms', async () => {
+    const { world } = officeWorld(NOON);
+    const { renderer, stage, frame } = await mount(world);
+    renderer.setGhost({ widthTiles: 9, heightFloors: 1, floor: 3, x: 180, ok: true });
+    renderer.render(world, 1);
+    const roots = stage.children as Container[];
+    const worldRoot = roots.find((c) => spritesWith(c, 'room|').length > 0) as Container;
+    const overlayRoot = roots.find((c) => spritesWith(c, 'ghost|').length > 0) as Container;
+    expect(worldRoot).toBeDefined();
+    expect(overlayRoot).toBeDefined();
+    expect(overlayRoot).not.toBe(worldRoot);
+
+    renderer.camera.setReducedMotion(true); // no inertia or zoom easing: the move lands this frame
+    renderer.camera.centerOn(6, 40);
+    renderer.camera.zoomAt(2, 400, 300);
+    for (let i = 0; i < 30; i++) frame(16);
+
+    expect(worldRoot.scale.x).not.toBe(1);
+    expect(overlayRoot.scale.x).toBe(worldRoot.scale.x);
+    expect(overlayRoot.scale.y).toBe(worldRoot.scale.y);
+    expect(overlayRoot.position.x).toBe(worldRoot.position.x);
+    expect(overlayRoot.position.y).toBe(worldRoot.position.y);
+    expect(worldRoot.position.x).not.toBe(0);
+  });
+
   it('hangs a cable from each car to the top of its shaft, under the car', async () => {
     const world = createWorld(5);
     world.time.minute = NOON;
