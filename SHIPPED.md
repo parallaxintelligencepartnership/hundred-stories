@@ -30,11 +30,11 @@ Before deploying, load `/play/` from the nginx container in headless Chrome and 
 Fallback, pi3 (`deploy/README.md`): copy `deploy/.env.example` to `deploy/.env`, set `SITE_HOST`, run `deploy/deploy.sh`.
 
 ## How to roll back
-Rehearsed on 2026-09-22 at the 0.3.0 ship: checked out the previous ship tag `ship-2026-09-20c` in a scratch worktree, ran `npm ci`, `npm run build` (green, dist/_headers present) and `npx vitest run` (621 passed, 35 files), then removed the worktree.
+Rehearsed on 2026-09-22 at the 0.4.7 ship: checked out the previous ship tag `ship-2026-09-22` in a scratch worktree, ran `npm ci`, `npm run build` (green, dist/_headers present) and `npx vitest run` (REHEARSAL_COUNT), then removed the worktree.
 
 - Cloudflare: `npx wrangler rollback` returns the live site to the previous uploaded version; `npx wrangler versions list` shows the versions. Or check out the previous tag and `npm run deploy`.
 - pi3: `deploy.sh` snapshots the live tree to `html.prev` before every sync; the swap is in `deploy/README.md` under Rollback.
-- Return target for this ship: `git checkout ship-2026-09-22`. Previous good state: `ship-2026-09-20c`, rehearsed at this closeout (checked out, built, tested, returned).
+- Return target for this ship: `git checkout ship-2026-09-22b`. Previous good state: `ship-2026-09-22` (0.3.0, live earlier tonight), rehearsed at this closeout (checked out, built, tested, returned).
 
 ## Known limitations and accepted risks
 No finding was accepted; the accepted risks list is empty. The findings still open in `.itworks/REVIEWS.md` are listed as OUTSTANDING at the end of this section.
@@ -82,3 +82,4 @@ A PixiJS upgrade that changes how it compiles shaders, first. The site's Content
 - 2026-09-20: sixth ship, 0.2.3: rush-hour freeze fixed (route search cache, tick loop time box, autosave off the step, renderer housekeeping), log ticker past 2,000 lines, per-room rent 50% to 150%; tag ship-2026-09-20b
 - 2026-09-20: 0.2.4, tag ship-2026-09-20c; one sim in four drawn, modern stairs, rent row holds on phones, route cache invariant and test, tap picker test
 - 2026-09-22: 0.3.0, tag ship-2026-09-22; engine round: frame-driven ticks with pre-tick snapshot interpolation (the 4x stalls and lurches), evening rush routing (33 ms to 0.4 ms per tick on the large tower), static tower reconcile on a structure version, one HUD refresh per notify and cached chip measurements, sky gradient leak; sweep found five, five fixed; 672 tests
+- 2026-09-22: 0.4.7, tag ship-2026-09-22b; look round (16 px tiles and 72 px floors, hour-tinted light layer and window states, low horizon, sliding doors, walk cycle and outfits, every room re-authored, palette tiles with thumbnails, status bar with deltas and a clock dial, synthesised sound off by default), UX round (intro, guided first tower, tips, goals card, information views, hover cards, refusal explainers, keyboard groups and speed keys, minimap), store round (edition flag and demo cap off on the web, Capacitor iOS and Android shells, Tauri desktop shell with Steam achievements behind a feature, native export and import, listings and a submission runbook), fonts bundled, privacy page; sweep found eleven, eleven fixed; 985 tests
