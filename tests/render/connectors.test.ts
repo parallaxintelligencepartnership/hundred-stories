@@ -6,7 +6,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { Graphics, Rectangle } from 'pixi.js';
 import type { Renderer as PixiRenderer, Texture } from 'pixi.js';
-import { FLOOR_PX, TILE_PX, createArt } from '../../src/render/art';
+import { FLOOR_PX, LINE_PX, TILE_PX, createArt } from '../../src/render/art';
 import { drawsOverRooms } from '../../src/render/renderer';
 import type { RoomKind } from '../../src/sim/types';
 
@@ -45,9 +45,9 @@ function fullCover(rects: readonly Rect[], w: number, h: number): Rect[] {
   return rects.filter((r) => r.x <= 0 && r.y <= 0 && r.w >= w && r.h >= h);
 }
 
-/** Rectangles as wide as the texture and more than one pixel tall: a wall or a slab band. */
+/** Rectangles as wide as the texture and thicker than an outline: a wall or a slab band. */
 function fullWidthBands(rects: readonly Rect[], w: number): Rect[] {
-  return rects.filter((r) => r.x <= 0 && r.w >= w && r.h > 1);
+  return rects.filter((r) => r.x <= 0 && r.w >= w && r.h > LINE_PX);
 }
 
 describe('connector art is an overlay', () => {
@@ -66,7 +66,7 @@ describe('connector art is an overlay', () => {
       expect(fullWidthBands(rects, w)).toHaveLength(0);
       // the treads, rails, landings and the cell outline are all still there
       expect(rects.length).toBeGreaterThan(20);
-      expect(rects.some((r) => r.x === 0 && r.y === 0 && r.w === w && r.h === 1)).toBe(true);
+      expect(rects.some((r) => r.x === 0 && r.y === 0 && r.w === w && r.h === LINE_PX)).toBe(true);
     }
   });
 });

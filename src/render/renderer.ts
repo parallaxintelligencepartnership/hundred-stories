@@ -28,7 +28,19 @@ import { stressBand } from '../sim/people';
 import { ROOMS } from '../sim/rules';
 import { clockOf, TOWER_WIDTH, type Car, type Id, type Room, type RoomKind, type Shaft, type ShaftKind, type Sim, type SimKind, type StressBand, type World } from '../sim/types';
 import { roomsOnFloor, shaftAt } from '../sim/world';
-import { createArt, FLOOR_PX, OVERLAY_KINDS, TILE_PX, type Art } from './art';
+import {
+  bakeResolution,
+  createArt,
+  FLOOR_PX,
+  LINE_PX,
+  OVERLAY_KINDS,
+  SIM_H,
+  SIM_W,
+  SLAB_PX,
+  TEXTURE_SIZE,
+  TILE_PX,
+  type Art,
+} from './art';
 import {
   createCamera,
   DEFAULT_GROUND_LINE,
@@ -139,21 +151,23 @@ export function pickRoomAt(world: World, floor: number, x: number): Room | undef
   return found;
 }
 
-const SIM_WIDTH_PX = TILE_PX; // one tile wide, matching art.ts
-const SIM_HEIGHT_PX = 3 * TILE_PX; // three tiles tall
+const SIM_WIDTH_PX = SIM_W; // one tile wide, matching art.ts
+const SIM_HEIGHT_PX = SIM_H; // three tiles tall
 const PARTICLE_THRESHOLD = 500;
 const PARTICLE_RELEASE = 400; // hysteresis, so a crowd on the edge does not thrash
 /** How long a mouse press may hold still and still count as a click. A finger gets no limit. */
 const CLICK_MS = 600;
 const FIRE_FLICKER_MS = 110;
 const LOAD_FADE_MS = 900;
-const SLAB_TOP_PX = 3; // art.ts draws the slab as the bottom 3 px of a floor band
+const SLAB_TOP_PX = SLAB_PX; // art.ts draws the slab as the bottom SLAB_PX of a floor band
 const STRIP_ABOVE = 0xeaeaea;
 const STRIP_BELOW = 0x7d818a;
 const STRIP_EDGE = 0x333333;
 const STRIP_CEILING = 0xcfcfcf;
 const DOOR_HOLD_MS = 120; // minimum time the open door texture stays up
 const TELEPORT_PX = TELEPORT_TILES * TILE_PX; // a jump past this in one tick is a teleport, so snap instead of lerp
+/** The selection ring's weight and its gap around a sim, two art lines so it reads at zoom 1. */
+const SELECT_PAD_PX = 2 * LINE_PX;
 const FRAME_GRACE_MS = 2000; // after this the opening framing never reasserts itself
 
 const SIM_KINDS: readonly SimKind[] = ['worker', 'resident', 'guest', 'shopper', 'diner', 'staff', 'visitor', 'vip'];
@@ -247,6 +261,11 @@ function hex(color: number): string {
   return `#${color.toString(16).padStart(6, '0')}`;
 }
 
+// The fallback's window band, on the same grid as art.ts: a pane a tile, inset by the outline.
+const WIN_X = 3 * LINE_PX;
+const WIN_Y = 3 * LINE_PX;
+const WIN_W = TILE_PX / 2;
+
 /**
  * Flat colored rectangles, used when WebGL is unavailable or the real art module
  * cannot be built. Drawn on a 2d canvas so it works without a GPU.
@@ -267,58 +286,62 @@ export function fallbackArt(_renderer: PixiRenderer | null): Art {
       return get(`room|${kind}|${width}|${height}|${variant}|${lit}`, () =>
         canvasTexture(width * TILE_PX, height * FLOOR_PX, (ctx) => {
           const base = FALLBACK_ROOM_COLORS[kind] ?? 0x3a4556;
+          const line = LINE_PX;
           // A connector is an overlay here too: a diagonal and an outline, no backing fill.
           if (drawsOverRooms(kind)) {
             ctx.strokeStyle = hex(base);
-            ctx.lineWidth = 2;
+            ctx.lineWidth = 2 * line;
             ctx.beginPath();
-            ctx.moveTo(2, ctx.canvas.height - 3);
-            ctx.lineTo(ctx.canvas.width - 2, 3);
+            ctx.moveTo(2 * line, ctx.canvas.height - SLAB_PX);
+            ctx.lineTo(ctx.canvas.width - 2 * line, SLAB_PX);
             ctx.stroke();
-            ctx.lineWidth = 1;
+            ctx.lineWidth = line;
             ctx.strokeStyle = hex(0x1c232e);
-            ctx.strokeRect(0.5, 0.5, ctx.canvas.width - 1, ctx.canvas.height - 1);
+            ctx.strokeRect(line / 2, line / 2, ctx.canvas.width - line, ctx.canvas.height - line);
             return;
           }
           ctx.fillStyle = hex(base);
           ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
           ctx.fillStyle = hex(lit ? 0xffd27a : 0x1a2233);
-          for (let wx = 3; wx + 4 <= ctx.canvas.width - 3; wx += 10) {
-            ctx.fillRect(wx, 6 + (variant % 2), 4, 8);
+          // one window a tile, the same band art.ts draws
+          for (let wx = WIN_X; wx + WIN_W <= ctx.canvas.width - WIN_X; wx += TILE_PX) {
+            ctx.fillRect(wx, WIN_Y + (variant % 2) * line, WIN_W, WIN_W);
           }
+          ctx.lineWidth = line;
           ctx.strokeStyle = hex(0x1c232e);
-          ctx.strokeRect(0.5, 0.5, ctx.canvas.width - 1, ctx.canvas.height - 1);
+          ctx.strokeRect(line / 2, line / 2, ctx.canvas.width - line, ctx.canvas.height - line);
         }),
       );
     },
     slab(widthTiles) {
       return get(`slab|${widthTiles}`, () =>
-        canvasTexture(widthTiles * TILE_PX, 4, (ctx) => {
+        canvasTexture(TEXTURE_SIZE.slab(widthTiles).width, TEXTURE_SIZE.slab(widthTiles).height, (ctx) => {
           ctx.fillStyle = hex(0x2f3238);
-          ctx.fillRect(0, 0, ctx.canvas.width, 4);
+          ctx.fillRect(0, 0, ctx.canvas.width, SLAB_PX);
           ctx.fillStyle = hex(0x4a4e57);
-          ctx.fillRect(0, 0, ctx.canvas.width, 1);
+          ctx.fillRect(0, 0, ctx.canvas.width, LINE_PX);
         }),
       );
     },
     shaft(kind, floors) {
       return get(`shaft|${kind}|${floors}`, () =>
-        canvasTexture(4 * TILE_PX, floors * FLOOR_PX, (ctx) => {
+        canvasTexture(TEXTURE_SIZE.shaft(kind, floors).width, floors * FLOOR_PX, (ctx) => {
           ctx.fillStyle = hex(kind === 'express' ? 0x232b38 : kind === 'service' ? 0x1e242e : 0x242c3a);
           ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
           ctx.fillStyle = hex(0x3a4556);
-          ctx.fillRect(0, 0, 2, ctx.canvas.height);
-          ctx.fillRect(ctx.canvas.width - 2, 0, 2, ctx.canvas.height);
+          ctx.fillRect(0, 0, 2 * LINE_PX, ctx.canvas.height);
+          ctx.fillRect(ctx.canvas.width - 2 * LINE_PX, 0, 2 * LINE_PX, ctx.canvas.height);
         }),
       );
     },
     car(kind, doorsOpen) {
       return get(`car|${kind}|${doorsOpen}`, () =>
-        canvasTexture(4 * TILE_PX, FLOOR_PX, (ctx) => {
+        canvasTexture(TEXTURE_SIZE.car(kind).width, TEXTURE_SIZE.car(kind).height, (ctx) => {
+          const line = LINE_PX;
           ctx.fillStyle = hex(0x8b93a3);
-          ctx.fillRect(0, 2, ctx.canvas.width, ctx.canvas.height - 4);
+          ctx.fillRect(0, 2 * line, ctx.canvas.width, ctx.canvas.height - 4 * line);
           ctx.fillStyle = hex(doorsOpen ? 0xffd27a : 0x28313f);
-          ctx.fillRect(3, 5, ctx.canvas.width - 6, ctx.canvas.height - 10);
+          ctx.fillRect(3 * line, 5 * line, ctx.canvas.width - 6 * line, ctx.canvas.height - 10 * line);
         }),
       );
     },
@@ -326,8 +349,9 @@ export function fallbackArt(_renderer: PixiRenderer | null): Art {
       return get(`sim|${band}|${frame}`, () =>
         canvasTexture(SIM_WIDTH_PX, SIM_HEIGHT_PX, (ctx) => {
           ctx.fillStyle = hex(FALLBACK_BAND_COLORS[band]);
-          ctx.fillRect(2, 2, 4, 3); // head
-          ctx.fillRect(frame === 0 ? 2 : 1, 5, 4, SIM_HEIGHT_PX - 5); // body and legs, a pixel over on the step
+          const u = SIM_WIDTH_PX / 8; // the figure is eight units wide
+          ctx.fillRect(2 * u, 2 * u, 4 * u, 3 * u); // head
+          ctx.fillRect((frame === 0 ? 2 : 1) * u, 5 * u, 4 * u, SIM_HEIGHT_PX - 5 * u); // body and legs, a unit over on the step
         }),
       );
     },
@@ -337,8 +361,8 @@ export function fallbackArt(_renderer: PixiRenderer | null): Art {
           ctx.fillStyle = ok ? 'rgba(244,185,66,0.30)' : 'rgba(255,92,77,0.30)';
           ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
           ctx.strokeStyle = ok ? hex(0xf4b942) : hex(0xff5c4d);
-          ctx.lineWidth = 2;
-          ctx.strokeRect(1, 1, ctx.canvas.width - 2, ctx.canvas.height - 2);
+          ctx.lineWidth = 2 * LINE_PX;
+          ctx.strokeRect(LINE_PX, LINE_PX, ctx.canvas.width - 2 * LINE_PX, ctx.canvas.height - 2 * LINE_PX);
         }),
       );
     },
@@ -490,7 +514,8 @@ export async function createRenderer(
   const app = new Application();
   await app.init({
     resizeTo: container,
-    resolution: window.devicePixelRatio || 1,
+    // The same resolution art.ts bakes at, so a texture pixel lands on whole device pixels.
+    resolution: bakeResolution(window.devicePixelRatio),
     autoDensity: true,
     antialias: false,
     roundPixels: true,
@@ -499,6 +524,8 @@ export async function createRenderer(
 
   app.canvas.style.display = 'block';
   app.canvas.style.touchAction = 'none';
+  // Above a device pixel ratio of 2 the browser stretches the canvas; keep that nearest neighbour too.
+  app.canvas.style.imageRendering = 'pixelated';
   container.appendChild(app.canvas);
 
   // Layers, back to front.
@@ -527,7 +554,8 @@ export async function createRenderer(
   // Behind everything in the tower: a continuous floor across each built floor,
   // so a sim between two rooms is never walking on sky.
   const floorStrips = new Graphics();
-  layers.tower.addChild(floorStrips, slabLayer, roomLayer, shaftLayer, connectorLayer);
+  // Slabs sit over the rooms: each casts its shadow onto the top of the floor below it.
+  layers.tower.addChild(floorStrips, roomLayer, slabLayer, shaftLayer, connectorLayer);
 
   const simSpriteLayer = new Container();
   layers.sims.addChild(simSpriteLayer);
@@ -610,6 +638,7 @@ export async function createRenderer(
       const rt = RenderTexture.create({
         width: cols * SIM_WIDTH_PX,
         height: rows * SIM_HEIGHT_PX,
+        resolution: bakeResolution(window.devicePixelRatio),
         antialias: false,
         scaleMode: 'nearest',
       });
@@ -728,10 +757,10 @@ export async function createRenderer(
       if (width <= 0) continue;
       const top = floorTopY(floor);
       floorStrips.rect(x, top, width, FLOOR_PX).fill(floor > 0 ? STRIP_ABOVE : STRIP_BELOW);
-      floorStrips.rect(x, top, width, 1).fill(STRIP_CEILING);
+      floorStrips.rect(x, top, width, LINE_PX).fill(STRIP_CEILING);
       // The slab edge sits where art.ts draws it, SLAB_TOP_PX up from the bottom of
       // the band, so an empty stretch lines up with the rooms on either side.
-      floorStrips.rect(x, top + FLOOR_PX - SLAB_TOP_PX, width, 1).fill(STRIP_EDGE);
+      floorStrips.rect(x, top + FLOOR_PX - SLAB_TOP_PX, width, LINE_PX).fill(STRIP_EDGE);
     }
   }
 
@@ -767,9 +796,10 @@ export async function createRenderer(
         slab.node.texture = art.slab(room.width);
         slab.width = room.width;
       }
-      const slabHeight = slab.node.texture.height || 4;
+      // The deck overlays the room's own bottom SLAB_PX; the shadow below it runs onto the floor beneath.
+      const slabHeight = TEXTURE_SIZE.slab(room.width).height;
       slab.node.setSize(pw, slabHeight);
-      slab.node.position.set(px, floorBaseY(room.floor) - slabHeight);
+      slab.node.position.set(px, floorBaseY(room.floor) - SLAB_TOP_PX);
 
       let entry = roomSprites.get(room.id);
       if (!entry) {
@@ -1026,12 +1056,14 @@ export async function createRenderer(
       g.clear();
       const baseY = floorBaseY(room.floor);
       const width = room.width * TILE_PX;
-      const flames = Math.max(2, Math.floor(width / 12));
+      // One flame per tile and a half, a tile tall at the least, a gap of three eighths of a tile between.
+      const flames = Math.max(2, Math.floor(width / (1.5 * TILE_PX)));
+      const gap = (3 * TILE_PX) / 8;
       for (let i = 0; i < flames; i++) {
         const jitter = reducedMotion ? 0.5 : flickerNext();
-        const h = 8 + jitter * (room.height * FLOOR_PX - 10);
+        const h = TILE_PX + jitter * (room.height * FLOOR_PX - 1.25 * TILE_PX);
         const x = room.x * TILE_PX + (i + 0.2) * (width / flames);
-        g.rect(x, baseY - h, Math.max(3, width / flames - 3), h).fill(jitter > 0.6 ? 0xffd27a : 0xff5c4d);
+        g.rect(x, baseY - h, Math.max(gap, width / flames - gap), h).fill(jitter > 0.6 ? 0xffd27a : 0xff5c4d);
       }
     }
   }
@@ -1075,16 +1107,16 @@ export async function createRenderer(
       const sim = w.sims.get(selection.simId);
       if (sim) {
         box = {
-          x: sim.pos.x * TILE_PX - SIM_WIDTH_PX / 2 - 2,
-          y: simFeetY(sim.pos.floor) - SIM_HEIGHT_PX - 2,
-          w: SIM_WIDTH_PX + 4,
-          h: SIM_HEIGHT_PX + 4,
+          x: sim.pos.x * TILE_PX - SIM_WIDTH_PX / 2 - SELECT_PAD_PX,
+          y: simFeetY(sim.pos.floor) - SIM_HEIGHT_PX - SELECT_PAD_PX,
+          w: SIM_WIDTH_PX + 2 * SELECT_PAD_PX,
+          h: SIM_HEIGHT_PX + 2 * SELECT_PAD_PX,
         };
       }
     }
     if (!box) return;
     selectionBox.visible = true;
-    selectionBox.rect(box.x, box.y, box.w, box.h).stroke({ width: 2, color: 0xf4b942, alignment: 0 });
+    selectionBox.rect(box.x, box.y, box.w, box.h).stroke({ width: SELECT_PAD_PX, color: 0xf4b942, alignment: 0 });
   }
 
   function screenToWorldPoint(sx: number, sy: number): { x: number; y: number } {

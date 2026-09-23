@@ -30,6 +30,17 @@ const wheelEvent = (over: Partial<WheelLike>): WheelLike => ({
   ...over,
 });
 
+describe('zoom range on the 0.4.0 grid', () => {
+  it('opens with a floor 72 css px tall and zooms out to the same 12.6 px it always reached', () => {
+    expect(DEFAULT_ZOOM).toBe(1);
+    expect(DEFAULT_ZOOM * FLOOR_PX).toBe(72);
+    expect(MIN_ZOOM).toBe(0.175);
+    expect(MIN_ZOOM * FLOOR_PX).toBeCloseTo(12.6, 6);
+    expect(MAX_ZOOM).toBe(3);
+    expect(createCamera().zoom).toBe(DEFAULT_ZOOM);
+  });
+});
+
 describe('floor axis', () => {
   it('puts the floor 1 slab at y = 0 and stacks floors upward', () => {
     expect(floorBaseY(1)).toBe(0);

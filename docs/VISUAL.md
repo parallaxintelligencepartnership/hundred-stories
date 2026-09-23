@@ -20,15 +20,18 @@ Color (chrome):
 - indicator `#8ff0c0` segmented readouts only
 - alert `#ff5c4d` fire, bomb, black stress, destructive confirmations
 
+Grid (since 0.4.0): the base grid is 16 px tiles and 72 px floors, twice the 0.3 grid, so a room has a real interior at zoom 1. Lines, outlines and mullions are 2 px. Textures bake at the device pixel ratio rounded to 1 or 2 with nearest neighbour sampling. The constants live in src/render/grid.ts and nothing else may assume a pixel size.
+
 Color (world, procedural art), corrected 2026-09-19 after Matt saw the first build ("doesn't look anything like SimTower used to"). The world must read like the original: bright, flat, high contrast, daytime dominant.
 - sky: day `#9fd3f5` at the top to `#dcefff` at the horizon, flat with no haze; dawn and dusk are short transitions (about one game hour each) through `#f6b98a` and `#e08a7a`; night `#0d1b3d` to `#1c2f5c`, never black
-- horizon: one low distant skyline strip, 24 px, `#b9cfe0`, no tall silhouettes, no parallax city
+- horizon: one low distant skyline strip, 3 tiles (48 px), `#b9cfe0`, no tall silhouettes, no parallax city
 - underground: concrete gray `#6b6f78` with floor lines `#4c5058`, not brown or black
-- slab `#e6e6e6` with a 1 px `#333333` edge; every room cell has a 1 px `#222222` outline so rooms read as bright cells like the original
+- slab `#e6e6e6`, the bottom 6 px of a floor (y 66 to 71) with a 2 px `#333333` top edge, casting a 4 px `#333333` shadow at 25 percent over the top of the floor below; every room cell has a 2 px `#222222` outline so rooms read as bright cells like the original
+- walls are two tone: the lit face, and a shadow face about 13 percent darker on the rightmost 8 interior px (4 px on a one tile lobby); windows are 12 by 12 panes, one per tile at x 2 + 16n, y 6, with 2 px mullions and a sill at y 18 to 19
 - room walls: office `#f7f5ee`, condo `#f2e8d8`, hotel `#eef2f7`, fast food `#fff1c9`, restaurant `#f3e3e3`, shop `#e9f2e4`, cinema `#2b2b3a` (dark by nature), party hall `#f5e8f2`, medical `#f2f8f7`, security `#e4e8ee`, housekeeping `#eeeae2`, parking `#8d9199`, recycling `#dfe6dc`, metro `#c9ced8`, cathedral `#f4efe4`, lobby white marble `#f8f8f6` with `#3a3a3a` columns
 - windows: day `#7fb6e0`, night lit `#ffd866`, unlit night `#2a3550`
-- shafts: `#d8dbe0` rails on `#3b3f47` cavity, cars `#f0c419` with a dark door line
-- sims: black `#111111` figures 1 tile wide by 3 tiles tall (8 by 24 px), like the original's; pink `#ff7ad9` and red `#ff2d2d` by stress band; sims are the only saturated moving color besides cars
+- shafts: `#d8dbe0` rails on `#3b3f47` cavity, cars `#f0c419` with a `#c09d14` shadow face, two door panels on a dark door line, a `#fff3b0` ceiling light strip, and a 4 px shadow cast up the shaft at 25 percent
+- sims: black `#111111` figures 1 tile wide by 3 tiles tall (16 by 48 px since 0.4.0), like the original's; pink `#ff7ad9` and red `#ff2d2d` by stress band; sims are the only saturated moving color besides cars
 - ghost green `#5fd38a`, refused red `#ff5c4d`; the chrome keeps the steel tokens above, and the contrast between dark chrome and bright world is the composition
 
 Type:
@@ -62,4 +65,4 @@ Principles:
 2. Every number is a readout, every label is a sentence-case word. No icons without a label.
 3. Copy speaks in the interface's voice: "Not enough cash. Offices cost $40,000." not "Oops!".
 4. US spelling. No em dashes, no spaced hyphens as dashes, anywhere in UI text.
-5. Pixel art at integer scales: `antialias: false`, `roundPixels: true`, zoom steps snap to 0.5, 1, 2, 3 for crisp rendering, free zoom between them allowed while the wheel is moving.
+5. Pixel art at integer scales: `antialias: false`, `roundPixels: true`, zoom steps snap to 0.5, 1, 2, 3 for crisp rendering, free zoom between them allowed while the wheel is moving. Since 0.4.0 zoom 1 is the opening view (a floor is 72 css px, as zoom 2 was on the 8 px grid) and the furthest out is 0.175 (a floor 12.6 css px, unchanged).

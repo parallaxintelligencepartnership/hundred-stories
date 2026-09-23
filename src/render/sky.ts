@@ -11,7 +11,7 @@
 import { Container, FillGradient, Graphics } from 'pixi.js';
 import { createRng } from '../sim/rng';
 import { MIN_FLOOR, TOWER_WIDTH } from '../sim/types';
-import { FLOOR_PX, TILE_PX } from './art';
+import { FLOOR_PX, LINE_PX, TILE_PX } from './art';
 import { floorBaseY } from './camera';
 
 export interface SkyColors {
@@ -44,12 +44,14 @@ const KEYFRAMES: readonly Keyframe[] = [
   { minute: 24 * 60, top: NIGHT_TOP, bottom: NIGHT_BOTTOM },
 ];
 
-const CITY_LEFT = -1600;
-const CITY_RIGHT = TOWER_WIDTH * TILE_PX + 1600;
+const CITY_MARGIN = 200 * TILE_PX; // past either end of the lot
+const CITY_LEFT = -CITY_MARGIN;
+const CITY_RIGHT = TOWER_WIDTH * TILE_PX + CITY_MARGIN;
 const HORIZON_PARALLAX = 0.35;
 
-/** One low distant skyline, no tall silhouettes and no haze. */
-const SKYLINE_HEIGHT = 24;
+/** One low distant skyline, three tiles at most, no tall silhouettes and no haze. */
+const SKYLINE_HEIGHT = 3 * TILE_PX;
+const SKYLINE_BASE = (3 * TILE_PX) / 8; // the continuous strip every rooftop stands on
 const SKYLINE_COLOR = 0xb9cfe0;
 
 const CONCRETE_COLOR = 0x6b6f78;
@@ -117,17 +119,20 @@ export interface Sky {
   destroy(): void;
 }
 
-/** A 24 px band of distant rooftops standing on the ground line. */
+/** A three tile band of distant rooftops standing on the ground line. */
 function buildSkyline(parent: Container): Graphics {
   const rng = createRng(0x5eed1);
   const g = new Graphics();
-  g.rect(CITY_LEFT, -6, CITY_RIGHT - CITY_LEFT, 6).fill(SKYLINE_COLOR);
+  g.rect(CITY_LEFT, -SKYLINE_BASE, CITY_RIGHT - CITY_LEFT, SKYLINE_BASE).fill(SKYLINE_COLOR);
+  // Widths, heights and gaps were drawn in eighths of a tile on the 0.3 grid; the same draws,
+  // scaled to the tile, keep the skyline's rhythm now that a tile is twice the pixels.
+  const unit = TILE_PX / 8;
   let x = CITY_LEFT;
   while (x < CITY_RIGHT) {
-    const width = rng.int(26, 90);
-    const height = rng.int(9, SKYLINE_HEIGHT);
+    const width = rng.int(26, 90) * unit;
+    const height = rng.int(9, SKYLINE_HEIGHT / unit) * unit;
     g.rect(x, -height, width, height).fill(SKYLINE_COLOR);
-    x += width + rng.int(0, 6);
+    x += width + rng.int(0, 6) * unit;
   }
   parent.addChild(g);
   return g;
@@ -145,11 +150,11 @@ function buildGround(ground: Container): Graphics {
 
   g.rect(left, 0, width, depth).fill(CONCRETE_COLOR);
   for (let floor = -1; floor >= MIN_FLOOR; floor--) {
-    g.rect(left, floorBaseY(floor) - 1, width, 1).fill(CONCRETE_LINE);
+    g.rect(left, floorBaseY(floor) - LINE_PX, width, LINE_PX).fill(CONCRETE_LINE);
   }
-  g.rect(left, 0, width, 6).fill(SIDEWALK_COLOR);
+  g.rect(left, 0, width, 3 * LINE_PX).fill(SIDEWALK_COLOR);
   // The street edge: where the ground floor can be built, visible with an empty lot.
-  g.rect(left, 0, width, 2).fill(STREET_EDGE_COLOR);
+  g.rect(left, 0, width, LINE_PX).fill(STREET_EDGE_COLOR);
   ground.addChild(g);
   return g;
 }

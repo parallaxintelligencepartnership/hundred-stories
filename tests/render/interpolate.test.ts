@@ -3,8 +3,9 @@
 
 import { describe, expect, it } from 'vitest';
 import { Motion, TELEPORT_TILES } from '../../src/render/interpolate';
+import { TILE_PX } from '../../src/render/grid';
 
-const TILE = 8;
+const TILE = TILE_PX;
 const TELEPORT_PX = TELEPORT_TILES * TILE;
 const Y = 100;
 

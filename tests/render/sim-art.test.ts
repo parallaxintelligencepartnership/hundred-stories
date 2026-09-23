@@ -7,15 +7,12 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { Graphics, Rectangle } from 'pixi.js';
 import type { Renderer as PixiRenderer, Texture } from 'pixi.js';
-import { TILE_PX, createArt } from '../../src/render/art';
+import { SIM_H, SIM_W, TILE_PX, createArt } from '../../src/render/art';
 import type { SimKind, StressBand } from '../../src/sim/types';
 
 const KINDS: readonly SimKind[] = ['worker', 'resident', 'guest', 'shopper', 'diner', 'staff', 'visitor', 'vip'];
 const BANDS: readonly StressBand[] = ['calm', 'pink', 'red'];
 const FRAMES = [0, 1] as const;
-
-const SIM_W = TILE_PX; // 8
-const SIM_H = 3 * TILE_PX; // 24
 
 interface Rect {
   x: number;
@@ -70,6 +67,12 @@ function silhouette(baked: Baked): string[] {
 }
 
 describe('sim sprite size', () => {
+  it('is one tile by three tiles, 16 by 48 on the 0.4.0 grid', () => {
+    expect(SIM_W).toBe(TILE_PX);
+    expect(SIM_H).toBe(3 * TILE_PX);
+    expect([SIM_W, SIM_H]).toEqual([16, 48]);
+  });
+
   it('bakes every kind, band and frame at one tile by three tiles', () => {
     for (const kind of KINDS) {
       for (const band of BANDS) {
@@ -87,7 +90,7 @@ describe('sim sprite size', () => {
     }
   });
 
-  it('draws every pixel inside the 8 by 24 box', () => {
+  it('draws every pixel inside the one by three tile box', () => {
     for (const kind of KINDS) {
       for (const band of BANDS) {
         for (const frame of FRAMES) {

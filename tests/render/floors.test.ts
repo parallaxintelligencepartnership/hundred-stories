@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { builtFloorExtents, inRoomSlot, simFeetY, simIsVisible, simMoves } from '../../src/render/renderer';
 import { floorBaseY } from '../../src/render/camera';
-import { TILE_PX } from '../../src/render/art';
+import { SLAB_PX, TILE_PX } from '../../src/render/art';
 import { ROOMS } from '../../src/sim/rules';
 import type { Room, RoomKind, Shaft, ShaftKind, Sim, World } from '../../src/sim/types';
 import { addRoom, addShaft, addSim, allocId, createWorld } from '../../src/sim/world';
@@ -154,8 +154,8 @@ describe('sims standing still', () => {
 
 describe('sim footing', () => {
   it('stands a sim on the slab top, not the bottom of the floor band', () => {
-    expect(simFeetY(1)).toBe(floorBaseY(1) - 3);
+    expect(simFeetY(1)).toBe(floorBaseY(1) - SLAB_PX);
     expect(simFeetY(1)).toBeLessThan(floorBaseY(1));
-    expect(simFeetY(-2)).toBe(floorBaseY(-2) - 3);
+    expect(simFeetY(-2)).toBe(floorBaseY(-2) - SLAB_PX);
   });
 });

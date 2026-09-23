@@ -12,9 +12,13 @@ import { MAX_FLOOR, MIN_FLOOR, TOWER_WIDTH } from '../sim/types';
 import { FLOOR_PX, TILE_PX } from './art';
 import type { WheelGesture } from './input';
 
-export const MIN_ZOOM = 0.35;
-/** Opening zoom. The original drew its 8 px tiles on a 640 px screen; 2x on a modern display reads the same. */
-export const DEFAULT_ZOOM = 2;
+/** The furthest out: a floor is 12.6 css px, the same as before the 0.4.0 grid doubled. */
+export const MIN_ZOOM = 0.175;
+/**
+ * Opening zoom. The original drew 8 px tiles on a 640 px screen; since 0.4.0 the art is authored
+ * at 16 px tiles and 72 px floors, so zoom 1 on a modern display reads the same, a floor 72 css px.
+ */
+export const DEFAULT_ZOOM = 1;
 export const MAX_ZOOM = 3;
 /** Zoom levels the wheel snaps to once it stops. */
 export const SNAP_ZOOMS: readonly number[] = [0.5, 1, 2, 3];
@@ -27,7 +31,7 @@ const KEY_PAN_PX_PER_SECOND = 900;
 const FRICTION_MS = 110; // inertia half life, roughly
 const MIN_INERTIA_SPEED = 0.015; // screen px per ms
 const MAX_INERTIA_SPEED = 4; // screen px per ms
-const PAN_MARGIN_PX = 240;
+const PAN_MARGIN_PX = 30 * TILE_PX; // world px past the lot and the roof the view may wander
 const FOLLOW_EASE_MS = 140; // how fast the view catches up with a room it had to follow
 const KEY_ZOOM_DELTA = 120; // one wheel notch, so the plus and minus keys feel like the wheel
 /**
@@ -106,7 +110,7 @@ export interface Camera {
    * street and a freshly built floor land where the player can see them.
    */
   setObstruction(topPx: number, bottomPx: number): void;
-  /** Back to the opening shot: zoom 1, tower center, street at DEFAULT_GROUND_LINE. */
+  /** Back to the opening shot: DEFAULT_ZOOM, tower center, street at DEFAULT_GROUND_LINE. */
   reset(): void;
   setViewport(width: number, height: number): void;
   setReducedMotion(on: boolean): void;

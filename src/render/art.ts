@@ -1,15 +1,60 @@
 // Procedural pixel art for the tower cross section. See docs/VISUAL.md and docs/DESIGN.md section 9.
 // No image assets: every texture is baked from Graphics primitives once and cached by key.
-// Drawing is done on an integer pixel grid at resolution 1 with antialias off so the art stays
-// crisp at the snapped zoom steps (0.5, 1, 2, 3).
+//
+// The grid is 16 px tiles and 72 px floors (grid.ts), drawn on integer pixels with antialias
+// off and baked at the device pixel ratio rounded to 1 or 2, so the art stays crisp at the
+// snapped zoom steps (0.5, 1, 2, 3). Geometry follows docs/reviews/2026-09-22-codex-astra-ui-graphics.md
+// section 1: a 2 px outline, a slab at y 66 to 71 with a 2 px edge and a 4 px cast shadow,
+// two-tone walls, 12 by 12 panes one per tile.
+//
+// Two classes of drawer. Native (this file): the shell of every room, the structure pieces,
+// office, the three hotel rooms, cars, people, shafts, the ghost. Half grid (art-2x.ts): the
+// interiors of the other fourteen kinds, drawn through a 2x scale inside the native shell until
+// ship L3 re-authors them.
 
-import { Graphics, Rectangle } from 'pixi.js';
+import { Container, Graphics, Rectangle } from 'pixi.js';
 import type { Renderer, Texture } from 'pixi.js';
 import type { RoomKind, ShaftKind, SimKind, StressBand } from '../sim/types';
 import { SHAFTS } from '../sim/rules';
+import { HALF_KINDS, HALF_SCALE, drawHalfInterior } from './art-2x';
+import {
+  CAR_CLEAR_PX,
+  CAR_INSET_PX,
+  CAR_SHADOW_PX,
+  FLOOR_PX,
+  INTERIOR_TOP,
+  LINE_PX,
+  LOBBY_SHADOW_PX,
+  SIM_H,
+  SIM_W,
+  SLAB_EDGE_PX,
+  SLAB_PX,
+  SLAB_SHADOW_ALPHA,
+  SLAB_SHADOW_PX,
+  TILE_PX,
+  WALL_SHADOW_PX,
+  WIN_PANE,
+  WIN_PANE_TOP,
+  WIN_PANE_X,
+  WIN_SILL,
+  WIN_TOP,
+  bakeResolution,
+} from './grid';
+import { INK, PALETTE, wallShadow } from './palette';
 
-export const TILE_PX = 8;
-export const FLOOR_PX = 36;
+export {
+  CAR_CLEAR_PX,
+  CAR_INSET_PX,
+  CAR_SHADOW_PX,
+  FLOOR_PX,
+  LINE_PX,
+  SIM_H,
+  SIM_W,
+  SLAB_PX,
+  SLAB_SHADOW_PX,
+  TILE_PX,
+  bakeResolution,
+};
 
 export interface Art {
   room(kind: RoomKind, width: number, height: number, variant: number, lit: boolean): Texture;
@@ -20,113 +65,18 @@ export interface Art {
   ghost(widthTiles: number, heightFloors: number, ok: boolean): Texture;
 }
 
-// ---------------------------------------------------------------------------
-// Palette. Every color the art uses lives here. World tokens come from VISUAL.md;
-// the furniture shades below are new, kept muted so lit windows and stress tints carry the signal.
-// ---------------------------------------------------------------------------
-
-const PALETTE = {
-  outline: 0x222222, // every room cell is boxed in this
-  slab: 0xe6e6e6,
-  slabEdge: 0x333333,
-  windowDay: 0x7fb6e0,
-  windowLit: 0xffd866,
-  windowUnlit: 0x2a3550,
-  windowFrame: 0x222222,
-  amber: 0xf0c419,
-  alert: 0xff5c4d,
-  ghostOk: 0x5fd38a,
-  shaftCavity: 0x3b3f47,
-  shaftRail: 0xd8dbe0,
-  shaftFloorMark: 0x222222,
-  carBody: 0xf0c419,
-  carTrim: 0x222222,
-  carDoor: 0xf7d54a,
-  carInterior: 0x3b3f47,
-  carLight: 0xfff3b0,
-  sim: { calm: 0x111111, pink: 0xff7ad9, red: 0xff2d2d },
-  simAccent: 0xffffff,
-  // Flat, bright wall color per kind, the way the original reads at 1x.
-  wall: {
-    lobby: 0xf8f8f6,
-    skyLobby: 0xf8f8f6,
-    stairs: 0xd9dde2,
-    escalator: 0xd3dae2,
-    office: 0xf7f5ee,
-    condo: 0xf2e8d8,
-    hotelSingle: 0xeef2f7,
-    hotelTwin: 0xeef2f7,
-    hotelSuite: 0xeef2f7,
-    fastFood: 0xfff1c9,
-    restaurant: 0xf3e3e3,
-    shop: 0xe9f2e4,
-    cinema: 0x2b2b3a,
-    partyHall: 0xf5e8f2,
-    medical: 0xf2f8f7,
-    security: 0xe4e8ee,
-    housekeeping: 0xeeeae2,
-    parkingRamp: 0x8d9199,
-    parkingSpace: 0x8d9199,
-    recycling: 0xdfe6dc,
-    metro: 0xc9ced8,
-    cathedral: 0xf4efe4,
-  } as Record<RoomKind, number>,
-  // Interiors are drawn in dark saturated inks so they read against the light walls.
-  detail: {
-    metal: 0x5a6472,
-    metalDark: 0x333a44,
-    wood: 0xa9702f,
-    woodDark: 0x6b4420,
-    linen: 0xf7f7f2,
-    pillow: 0xffffff,
-    blanketA: 0x2f5c9e,
-    blanketB: 0x8c3050,
-    marble: 0xf8f8f6,
-    marbleVein: 0xc9c4b8,
-    column: 0x3a3a3a,
-    carpet: 0x8c2f3c,
-    chairA: 0x2b5ea8,
-    chairB: 0x6a3a97,
-    screenOn: 0x8fd4ff,
-    screenOff: 0x33404d,
-    glow: 0xffd866,
-    pot: 0xa4522c,
-    leaf: 0x2f7d3a,
-    counter: 0xa9702f,
-    tile: 0xeef2f5,
-    cross: 0xd22b2b,
-    shelfGoodsA: 0xd2761f,
-    shelfGoodsB: 0x1f7d7d,
-    seatA: 0x9c2b2b,
-    seatB: 0x2b3f9c,
-    curtain: 0x8c1f3d,
-    stripe: 0x555b63,
-    carRed: 0xc03028,
-    carBlue: 0x2f5c9e,
-    binGreen: 0x2f7d3a,
-    binBlue: 0x2f5c9e,
-    binAmber: 0xd28c1f,
-    rail: 0x5a6472,
-    stone: 0x8e87a3,
-    stoneDark: 0x6c6482,
-    gold: 0xc9a227,
-    glass: 0x7fb6e0,
-    dark: 0x222222,
-  },
+/** Texture sizes, in logical pixels, so the renderer and the tests share one rule. */
+export const TEXTURE_SIZE = {
+  room: (tiles: number, floors: number) => ({ width: tiles * TILE_PX, height: floors * FLOOR_PX }),
+  slab: (tiles: number) => ({ width: tiles * TILE_PX, height: SLAB_PX + SLAB_SHADOW_PX }),
+  shaft: (kind: ShaftKind, floors: number) => ({ width: SHAFTS[kind].width * TILE_PX, height: floors * FLOOR_PX }),
+  car: (kind: ShaftKind) => ({
+    width: SHAFTS[kind].width * TILE_PX - CAR_INSET_PX,
+    height: FLOOR_PX - CAR_CLEAR_PX + CAR_SHADOW_PX,
+  }),
+  sim: () => ({ width: SIM_W, height: SIM_H }),
+  ghost: (tiles: number, floors: number) => ({ width: tiles * TILE_PX, height: floors * FLOOR_PX }),
 } as const;
-
-const SLAB_H = 3; // the slab is the bottom 3 px of a floor band (renderer.SLAB_TOP_PX)
-const INK = 0x222222; // every silhouette is drawn in 1 px of this against the light walls
-
-// The window band is a head rail, a row of panes with mullions, and a sill line, so the
-// top of a room reads as a window instead of a black bar across the whole floor.
-const WIN_TOP = 2;
-const WIN_H = 6;
-const WIN_PANE = 6;
-const WIN_STEP = 8; // one pane per tile
-const SILL = WIN_TOP + WIN_H + 1; // 9
-const INTERIOR_TOP = SILL + 2; // 11: first free row under the windows
-const OPEN_TOP = 2; // first free row for a kind with no window band
 
 type WindowMood = 'glass' | 'none';
 
@@ -174,8 +124,14 @@ const FULL_HEIGHT: ReadonlySet<RoomKind> = new Set<RoomKind>([
   'cathedral',
 ]);
 
+/** Lobby tiles are one tile wide, so their shadow face is half the usual strip. */
+const LOBBY_KINDS: ReadonlySet<RoomKind> = new Set<RoomKind>(['lobby', 'skyLobby']);
+
+/** The interior baseline: the first row of the slab, measured from the top of a floor band. */
+const BASE = FLOOR_PX - SLAB_PX; // 66
+
 // ---------------------------------------------------------------------------
-// Primitives
+// Primitives. Lines default to LINE_PX; a 1 px argument is a native highlight.
 // ---------------------------------------------------------------------------
 
 function box(g: Graphics, x: number, y: number, w: number, h: number, color: number, alpha = 1): void {
@@ -187,236 +143,210 @@ function box(g: Graphics, x: number, y: number, w: number, h: number, color: num
   g.rect(rx, ry, rw, rh).fill({ color, alpha });
 }
 
-function stripe(g: Graphics, x1: number, y1: number, x2: number, y2: number, color: number, width = 1): void {
+function stripe(g: Graphics, x1: number, y1: number, x2: number, y2: number, color: number, width = LINE_PX): void {
   g.moveTo(x1, y1).lineTo(x2, y2).stroke({ color, width, alignment: 0.5, cap: 'butt' });
 }
 
-function outline(g: Graphics, x: number, y: number, w: number, h: number, color: number): void {
-  box(g, x, y, w, 1, color);
-  box(g, x, y + h - 1, w, 1, color);
-  box(g, x, y, 1, h, color);
-  box(g, x + w - 1, y, 1, h, color);
+function outline(g: Graphics, x: number, y: number, w: number, h: number, color: number, t = LINE_PX): void {
+  box(g, x, y, w, t, color);
+  box(g, x, y + h - t, w, t, color);
+  box(g, x, y, t, h, color);
+  box(g, x + w - t, y, t, h, color);
 }
 
-/** A filled shape with a 1 px line around it: the unit every piece of furniture is built from. */
+/** A filled shape with a line around it: the unit every piece of furniture is built from. */
 function panel(g: Graphics, x: number, y: number, w: number, h: number, fill: number, ink = INK): void {
   box(g, x, y, w, h, fill);
   outline(g, x, y, w, h, ink);
 }
 
-function hline(g: Graphics, x: number, y: number, w: number, color = INK): void {
-  box(g, x, y, w, 1, color);
+function hline(g: Graphics, x: number, y: number, w: number, color = INK, t = LINE_PX): void {
+  box(g, x, y, w, t, color);
 }
 
-function vline(g: Graphics, x: number, y: number, h: number, color = INK): void {
-  box(g, x, y, 1, h, color);
-}
-
-function pick(list: readonly number[], i: number, fallback: number): number {
-  return list[((i % list.length) + list.length) % list.length] ?? fallback;
+function vline(g: Graphics, x: number, y: number, h: number, color = INK, t = LINE_PX): void {
+  box(g, x, y, t, h, color);
 }
 
 // ---------------------------------------------------------------------------
-// Shared furniture. Every icon is drawn from its baseline `by`, the first row of the
-// floor slab, so a piece sits on the floor no matter which floor band it lands in.
+// Shared native furniture. Every piece is drawn from its baseline `by`, the first row of
+// the slab, so it sits on the floor in whichever band it lands.
 // ---------------------------------------------------------------------------
 
 function plantIcon(g: Graphics, x: number, by: number): void {
   const leaf = PALETTE.detail.leaf;
-  box(g, x + 2, by - 14, 3, 1, leaf);
-  box(g, x + 1, by - 13, 5, 1, leaf);
-  box(g, x, by - 12, 7, 1, leaf);
-  box(g, x + 1, by - 11, 5, 1, leaf);
-  box(g, x + 2, by - 10, 3, 1, leaf);
-  vline(g, x + 3, by - 10, 5, PALETTE.detail.woodDark);
-  panel(g, x + 1, by - 5, 5, 5, PALETTE.detail.pot);
+  box(g, x + 4, by - 28, 6, 2, leaf);
+  box(g, x + 2, by - 26, 10, 2, leaf);
+  box(g, x, by - 24, 14, 2, leaf);
+  box(g, x + 2, by - 22, 10, 2, leaf);
+  box(g, x + 4, by - 20, 6, 2, leaf);
+  box(g, x + 3, by - 25, 2, 1, PALETTE.detail.leafLight); // light catching the top leaves
+  box(g, x + 8, by - 23, 2, 1, PALETTE.detail.leafLight);
+  vline(g, x + 6, by - 20, 10, PALETTE.detail.woodDark);
+  panel(g, x + 2, by - 10, 10, 10, PALETTE.detail.pot);
+  hline(g, x + 4, by - 8, 6, PALETTE.detail.woodLight, 1); // the pot's rim
 }
 
 function picture(g: Graphics, x: number, y: number, w: number, h: number, sky: number): void {
   panel(g, x, y, w, h, PALETTE.detail.gold);
-  box(g, x + 1, y + 1, w - 2, h - 2, sky);
-  box(g, x + 1, y + h - 3, w - 2, 2, PALETTE.detail.leaf); // ground
-  box(g, x + 3, y + h - 5, 3, 2, PALETTE.detail.stoneDark); // a hill in the middle distance
+  box(g, x + 2, y + 2, w - 4, h - 4, sky);
+  box(g, x + 2, y + h - 6, w - 4, 4, PALETTE.detail.leaf); // ground
+  box(g, x + 6, y + h - 10, 6, 4, PALETTE.detail.stoneDark); // a hill in the middle distance
+  box(g, x + 7, y + h - 11, 4, 1, PALETTE.detail.stoneDark);
 }
 
 function wallClock(g: Graphics, x: number, y: number): void {
-  box(g, x + 1, y, 3, 1, INK);
-  box(g, x, y + 1, 1, 3, INK);
-  box(g, x + 4, y + 1, 1, 3, INK);
-  box(g, x + 1, y + 4, 3, 1, INK);
-  box(g, x + 1, y + 1, 3, 3, PALETTE.detail.linen);
-  box(g, x + 2, y + 1, 1, 2, INK); // hands
-  box(g, x + 2, y + 2, 2, 1, INK);
+  box(g, x + 2, y, 6, 2, INK);
+  box(g, x, y + 2, 2, 6, INK);
+  box(g, x + 8, y + 2, 2, 6, INK);
+  box(g, x + 2, y + 8, 6, 2, INK);
+  box(g, x + 1, y + 1, 1, 1, INK); // the corners round it off
+  box(g, x + 8, y + 1, 1, 1, INK);
+  box(g, x + 1, y + 8, 1, 1, INK);
+  box(g, x + 8, y + 8, 1, 1, INK);
+  box(g, x + 2, y + 2, 6, 6, PALETTE.detail.linen);
+  box(g, x + 4, y + 3, 1, 3, INK); // hands, one pixel thin
+  box(g, x + 4, y + 5, 3, 1, INK);
 }
 
 function floorLampIcon(g: Graphics, x: number, by: number, lit: boolean): void {
-  box(g, x + 1, by - 2, 6, 2, PALETTE.detail.metalDark);
-  hline(g, x + 1, by - 2, 6);
-  box(g, x + 3, by - 16, 2, 14, PALETTE.detail.metal);
-  hline(g, x + 2, by - 21, 4); // shade top
-  box(g, x + 1, by - 20, 6, 4, lit ? PALETTE.windowLit : PALETTE.detail.linen);
-  vline(g, x + 1, by - 20, 4);
-  vline(g, x + 6, by - 20, 4);
-  hline(g, x, by - 16, 8);
+  box(g, x + 2, by - 4, 12, 4, PALETTE.detail.metalDark);
+  hline(g, x + 2, by - 4, 12);
+  box(g, x + 7, by - 32, 2, 28, PALETTE.detail.metal);
+  hline(g, x + 4, by - 42, 8); // shade top
+  box(g, x + 2, by - 40, 12, 8, lit ? PALETTE.windowLit : PALETTE.detail.linen);
+  vline(g, x + 2, by - 40, 8);
+  vline(g, x + 12, by - 40, 8);
+  hline(g, x, by - 32, 16);
+  if (lit) box(g, x + 4, by - 38, 8, 1, PALETTE.carLight);
 }
 
 function tableLamp(g: Graphics, x: number, by: number, lit: boolean): void {
-  box(g, x + 1, by - 4, 3, 4, PALETTE.detail.metal);
-  hline(g, x, by - 7, 5);
-  box(g, x, by - 6, 5, 2, lit ? PALETTE.windowLit : PALETTE.detail.linen);
-  hline(g, x, by - 4, 5);
+  box(g, x + 2, by - 2, 6, 2, PALETTE.detail.metalDark); // foot
+  box(g, x + 4, by - 8, 2, 6, PALETTE.detail.metal); // stem
+  box(g, x + 1, by - 14, 8, 2, INK); // shade, narrower at the top
+  box(g, x, by - 12, 10, 4, lit ? PALETTE.windowLit : PALETTE.detail.linen);
+  hline(g, x, by - 8, 10);
+  vline(g, x, by - 12, 4, INK, 1);
+  vline(g, x + 9, by - 12, 4, INK, 1);
 }
 
 function monitorIcon(g: Graphics, x: number, by: number, w: number, h: number, lit: boolean): void {
   panel(g, x, by - h, w, h, PALETTE.detail.metalDark);
-  box(g, x + 1, by - h + 1, w - 2, h - 3, lit ? PALETTE.detail.screenOn : PALETTE.detail.screenOff);
-  if (lit) box(g, x + 1, by - h + 1, w - 2, 1, PALETTE.carLight); // the glow off the top of the tube
-}
-
-function deskWithMonitor(g: Graphics, x: number, by: number, lit: boolean, chairColor: number): void {
-  monitorIcon(g, x + 1, by - 10, 7, 7, lit);
-  box(g, x, by - 10, 10, 2, PALETTE.detail.wood); // desk top
-  hline(g, x, by - 10, 10);
-  vline(g, x + 1, by - 8, 8, PALETTE.detail.woodDark);
-  vline(g, x + 8, by - 8, 8, PALETTE.detail.woodDark);
-  officeChair(g, x + 10, by, chairColor);
+  box(g, x + 2, by - h + 2, w - 4, h - 6, lit ? PALETTE.detail.screenOn : PALETTE.detail.screenOff);
+  if (lit) box(g, x + 2, by - h + 2, w - 4, 2, PALETTE.carLight); // the glow off the top of the tube
+  else box(g, x + 3, by - h + 3, 2, 1, PALETTE.detail.metal); // a glint on the dark glass
+  box(g, x + w - 5, by - 3, 2, 1, lit ? PALETTE.detail.led : PALETTE.detail.metal); // power light
 }
 
 function officeChair(g: Graphics, x: number, by: number, color: number): void {
-  panel(g, x + 1, by - 17, 4, 10, color); // padded back
-  panel(g, x, by - 8, 6, 3, color); // seat
-  vline(g, x + 2, by - 5, 4, PALETTE.detail.metalDark); // gas post
-  hline(g, x, by - 1, 6); // star base
-  box(g, x, by - 2, 2, 1, INK); // casters
-  box(g, x + 4, by - 2, 2, 1, INK);
+  panel(g, x + 2, by - 34, 8, 20, color); // padded back
+  vline(g, x + 4, by - 32, 16, 0xffffff, 1); // a seam down the pad
+  panel(g, x, by - 16, 12, 6, color); // seat
+  vline(g, x + 4, by - 10, 8, PALETTE.detail.metalDark); // gas post
+  hline(g, x, by - 2, 12); // star base
+  box(g, x, by - 4, 4, 2, INK); // casters
+  box(g, x + 8, by - 4, 4, 2, INK);
 }
 
-function diningChair(g: Graphics, x: number, by: number, color: number, faceRight: boolean): void {
-  const back = faceRight ? x : x + 3;
-  panel(g, back, by - 16, 3, 16, color); // back with a slat
-  box(g, x, by - 9, 6, 3, color); // seat
-  outline(g, x, by - 9, 6, 3, INK);
-  vline(g, faceRight ? x + 5 : x, by - 6, 6, PALETTE.detail.woodDark); // front leg
-}
-
-function stool(g: Graphics, x: number, by: number): void {
-  box(g, x, by - 10, 8, 2, PALETTE.detail.seatA);
-  hline(g, x, by - 10, 8);
-  box(g, x + 3, by - 8, 2, 7, PALETTE.detail.metal);
-  hline(g, x + 1, by - 4, 6, PALETTE.detail.metal); // foot ring
-  hline(g, x + 1, by - 1, 6);
+function deskWithMonitor(g: Graphics, x: number, by: number, lit: boolean, chairColor: number): void {
+  monitorIcon(g, x + 2, by - 20, 14, 14, lit);
+  box(g, x, by - 20, 20, 4, PALETTE.detail.wood); // desk top
+  hline(g, x, by - 20, 20);
+  hline(g, x + 2, by - 18, 16, PALETTE.detail.woodLight, 1); // grain along the top
+  box(g, x + 17, by - 24, 2, 4, PALETTE.detail.linen); // a mug
+  vline(g, x + 2, by - 16, 16, PALETTE.detail.woodDark);
+  vline(g, x + 16, by - 16, 16, PALETTE.detail.woodDark);
+  officeChair(g, x + 20, by, chairColor);
 }
 
 function bedIcon(g: Graphics, x: number, by: number, w: number, v: number, headLeft = true): void {
   const blanket = v === 0 ? PALETTE.detail.blanketA : PALETTE.detail.blanketB;
-  const hb = 4;
+  const hb = 8;
   const hx = headLeft ? x : x + w - hb;
-  box(g, hx, by - 16, hb, 16, PALETTE.detail.wood); // headboard
-  hline(g, hx, by - 16, hb);
-  vline(g, headLeft ? hx : hx + hb - 1, by - 16, 16); // only the outer edge is inked
-  vline(g, headLeft ? hx + hb - 1 : hx, by - 16, 6); // the board reads above the mattress
-  hline(g, hx + 1, by - 14, hb - 2, PALETTE.detail.woodDark); // a rail across the board
+  box(g, hx, by - 32, hb, 32, PALETTE.detail.wood); // headboard
+  hline(g, hx, by - 32, hb);
+  vline(g, headLeft ? hx : hx + hb - LINE_PX, by - 32, 32); // only the outer edge is inked
+  vline(g, headLeft ? hx + hb - LINE_PX : hx, by - 32, 12); // the board reads above the mattress
+  hline(g, hx + 2, by - 28, hb - 4, PALETTE.detail.woodDark); // a rail across the board
+  hline(g, hx + 2, by - 24, hb - 4, PALETTE.detail.woodLight, 1);
   const mx = headLeft ? x + hb : x;
   const mw = w - hb;
-  panel(g, mx, by - 6, mw, 6, PALETTE.detail.woodDark); // base
-  panel(g, mx, by - 10, mw, 5, PALETTE.detail.linen); // mattress and sheet
-  const pw = Math.min(6, Math.max(3, mw - 6));
-  panel(g, headLeft ? mx + 1 : mx + mw - pw - 1, by - 13, pw, 3, PALETTE.detail.pillow);
-  const bw = Math.min(10, Math.max(3, mw - 8));
-  const bx = headLeft ? mx + mw - bw - 1 : mx + 1;
-  box(g, bx, by - 9, bw, 3, blanket);
-  hline(g, bx, by - 9, bw);
+  panel(g, mx, by - 12, mw, 12, PALETTE.detail.woodDark); // base
+  panel(g, mx, by - 20, mw, 10, PALETTE.detail.linen); // mattress and sheet
+  const pw = Math.min(12, Math.max(6, mw - 12));
+  const px = headLeft ? mx + 2 : mx + mw - pw - 2;
+  panel(g, px, by - 26, pw, 6, PALETTE.detail.pillow);
+  hline(g, px + 2, by - 23, pw - 4, PALETTE.detail.marbleVein, 1); // the dent in the pillow
+  const bw = Math.min(20, Math.max(6, mw - 16));
+  const bx = headLeft ? mx + mw - bw - 2 : mx + 2;
+  box(g, bx, by - 18, bw, 6, blanket);
+  hline(g, bx, by - 18, bw);
+  hline(g, bx, by - 16, bw, PALETTE.detail.linen, 1); // the turned down sheet
 }
 
 function sofaIcon(g: Graphics, x: number, by: number, w: number, back: number, seat: number): void {
-  panel(g, x + 3, by - 14, w - 6, 8, back); // backrest
-  panel(g, x, by - 11, 4, 11, back); // arms
-  panel(g, x + w - 4, by - 11, 4, 11, back);
-  panel(g, x + 3, by - 7, w - 6, 7, seat); // cushions
-  for (let cx = x + 3 + Math.floor((w - 6) / 2); cx < x + w - 5; cx += Math.max(8, Math.floor((w - 6) / 2))) {
-    vline(g, cx, by - 6, 5);
-  }
+  panel(g, x + 6, by - 28, w - 12, 16, back); // backrest
+  panel(g, x, by - 22, 8, 22, back); // arms
+  panel(g, x + w - 8, by - 22, 8, 22, back);
+  panel(g, x + 6, by - 14, w - 12, 14, seat); // cushions
+  const half = Math.max(16, Math.floor((w - 12) / 4) * 2);
+  for (let cx = x + 6 + half; cx < x + w - 10; cx += half) vline(g, cx, by - 12, 10);
+  hline(g, x + 8, by - 12, w - 16, 0xffffff, 1); // light along the cushion fronts
 }
 
 function lowTable(g: Graphics, x: number, by: number, w: number, v: number): void {
-  box(g, x, by - 6, w, 2, PALETTE.detail.wood);
-  hline(g, x, by - 6, w);
-  vline(g, x + 1, by - 4, 4, PALETTE.detail.woodDark);
-  vline(g, x + w - 2, by - 4, 4, PALETTE.detail.woodDark);
-  box(g, x + Math.floor(w / 2) - 1, by - 9, 3, 3, v === 0 ? PALETTE.detail.leaf : PALETTE.detail.cross);
-  hline(g, x + Math.floor(w / 2) - 1, by - 9, 3);
+  box(g, x, by - 12, w, 4, PALETTE.detail.wood);
+  hline(g, x, by - 12, w);
+  hline(g, x + 2, by - 10, w - 4, PALETTE.detail.woodLight, 1);
+  vline(g, x + 2, by - 8, 8, PALETTE.detail.woodDark);
+  vline(g, x + w - 4, by - 8, 8, PALETTE.detail.woodDark);
+  const cx = x + Math.floor(w / 4) * 2 - 2;
+  box(g, cx, by - 18, 6, 6, v === 0 ? PALETTE.detail.leaf : PALETTE.detail.cross);
+  hline(g, cx, by - 18, 6);
 }
 
-function clothTable(g: Graphics, x: number, by: number, w: number, h: number, v: number): void {
-  panel(g, x, by - h, w, h, PALETTE.detail.linen);
-  hline(g, x + 1, by - h + 3, w - 2, PALETTE.detail.marbleVein); // the fall of the cloth
-  const cx = x + Math.floor(w / 2) - 1;
-  box(g, cx, by - h - 4, 3, 4, v === 0 ? PALETTE.detail.cross : PALETTE.detail.leaf);
-  hline(g, cx, by - h - 4, 3);
+const NIGHTSTAND_W = 10;
+const TV_W = 14;
+
+function nightstand(g: Graphics, x: number, by: number, lit: boolean): void {
+  panel(g, x, by - 16, NIGHTSTAND_W, 16, PALETTE.detail.wood);
+  hline(g, x + 2, by - 10, NIGHTSTAND_W - 4, PALETTE.detail.woodDark); // drawer
+  box(g, x + 4, by - 7, 2, 1, PALETTE.detail.gold); // its knob
+  tableLamp(g, x, by - 16, lit);
 }
 
-function shelfUnit(g: Graphics, x: number, by: number, w: number, h: number, v: number): void {
-  panel(g, x, by - h, w, h, PALETTE.detail.woodDark);
-  const rows = Math.max(2, Math.round((h - 2) / 7));
-  const step = Math.floor((h - 2) / rows);
-  for (let r = 0; r < rows; r++) {
-    const top = by - h + 1 + r * step;
-    hline(g, x + 1, top + step - 1, w - 2, PALETTE.detail.wood); // the shelf board
-    for (let i = 0; x + 2 + i * 5 + 4 <= x + w - 1; i++) {
-      const c = (i + r + v) % 3 === 0 ? PALETTE.detail.shelfGoodsA : (i + r + v) % 3 === 1 ? PALETTE.detail.shelfGoodsB : PALETTE.amber;
-      box(g, x + 2 + i * 5, top + 1, 4, step - 2, c);
-      outline(g, x + 2 + i * 5, top + 1, 4, step - 2, INK);
-    }
-  }
-}
-
-function linenShelf(g: Graphics, x: number, by: number, w: number, h: number): void {
-  panel(g, x, by - h, w, h, PALETTE.detail.metal);
-  const shelves = 3;
-  const step = Math.floor(h / shelves);
-  for (let s = 1; s <= shelves; s++) {
-    const y = by - h + s * step;
-    hline(g, x + 1, y, w - 2);
-    for (let i = 0; x + 2 + i * 8 + 7 <= x + w - 1; i++) {
-      box(g, x + 2 + i * 8, y - step + 2, 7, step - 3, PALETTE.detail.linen);
-      outline(g, x + 2 + i * 8, y - step + 2, 7, step - 3, INK);
-      hline(g, x + 3, y - 2, 5, PALETTE.detail.marbleVein); // a fold in the top sheet
-    }
-  }
-}
-
-function carSilhouette(g: Graphics, x: number, by: number, color: number): void {
-  panel(g, x + 5, by - 12, 14, 6, color); // cabin
-  box(g, x + 6, by - 11, 5, 3, PALETTE.detail.glass);
-  box(g, x + 12, by - 11, 6, 3, PALETTE.detail.glass);
-  panel(g, x, by - 7, 24, 5, color); // body
-  box(g, x + 2, by - 3, 5, 3, INK); // wheels
-  box(g, x + 17, by - 3, 5, 3, INK);
-  box(g, x + 22, by - 6, 2, 1, PALETTE.detail.glow); // headlight
+function smallTv(g: Graphics, x: number, by: number, lit: boolean): void {
+  panel(g, x + 2, by - 10, TV_W - 4, 10, PALETTE.detail.wood); // stand
+  monitorIcon(g, x, by - 10, TV_W, 16, lit);
 }
 
 // ---------------------------------------------------------------------------
-// Room shell: wall, window band per floor, floor slabs
+// Room shell: two-tone wall, window band per floor, floor slabs
 // ---------------------------------------------------------------------------
 
-function drawWindowBand(g: Graphics, kind: RoomKind, y0: number, w: number, lit: boolean): void {
+function drawWindowBand(g: Graphics, kind: RoomKind, y0: number, w: number, lit: boolean, shadeFrom: number): void {
   if (WINDOWS[kind] === 'none') return;
   hline(g, 0, y0 + WIN_TOP, w); // head rail
-  hline(g, 0, y0 + SILL, w); // sill
-  for (let x = 1; x + WIN_PANE + 1 <= w; x += WIN_STEP) {
-    const gy = y0 + WIN_TOP + 1;
+  hline(g, 0, y0 + WIN_SILL, w); // sill
+  const gy = y0 + WIN_PANE_TOP;
+  for (let x = WIN_PANE_X; x + WIN_PANE + LINE_PX <= w; x += TILE_PX) {
     if (lit) {
-      box(g, x, gy, WIN_PANE, WIN_H, PALETTE.windowLit);
-      box(g, x, gy, WIN_PANE, 1, PALETTE.carLight);
+      box(g, x, gy, WIN_PANE, WIN_PANE, PALETTE.windowLit);
+      box(g, x, gy, WIN_PANE, 2, PALETTE.carLight); // the lamp light pooling at the head
     } else {
       // The renderer only knows lit or unlit, so an unlit pane keeps the day sky in it
       // with the deep unlit blue pooling along the bottom.
-      box(g, x, gy, WIN_PANE, WIN_H, PALETTE.windowDay);
-      box(g, x, gy + WIN_H - 2, WIN_PANE, 2, PALETTE.windowUnlit);
+      box(g, x, gy, WIN_PANE, WIN_PANE, PALETTE.windowDay);
+      box(g, x, gy + WIN_PANE - 4, WIN_PANE, 4, PALETTE.windowUnlit);
+      box(g, x + 2, gy + 2, 3, 1, 0xffffff, 0.55); // a glint in the top corner
+      box(g, x + 2, gy + 3, 1, 2, 0xffffff, 0.55);
     }
-    vline(g, x - 1, gy, WIN_H); // mullions
-    vline(g, x + WIN_PANE, gy, WIN_H);
+    vline(g, x - LINE_PX, gy, WIN_PANE); // mullions
+    vline(g, x + WIN_PANE, gy, WIN_PANE);
   }
+  // Glass on the shadow face sits in the same shade as the wall around it.
+  if (shadeFrom < w) box(g, shadeFrom, gy, w - LINE_PX - shadeFrom, WIN_PANE, INK, 0.14);
 }
 
 function drawShell(g: Graphics, kind: RoomKind, w: number, h: number, lit: boolean): void {
@@ -424,15 +354,18 @@ function drawShell(g: Graphics, kind: RoomKind, w: number, h: number, lit: boole
   // The floor under it is already drawn by the slab layer and the floor strip.
   if (OVERLAY_KINDS.has(kind)) return;
   box(g, 0, 0, w, h, PALETTE.wall[kind]);
+  const shadowW = LOBBY_KINDS.has(kind) ? LOBBY_SHADOW_PX : WALL_SHADOW_PX;
+  const shadeFrom = w - LINE_PX - shadowW;
+  box(g, shadeFrom, 0, shadowW, h, wallShadow(kind)); // the shadow face
   const floors = Math.max(1, Math.round(h / FLOOR_PX));
   const perFloorSlabs = !FULL_HEIGHT.has(kind);
   for (let f = 0; f < floors; f++) {
     const y0 = f * FLOOR_PX;
-    drawWindowBand(g, kind, y0, w, lit);
+    drawWindowBand(g, kind, y0, w, lit, shadeFrom);
     if (perFloorSlabs || f === floors - 1) {
-      const sy = y0 + FLOOR_PX - SLAB_H;
-      box(g, 0, sy, w, SLAB_H, PALETTE.slab);
-      box(g, 0, sy, w, 1, PALETTE.slabEdge);
+      const sy = y0 + BASE;
+      box(g, 0, sy, w, SLAB_PX, PALETTE.slab);
+      box(g, 0, sy, w, SLAB_EDGE_PX, PALETTE.slabEdge);
     }
   }
 }
@@ -443,13 +376,13 @@ function drawCellOutline(g: Graphics, w: number, h: number, floors: number, perF
 }
 
 // ---------------------------------------------------------------------------
-// Interiors, one per room kind. y0 is the top of the band to fill, `by` the baseline
-// (first row of the floor slab), `ty` the first free row under the windows.
+// Native interiors. y0 is the top of the band to fill, `by` the baseline (first row of the
+// slab), `ty` the first free row under the windows.
 // ---------------------------------------------------------------------------
 
-function drawInterior(g: Graphics, kind: RoomKind, y0: number, w: number, h: number, v: number, lit: boolean): void {
-  const by = y0 + h - SLAB_H;
-  const ty = y0 + (WINDOWS[kind] === 'none' ? OPEN_TOP : INTERIOR_TOP);
+function drawNativeInterior(g: Graphics, kind: RoomKind, y0: number, w: number, h: number, v: number, lit: boolean): void {
+  const by = y0 + h - SLAB_PX;
+  const ty = y0 + INTERIOR_TOP;
   switch (kind) {
     case 'lobby':
       drawLobby(g, y0, w, h, v, lit);
@@ -466,9 +399,6 @@ function drawInterior(g: Graphics, kind: RoomKind, y0: number, w: number, h: num
     case 'office':
       drawOffice(g, by, ty, w, v, lit);
       break;
-    case 'condo':
-      drawCondo(g, y0, by, ty, w, v, lit);
-      break;
     case 'hotelSingle':
       drawHotelSingle(g, by, ty, w, v, lit);
       break;
@@ -478,636 +408,103 @@ function drawInterior(g: Graphics, kind: RoomKind, y0: number, w: number, h: num
     case 'hotelSuite':
       drawHotelSuite(g, by, ty, w, v, lit);
       break;
-    case 'fastFood':
-      drawFastFood(g, by, ty, w, v, lit);
-      break;
-    case 'restaurant':
-      drawRestaurant(g, by, ty, w, v, lit);
-      break;
-    case 'shop':
-      drawShop(g, by, ty, w, v);
-      break;
-    case 'cinema':
-      drawCinema(g, y0, w, h, v, lit);
-      break;
-    case 'partyHall':
-      drawPartyHall(g, y0, w, h, v, lit);
-      break;
-    case 'medical':
-      drawMedical(g, by, ty, w, v);
-      break;
-    case 'security':
-      drawSecurity(g, by, ty, w, v, lit);
-      break;
-    case 'housekeeping':
-      drawHousekeeping(g, by, ty, w, v, lit);
-      break;
-    case 'parkingRamp':
-      drawParkingRamp(g, by, ty, w, v, lit);
-      break;
-    case 'parkingSpace':
-      drawParkingSpace(g, by, ty, w, v, lit);
-      break;
-    case 'recycling':
-      drawRecycling(g, y0, w, h, v, lit);
-      break;
-    case 'metro':
-      drawMetro(g, y0, w, h, v, lit);
-      break;
-    case 'cathedral':
-      drawCathedral(g, y0, w, h, v, lit);
-      break;
+    default:
+      break; // the half grid kinds are drawn by art-2x.ts
   }
 }
 
 // --- office -----------------------------------------------------------------
-// Left to right: a low partition line, three desks with monitors and chairs, a
-// filing cabinet at the right end, a wall clock above it.
+// Left to right: a low partition line, three desks with monitors and chairs, a filing
+// cabinet at the right end, a wall clock above it. Desks at x 14, 50, 86 on a 144 px office.
 
 function drawOffice(g: Graphics, by: number, ty: number, w: number, v: number, lit: boolean): void {
-  const cabX = w - 10;
-  const deskStep = 18;
-  const desks = Math.max(1, Math.min(3, Math.floor((cabX - 6) / deskStep)));
+  const cabX = w - 20;
+  const deskStep = 36;
+  const desks = Math.max(1, Math.min(3, Math.floor((cabX - 12) / deskStep)));
   const chairColor = v === 0 ? PALETTE.detail.chairA : PALETTE.detail.chairB;
   for (let i = 0; i < desks; i++) {
-    const x = 7 + i * deskStep;
-    if (x + 17 > cabX - 1) break;
-    vline(g, x - 2, by - 13, 13); // the low partition between the bays
-    hline(g, x - 3, by - 13, 3);
+    const x = 14 + i * deskStep;
+    if (x + 34 > cabX - 2) break;
+    vline(g, x - 4, by - 26, 26); // the low partition between the bays
+    hline(g, x - 6, by - 26, 6);
     deskWithMonitor(g, x, by, lit, chairColor);
   }
-  if (cabX > 12) {
-    panel(g, cabX, by - 15, 8, 15, PALETTE.detail.metal); // filing cabinet
+  if (cabX > 24) {
+    panel(g, cabX, by - 30, 16, 30, PALETTE.detail.metal); // filing cabinet
     for (let i = 0; i < 3; i++) {
-      hline(g, cabX, by - 11 + i * 4, 8);
-      box(g, cabX + 3, by - 13 + i * 4, 2, 1, INK); // drawer handle
+      hline(g, cabX, by - 22 + i * 8, 16);
+      box(g, cabX + 6, by - 26 + i * 8, 4, 2, INK); // drawer handle
     }
-    wallClock(g, cabX + 1, ty);
+    box(g, cabX + 2, by - 28, 12, 1, 0xffffff, 0.35); // light on the cabinet top
+    wallClock(g, cabX + 2, ty);
   }
-  if (v === 1 && cabX > 20) picture(g, 2, ty, 9, 7, PALETTE.detail.glass);
-}
-
-// --- condo ------------------------------------------------------------------
-// A curtained window, sofa, coffee table, floor lamp, the bed at the far end, a plant.
-
-function drawCondo(g: Graphics, y0: number, by: number, ty: number, w: number, v: number, lit: boolean): void {
-  const curtainEnd = Math.min(w - 2, 44);
-  hline(g, 2, y0 + WIN_TOP - 1, curtainEnd - 2, PALETTE.detail.metalDark); // curtain rail
-  panel(g, 2, y0 + WIN_TOP, 6, 13, PALETTE.detail.curtain); // drapes either side of the glass
-  panel(g, curtainEnd - 6, y0 + WIN_TOP, 6, 13, PALETTE.detail.curtain);
-  for (let x = 4; x < curtainEnd - 6; x += 4) box(g, x, y0 + WIN_TOP, 1, 2, PALETTE.detail.curtain); // valance pleats
-
-  const back = v === 0 ? PALETTE.detail.chairA : PALETTE.detail.chairB;
-  const seat = v === 0 ? PALETTE.detail.chairB : PALETTE.detail.chairA;
-  let x = 6;
-  const sofaW = Math.min(34, Math.max(14, Math.floor(w * 0.28)));
-  sofaIcon(g, x, by, sofaW, back, seat);
-  x += sofaW + 4;
-  if (x + 18 < w) {
-    lowTable(g, x, by, 16, v);
-    x += 20;
-  }
-  if (x + 8 < w) {
-    floorLampIcon(g, x, by, lit);
-    x += 10;
-  }
-  const bedW = Math.min(36, w - x - 12);
-  if (bedW >= 14) {
-    bedIcon(g, x, by, bedW, v, false); // headboard against the far wall
-    x += bedW + 2;
-  }
-  if (x + 7 <= w - 1) plantIcon(g, w - 8, by);
-  if (v === 1 && curtainEnd + 12 < w) picture(g, curtainEnd + 4, ty, 10, 8, PALETTE.detail.glass);
+  if (v === 1 && cabX > 40) picture(g, 4, ty, 18, 14, PALETTE.detail.glass);
 }
 
 // --- hotel ------------------------------------------------------------------
-
-const NIGHTSTAND_W = 5;
-const TV_W = 7;
-
-function nightstand(g: Graphics, x: number, by: number, lit: boolean): void {
-  panel(g, x, by - 8, NIGHTSTAND_W, 8, PALETTE.detail.wood);
-  hline(g, x + 1, by - 5, NIGHTSTAND_W - 2, PALETTE.detail.woodDark); // drawer
-  tableLamp(g, x, by - 8, lit);
-}
-
-function smallTv(g: Graphics, x: number, by: number, lit: boolean): void {
-  panel(g, x + 1, by - 5, TV_W - 2, 5, PALETTE.detail.wood); // stand
-  monitorIcon(g, x, by - 5, TV_W, 8, lit);
-}
+// Single: bed at x 4, 32 wide with an 8 by 32 headboard; nightstand at (36, 50); TV at (48, 40).
 
 function drawHotelSingle(g: Graphics, by: number, ty: number, w: number, v: number, lit: boolean): void {
-  const bedW = Math.max(12, w - 16);
-  bedIcon(g, 2, by, bedW, v);
-  const nx = 2 + bedW;
-  if (nx + NIGHTSTAND_W <= w - TV_W - 2) nightstand(g, nx, by, lit);
-  smallTv(g, w - TV_W - 1, by, lit);
-  if (v === 1 && w >= 44) picture(g, 4, ty, 10, 8, PALETTE.detail.curtain);
+  const bedW = Math.max(24, w - 32);
+  bedIcon(g, 4, by, bedW, v);
+  const nx = 4 + bedW;
+  if (nx + NIGHTSTAND_W <= w - TV_W - 4) nightstand(g, nx, by, lit);
+  smallTv(g, w - TV_W - 2, by, lit);
+  if (v === 1 && w >= 88) picture(g, 8, ty, 20, 16, PALETTE.detail.curtain);
 }
 
 function drawHotelTwin(g: Graphics, by: number, ty: number, w: number, v: number, lit: boolean): void {
-  const bedW = Math.max(12, Math.floor((w - 14) / 2));
-  bedIcon(g, 2, by, bedW, v);
-  bedIcon(g, 4 + bedW, by, bedW, v === 0 ? 1 : 0);
-  const nx = 6 + bedW * 2;
-  if (nx + NIGHTSTAND_W <= w - 1) {
+  const bedW = Math.max(24, Math.floor((w - 28) / 4) * 2);
+  bedIcon(g, 4, by, bedW, v);
+  bedIcon(g, 8 + bedW, by, bedW, v === 0 ? 1 : 0);
+  const nx = 12 + bedW * 2;
+  if (nx + NIGHTSTAND_W <= w - LINE_PX) {
     nightstand(g, nx, by, lit);
-    picture(g, nx - 1, ty, 7, 6, PALETTE.detail.glass);
+    picture(g, nx - 2, ty, 14, 12, PALETTE.detail.glass);
   }
 }
 
 function drawHotelSuite(g: Graphics, by: number, ty: number, w: number, v: number, lit: boolean): void {
-  const bedW = Math.min(26, Math.max(14, Math.floor(w * 0.32)));
-  bedIcon(g, 2, by, bedW, v);
-  let x = bedW + 3;
-  if (x + NIGHTSTAND_W <= w - 40) {
+  const bedW = Math.min(52, Math.max(28, Math.floor(w * 0.16) * 2));
+  bedIcon(g, 4, by, bedW, v);
+  let x = bedW + 6;
+  if (x + NIGHTSTAND_W <= w - 80) {
     nightstand(g, x, by, lit);
-    x += NIGHTSTAND_W + 3;
+    x += NIGHTSTAND_W + 6;
   }
-  const sofaW = Math.min(24, w - x - 25);
-  if (sofaW >= 14) {
+  const sofaW = Math.min(48, w - x - 50);
+  if (sofaW >= 28) {
     sofaIcon(g, x, by, sofaW, PALETTE.detail.chairA, v === 0 ? PALETTE.detail.chairB : PALETTE.detail.seatA);
-    picture(g, x + 3, ty, Math.min(14, sofaW - 6), 8, v === 0 ? PALETTE.detail.glass : PALETTE.detail.curtain);
-    x += sofaW + 2;
+    picture(g, x + 6, ty, Math.min(28, sofaW - 12), 16, v === 0 ? PALETTE.detail.glass : PALETTE.detail.curtain);
+    x += sofaW + 4;
   }
-  if (x + 12 <= w - 11) {
-    lowTable(g, x, by, 11, v);
-    x += 12;
+  if (x + 24 <= w - 22) {
+    lowTable(g, x, by, 22, v);
+    x += 24;
   }
-  floorLampIcon(g, w - 9, by, lit);
-}
-
-// --- fast food --------------------------------------------------------------
-// A counter with a register under a menu board, three stools, a drinks fridge.
-
-function drawFastFood(g: Graphics, by: number, ty: number, w: number, v: number, lit: boolean): void {
-  const counterW = Math.min(48, Math.floor(w * 0.38));
-  panel(g, 2, by - 13, counterW, 3, PALETTE.detail.tile); // counter top
-  panel(g, 2, by - 10, counterW, 10, PALETTE.detail.counter);
-  for (let x = 10; x < counterW; x += 8) vline(g, x, by - 9, 8, PALETTE.detail.woodDark);
-  const regX = 2 + counterW - 12;
-  panel(g, regX, by - 20, 10, 7, PALETTE.detail.metal); // register
-  box(g, regX + 1, by - 19, 8, 3, lit ? PALETTE.detail.screenOn : PALETTE.detail.screenOff);
-  hline(g, regX + 1, by - 15, 8, INK);
-
-  const boardW = counterW - 14;
-  if (boardW >= 16) {
-    panel(g, 4, ty, boardW, 9, v === 0 ? PALETTE.amber : PALETTE.detail.cross); // menu board
-    for (let i = 0; 6 + i * 6 + 4 <= boardW; i++) {
-      box(g, 6 + i * 6, ty + 2, 4, 2, INK);
-      box(g, 6 + i * 6, ty + 5, 3, 2, INK);
-    }
-  }
-
-  const fridgeX = w - 20;
-  for (let i = 0, x = counterW + 8; i < 3 && x + 8 <= fridgeX - 4; i++, x += 12) stool(g, x, by);
-
-  panel(g, fridgeX, by - 22, 18, 22, PALETTE.detail.metalDark); // drinks fridge
-  box(g, fridgeX + 2, by - 20, 14, 18, lit ? PALETTE.windowLit : PALETTE.detail.glass);
-  for (let s = 0; s < 3; s++) {
-    const y = by - 19 + s * 6;
-    hline(g, fridgeX + 2, y + 4, 14);
-    for (let i = 0; i < 4; i++) {
-      box(g, fridgeX + 3 + i * 3, y, 2, 4, pick([PALETTE.detail.cross, PALETTE.detail.leaf, PALETTE.amber], i + s + v, PALETTE.detail.cross));
-    }
-  }
-  vline(g, fridgeX + 9, by - 20, 18); // door seam
-}
-
-// --- restaurant -------------------------------------------------------------
-// Four clothed tables with chairs and hanging lamps, a bar at the right end.
-
-function drawRestaurant(g: Graphics, by: number, ty: number, w: number, v: number, lit: boolean): void {
-  const barW = Math.min(44, Math.floor(w * 0.24));
-  const barX = w - barW - 2;
-  const step = 34;
-  const wood = v === 0 ? PALETTE.detail.woodDark : PALETTE.detail.chairB;
-  for (let i = 0, x = 4; i < 4 && x + 30 <= barX - 2; i++, x += step) {
-    diningChair(g, x, by, wood, true);
-    clothTable(g, x + 7, by, 16, 12, v);
-    diningChair(g, x + 24, by, wood, false);
-    vline(g, x + 14, ty - 1, 3, PALETTE.detail.metalDark); // the cord of a hanging lamp
-    hline(g, x + 12, ty + 2, 5);
-    box(g, x + 11, ty + 3, 7, 3, lit ? PALETTE.windowLit : PALETTE.detail.linen);
-    hline(g, x + 11, ty + 6, 7);
-  }
-  panel(g, barX, by - 14, barW, 3, PALETTE.detail.wood); // bar top
-  panel(g, barX, by - 11, barW, 11, PALETTE.detail.woodDark);
-  for (let x = barX + 6; x < barX + barW - 2; x += 7) vline(g, x, by - 10, 9, PALETTE.detail.wood);
-  panel(g, barX + 2, ty, barW - 4, 9, PALETTE.detail.woodDark); // back shelf
-  hline(g, barX + 3, ty + 5, barW - 6, PALETTE.detail.wood);
-  for (let i = 0; barX + 4 + i * 4 + 2 <= barX + barW - 3; i++) {
-    box(g, barX + 4 + i * 4, ty + 1, 2, 4, pick([PALETTE.detail.leaf, PALETTE.detail.cross, PALETTE.amber], i + v, PALETTE.detail.leaf));
-  }
-}
-
-// --- shop -------------------------------------------------------------------
-
-function drawShop(g: Graphics, by: number, ty: number, w: number, v: number): void {
-  const counterW = Math.min(34, Math.floor(w * 0.36));
-  const counterX = w - counterW - 3;
-  for (let i = 0, x = 3; x + 20 <= counterX - 3; i++, x += 21) shelfUnit(g, x, by, 20, by - ty - 1, v + i);
-  panel(g, counterX - 2, ty, counterW + 4, 9, v === 0 ? PALETTE.amber : PALETTE.detail.shelfGoodsB); // sign board
-  for (let i = 0; counterX + 1 + i * 7 + 5 <= counterX + counterW; i++) box(g, counterX + 1 + i * 7, ty + 3, 5, 3, INK);
-  panel(g, counterX, by - 12, counterW, 3, PALETTE.detail.wood); // counter top
-  panel(g, counterX + 1, by - 9, counterW - 2, 9, PALETTE.detail.woodDark);
-  for (let x = counterX + 8; x < counterX + counterW - 2; x += 8) vline(g, x, by - 8, 7, PALETTE.detail.wood);
-  panel(g, counterX + counterW - 13, by - 19, 10, 7, PALETTE.detail.metal); // register
-  box(g, counterX + counterW - 12, by - 18, 8, 3, PALETTE.detail.screenOff);
-  hline(g, counterX + counterW - 12, by - 14, 8);
-}
-
-// --- cinema -----------------------------------------------------------------
-
-function drawCinema(g: Graphics, y0: number, w: number, h: number, v: number, lit: boolean): void {
-  const line = 0x8a8aa0; // the cinema wall is dark, so its line art is light
-  const by = y0 + h - SLAB_H;
-  const screenW = Math.min(46, Math.floor(w / 5));
-  const screenTop = y0 + 6;
-  const screenH = h - 20;
-  panel(g, 4, screenTop, screenW, screenH, PALETTE.detail.metalDark, lit ? PALETTE.windowLit : line); // lit frame
-  box(g, 6, screenTop + 2, screenW - 4, screenH - 4, lit ? PALETTE.detail.screenOn : PALETTE.detail.screenOff);
-  const projX = w - 16;
-  const projY = y0 + 5;
-  panel(g, projX, projY, 12, 9, PALETTE.detail.metalDark, line);
-  box(g, projX - 2, projY + 3, 2, 3, lit ? PALETTE.windowLit : line); // lens
-  if (lit) {
-    const steps = 10;
-    const lensY = projY + 4;
-    const screenCy = screenTop + screenH / 2;
-    for (let i = 0; i < steps; i++) {
-      const t0 = i / steps;
-      const t1 = (i + 1) / steps;
-      const bx0 = projX - 2 - (projX - 2 - (4 + screenW)) * t1;
-      const bx1 = projX - 2 - (projX - 2 - (4 + screenW)) * t0;
-      const cy = lensY + (screenCy - lensY) * t1;
-      const half = 1 + (screenH / 3 - 1) * t1;
-      const top = Math.max(y0 + 1, cy - half);
-      const bot = Math.min(by - 1, cy + half);
-      box(g, bx0, top, bx1 - bx0, bot - top, PALETTE.carLight, 0.13);
-    }
-  }
-  const seat = v === 0 ? PALETTE.detail.seatA : PALETTE.detail.seatB;
-  const rows = 4;
-  const rowW = Math.floor((w - screenW - 24) / rows);
-  for (let r = 0; r < rows; r++) {
-    const rx = screenW + 8 + r * rowW;
-    const ry = by - r * 6;
-    hline(g, rx, ry - 1, rowW, line); // the step this row sits on
-    vline(g, rx, ry - 6, 6, line); // its riser
-    for (let x = rx + 3; x + 9 <= rx + rowW - 1; x += 11) {
-      // the seats face the screen, so the pad hangs off the left of the back
-      panel(g, x + 4, ry - 13, 5, 13, seat, line); // seat back
-      panel(g, x + 3, ry - 16, 6, 4, seat, line); // headrest
-      panel(g, x, ry - 7, 5, 3, seat, line); // pad
-      vline(g, x + 1, ry - 4, 3, line); // leg
-    }
-  }
-}
-
-// --- party hall -------------------------------------------------------------
-
-function drawPartyHall(g: Graphics, y0: number, w: number, h: number, v: number, lit: boolean): void {
-  const by = y0 + h - SLAB_H;
-  const ty = y0 + INTERIOR_TOP;
-  const stageW = Math.min(58, Math.floor(w / 3));
-  panel(g, 2, ty + 2, stageW, by - 14 - (ty + 2), PALETTE.detail.curtain); // backdrop
-  for (let x = 6; x < stageW; x += 6) vline(g, x, ty + 3, by - 16 - (ty + 2), INK, );
-  panel(g, 2, by - 14, stageW, 4, PALETTE.detail.wood); // stage deck
-  panel(g, 2, by - 10, stageW, 10, PALETTE.detail.woodDark);
-  const lx = 2 + Math.floor(stageW / 2) - 4;
-  panel(g, lx, by - 27, 9, 13, PALETTE.detail.wood); // lectern
-  hline(g, lx - 1, by - 28, 11);
-  vline(g, lx + 4, by - 31, 3, PALETTE.detail.metal); // microphone
-  box(g, lx + 3, by - 33, 3, 2, PALETTE.detail.metalDark);
-
-  const tablesX = stageW + 8;
-  const tableW = Math.floor((w - tablesX - 6) / 2);
-  for (let i = 0; i < 2; i++) {
-    const x = tablesX + i * (tableW + 4);
-    if (x + tableW > w - 2) break;
-    clothTable(g, x, by, tableW, 13, (v + i) % 2);
-    for (let px = x + 4; px + 4 <= x + tableW - 4; px += 9) panel(g, px, by - 16, 4, 3, PALETTE.detail.linen); // place settings
-  }
-
-  hline(g, stageW + 4, ty + 1, w - stageW - 8, PALETTE.detail.metalDark); // bunting line
-  for (let i = 0, x = stageW + 6; x + 7 <= w - 4; i++, x += 9) {
-    const c = pick([PALETTE.amber, PALETTE.detail.cross, PALETTE.detail.chairB], i + v, PALETTE.amber);
-    box(g, x, ty + 2, 7, 1, c);
-    box(g, x + 1, ty + 3, 5, 1, c);
-    box(g, x + 2, ty + 4, 3, 1, c);
-    box(g, x + 3, ty + 5, 1, 1, c);
-  }
-  for (let i = 0, x = tablesX + 6; i < 3 && x + 6 <= w - 6; i++, x += 26) {
-    const c = pick([PALETTE.detail.cross, PALETTE.amber, PALETTE.detail.chairA], i + v, PALETTE.detail.cross);
-    box(g, x + 1, ty + 8, 4, 1, INK); // balloon
-    box(g, x, ty + 9, 6, 5, c);
-    box(g, x + 1, ty + 14, 4, 1, INK);
-    vline(g, x + 2, ty + 15, 6, PALETTE.detail.metalDark);
-  }
-  if (lit) box(g, 0, y0 + 1, w, 1, PALETTE.detail.glow, 0.35);
-}
-
-// --- medical ----------------------------------------------------------------
-
-function drawMedical(g: Graphics, by: number, ty: number, w: number, v: number): void {
-  panel(g, 3, ty, 16, 16, PALETTE.detail.linen); // red cross sign
-  box(g, 9, ty + 3, 4, 10, PALETTE.detail.cross);
-  box(g, 6, ty + 6, 10, 4, PALETTE.detail.cross);
-  const deskW = Math.min(36, Math.floor(w * 0.18));
-  const deskX = w - deskW - 8;
-  for (let i = 0, x = 22; i < 3 && x + 44 <= deskX - 2; i++, x += 46) {
-    bedIcon(g, x, by, 38, 0);
-    vline(g, x + 40, by - 20, 20, PALETTE.detail.metal); // drip stand
-    hline(g, x + 39, by - 20, 3, PALETTE.detail.metal);
-    box(g, x + 40, by - 19, 3, 5, (v + i) % 2 === 0 ? PALETTE.detail.glass : PALETTE.detail.linen);
-    hline(g, x + 39, by - 1, 5);
-  }
-  panel(g, deskX, by - 12, deskW, 3, PALETTE.detail.tile); // reception desk
-  panel(g, deskX + 1, by - 9, deskW - 2, 9, PALETTE.detail.metal);
-  hline(g, deskX + 3, by - 5, deskW - 6);
-  officeChair(g, deskX + deskW + 1, by, PALETTE.detail.chairA);
-}
-
-// --- security ---------------------------------------------------------------
-
-function drawSecurity(g: Graphics, by: number, ty: number, w: number, v: number, lit: boolean): void {
-  const deskW = Math.min(84, Math.floor(w * 0.66));
-  for (let i = 0, x = 4; x + 16 <= deskW - 2; i++, x += 20) {
-    monitorIcon(g, x, by - 11, 16, 11, lit);
-    if (lit) box(g, x + 2, by - 19 + ((i + v) % 5), 12, 1, PALETTE.carLight, 0.6); // scan line
-  }
-  panel(g, 2, by - 11, deskW, 3, PALETTE.detail.metal); // console top
-  panel(g, 3, by - 8, deskW - 2, 8, PALETTE.detail.metalDark);
-  for (let x = 10; x < deskW - 2; x += 12) vline(g, x, by - 7, 6, PALETTE.detail.metal);
-  officeChair(g, deskW + 4, by, v === 0 ? PALETTE.detail.chairA : PALETTE.detail.chairB);
-  const bx = w - 16;
-  panel(g, bx, ty, 13, 13, PALETTE.detail.chairA); // badge sign
-  box(g, bx + 1, ty + 13, 11, 1, PALETTE.detail.chairA);
-  box(g, bx + 4, ty + 14, 5, 1, PALETTE.detail.chairA);
-  hline(g, bx + 1, ty + 14, 11);
-  hline(g, bx + 4, ty + 15, 5);
-  box(g, bx + 5, ty + 3, 3, 7, PALETTE.amber); // star on the badge
-  box(g, bx + 3, ty + 5, 7, 3, PALETTE.amber);
-}
-
-// --- housekeeping -----------------------------------------------------------
-
-function drawHousekeeping(g: Graphics, by: number, ty: number, w: number, v: number, lit: boolean): void {
-  const shelfW = Math.min(40, Math.floor(w * 0.34));
-  linenShelf(g, 3, by, shelfW, 20);
-  const cartX = shelfW + 8;
-  panel(g, cartX, by - 13, 28, 13, PALETTE.detail.metal); // linen cart
-  box(g, cartX + 2, by - 18, 16, 5, PALETTE.detail.linen); // towels heaped on top
-  outline(g, cartX + 2, by - 18, 16, 5, INK);
-  hline(g, cartX + 3, by - 16, 14, PALETTE.detail.marbleVein);
-  hline(g, cartX + 2, by - 8, 24, PALETTE.detail.metalDark);
-  vline(g, cartX + 28, by - 19, 7, PALETTE.detail.metalDark); // push handle
-  hline(g, cartX + 24, by - 19, 5, PALETTE.detail.metalDark);
-  box(g, cartX + 3, by - 2, 4, 2, INK); // wheels
-  box(g, cartX + 21, by - 2, 4, 2, INK);
-  const wmX = w - 24;
-  if (wmX > cartX + 30) {
-    panel(g, wmX, by - 22, 22, 22, PALETTE.detail.tile); // washing machine
-    hline(g, wmX, by - 17, 22);
-    box(g, wmX + 2, by - 21, 8, 3, PALETTE.detail.metalDark); // control panel
-    box(g, wmX + 17, by - 20, 2, 2, lit ? PALETTE.detail.glow : PALETTE.detail.metalDark);
-    panel(g, wmX + 5, by - 14, 12, 12, PALETTE.detail.metal);
-    box(g, wmX + 7, by - 12, 8, 8, lit ? PALETTE.windowLit : PALETTE.detail.glass);
-    outline(g, wmX + 7, by - 12, 8, 8, INK);
-    box(g, wmX + 5, by - 14, 1, 1, PALETTE.detail.tile); // rounded corners
-    box(g, wmX + 16, by - 14, 1, 1, PALETTE.detail.tile);
-    box(g, wmX + 5, by - 3, 1, 1, PALETTE.detail.tile);
-    box(g, wmX + 16, by - 3, 1, 1, PALETTE.detail.tile);
-  }
-  if (v === 1) picture(g, cartX + 4, ty, 9, 7, PALETTE.detail.glass);
-}
-
-// --- parking ----------------------------------------------------------------
-
-function drawParkingRamp(g: Graphics, by: number, ty: number, w: number, v: number, lit: boolean): void {
-  hline(g, 0, ty, w, PALETTE.detail.metalDark); // ceiling line
-  const x1 = 3;
-  const x2 = w - 3;
-  const y1 = by - 2;
-  const y2 = ty + 14;
-  stripe(g, x1, y1 + 1, x2, y2 + 1, INK, 1); // the deck of the ramp
-  stripe(g, x1, y1 - 3, x2, y2 - 3, PALETTE.detail.stripe, 4);
-  stripe(g, x1, y1 - 5, x2, y2 - 5, INK, 1);
-  const n = 7;
-  for (let i = 0; i < n; i++) {
-    const t = (i + 0.3) / n;
-    const x = x1 + (x2 - x1) * t;
-    const y = y1 - 3 + (y2 - y1) * t;
-    box(g, x, y, 5, 1, PALETTE.detail.linen); // lane stripes
-  }
-  for (let i = 0; i <= 4; i++) {
-    const t = i / 4;
-    const x = x1 + (x2 - x1) * t;
-    const y = y1 - 11 + (y2 - y1) * t;
-    vline(g, x, y, 8, PALETTE.detail.metal); // guard rail posts
-  }
-  stripe(g, x1, y1 - 11, x2, y2 - 11, PALETTE.detail.metal, 2);
-  for (let x = 8; x + 6 <= w - 6; x += 30) box(g, x, ty + 1, 6, 2, lit ? PALETTE.detail.glow : PALETTE.detail.metalDark);
-  if (v === 1) carSilhouette(g, 6, by, PALETTE.detail.carRed);
-}
-
-function drawParkingSpace(g: Graphics, by: number, ty: number, w: number, v: number, lit: boolean): void {
-  hline(g, 0, ty, w, PALETTE.detail.metalDark);
-  box(g, Math.floor(w / 2) - 3, ty + 1, 6, 2, lit ? PALETTE.detail.glow : PALETTE.detail.metalDark);
-  vline(g, 1, by - 14, 14, PALETTE.detail.linen); // bay lines
-  vline(g, w - 2, by - 14, 14, PALETTE.detail.linen);
-  hline(g, 2, by - 1, w - 4, PALETTE.detail.linen);
-  carSilhouette(g, Math.max(2, Math.floor((w - 24) / 2)), by, v === 0 ? PALETTE.detail.carBlue : PALETTE.detail.carRed);
-}
-
-// --- recycling --------------------------------------------------------------
-
-function drawRecycling(g: Graphics, y0: number, w: number, h: number, v: number, lit: boolean): void {
-  const by = y0 + h - SLAB_H;
-  const beltY = y0 + Math.floor(h / 2) - 4;
-  const balerX = w - 46;
-  panel(g, 6, beltY, balerX - 10, 5, PALETTE.detail.metalDark); // conveyor
-  hline(g, 7, beltY + 1, balerX - 12, PALETTE.detail.metal);
-  for (let x = 12; x + 4 < balerX - 6; x += 10) {
-    panel(g, x, beltY + 5, 4, 4, PALETTE.detail.metal); // rollers
-    vline(g, x + 2, beltY + 9, by - 26 - (beltY + 9), PALETTE.detail.metalDark); // legs
-  }
-  for (let i = 0, x = 10 + v * 5; x + 6 < balerX - 8; i++, x += 18) {
-    panel(g, x, beltY - 5, 6, 5, pick([PALETTE.detail.shelfGoodsA, PALETTE.detail.shelfGoodsB, PALETTE.amber], i + v, PALETTE.detail.shelfGoodsA));
-  }
-  const bins = [PALETTE.detail.binGreen, PALETTE.detail.binBlue, PALETTE.detail.binAmber] as const;
-  for (let i = 0, x = 6; i < 4 && x + 22 <= balerX - 4; i++, x += 26) {
-    panel(g, x, by - 22, 22, 22, pick(bins, i + v, PALETTE.detail.binGreen)); // bins in a row
-    panel(g, x - 1, by - 25, 24, 3, PALETTE.detail.metalDark); // lid
-    hline(g, x + 2, by - 12, 18, INK);
-    box(g, x + 8, by - 20, 6, 6, PALETTE.detail.linen, 0.8); // the recycling mark
-    box(g, x + 9, by - 19, 4, 4, pick(bins, i + v, PALETTE.detail.binGreen));
-  }
-  panel(g, balerX, y0 + 4, 42, by - 12 - (y0 + 4), PALETTE.detail.metal); // baler
-  panel(g, balerX + 4, y0 + 8, 34, 10, PALETTE.detail.metalDark); // hopper
-  hline(g, balerX + 8, y0 + 18, 26, INK);
-  panel(g, balerX + 14, y0 + 20, 14, 10, PALETTE.detail.stripe); // ram
-  vline(g, balerX + 20, y0 + 30, 8, PALETTE.detail.metalDark);
-  vline(g, balerX + 22, y0 + 30, 8, PALETTE.detail.metalDark);
-  if (lit) box(g, balerX + 34, y0 + 8, 3, 3, PALETTE.detail.glow);
-  for (let i = 0; i < 2; i++) {
-    const x = balerX + 6 + i * 18;
-    panel(g, x, by - 12, 16, 12, PALETTE.detail.shelfGoodsA); // baled output
-    hline(g, x + 4, by - 12, 1, INK);
-    vline(g, x + 5, by - 11, 10, PALETTE.detail.metal);
-    vline(g, x + 11, by - 11, 10, PALETTE.detail.metal);
-  }
-}
-
-// --- metro ------------------------------------------------------------------
-
-function drawMetro(g: Graphics, y0: number, w: number, h: number, v: number, lit: boolean): void {
-  const by = y0 + h - SLAB_H;
-  const tunnelTop = by - 44;
-  box(g, 0, tunnelTop, w, by - tunnelTop, PALETTE.detail.metalDark, 0.35); // the cut into the tunnel
-  hline(g, 0, tunnelTop, w);
-  const platW = Math.floor(w * 0.46);
-  const platTop = by - 16;
-  panel(g, 0, platTop, platW, 16, PALETTE.detail.tile); // platform
-  box(g, platW - 5, platTop + 1, 4, 14, PALETTE.amber); // the yellow line at the edge
-  for (let x = 6; x + 10 <= platW - 8; x += 14) hline(g, x, platTop + 8, 10, PALETTE.detail.marbleVein);
-  const railY = by - 4;
-  for (let x = platW + 2; x + 4 < w - 2; x += 8) box(g, x, railY + 1, 5, 3, PALETTE.detail.woodDark); // sleepers
-  hline(g, platW, railY, w - platW, PALETTE.detail.rail);
-  hline(g, platW, railY + 4, w - platW, PALETTE.detail.rail);
-
-  const trainX = platW + 4;
-  const trainW = w - trainX - 4;
-  const trainTop = railY - 34;
-  panel(g, trainX, trainTop, trainW, 30, PALETTE.detail.metal); // train
-  box(g, trainX + trainW - 6, trainTop, 6, 4, PALETTE.wall.metro); // the nose tapers
-  box(g, trainX + trainW - 4, trainTop + 4, 4, 3, PALETTE.wall.metro);
-  hline(g, trainX + trainW - 6, trainTop + 4, 6);
-  hline(g, trainX + trainW - 4, trainTop + 7, 4);
-  box(g, trainX + 1, trainTop + 20, trainW - 2, 4, v === 0 ? PALETTE.detail.chairA : PALETTE.detail.cross); // livery band
-  for (let i = 0, x = trainX + 4; x + 14 <= trainX + trainW - 8; i++, x += 20) {
-    if (i % 2 === 0) {
-      panel(g, x, trainTop + 5, 14, 12, lit ? PALETTE.windowLit : PALETTE.detail.glass); // windows
-    } else {
-      panel(g, x, trainTop + 4, 14, 22, PALETTE.detail.metalDark); // doors
-      box(g, x + 1, trainTop + 6, 12, 8, lit ? PALETTE.windowLit : PALETTE.detail.glass);
-      vline(g, x + 7, trainTop + 5, 20, PALETTE.detail.metal);
-    }
-  }
-  for (let x = trainX + 6; x + 10 <= trainX + trainW - 6; x += 26) {
-    box(g, x, trainTop + 30, 10, 4, INK); // bogies
-  }
-  panel(g, 8, y0 + 8, 62, 14, PALETTE.detail.chairA); // station sign
-  vline(g, 20, y0 + 2, 6, PALETTE.detail.metalDark);
-  vline(g, 58, y0 + 2, 6, PALETTE.detail.metalDark);
-  for (let i = 0; 12 + i * 8 + 6 <= 68; i++) box(g, 12 + i * 8, y0 + 12, 6, 6, PALETTE.detail.linen);
-  // a flight down from the concourse, so the platform is not a field of empty gray
-  const stW = 6;
-  const stH = 5;
-  for (let i = 0; i < 6; i++) {
-    const sx = platW - 10 - (i + 1) * stW;
-    const sy = platTop - 30 + i * stH;
-    if (sx < 4) break;
-    box(g, sx, sy, stW + 1, 2, PALETTE.detail.metal);
-    hline(g, sx, sy, stW + 1);
-    vline(g, sx, sy + 2, stH - 2, PALETTE.detail.metalDark);
-  }
-  panel(g, 12, platTop - 9, 20, 3, PALETTE.detail.wood); // a bench on the platform
-  vline(g, 13, platTop - 6, 6, PALETTE.detail.metalDark);
-  vline(g, 30, platTop - 6, 6, PALETTE.detail.metalDark);
-  for (let x = 14; x + 4 < platW - 10; x += 34) {
-    panel(g, x, y0 + 26, 4, platTop - (y0 + 26), PALETTE.detail.metal); // pillars
-    box(g, x - 3, y0 + 22, 10, 4, lit ? PALETTE.detail.glow : PALETTE.detail.metalDark);
-    outline(g, x - 3, y0 + 22, 10, 4, INK);
-  }
-}
-
-// --- cathedral --------------------------------------------------------------
-
-function drawCathedral(g: Graphics, y0: number, w: number, h: number, v: number, lit: boolean): void {
-  const by = y0 + h - SLAB_H;
-  const organX = w - 40;
-  const winTop = y0 + 14;
-  const winBot = by - 40;
-  const panes = [PALETTE.detail.curtain, PALETTE.detail.glass, PALETTE.amber, PALETTE.detail.leaf] as const;
-  for (let i = 0, x = 10; x + 30 <= organX - 6; i++, x += 46) {
-    // a tall window, arched at the top, with colored panes
-    const stepH = 3;
-    for (let s = 0; s < 4; s++) {
-      const inset = [11, 7, 4, 2][s] as number;
-      box(g, x + inset, winTop + s * stepH, 30 - inset * 2, stepH, PALETTE.detail.stone);
-      box(g, x + inset + 1, winTop + s * stepH + 1, 28 - inset * 2, stepH, lit ? PALETTE.windowLit : pick(panes, i + v + s, PALETTE.detail.glass));
-    }
-    box(g, x + 1, winTop + 12, 28, winBot - winTop - 12, PALETTE.detail.stone);
-    for (let py = winTop + 13; py + 6 <= winBot - 1; py += 7) {
-      for (let px = x + 3; px + 6 <= x + 27; px += 7) {
-        const c = pick(panes, px + py + v, PALETTE.detail.glass);
-        box(g, px, py, 6, 6, c);
-        if (lit) box(g, px, py, 6, 6, PALETTE.windowLit, 0.4);
-      }
-    }
-    outline(g, x, winTop + 11, 30, winBot - winTop - 10, PALETTE.detail.stoneDark);
-  }
-  for (let x = 4; x + 6 <= organX - 2; x += 46) {
-    panel(g, x, winTop, 6, by - winTop, PALETTE.detail.stone, PALETTE.detail.stoneDark); // columns
-    panel(g, x - 1, winTop, 8, 4, PALETTE.detail.stoneDark, PALETTE.detail.stoneDark); // capital
-  }
-  // the organ: a case of pipes at the right end
-  panel(g, organX, y0 + 10, 34, by - 20 - (y0 + 10), PALETTE.detail.woodDark);
-  for (let i = 0, x = organX + 3; x + 4 <= organX + 31; i++, x += 5) {
-    const ph = 10 + ((i * 7) % 4) * 6;
-    box(g, x, y0 + 14 + (24 - ph), 4, ph, PALETTE.detail.gold);
-    outline(g, x, y0 + 14 + (24 - ph), 4, ph, INK);
-  }
-  panel(g, organX + 2, by - 24, 30, 4, PALETTE.detail.wood); // the console shelf
-  panel(g, organX + 8, by - 20, 18, 20, PALETTE.detail.woodDark);
-  box(g, organX + 10, by - 18, 14, 3, PALETTE.detail.linen); // keyboard
-  outline(g, organX + 10, by - 18, 14, 3, INK);
-  for (let x = organX + 11; x < organX + 23; x += 3) vline(g, x, by - 18, 3);
-  hline(g, organX + 10, by - 12, 14, PALETTE.detail.wood); // stop rails
-  hline(g, organX + 10, by - 8, 14, PALETTE.detail.wood);
-  // the altar on its steps, with a cross above it
-  const ax = Math.floor(organX / 2) - 12;
-  hline(g, ax - 4, by - 3, 32, PALETTE.detail.stone);
-  hline(g, ax - 2, by - 5, 28, PALETTE.detail.stone);
-  box(g, ax - 4, by - 4, 32, 4, PALETTE.detail.stone);
-  box(g, ax - 2, by - 6, 28, 2, PALETTE.detail.stone);
-  panel(g, ax, by - 16, 24, 10, PALETTE.detail.linen);
-  box(g, ax + 10, by - 34, 4, 18, PALETTE.detail.gold);
-  box(g, ax + 5, by - 29, 14, 4, PALETTE.detail.gold);
-  outline(g, ax + 10, by - 34, 4, 18, INK);
-  // pews in rows, stepping toward the front
-  for (let r = 0; r < 3; r++) {
-    const py = by - 8 - r * 10;
-    if (py - 8 < winBot) break;
-    for (let x = 6; x + 22 <= organX - 4; x += 26) {
-      if (x < ax + 26 && x + 22 > ax - 6) continue; // leave the altar clear
-      box(g, x, py - 10, 22, 4, PALETTE.detail.wood); // back rest
-      outline(g, x, py - 10, 22, 4, INK);
-      box(g, x, py - 4, 22, 3, PALETTE.detail.wood); // seat
-      outline(g, x, py - 4, 22, 3, INK);
-      vline(g, x + 1, py - 10, 10, PALETTE.detail.woodDark); // end frames
-      vline(g, x + 20, py - 10, 10, PALETTE.detail.woodDark);
-    }
-  }
-  if (lit) box(g, 0, y0 + 1, w, 2, PALETTE.detail.glow, 0.25);
+  floorLampIcon(g, w - 18, by, lit);
 }
 
 // --- lobby, sky lobby, stairs, escalator -------------------------------------
 
 function marbleFloor(g: Graphics, by: number, w: number, narrow: boolean): void {
-  box(g, 0, by - 6, w, 6, PALETTE.detail.marble);
-  hline(g, 0, by - 6, w, PALETTE.detail.marbleVein);
-  if (narrow) return; // a one tile segment is all joint and no floor if it keeps the veining
-  for (let x = 6; x < w - 2; x += 10) vline(g, x, by - 5, 5, PALETTE.detail.marbleVein);
+  box(g, 0, by - 12, w, 12, PALETTE.detail.marble);
+  hline(g, 0, by - 12, w, PALETTE.detail.marbleVein);
+  if (narrow) {
+    // a one tile segment is all joint and no floor if it keeps the joints, so it gets flecks
+    box(g, 4, by - 7, 3, 1, PALETTE.detail.marbleVein);
+    box(g, 10, by - 4, 2, 1, PALETTE.detail.marbleVein);
+    return;
+  }
+  for (let x = 12; x < w - 4; x += 20) vline(g, x, by - 10, 10, PALETTE.detail.marbleVein);
 }
 
 function columnPair(g: Graphics, x: number, top: number, bot: number): void {
-  for (const cx of [x, x + 4]) {
-    box(g, cx, top + 2, 3, bot - top - 4, PALETTE.detail.column);
-    box(g, cx - 1, top, 5, 2, PALETTE.detail.column); // capital
-    box(g, cx - 1, bot - 2, 5, 2, PALETTE.detail.column); // base
+  for (const cx of [x, x + 8]) {
+    box(g, cx, top + 4, 6, bot - top - 8, PALETTE.detail.column);
+    vline(g, cx + 1, top + 4, bot - top - 8, PALETTE.detail.columnLight, 1); // fluting
+    box(g, cx - 2, top, 10, 4, PALETTE.detail.column); // capital
+    box(g, cx - 2, bot - 4, 10, 4, PALETTE.detail.column); // base
   }
 }
 
@@ -1115,79 +512,82 @@ function columnPair(g: Graphics, x: number, top: number, bot: number): void {
  *  to tile seamlessly: piers in one stretch, a length of the front desk in the next. */
 function narrowLobbySegment(g: Graphics, w: number, ty: number, by: number, v: number): void {
   if (v === 0) {
-    box(g, 3, ty + 2, 2, by - 8 - ty, PALETTE.detail.column); // a pier
-    box(g, 2, ty, 4, 2, PALETTE.detail.column);
-    box(g, 2, by - 8, 4, 2, PALETTE.detail.column);
+    box(g, 6, ty + 4, 4, by - 16 - ty, PALETTE.detail.column); // a pier
+    vline(g, 7, ty + 4, by - 16 - ty, PALETTE.detail.columnLight, 1);
+    box(g, 4, ty, 8, 4, PALETTE.detail.column);
+    box(g, 4, by - 16, 8, 4, PALETTE.detail.column);
   } else {
-    box(g, 0, by - 16, w, 3, PALETTE.detail.wood); // a length of the front desk
-    hline(g, 0, by - 16, w);
-    box(g, 0, by - 13, w, 7, PALETTE.detail.woodDark);
-    hline(g, 0, by - 7, w);
+    box(g, 0, by - 32, w, 6, PALETTE.detail.wood); // a length of the front desk
+    hline(g, 0, by - 32, w);
+    hline(g, 0, by - 29, w, PALETTE.detail.woodLight, 1);
+    box(g, 0, by - 26, w, 14, PALETTE.detail.woodDark);
+    hline(g, 0, by - 14, w);
   }
 }
 
 function drawLobby(g: Graphics, y0: number, w: number, h: number, v: number, lit: boolean): void {
-  const by = y0 + h - SLAB_H;
+  const by = y0 + h - SLAB_PX;
   const ty = y0 + INTERIOR_TOP;
-  const narrow = w < 24;
+  const narrow = w < 3 * TILE_PX;
   marbleFloor(g, by, w, narrow);
-  hline(g, 0, ty - 1, w, PALETTE.detail.marbleVein); // the soffit over the hall
+  hline(g, 0, ty - 2, w, PALETTE.detail.marbleVein); // the soffit over the hall, y 20
   if (!narrow) {
-    columnPair(g, 3, ty, by - 6);
-    panel(g, 16, by - 16, Math.min(26, w - 28), 3, PALETTE.detail.wood); // front desk
-    panel(g, 17, by - 13, Math.min(24, w - 30), 7, PALETTE.detail.woodDark);
-    if (w >= 48) plantIcon(g, w - 20, by - 6);
-    columnPair(g, w - 10, ty, by - 6);
+    columnPair(g, 6, ty, by - 12);
+    panel(g, 32, by - 32, Math.min(52, w - 56), 6, PALETTE.detail.wood); // front desk
+    panel(g, 34, by - 26, Math.min(48, w - 60), 14, PALETTE.detail.woodDark);
+    if (w >= 96) plantIcon(g, w - 40, by - 12);
+    columnPair(g, w - 20, ty, by - 12);
   } else {
     narrowLobbySegment(g, w, ty, by, v);
   }
-  if (lit) box(g, 0, ty, w, 1, PALETTE.detail.glow, 0.5);
+  if (lit) box(g, 0, ty, w, 2, PALETTE.detail.glow, 0.5);
 }
 
 function drawSkyLobby(g: Graphics, y0: number, w: number, h: number, v: number, lit: boolean): void {
-  const by = y0 + h - SLAB_H;
+  const by = y0 + h - SLAB_PX;
   const ty = y0 + INTERIOR_TOP;
-  const narrow = w < 24;
+  const narrow = w < 3 * TILE_PX;
   marbleFloor(g, by, w, narrow);
   const mezz = y0 + h - FLOOR_PX; // the mezzanine deck, one floor up
-  box(g, 0, mezz - 3, w, 3, PALETTE.slab);
-  hline(g, 0, mezz - 3, w, PALETTE.slabEdge);
-  hline(g, 0, mezz - 10, w, PALETTE.detail.column); // the mezzanine rail
-  hline(g, 0, mezz - 6, w, PALETTE.detail.column);
-  for (let x = 3; x < w; x += 8) vline(g, x, mezz - 9, 6, PALETTE.detail.column); // balusters
-  hline(g, 0, ty - 1, w, PALETTE.detail.marbleVein);
+  box(g, 0, mezz - SLAB_PX, w, SLAB_PX, PALETTE.slab);
+  hline(g, 0, mezz - SLAB_PX, w, PALETTE.slabEdge, SLAB_EDGE_PX);
+  hline(g, 0, mezz - 20, w, PALETTE.detail.column); // the mezzanine rail
+  hline(g, 0, mezz - 12, w, PALETTE.detail.column);
+  for (let x = 6; x < w; x += TILE_PX) vline(g, x, mezz - 18, 12, PALETTE.detail.column); // balusters
+  hline(g, 0, ty - 2, w, PALETTE.detail.marbleVein);
   if (!narrow) {
-    columnPair(g, 3, mezz, by - 6);
-    panel(g, 16, by - 16, Math.min(26, w - 28), 3, PALETTE.detail.wood);
-    panel(g, 17, by - 13, Math.min(24, w - 30), 7, PALETTE.detail.woodDark);
-    if (w >= 48) plantIcon(g, w - 20, by - 6);
-    columnPair(g, w - 10, mezz, by - 6);
+    columnPair(g, 6, mezz, by - 12);
+    panel(g, 32, by - 32, Math.min(52, w - 56), 6, PALETTE.detail.wood);
+    panel(g, 34, by - 26, Math.min(48, w - 60), 14, PALETTE.detail.woodDark);
+    if (w >= 96) plantIcon(g, w - 40, by - 12);
+    columnPair(g, w - 20, mezz, by - 12);
   } else {
-    narrowLobbySegment(g, w, mezz + 2, by, v);
+    narrowLobbySegment(g, w, mezz + 4, by, v);
   }
-  if (lit) box(g, 0, ty, w, 1, PALETTE.detail.glow, 0.5);
+  if (lit) box(g, 0, ty, w, 2, PALETTE.detail.glow, 0.5);
 }
 
 function drawStairs(g: Graphics, y0: number, w: number, h: number, v: number, lit: boolean): void {
-  const by = y0 + h - SLAB_H;
-  const ty = y0 + FLOOR_PX - SLAB_H;
+  const by = y0 + h - SLAB_PX;
+  const ty = y0 + BASE;
   const steps = 9;
-  const run = 5;
-  const rise = 4; // 9 * 4 = 36 = by - ty, so the flight lands exactly on the upper floor
-  const x0 = 6;
-  const x1 = x0 + steps * run; // 51
+  const run = 10;
+  const rise = FLOOR_PX / steps; // 9 * 8 = 72 = by - ty, so the flight lands exactly on the upper floor
+  const x0 = 12;
+  const x1 = x0 + steps * run; // 102
   const rail = v === 0 ? PALETTE.detail.metalDark : PALETTE.detail.wood;
 
   // the slab under the flight
-  g.poly([x0, by, x1, ty, x1, ty + 7, x0 + 9, by]).fill(PALETTE.detail.stoneDark);
-  stripe(g, x0 + 9, by, x1, ty + 7, INK, 1);
+  g.poly([x0, by, x1, ty, x1, ty + 14, x0 + 18, by]).fill(PALETTE.detail.stoneDark);
+  stripe(g, x0 + 18, by, x1, ty + 14, INK);
 
   // the steps
   for (let i = 0; i < steps; i++) {
     const x = x0 + i * run;
     const top = by - (i + 1) * rise;
     box(g, x, top, run, rise, PALETTE.detail.stone);
-    hline(g, x, top, run + 1, PALETTE.detail.marble); // tread nosing
+    hline(g, x, top, run + 2, PALETTE.detail.marble); // tread nosing
+    hline(g, x + 2, top + 2, run - 2, PALETTE.detail.stoneDark, 1); // the shadow under the nosing
     vline(g, x, top, rise, INK); // riser edge
   }
 
@@ -1196,145 +596,166 @@ function drawStairs(g: Graphics, y0: number, w: number, h: number, v: number, li
   hline(g, x1, ty, w - x1, PALETTE.detail.marble);
 
   // glass balustrade
-  stripe(g, x0, by - 12, x1, ty - 12, PALETTE.detail.glass, 8);
-  box(g, x1, ty - 16, w - x1, 8, PALETTE.detail.glass);
+  stripe(g, x0, by - 24, x1, ty - 24, PALETTE.detail.glass, 16);
+  box(g, x1, ty - 32, w - x1, 16, PALETTE.detail.glass);
 
   // slim posts hiding the joins
-  vline(g, x0, by - 18, 18, PALETTE.detail.metalDark);
-  vline(g, x1, ty - 18, 18, PALETTE.detail.metalDark);
+  vline(g, x0, by - 36, 36, PALETTE.detail.metalDark);
+  vline(g, x1, ty - 36, 36, PALETTE.detail.metalDark);
 
   // flat handrail
-  stripe(g, x0, by - 17, x1, ty - 17, rail, 2);
-  box(g, x1, ty - 18, w - x1, 2, rail);
+  stripe(g, x0, by - 34, x1, ty - 34, rail, 4);
+  box(g, x1, ty - 36, w - x1, 4, rail);
 
   if (lit) {
-    stripe(g, x0, by - 16, x1, ty - 16, PALETTE.detail.glow, 1);
-    hline(g, x1, ty - 16, w - x1, PALETTE.detail.glow);
+    stripe(g, x0, by - 32, x1, ty - 32, PALETTE.detail.glow, 2);
+    hline(g, x1, ty - 32, w - x1, PALETTE.detail.glow);
   }
 }
 
 function drawEscalator(g: Graphics, y0: number, w: number, h: number, v: number, lit: boolean): void {
-  const by = y0 + h - SLAB_H;
-  const x0 = 4;
-  const x1 = w - 4;
-  const y1 = by - 3;
-  const y2 = y0 + 16;
-  stripe(g, x0, y1 + 3, x1, y2 + 3, INK, 1); // the truss under the steps
-  stripe(g, x0, y1, x1, y2, PALETTE.detail.metalDark, 6);
-  stripe(g, x0, y1 - 3, x1, y2 - 3, PALETTE.detail.metal, 2);
+  const by = y0 + h - SLAB_PX;
+  const x0 = 8;
+  const x1 = w - 8;
+  const y1 = by - 6;
+  const y2 = y0 + 32;
+  stripe(g, x0, y1 + 6, x1, y2 + 6, INK); // the truss under the steps
+  stripe(g, x0, y1, x1, y2, PALETTE.detail.metalDark, 12);
+  stripe(g, x0, y1 - 6, x1, y2 - 6, PALETTE.detail.metal, 4);
   const n = 12;
   for (let i = 0; i <= n; i++) {
     const t = i / n;
     const x = x0 + (x1 - x0) * t;
     const y = y1 + (y2 - y1) * t;
-    box(g, x - 1, y - 3, 2, 3, INK); // step cleats
+    box(g, x - 2, y - 6, 4, 6, INK); // step cleats
   }
-  stripe(g, x0, y1 - 8, x1, y2 - 8, PALETTE.detail.glass, 5); // balustrade
-  stripe(g, x0, y1 - 11, x1, y2 - 11, v === 0 ? INK : PALETTE.detail.chairB, 2); // handrail
-  box(g, 0, by - 3, x0 + 2, 3, PALETTE.detail.metal); // landings
-  hline(g, 0, by - 4, x0 + 2);
-  box(g, x1 - 2, y2, w - x1 + 2, 3, PALETTE.detail.metal);
-  hline(g, x1 - 2, y2, w - x1 + 2);
+  stripe(g, x0, y1 - 16, x1, y2 - 16, PALETTE.detail.glass, 10); // balustrade
+  stripe(g, x0, y1 - 22, x1, y2 - 22, v === 0 ? INK : PALETTE.detail.chairB, 4); // handrail
+  box(g, 0, by - 6, x0 + 4, 6, PALETTE.detail.metal); // landings
+  hline(g, 0, by - 8, x0 + 4);
+  box(g, x1 - 4, y2, w - x1 + 4, 6, PALETTE.detail.metal);
+  hline(g, x1 - 4, y2, w - x1 + 4);
   if (lit) {
-    box(g, 1, by - 6, 5, 2, PALETTE.detail.glow);
-    box(g, w - 6, y2 - 3, 5, 2, PALETTE.detail.glow);
+    box(g, 2, by - 12, 10, 4, PALETTE.detail.glow);
+    box(g, w - 12, y2 - 6, 10, 4, PALETTE.detail.glow);
   }
 }
-
 
 // ---------------------------------------------------------------------------
 // Non-room textures
 // ---------------------------------------------------------------------------
 
+/** The deck with its dark top edge, then the soft shadow it casts on the floor below. */
 function drawSlab(g: Graphics, w: number): void {
-  box(g, 0, 0, w, 4, PALETTE.slab);
-  box(g, 0, 0, w, 1, PALETTE.slabEdge);
-  for (let x = 4; x < w; x += 16) box(g, x, 1, 1, 3, PALETTE.slabEdge, 0.5); // rib marks
+  box(g, 0, 0, w, SLAB_PX, PALETTE.slab);
+  box(g, 0, 0, w, SLAB_EDGE_PX, PALETTE.slabEdge);
+  for (let x = 8; x < w; x += 2 * TILE_PX) box(g, x, SLAB_EDGE_PX, 2, SLAB_PX - SLAB_EDGE_PX, PALETTE.slabEdge, 0.5); // rib marks
+  box(g, 0, SLAB_PX, w, SLAB_SHADOW_PX, PALETTE.slabShadow, SLAB_SHADOW_ALPHA);
 }
 
 function drawShaft(g: Graphics, kind: ShaftKind, w: number, h: number): void {
   // A hint of a cavity, not a wall: the shaft reads as rails and floor marks with the car
   // running inside them, and whatever stands behind the column shows through.
   box(g, 0, 0, w, h, PALETTE.shaftCavity, 0.14);
-  box(g, 0, 0, 1, h, PALETTE.shaftFloorMark);
-  box(g, w - 1, 0, 1, h, PALETTE.shaftFloorMark);
-  box(g, 3, 0, 2, h, PALETTE.shaftRail); // guide rails
-  box(g, w - 5, 0, 2, h, PALETTE.shaftRail);
-  if (kind === 'express') box(g, Math.floor(w / 2) - 1, 0, 2, h, PALETTE.shaftRail, 0.6);
-  for (let y = 0; y + 1 <= h; y += FLOOR_PX) {
-    box(g, 0, y, w, 1, PALETTE.shaftFloorMark);
-    box(g, 1, y + 1, 2, 2, kind === 'service' ? PALETTE.detail.metalDark : PALETTE.shaftRail, 0.8);
+  box(g, 0, 0, LINE_PX, h, PALETTE.shaftFloorMark);
+  box(g, w - LINE_PX, 0, LINE_PX, h, PALETTE.shaftFloorMark);
+  box(g, 6, 0, 4, h, PALETTE.shaftRail); // guide rails
+  box(g, w - 10, 0, 4, h, PALETTE.shaftRail);
+  box(g, 6, 0, 1, h, 0xffffff, 0.5); // the lit edge of each rail
+  box(g, w - 10, 0, 1, h, 0xffffff, 0.5);
+  if (kind === 'express') box(g, Math.floor(w / 2) - 2, 0, 4, h, PALETTE.shaftRail, 0.6);
+  for (let y = 0; y + LINE_PX <= h; y += FLOOR_PX) {
+    box(g, 0, y, w, LINE_PX, PALETTE.shaftFloorMark);
+    box(g, 2, y + 2, 4, 4, kind === 'service' ? PALETTE.detail.metalDark : PALETTE.shaftRail, 0.8);
   }
 }
 
-function drawCar(g: Graphics, kind: ShaftKind, w: number, h: number, doorsOpen: boolean): void {
-  box(g, 0, 0, w, h, PALETTE.carTrim);
-  box(g, 1, 1, w - 2, h - 2, PALETTE.carBody);
-  box(g, 1, 1, w - 2, 2, PALETTE.carLight); // ceiling light strip
-  box(g, 0, h - 2, w, 2, PALETTE.carTrim);
-  const inset = 3;
-  const openW = doorsOpen ? Math.max(4, Math.floor((w - inset * 2) / 3)) : 0;
-  const panelW = Math.floor((w - inset * 2 - openW) / 2);
-  box(g, inset + panelW, 4, openW, h - 6, PALETTE.carInterior); // the gap when the doors are open
-  box(g, inset, 4, panelW, h - 6, PALETTE.carDoor);
-  box(g, inset + panelW + openW, 4, panelW, h - 6, PALETTE.carDoor);
-  box(g, inset + panelW - 1, 4, 1, h - 6, PALETTE.carTrim);
-  box(g, inset + panelW + openW, 4, 1, h - 6, PALETTE.carTrim);
-  if (kind === 'service') box(g, inset + 1, 6, panelW - 2, 2, PALETTE.detail.metalDark);
-  if (kind === 'express') box(g, inset + 1, h - 9, panelW - 2, 2, PALETTE.amber);
+/**
+ * A car, `w` by `bodyH` with its cast shadow CAR_SHADOW_PX tall on top. The standard car is
+ * 56 by 60: 2 px trim, a right shadow face, a 52 by 4 ceiling light, a 44 by 48 door opening
+ * at (6, 8) with two panels that slide outward, a 4 px bottom plate.
+ */
+function drawCar(g: Graphics, kind: ShaftKind, w: number, bodyH: number, doorsOpen: boolean): void {
+  box(g, 0, 0, w, CAR_SHADOW_PX, PALETTE.slabShadow, SLAB_SHADOW_ALPHA); // cast shadow up the shaft
+  const top = CAR_SHADOW_PX;
+  box(g, 0, top, w, bodyH, PALETTE.carTrim);
+  box(g, LINE_PX, top + LINE_PX, w - 2 * LINE_PX, bodyH - 2 * LINE_PX, PALETTE.carBody);
+  box(g, w - LINE_PX - 4, top + LINE_PX, 4, bodyH - 2 * LINE_PX, PALETTE.carShade); // shadow face
+  box(g, LINE_PX, top + LINE_PX, w - 2 * LINE_PX, 4, PALETTE.carLight); // ceiling light strip
+  vline(g, LINE_PX, top + 6, bodyH - 10, PALETTE.carDoor, 1); // the lit edge of the body
+  const ox = 6;
+  const oy = top + 8;
+  const ow = w - 2 * ox;
+  const oh = bodyH - 12;
+  box(g, ox, oy, ow, oh, PALETTE.carInterior); // the cavity behind the doors
+  const panelW = Math.floor(ow / 2);
+  // Each panel slides outward by 8 px of a 22 px panel, clipped to the opening.
+  const slide = doorsOpen ? Math.round((panelW * 8) / 22) : 0;
+  const leftW = panelW - slide;
+  const rightX = ox + panelW + slide;
+  const rightW = ox + ow - rightX;
+  box(g, ox, oy, leftW, oh, PALETTE.carDoor);
+  box(g, rightX, oy, rightW, oh, PALETTE.carDoor);
+  if (doorsOpen) {
+    vline(g, ox + leftW - 1, oy, oh, PALETTE.carTrim, 1); // the panel edges
+    vline(g, rightX, oy, oh, PALETTE.carTrim, 1);
+  } else {
+    vline(g, ox + panelW - 1, oy, oh, PALETTE.carTrim); // the door line
+  }
+  if (kind === 'service') box(g, ox + 2, oy + 4, leftW - 4, 4, PALETTE.detail.metalDark);
+  if (kind === 'express') box(g, ox + 2, oy + oh - 16, leftW - 4, 4, PALETTE.amber);
+  box(g, 0, top + bodyH - 4, w, 4, PALETTE.carTrim); // bottom plate
 }
 
-const SIM_W = TILE_PX; // 8: one tile wide, the way the original's people read
-const SIM_H = 3 * TILE_PX; // 24: three tiles tall, head to feet
-
 /**
- * A person, drawn on an 8 by 24 grid. The feet fill the bottom row so the sprite's lower
- * edge lands on the slab line, and the top two rows stay clear for the vip's hat.
- * Head 3 px (a 2 px crown over a 1 px neck notch, which is what reads as a head at this size),
- * torso 9, legs 10. Nothing may reach outside the box: at one tile wide the figures stand
- * shoulder to shoulder in a lift queue, so a stray pixel lands on the neighbor.
+ * A person, 16 by 48: a straight double of the 0.3 figure. The feet fill the bottom rows so
+ * the sprite's lower edge lands on the slab line, and the top four rows stay clear for the
+ * vip's hat. Head 8 by 4 with its top corners rounded, a neck notch, torso 18, legs 20.
+ * Nothing may reach outside the box: at one tile wide the figures stand shoulder to shoulder
+ * in a lift queue, so a stray pixel lands on the neighbor.
  */
 function drawSim(g: Graphics, kind: SimKind, band: StressBand, frame: 0 | 1): void {
   const body = band === 'calm' ? PALETTE.sim.calm : band === 'pink' ? PALETTE.sim.pink : PALETTE.sim.red;
-  box(g, 2, 2, 4, 2, body); // head
-  box(g, 3, 4, 2, 1, body); // neck, the notch that separates head from shoulders
-  box(g, 2, 5, 4, 9, body); // torso
+  box(g, 5, 4, 6, 1, body); // crown, one pixel in at each corner
+  box(g, 4, 5, 8, 3, body); // head
+  box(g, 6, 8, 4, 2, body); // neck, the notch that separates head from shoulders
+  box(g, 4, 10, 8, 18, body); // torso
   if (frame === 0) {
-    box(g, 1, 6, 1, 7, body); // arms hanging
-    box(g, 6, 6, 1, 7, body);
-    box(g, 2, 14, 1, 10, body); // legs upright, a two pixel gap between them
-    box(g, 5, 14, 1, 10, body);
+    box(g, 2, 12, 2, 14, body); // arms hanging
+    box(g, 12, 12, 2, 14, body);
+    box(g, 4, 28, 2, 20, body); // legs upright, a four pixel gap between them
+    box(g, 10, 28, 2, 20, body);
   } else {
-    box(g, 1, 7, 1, 6, body); // arms swinging, one forward one back
-    box(g, 6, 5, 1, 6, body);
-    box(g, 1, 14, 1, 5, body); // legs mid stride, feet planted wide
-    box(g, 0, 19, 2, 5, body);
-    box(g, 6, 14, 1, 5, body);
-    box(g, 6, 19, 2, 5, body);
+    box(g, 2, 14, 2, 12, body); // arms swinging, one forward one back
+    box(g, 12, 10, 2, 12, body);
+    box(g, 2, 28, 2, 10, body); // legs mid stride, feet planted wide
+    box(g, 0, 38, 4, 10, body);
+    box(g, 12, 28, 2, 10, body);
+    box(g, 12, 38, 4, 10, body);
   }
-  // small per kind accents, one or two pixels each, kept clear of the legs
+  // small per kind accents, kept clear of the legs
   switch (kind) {
     case 'worker':
-      box(g, 6, 11, 2, 3, PALETTE.detail.woodDark); // briefcase
+      box(g, 12, 22, 4, 6, PALETTE.detail.woodDark); // briefcase
       break;
     case 'guest':
-      box(g, 6, 10, 2, 4, PALETTE.detail.chairA); // suitcase
+      box(g, 12, 20, 4, 8, PALETTE.detail.chairA); // suitcase
       break;
     case 'shopper':
-      box(g, 6, 11, 2, 3, PALETTE.detail.shelfGoodsA); // shopping bag
+      box(g, 12, 22, 4, 6, PALETTE.detail.shelfGoodsA); // shopping bag
       break;
     case 'staff':
-      box(g, 2, 5, 4, 1, PALETTE.simAccent); // uniform collar
+      box(g, 4, 10, 8, 2, PALETTE.simAccent); // uniform collar
       break;
     case 'vip':
-      box(g, 1, 1, 6, 1, PALETTE.amber); // hat brim
-      box(g, 2, 0, 4, 1, PALETTE.amber);
+      box(g, 2, 2, 12, 2, PALETTE.amber); // hat brim
+      box(g, 4, 0, 8, 2, PALETTE.amber);
       break;
     case 'diner':
-      box(g, 6, 11, 2, 2, PALETTE.detail.linen);
+      box(g, 12, 22, 4, 4, PALETTE.detail.linen);
       break;
     case 'resident':
-      box(g, 2, 5, 4, 1, PALETTE.detail.blanketA); // scarf
+      box(g, 4, 10, 8, 2, PALETTE.detail.blanketA); // scarf
       break;
     case 'visitor':
       break;
@@ -1344,35 +765,68 @@ function drawSim(g: Graphics, kind: SimKind, band: StressBand, frame: 0 | 1): vo
 function drawGhost(g: Graphics, w: number, h: number, ok: boolean): void {
   const color = ok ? PALETTE.ghostOk : PALETTE.alert;
   box(g, 0, 0, w, h, color, 0.18);
-  // Two pixels of edge, not one: at phone zoom a single pixel of outline all but disappears
-  // against the tower behind it, and the outline is the whole point of the preview.
-  outline(g, 0, 0, w, h, color);
-  if (w > 2 && h > 2) outline(g, 1, 1, w - 2, h - 2, color);
-  for (let x = 0; x < w; x += TILE_PX) box(g, x, 0, 1, h, color, 0.12); // tile guides
+  // Two lines of edge, not one: at phone zoom a thin outline all but disappears against the
+  // tower behind it, and the outline is the whole point of the preview.
+  outline(g, 0, 0, w, h, color, 2 * LINE_PX);
+  for (let x = 0; x < w; x += TILE_PX) box(g, x, 0, LINE_PX, h, color, 0.12); // tile guides
 }
 
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
 
+/** Draws a room into a container: native shell, interior (2x for the half grid kinds), outline. */
+function roomContainer(kind: RoomKind, tiles: number, floors: number, v: number, lit: boolean): Container {
+  const { width: w, height: h } = TEXTURE_SIZE.room(tiles, floors);
+  const root = new Container();
+  const shell = new Graphics();
+  drawShell(shell, kind, w, h, lit);
+  root.addChild(shell);
+  const full = FULL_HEIGHT.has(kind);
+  if (HALF_KINDS.has(kind)) {
+    const inner = new Graphics();
+    inner.scale.set(HALF_SCALE);
+    const s = HALF_SCALE;
+    if (full) drawHalfInterior(inner, kind, 0, w / s, h / s, v, lit);
+    else for (let f = 0; f < floors; f++) drawHalfInterior(inner, kind, (f * FLOOR_PX) / s, w / s, FLOOR_PX / s, v, lit);
+    root.addChild(inner);
+    const edge = new Graphics();
+    drawCellOutline(edge, w, h, floors, !full);
+    root.addChild(edge);
+  } else {
+    if (full) drawNativeInterior(shell, kind, 0, w, h, v, lit);
+    else for (let f = 0; f < floors; f++) drawNativeInterior(shell, kind, f * FLOOR_PX, w, FLOOR_PX, v, lit);
+    drawCellOutline(shell, w, h, floors, !full);
+  }
+  return root;
+}
+
 export function createArt(renderer: Renderer): Art {
   const cache = new Map<string, Texture>();
+  const resolution = bakeResolution(typeof window === 'undefined' ? 1 : window.devicePixelRatio);
 
-  function bake(key: string, w: number, h: number, draw: (g: Graphics) => void): Texture {
+  function bakeTarget(key: string, w: number, h: number, make: () => Container): Texture {
     const hit = cache.get(key);
     if (hit) return hit;
-    const g = new Graphics();
-    draw(g);
+    const target = make();
     const texture = renderer.generateTexture({
-      target: g,
+      target,
       frame: new Rectangle(0, 0, w, h),
-      resolution: 1,
+      resolution,
       antialias: false,
       textureSourceOptions: { scaleMode: 'nearest' },
     });
-    g.destroy();
+    target.destroy({ children: true });
     cache.set(key, texture);
     return texture;
+  }
+
+  function bake(key: string, w: number, h: number, draw: (g: Graphics) => void): Texture {
+    return bakeTarget(key, w, h, () => {
+      const g = new Graphics();
+      draw(g);
+      return g;
+    });
   }
 
   return {
@@ -1380,47 +834,38 @@ export function createArt(renderer: Renderer): Art {
       const tiles = Math.max(1, Math.round(width));
       const floors = Math.max(1, Math.round(height));
       const v = ((Math.round(variant) % 2) + 2) % 2;
-      const w = tiles * TILE_PX;
-      const h = floors * FLOOR_PX;
-      return bake(`room:${kind}:${tiles}:${floors}:${v}:${lit ? 1 : 0}`, w, h, (g) => {
-        drawShell(g, kind, w, h, lit);
-        if (FULL_HEIGHT.has(kind)) {
-          drawInterior(g, kind, 0, w, h, v, lit);
-        } else {
-          for (let f = 0; f < floors; f++) drawInterior(g, kind, f * FLOOR_PX, w, FLOOR_PX, v, lit);
-        }
-        drawCellOutline(g, w, h, floors, !FULL_HEIGHT.has(kind));
-      });
+      const { width: w, height: h } = TEXTURE_SIZE.room(tiles, floors);
+      return bakeTarget(`room:${kind}:${tiles}:${floors}:${v}:${lit ? 1 : 0}`, w, h, () =>
+        roomContainer(kind, tiles, floors, v, lit),
+      );
     },
 
     slab(widthTiles) {
       const tiles = Math.max(1, Math.round(widthTiles));
-      const w = tiles * TILE_PX;
-      return bake(`slab:${tiles}`, w, 4, (g) => drawSlab(g, w));
+      const { width: w, height: h } = TEXTURE_SIZE.slab(tiles);
+      return bake(`slab:${tiles}`, w, h, (g) => drawSlab(g, w));
     },
 
     shaft(kind, floors) {
       const n = Math.max(1, Math.round(floors));
-      const w = SHAFTS[kind].width * TILE_PX;
-      const h = n * FLOOR_PX;
+      const { width: w, height: h } = TEXTURE_SIZE.shaft(kind, n);
       return bake(`shaft:${kind}:${n}`, w, h, (g) => drawShaft(g, kind, w, h));
     },
 
     car(kind, doorsOpen) {
-      const w = SHAFTS[kind].width * TILE_PX - 4;
-      const h = FLOOR_PX - 6;
-      return bake(`car:${kind}:${doorsOpen ? 1 : 0}`, w, h, (g) => drawCar(g, kind, w, h, doorsOpen));
+      const { width: w, height: h } = TEXTURE_SIZE.car(kind);
+      return bake(`car:${kind}:${doorsOpen ? 1 : 0}`, w, h, (g) => drawCar(g, kind, w, h - CAR_SHADOW_PX, doorsOpen));
     },
 
     sim(kind, band, frame) {
-      return bake(`sim:${kind}:${band}:${frame}`, SIM_W, SIM_H, (g) => drawSim(g, kind, band, frame));
+      const { width: w, height: h } = TEXTURE_SIZE.sim();
+      return bake(`sim:${kind}:${band}:${frame}`, w, h, (g) => drawSim(g, kind, band, frame));
     },
 
     ghost(widthTiles, heightFloors, ok) {
       const tiles = Math.max(1, Math.round(widthTiles));
       const floors = Math.max(1, Math.round(heightFloors));
-      const w = tiles * TILE_PX;
-      const h = floors * FLOOR_PX;
+      const { width: w, height: h } = TEXTURE_SIZE.ghost(tiles, floors);
       return bake(`ghost:${tiles}:${floors}:${ok ? 1 : 0}`, w, h, (g) => drawGhost(g, w, h, ok));
     },
   };
