@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { Rectangle } from 'pixi.js';
 import type { Renderer as PixiRenderer, Texture } from 'pixi.js';
 import { FLOOR_PX, SLAB_PX, SLAB_SHADOW_PX, TEXTURE_SIZE, TILE_PX, bakeResolution, createArt } from '../../src/render/art';
+import { WINDOW_STATES } from '../../src/render/light';
 import { ROOMS, SHAFTS } from '../../src/sim/rules';
 import type { RoomKind, ShaftKind } from '../../src/sim/types';
 
@@ -48,9 +49,9 @@ describe('every drawer bakes on the grid', () => {
   it('bakes each room kind at tiles * TILE_PX by floors * FLOOR_PX', () => {
     for (const kind of kinds) {
       const rule = ROOMS[kind];
-      for (const lit of [false, true]) {
+      for (const state of WINDOW_STATES) {
         const { renderer, last } = recorder();
-        createArt(renderer).room(kind, rule.width, rule.height, 0, lit);
+        createArt(renderer).room(kind, rule.width, rule.height, 0, state);
         const { width, height } = last();
         expect({ kind, width, height }).toEqual({ kind, width: rule.width * TILE_PX, height: rule.height * FLOOR_PX });
       }
@@ -87,7 +88,7 @@ describe('every drawer bakes on the grid', () => {
 
   it('passes the bake resolution to every texture', () => {
     const { renderer, last } = recorder();
-    createArt(renderer).room('office', 9, 1, 0, false);
+    createArt(renderer).room('office', 9, 1, 0, 'day');
     expect(last().resolution).toBe(bakeResolution(typeof window === 'undefined' ? 1 : window.devicePixelRatio));
   });
 

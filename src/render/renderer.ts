@@ -1,6 +1,6 @@
 // The tower view: one pixi Application, nine layers, and a sprite pool reconciled
 // against the world: cars and sims every frame, the static tower when
-// world.structureVersion or the night lit bit moves. See docs/DESIGN.md section 9 and docs/VISUAL.md.
+// world.structureVersion or the light band (light.ts) moves. See docs/DESIGN.md section 9 and docs/VISUAL.md.
 //
 // The renderer never mutates the world and never touches world.rng: it reads the
 // world, moves sprites, and reports picks back through onPick.
@@ -30,6 +30,7 @@ import { clockOf, TOWER_WIDTH, type Car, type Id, type Room, type RoomKind, type
 import { roomsOnFloor, shaftAt } from '../sim/world';
 import {
   bakeResolution,
+  CAR_CLEAR_PX,
   createArt,
   FLOOR_PX,
   LINE_PX,
@@ -63,6 +64,7 @@ import {
   type Point,
 } from './input';
 import { Motion, TELEPORT_TILES } from './interpolate';
+import { floorsWithPeople, LIGHT_ALPHA, lightBand, lightTintAt, windowStateOf, windowStatesFor, type WindowState } from './light';
 import { createSky, isNight, skyBackground, type Sky } from './sky';
 
 export interface PickHit {
@@ -169,6 +171,38 @@ const TELEPORT_PX = TELEPORT_TILES * TILE_PX; // a jump past this in one tick is
 /** The selection ring's weight and its gap around a sim, two art lines so it reads at zoom 1. */
 const SELECT_PAD_PX = 2 * LINE_PX;
 const FRAME_GRACE_MS = 2000; // after this the opening framing never reasserts itself
+const CABLE_PX = LINE_PX; // the hoist cable, one art line wide
+const CABLE_COLOR = 0x3b3f47;
+const NO_FLOORS: ReadonlySet<number> = new Set<number>();
+
+/**
+ * Lobby segments are one tile wide: alternating the variant per id would stripe the lobby
+ * every tile, so narrow rooms pick their variant by x in long runs and a continuous lobby
+ * reads as one room.
+ */
+function roomVariant(room: Room): number {
+  return room.width <= 2 ? Math.floor(room.x / 6) % 2 : room.id % 2;
+}
+
+/**
+ * Bake every window state for every room shape in the tower, once, at boot, so the first
+ * dusk swaps textures instead of baking hundreds of them mid play. Exported for the test.
+ */
+export function bakeRoomStates(art: Art, world: World): number {
+  const seen = new Set<string>();
+  let baked = 0;
+  for (const room of world.rooms.values()) {
+    const variant = roomVariant(room);
+    const key = `${room.kind}|${room.width}|${room.height}|${variant}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    for (const state of windowStatesFor(room.kind)) {
+      art.room(room.kind, room.width, room.height, variant, state);
+      baked++;
+    }
+  }
+  return baked;
+}
 
 const SIM_KINDS: readonly SimKind[] = ['worker', 'resident', 'guest', 'shopper', 'diner', 'staff', 'visitor', 'vip'];
 const STRESS_BANDS: readonly StressBand[] = ['calm', 'pink', 'red'];
@@ -216,7 +250,7 @@ interface RoomEntry {
   width: number;
   height: number;
   variant: number;
-  lit: boolean;
+  state: WindowState;
 }
 
 interface SlabEntry {
@@ -232,6 +266,8 @@ interface ShaftEntry {
 
 interface CarEntry {
   node: Sprite;
+  /** The hoist cable from the car's roof to the top of the shaft, a 2 px line scaled to length. */
+  cable: Graphics;
   kind: ShaftKind;
   doorsOpen: boolean;
 }
@@ -282,8 +318,8 @@ export function fallbackArt(_renderer: PixiRenderer | null): Art {
   };
 
   return {
-    room(kind, width, height, variant, lit) {
-      return get(`room|${kind}|${width}|${height}|${variant}|${lit}`, () =>
+    room(kind, width, height, variant, state) {
+      return get(`room|${kind}|${width}|${height}|${variant}|${state}`, () =>
         canvasTexture(width * TILE_PX, height * FLOOR_PX, (ctx) => {
           const base = FALLBACK_ROOM_COLORS[kind] ?? 0x3a4556;
           const line = LINE_PX;
@@ -302,7 +338,7 @@ export function fallbackArt(_renderer: PixiRenderer | null): Art {
           }
           ctx.fillStyle = hex(base);
           ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-          ctx.fillStyle = hex(lit ? 0xffd27a : 0x1a2233);
+          ctx.fillStyle = hex(state === 'lit' ? 0xffd27a : state === 'day' ? 0x7fb6e0 : 0x1a2233);
           // one window a tile, the same band art.ts draws
           for (let wx = WIN_X; wx + WIN_W <= ctx.canvas.width - WIN_X; wx += TILE_PX) {
             ctx.fillRect(wx, WIN_Y + (variant % 2) * line, WIN_W, WIN_W);
@@ -384,7 +420,7 @@ function guardArt(primary: Art, backup: Art): Art {
     return run(backup);
   };
   return {
-    room: (kind, width, height, variant, lit) => call('room', (a) => a.room(kind, width, height, variant, lit)),
+    room: (kind, width, height, variant, state) => call('room', (a) => a.room(kind, width, height, variant, state)),
     slab: (widthTiles) => call('slab', (a) => a.slab(widthTiles)),
     shaft: (kind, floors) => call('shaft', (a) => a.shaft(kind, floors)),
     car: (kind, doorsOpen) => call('car', (a) => a.car(kind, doorsOpen)),
@@ -538,12 +574,30 @@ export async function createRenderer(
     cars: new Container(),
     sims: new Container(),
     effects: new Container(),
+    light: new Container(),
     overlay: new Container(),
   };
   // Everything from ground forward shares the camera transform.
   const worldRoot = new Container();
-  worldRoot.addChild(layers.ground, layers.tower, layers.cars, layers.sims, layers.effects, layers.overlay);
-  app.stage.addChild(layers.sky, layers.cityFar, layers.cityNear, worldRoot);
+  worldRoot.addChild(layers.ground, layers.tower, layers.cars, layers.sims, layers.effects);
+  // The overlay (ghost, selection) shares the camera too, but sits above the light layer so the
+  // placement colours are never graded by the hour.
+  const overlayRoot = new Container();
+  overlayRoot.addChild(layers.overlay);
+  app.stage.addChild(layers.sky, layers.cityFar, layers.cityNear, worldRoot, layers.light, overlayRoot);
+
+  // The light layer: one screen sized multiply quad tinted by the minute of day. It grades the
+  // sky, the horizon and the tower together; the DOM chrome is outside the canvas.
+  const lightSprite = new Sprite(Texture.WHITE);
+  lightSprite.blendMode = 'multiply';
+  lightSprite.alpha = LIGHT_ALPHA;
+  lightSprite.tint = lightTintAt(clockOf(world.time.minute).minuteOfDay);
+  layers.light.addChild(lightSprite);
+
+  // Cars draw over their cables: one layer of hoist lines, then the car sprites.
+  const cableLayer = new Container();
+  const carSpriteLayer = new Container();
+  layers.cars.addChild(cableLayer, carSpriteLayer);
 
   const slabLayer = new Container();
   const roomLayer = new Container();
@@ -571,6 +625,8 @@ export async function createRenderer(
     console.warn('render: createArt failed, drawing flat rectangles', error);
     art = backup;
   }
+
+  bakeRoomStates(art, world);
 
   const camera = createCamera();
   camera.setViewport(app.screen.width, app.screen.height);
@@ -773,13 +829,11 @@ export async function createRenderer(
 
   function reconcileRooms(w: World, night: boolean): void {
     seenRooms.clear();
+    const peopleFloors = night ? floorsWithPeople(w) : NO_FLOORS;
     for (const room of w.rooms.values()) {
       seenRooms.add(room.id);
-      const lit = night && room.occupancy > 0;
-      // Lobby segments are one tile wide: alternating the variant per id would
-      // stripe the lobby every 8 px, so narrow rooms pick their variant by x in
-      // long runs and a continuous lobby reads as one room.
-      const variant = room.width <= 2 ? Math.floor(room.x / 6) % 2 : room.id % 2;
+      const state = windowStateOf(room, night, peopleFloors);
+      const variant = roomVariant(room);
       const topFloor = room.floor + room.height - 1;
       const px = room.x * TILE_PX;
       const py = floorTopY(topFloor);
@@ -803,23 +857,23 @@ export async function createRenderer(
 
       let entry = roomSprites.get(room.id);
       if (!entry) {
-        const sprite = new Sprite(art.room(room.kind, room.width, room.height, variant, lit));
+        const sprite = new Sprite(art.room(room.kind, room.width, room.height, variant, state));
         (drawsOverRooms(room.kind) ? connectorLayer : roomLayer).addChild(sprite);
-        entry = { node: sprite, kind: room.kind, width: room.width, height: room.height, variant, lit };
+        entry = { node: sprite, kind: room.kind, width: room.width, height: room.height, variant, state };
         roomSprites.set(room.id, entry);
       } else if (
         entry.kind !== room.kind ||
         entry.width !== room.width ||
         entry.height !== room.height ||
         entry.variant !== variant ||
-        entry.lit !== lit
+        entry.state !== state
       ) {
-        entry.node.texture = art.room(room.kind, room.width, room.height, variant, lit);
+        entry.node.texture = art.room(room.kind, room.width, room.height, variant, state);
         entry.kind = room.kind;
         entry.width = room.width;
         entry.height = room.height;
         entry.variant = variant;
-        entry.lit = lit;
+        entry.state = state;
       }
       entry.node.position.set(px, py);
       entry.node.setSize(pw, ph);
@@ -839,17 +893,21 @@ export async function createRenderer(
   }
 
   // The static tower (floor strips, rooms, slabs, shafts, fire markers) is reconciled only
-  // when the world's structure version, the world itself or the night lit bit moves since
-  // the last full pass. Cars, sims and the overlay are touched every frame.
+  // when the world's structure version, the world itself or the light band moves since the
+  // last full pass. The light band is one value all day and one per game hour at night
+  // (light.ts lightBand), so window states the sim does not version (a hotel room going
+  // dirty, people on a lobby floor) catch up within a game hour. Cars, sims and the overlay
+  // are touched every frame.
   let reconciledWorld: World | null = null;
   let reconciledVersion = -1;
-  let lastLitState = false;
+  let lastLitState = -1;
 
-  function reconcileStaticTower(w: World, night: boolean): void {
-    if (w === reconciledWorld && w.structureVersion === reconciledVersion && night === lastLitState) return;
+  function reconcileStaticTower(w: World, night: boolean, minuteOfDay: number): void {
+    const band = lightBand(night, minuteOfDay);
+    if (w === reconciledWorld && w.structureVersion === reconciledVersion && band === lastLitState) return;
     reconciledWorld = w;
     reconciledVersion = w.structureVersion;
-    lastLitState = night;
+    lastLitState = band;
     syncFloorStrips(w);
     reconcileRooms(w, night);
     reconcileShafts(w);
@@ -894,6 +952,7 @@ export async function createRenderer(
     for (const [id, entry] of carSprites) {
       if (seenCars.has(id)) continue;
       entry.node.destroy();
+      entry.cable.destroy();
       carSprites.delete(id);
       doorHold.delete(id);
       carMotion.forget(id);
@@ -922,8 +981,12 @@ export async function createRenderer(
       // Bottom center on the slab line: the two door textures may differ in size,
       // and this way a swap never moves the car.
       sprite.anchor.set(0.5, 1);
-      layers.cars.addChild(sprite);
-      entry = { node: sprite, kind: shaft.kind, doorsOpen };
+      carSpriteLayer.addChild(sprite);
+      // Drawn once a pixel tall and stretched to length each frame, so a moving car costs a
+      // scale, not a Graphics rebuild.
+      const cable = new Graphics().rect(-CABLE_PX / 2, 0, CABLE_PX, 1).fill(CABLE_COLOR);
+      cableLayer.addChild(cable);
+      entry = { node: sprite, cable, kind: shaft.kind, doorsOpen };
       carSprites.set(car.id, entry);
     } else if (entry.kind !== shaft.kind || entry.doorsOpen !== doorsOpen) {
       entry.node.texture = art.car(shaft.kind, doorsOpen); // texture swap only
@@ -932,6 +995,12 @@ export async function createRenderer(
     }
     const target = interpolated(carMotion, car.id, carX(shaft), carY(car), alpha);
     entry.node.position.set(target.x, target.y);
+    // From the car's roof (under its cast shadow) up to the top of the shaft.
+    const roof = target.y - (FLOOR_PX - CAR_CLEAR_PX);
+    const shaftTop = floorTopY(shaft.floorMax);
+    entry.cable.position.set(target.x, shaftTop);
+    entry.cable.scale.y = Math.max(0, roof - shaftTop);
+    entry.cable.visible = roof > shaftTop;
   }
 
   function simTextureKey(sim: Sim): { kind: SimKind; band: StressBand; frame: 0 | 1 } {
@@ -1405,6 +1474,7 @@ export async function createRenderer(
   let fadeLeft = reducedMotion ? 0 : LOAD_FADE_MS;
   let flickerLeft = 0;
   let lastBackground = -1;
+  let lastLightMinute = -1;
   let lastW = -1;
   let lastH = -1;
 
@@ -1426,7 +1496,13 @@ export async function createRenderer(
     worldRoot.position.set(width / 2 - camera.x * camera.zoom, height / 2 - camera.y * camera.zoom);
 
     const clock = clockOf(lastWorld.time.minute);
-    sky.update(clock.minuteOfDay, camera, width, height);
+    sky.update(clock.minuteOfDay, camera, width, height, reducedMotion ? 0 : dt);
+    const lightMinute = Math.floor(clock.minuteOfDay);
+    if (lightMinute !== lastLightMinute) {
+      lightSprite.tint = lightTintAt(lightMinute);
+      lastLightMinute = lightMinute;
+    }
+    if (lightSprite.width !== width || lightSprite.height !== height) lightSprite.setSize(width, height);
     const background = skyBackground(clock.minuteOfDay);
     if (background !== lastBackground) {
       app.renderer.background.color = background;
@@ -1458,7 +1534,7 @@ export async function createRenderer(
       lastWorld = w;
       const clock = clockOf(w.time.minute);
       const night = isNight(clock.minuteOfDay);
-      reconcileStaticTower(w, night);
+      reconcileStaticTower(w, night, clock.minuteOfDay);
       reconcileCars(w, alpha);
       reconcileSims(w, alpha);
       drawOverlay(w);

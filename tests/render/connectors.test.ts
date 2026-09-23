@@ -35,7 +35,7 @@ function bakeRoom(kind: RoomKind, tiles: number, floors: number): Rect[] {
       return {} as Texture;
     },
   } as unknown as PixiRenderer;
-  createArt(renderer).room(kind, tiles, floors, 0, false);
+  createArt(renderer).room(kind, tiles, floors, 0, 'day');
   Graphics.prototype.rect = originalRect;
   return rects;
 }

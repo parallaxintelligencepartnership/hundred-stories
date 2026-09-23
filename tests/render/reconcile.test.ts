@@ -1,5 +1,5 @@
 // The static tower (rooms, slabs, shafts) is reconciled only when world.structureVersion,
-// the world itself or the night lit bit moves; cars and sims every frame. And the screen
+// the world itself or the light band (day, or the hour at night) moves; cars and sims every frame. And the screen
 // draws one sim in four. Both live inside the createRenderer closure, so this drives the
 // real createRenderer against a stub pixi Application and stub art, in the stub-renderer
 // spirit of connectors.test.ts: no GPU, no DOM, real pixi Containers and Sprites.
@@ -9,8 +9,9 @@ import { Container, ParticleContainer, Sprite, Texture } from 'pixi.js';
 import type { Art } from '../../src/render/art';
 import { CROWD_ONE_IN, createRenderer, type Renderer } from '../../src/render/renderer';
 import { ROOMS } from '../../src/sim/rules';
-import type { Room, RoomKind, Sim, World } from '../../src/sim/types';
-import { addRoom, addSim, allocId, createWorld, markStructureChanged, setOccupancy, setOnFire } from '../../src/sim/world';
+import type { Car, Room, RoomKind, Sim, World } from '../../src/sim/types';
+import { addRoom, addShaft, addSim, allocId, createWorld, markStructureChanged, setOccupancy, setOnFire } from '../../src/sim/world';
+import { floorTopY } from '../../src/render/camera';
 
 // Every fake application, newest last, so a test can walk the stage createRenderer built.
 const apps = vi.hoisted(() => [] as { stage: import('pixi.js').Container }[]);
@@ -44,7 +45,7 @@ function tex(key: string): Texture {
   return t;
 }
 const stubArt: Art = {
-  room: (kind, width, height, variant, lit) => tex(`room|${kind}|${width}|${height}|${variant}|${lit}`),
+  room: (kind, width, height, variant, state) => tex(`room|${kind}|${width}|${height}|${variant}|${state}`),
   slab: (width) => tex(`slab|${width}`),
   shaft: (kind, floors) => tex(`shaft|${kind}|${floors}`),
   car: (kind, doorsOpen) => tex(`car|${kind}|${doorsOpen}`),
@@ -189,7 +190,7 @@ describe('static tower reconcile on the structure version', () => {
     const { world, room } = officeWorld(MIDNIGHT);
     const { renderer, stage } = await mount(world);
     renderer.render(world, 1);
-    expect(roomSprite(stage).texture.label).toMatch(/\|false$/);
+    expect(roomSprite(stage).texture.label).toMatch(/\|vacant$/);
 
     const before = world.structureVersion;
     setOccupancy(world, room, 1);
@@ -197,11 +198,11 @@ describe('static tower reconcile on the structure version', () => {
     setOccupancy(world, room, 2); // still occupied: nothing on screen changes
     expect(world.structureVersion).toBe(before + 1);
     renderer.render(world, 1);
-    expect(roomSprite(stage).texture.label).toMatch(/\|true$/);
+    expect(roomSprite(stage).texture.label).toMatch(/\|lit$/);
 
     setOccupancy(world, room, 0);
     renderer.render(world, 1);
-    expect(roomSprite(stage).texture.label).toMatch(/\|false$/);
+    expect(roomSprite(stage).texture.label).toMatch(/\|vacant$/);
   });
 
   it('runs a full pass when night falls, with no version bump', async () => {
@@ -209,12 +210,12 @@ describe('static tower reconcile on the structure version', () => {
     setOccupancy(world, room, 1);
     const { renderer, stage } = await mount(world);
     renderer.render(world, 1);
-    expect(roomSprite(stage).texture.label).toMatch(/\|false$/);
+    expect(roomSprite(stage).texture.label).toMatch(/\|day$/);
     const version = world.structureVersion;
     world.time.minute = MIDNIGHT;
     renderer.render(world, 1);
     expect(world.structureVersion).toBe(version);
-    expect(roomSprite(stage).texture.label).toMatch(/\|true$/);
+    expect(roomSprite(stage).texture.label).toMatch(/\|lit$/);
   });
 
   it('reconciles in full after resetMotion and on a replaced world', async () => {
@@ -283,5 +284,114 @@ describe('crowd sample in the sim draw loop', () => {
     renderer.render(world, 1);
     expect(hasParticles(stage)).toBe(false);
     expect(spritesWith(stage, 'sim|')).toHaveLength(400);
+  });
+});
+
+describe('light and time (look round L2)', () => {
+  it('bakes the window states for every kind in the tower at boot, before any render', async () => {
+    const world = createWorld(5);
+    world.time.minute = NOON;
+    makeRoom(world, 'office', 3, 180);
+    makeRoom(world, 'hotelSingle', 4, 180);
+    textures.clear();
+    await mount(world);
+    const keys = [...textures.keys()].filter((k) => k.startsWith('room|'));
+    for (const kind of ['office', 'hotelSingle']) {
+      for (const state of ['day', 'lit', 'vacant']) {
+        expect(keys.some((k) => k.startsWith(`room|${kind}|`) && k.endsWith(`|${state}`))).toBe(true);
+      }
+    }
+    expect(keys.some((k) => k.startsWith('room|hotelSingle|') && k.endsWith('|housekeeping'))).toBe(true);
+    expect(keys.some((k) => k.startsWith('room|office|') && k.endsWith('|housekeeping'))).toBe(false);
+  });
+
+  it('picks up a hotel room going dirty at night on the next game hour, with no version bump', async () => {
+    const world = createWorld(5);
+    world.time.minute = MIDNIGHT + 60; // 01:00
+    const hotel = makeRoom(world, 'hotelSingle', 4, 180);
+    const { renderer, stage } = await mount(world);
+    renderer.render(world, 1);
+    const sprite = (): Sprite => spritesWith(stage, 'room|hotelSingle')[0]!;
+    expect(sprite().texture.label).toMatch(/\|vacant$/);
+    hotel.dirty = true; // the sim does not version the dirty flag
+    world.time.minute += 30;
+    renderer.render(world, 1);
+    expect(sprite().texture.label).toMatch(/\|vacant$/); // same hour: the gate holds
+    world.time.minute += 30; // 02:00
+    renderer.render(world, 1);
+    expect(sprite().texture.label).toMatch(/\|housekeeping$/);
+  });
+
+  it('lights a lobby at night while someone stands on its floor', async () => {
+    const world = createWorld(5);
+    world.time.minute = MIDNIGHT + 60;
+    makeRoom(world, 'lobby', 1, 186);
+    const walker = makeWalker(world, 1, 186);
+    const { renderer, stage } = await mount(world);
+    renderer.render(world, 1);
+    expect(spritesWith(stage, 'room|lobby')[0]!.texture.label).toMatch(/\|lit$/);
+    walker.state = 'gone';
+    world.time.minute += 60;
+    renderer.render(world, 1);
+    expect(spritesWith(stage, 'room|lobby')[0]!.texture.label).toMatch(/\|vacant$/);
+  });
+
+  it('puts one multiply light sprite between the world and the overlay, tinted by the hour', async () => {
+    const { world } = officeWorld(MIDNIGHT - 60); // 23:00
+    const { renderer, stage } = await mount(world);
+    renderer.render(world, 1);
+    const isLight = (c: Container): boolean => c.children.some((s) => s instanceof Sprite && s.blendMode === 'multiply');
+    const layers = stage.children.filter((c) => isLight(c as Container));
+    expect(layers).toHaveLength(1);
+    const layer = layers[0] as Container;
+    const light = layer.children[0] as Sprite;
+    expect(light.alpha).toBeCloseTo(0.4);
+    expect(light.tint).toBe(0x6078b0);
+    const index = stage.children.indexOf(layer);
+    // Behind it: the world root holding the tower.
+    const behind = stage.children.slice(0, index) as Container[];
+    expect(behind.some((c) => spritesWith(c, 'room|').length > 0)).toBe(true);
+    // In front of it: the ghost's layer, so placement colours are never graded by the hour.
+    renderer.setGhost({ widthTiles: 9, heightFloors: 1, floor: 3, x: 180, ok: true });
+    renderer.render(world, 1);
+    const front = stage.children.slice(index + 1) as Container[];
+    expect(front.some((c) => spritesWith(c, 'ghost|').length > 0)).toBe(true);
+  });
+
+  it('hangs a cable from each car to the top of its shaft, under the car', async () => {
+    const world = createWorld(5);
+    world.time.minute = NOON;
+    const id = allocId(world);
+    const car: Car = {
+      id: allocId(world),
+      shaftId: id,
+      y: 2,
+      dir: 0,
+      state: 'idle',
+      doorTimer: 0,
+      idleSince: null,
+      passengers: [],
+      calls: new Set(),
+      serves: 'any',
+      range: null,
+    };
+    const stops = new Set<number>([1, 2, 3, 4, 5, 6]);
+    addShaft(world, { id, kind: 'standard', x: 180, width: 4, floorMin: 1, floorMax: 6, stops, homeFloor: 1, cars: [car], hallCalls: new Map() });
+    const { renderer, stage } = await mount(world);
+    renderer.render(world, 1);
+    const carSprite = spritesWith(stage, 'car|')[0]!;
+    const carsLayer = carSprite.parent!.parent!;
+    const [cables, sprites] = carsLayer.children as Container[];
+    expect(sprites!.children).toContain(carSprite);
+    expect(cables!.children).toHaveLength(1);
+    const cable = cables!.children[0]!;
+    expect(cable.y).toBe(floorTopY(6));
+    expect(cable.visible).toBe(true);
+    const before = cable.scale.y;
+    expect(before).toBeGreaterThan(0);
+    car.y = 5; // the car climbs, the cable shortens
+    renderer.render(world, 1);
+    expect(cable.scale.y).toBeLessThan(before);
+    expect(cable.scale.y).toBeGreaterThan(0);
   });
 });

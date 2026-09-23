@@ -40,6 +40,7 @@ import {
   WIN_TOP,
   bakeResolution,
 } from './grid';
+import type { WindowState } from './light';
 import { INK, PALETTE, wallShadow } from './palette';
 
 export {
@@ -57,7 +58,7 @@ export {
 };
 
 export interface Art {
-  room(kind: RoomKind, width: number, height: number, variant: number, lit: boolean): Texture;
+  room(kind: RoomKind, width: number, height: number, variant: number, state: WindowState): Texture;
   slab(widthTiles: number): Texture;
   shaft(kind: ShaftKind, floors: number): Texture;
   car(kind: ShaftKind, doorsOpen: boolean): Texture;
@@ -325,22 +326,23 @@ function smallTv(g: Graphics, x: number, by: number, lit: boolean): void {
 // Room shell: two-tone wall, window band per floor, floor slabs
 // ---------------------------------------------------------------------------
 
-function drawWindowBand(g: Graphics, kind: RoomKind, y0: number, w: number, lit: boolean, shadeFrom: number): void {
+function drawWindowBand(g: Graphics, kind: RoomKind, y0: number, w: number, state: WindowState, shadeFrom: number): void {
   if (WINDOWS[kind] === 'none') return;
   hline(g, 0, y0 + WIN_TOP, w); // head rail
   hline(g, 0, y0 + WIN_SILL, w); // sill
   const gy = y0 + WIN_PANE_TOP;
   for (let x = WIN_PANE_X; x + WIN_PANE + LINE_PX <= w; x += TILE_PX) {
-    if (lit) {
+    if (state === 'lit') {
       box(g, x, gy, WIN_PANE, WIN_PANE, PALETTE.windowLit);
       box(g, x, gy, WIN_PANE, 2, PALETTE.carLight); // the lamp light pooling at the head
-    } else {
-      // The renderer only knows lit or unlit, so an unlit pane keeps the day sky in it
-      // with the deep unlit blue pooling along the bottom.
+    } else if (state === 'day') {
       box(g, x, gy, WIN_PANE, WIN_PANE, PALETTE.windowDay);
-      box(g, x, gy + WIN_PANE - 4, WIN_PANE, 4, PALETTE.windowUnlit);
       box(g, x + 2, gy + 2, 3, 1, 0xffffff, 0.55); // a glint in the top corner
       box(g, x + 2, gy + 3, 1, 2, 0xffffff, 0.55);
+    } else {
+      box(g, x, gy, WIN_PANE, WIN_PANE, PALETTE.windowUnlit);
+      // A dirty hotel room keeps only its lamp: a low warm glow along the bottom of the glass.
+      if (state === 'housekeeping') box(g, x, gy + WIN_PANE - 4, WIN_PANE, 4, PALETTE.windowLit, 0.55);
     }
     vline(g, x - LINE_PX, gy, WIN_PANE); // mullions
     vline(g, x + WIN_PANE, gy, WIN_PANE);
@@ -349,7 +351,7 @@ function drawWindowBand(g: Graphics, kind: RoomKind, y0: number, w: number, lit:
   if (shadeFrom < w) box(g, shadeFrom, gy, w - LINE_PX - shadeFrom, WIN_PANE, INK, 0.14);
 }
 
-function drawShell(g: Graphics, kind: RoomKind, w: number, h: number, lit: boolean): void {
+function drawShell(g: Graphics, kind: RoomKind, w: number, h: number, state: WindowState): void {
   // An overlay has no shell at all: the wall and the slab would hide the room behind it.
   // The floor under it is already drawn by the slab layer and the floor strip.
   if (OVERLAY_KINDS.has(kind)) return;
@@ -361,7 +363,7 @@ function drawShell(g: Graphics, kind: RoomKind, w: number, h: number, lit: boole
   const perFloorSlabs = !FULL_HEIGHT.has(kind);
   for (let f = 0; f < floors; f++) {
     const y0 = f * FLOOR_PX;
-    drawWindowBand(g, kind, y0, w, lit, shadeFrom);
+    drawWindowBand(g, kind, y0, w, state, shadeFrom);
     if (perFloorSlabs || f === floors - 1) {
       const sy = y0 + BASE;
       box(g, 0, sy, w, SLAB_PX, PALETTE.slab);
@@ -380,7 +382,11 @@ function drawCellOutline(g: Graphics, w: number, h: number, floors: number, perF
 // slab), `ty` the first free row under the windows.
 // ---------------------------------------------------------------------------
 
-function drawNativeInterior(g: Graphics, kind: RoomKind, y0: number, w: number, h: number, v: number, lit: boolean): void {
+/**
+ * `lit` turns on everything a person switches on (screens, lamps, glows); `lamp` is the lamp
+ * alone, which a dirty hotel room keeps at night for housekeeping.
+ */
+function drawNativeInterior(g: Graphics, kind: RoomKind, y0: number, w: number, h: number, v: number, lit: boolean, lamp: boolean): void {
   const by = y0 + h - SLAB_PX;
   const ty = y0 + INTERIOR_TOP;
   switch (kind) {
@@ -400,13 +406,13 @@ function drawNativeInterior(g: Graphics, kind: RoomKind, y0: number, w: number, 
       drawOffice(g, by, ty, w, v, lit);
       break;
     case 'hotelSingle':
-      drawHotelSingle(g, by, ty, w, v, lit);
+      drawHotelSingle(g, by, ty, w, v, lit, lamp);
       break;
     case 'hotelTwin':
-      drawHotelTwin(g, by, ty, w, v, lit);
+      drawHotelTwin(g, by, ty, w, v, lit, lamp);
       break;
     case 'hotelSuite':
-      drawHotelSuite(g, by, ty, w, v, lit);
+      drawHotelSuite(g, by, ty, w, v, lit, lamp);
       break;
     default:
       break; // the half grid kinds are drawn by art-2x.ts
@@ -444,32 +450,32 @@ function drawOffice(g: Graphics, by: number, ty: number, w: number, v: number, l
 // --- hotel ------------------------------------------------------------------
 // Single: bed at x 4, 32 wide with an 8 by 32 headboard; nightstand at (36, 50); TV at (48, 40).
 
-function drawHotelSingle(g: Graphics, by: number, ty: number, w: number, v: number, lit: boolean): void {
+function drawHotelSingle(g: Graphics, by: number, ty: number, w: number, v: number, lit: boolean, lamp: boolean): void {
   const bedW = Math.max(24, w - 32);
   bedIcon(g, 4, by, bedW, v);
   const nx = 4 + bedW;
-  if (nx + NIGHTSTAND_W <= w - TV_W - 4) nightstand(g, nx, by, lit);
+  if (nx + NIGHTSTAND_W <= w - TV_W - 4) nightstand(g, nx, by, lamp);
   smallTv(g, w - TV_W - 2, by, lit);
   if (v === 1 && w >= 88) picture(g, 8, ty, 20, 16, PALETTE.detail.curtain);
 }
 
-function drawHotelTwin(g: Graphics, by: number, ty: number, w: number, v: number, lit: boolean): void {
+function drawHotelTwin(g: Graphics, by: number, ty: number, w: number, v: number, lit: boolean, lamp: boolean): void {
   const bedW = Math.max(24, Math.floor((w - 28) / 4) * 2);
   bedIcon(g, 4, by, bedW, v);
   bedIcon(g, 8 + bedW, by, bedW, v === 0 ? 1 : 0);
   const nx = 12 + bedW * 2;
   if (nx + NIGHTSTAND_W <= w - LINE_PX) {
-    nightstand(g, nx, by, lit);
+    nightstand(g, nx, by, lamp);
     picture(g, nx - 2, ty, 14, 12, PALETTE.detail.glass);
   }
 }
 
-function drawHotelSuite(g: Graphics, by: number, ty: number, w: number, v: number, lit: boolean): void {
+function drawHotelSuite(g: Graphics, by: number, ty: number, w: number, v: number, lit: boolean, lamp: boolean): void {
   const bedW = Math.min(52, Math.max(28, Math.floor(w * 0.16) * 2));
   bedIcon(g, 4, by, bedW, v);
   let x = bedW + 6;
   if (x + NIGHTSTAND_W <= w - 80) {
-    nightstand(g, x, by, lit);
+    nightstand(g, x, by, lamp);
     x += NIGHTSTAND_W + 6;
   }
   const sofaW = Math.min(48, w - x - 50);
@@ -482,7 +488,7 @@ function drawHotelSuite(g: Graphics, by: number, ty: number, w: number, v: numbe
     lowTable(g, x, by, 22, v);
     x += 24;
   }
-  floorLampIcon(g, w - 18, by, lit);
+  floorLampIcon(g, w - 18, by, lamp);
 }
 
 // --- lobby, sky lobby, stairs, escalator -------------------------------------
@@ -688,6 +694,7 @@ function drawCar(g: Graphics, kind: ShaftKind, w: number, bodyH: number, doorsOp
   const ow = w - 2 * ox;
   const oh = bodyH - 12;
   box(g, ox, oy, ow, oh, PALETTE.carInterior); // the cavity behind the doors
+  box(g, ox, oy, ow, oh, PALETTE.carLight, 0.3); // the car is lit inside, full or empty
   const panelW = Math.floor(ow / 2);
   // Each panel slides outward by 8 px of a 22 px panel, clipped to the opening.
   const slide = doorsOpen ? Math.round((panelW * 8) / 22) : 0;
@@ -776,11 +783,13 @@ function drawGhost(g: Graphics, w: number, h: number, ok: boolean): void {
 // ---------------------------------------------------------------------------
 
 /** Draws a room into a container: native shell, interior (2x for the half grid kinds), outline. */
-function roomContainer(kind: RoomKind, tiles: number, floors: number, v: number, lit: boolean): Container {
+function roomContainer(kind: RoomKind, tiles: number, floors: number, v: number, state: WindowState): Container {
   const { width: w, height: h } = TEXTURE_SIZE.room(tiles, floors);
+  const lit = state === 'lit';
+  const lamp = lit || state === 'housekeeping';
   const root = new Container();
   const shell = new Graphics();
-  drawShell(shell, kind, w, h, lit);
+  drawShell(shell, kind, w, h, state);
   root.addChild(shell);
   const full = FULL_HEIGHT.has(kind);
   if (HALF_KINDS.has(kind)) {
@@ -794,8 +803,8 @@ function roomContainer(kind: RoomKind, tiles: number, floors: number, v: number,
     drawCellOutline(edge, w, h, floors, !full);
     root.addChild(edge);
   } else {
-    if (full) drawNativeInterior(shell, kind, 0, w, h, v, lit);
-    else for (let f = 0; f < floors; f++) drawNativeInterior(shell, kind, f * FLOOR_PX, w, FLOOR_PX, v, lit);
+    if (full) drawNativeInterior(shell, kind, 0, w, h, v, lit, lamp);
+    else for (let f = 0; f < floors; f++) drawNativeInterior(shell, kind, f * FLOOR_PX, w, FLOOR_PX, v, lit, lamp);
     drawCellOutline(shell, w, h, floors, !full);
   }
   return root;
@@ -830,13 +839,13 @@ export function createArt(renderer: Renderer): Art {
   }
 
   return {
-    room(kind, width, height, variant, lit) {
+    room(kind, width, height, variant, state) {
       const tiles = Math.max(1, Math.round(width));
       const floors = Math.max(1, Math.round(height));
       const v = ((Math.round(variant) % 2) + 2) % 2;
       const { width: w, height: h } = TEXTURE_SIZE.room(tiles, floors);
-      return bakeTarget(`room:${kind}:${tiles}:${floors}:${v}:${lit ? 1 : 0}`, w, h, () =>
-        roomContainer(kind, tiles, floors, v, lit),
+      return bakeTarget(`room:${kind}:${tiles}:${floors}:${v}:${state}`, w, h, () =>
+        roomContainer(kind, tiles, floors, v, state),
       );
     },
 
