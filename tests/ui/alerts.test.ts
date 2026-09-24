@@ -3,11 +3,11 @@
 // card; the stack shows three cards and folds the rest; the log keeps one line per room.
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { EVENT_TEST_HOOKS, handleEventCommand, resetEventTestHooks, tickEvents } from '../../src/sim/events';
+import { EVENT_TEST_HOOKS, handleEventCommand, resetEventTestHooks, startBomb, tickCockroaches, tickEvents } from '../../src/sim/events';
 import { EVENTS, ROOMS } from '../../src/sim/rules';
 import type { Command, CommandResult, LogEntry, Room, RoomKind, Star, World } from '../../src/sim/types';
 import { addRoom, allocId, createWorld, log } from '../../src/sim/world';
-import { SECURITY_LESSON, SECURITY_RESPONDING, fireHeadline, fireOutText } from '../../src/ui/alerts';
+import { ALERT_LINGER_MS, ROACHES_GONE, SECURITY_LESSON, SECURITY_RESPONDING, fireHeadline, fireOutText, roachHeadline } from '../../src/ui/alerts';
 import { createUi } from '../../src/ui/ui';
 import { FakeDom, type FakeElement } from './fake-dom';
 
@@ -238,6 +238,105 @@ describe('the fire incident card', () => {
     expect(fireHeadline([12], 1)).toBe('Fire on floor 12');
     expect(fireHeadline([12, 13, 14], 3)).toBe('Fire on floors 12 to 14, 3 rooms burning');
     expect(fireOutText(3)).toBe('Fire out, 3 rooms damaged');
+  });
+});
+
+const buttonOf = (card: FakeElement, command: string): FakeElement | undefined =>
+  card.descendants().find((n) => n.tagName === 'BUTTON' && n.dataset['command'] === command);
+const hasClass = (cls: string) => (root: FakeElement): FakeElement[] => toastsOf(root).filter((n) => has(n, cls));
+const bombCards = hasClass('is-bomb');
+const roachCards = hasClass('is-roaches');
+
+describe('the bomb card', () => {
+  function bombTower(): World {
+    const world = createWorld(4242);
+    world.stars = EVENTS.bomb.minStar as Star;
+    place(world, 'lobby', 1, 100);
+    const office = place(world, 'office', 3, 100);
+    EVENT_TEST_HOOKS.target.bomb = office.id;
+    world.time.minute = ROLL_MINUTE;
+    return world;
+  }
+
+  it('carries the ransom button while the threat stands, then shows the outcome without it and goes', () => {
+    vi.useFakeTimers();
+    const world = bombTower();
+    const h = mount(world);
+    startBomb(world);
+    h.notify();
+    const card = bombCards(h.root)[0]!;
+    expect(bombCards(h.root)).toHaveLength(1);
+    expect(buttonOf(card, 'bomb.pay')?.textContent).toBe('Pay ransom');
+    click(buttonOf(card, 'bomb.pay')!);
+    expect(h.applied).toEqual([{ kind: 'bomb.pay' }]);
+    expect(bombCards(h.root)).toHaveLength(1);
+    expect(buttonOf(card, 'bomb.pay')).toBeUndefined();
+    expect(card.textContent).toContain('ransom and the bomb in the office on floor 3 was handed over.');
+    vi.advanceTimersByTime(ALERT_LINGER_MS);
+    expect(bombCards(h.root)).toHaveLength(0);
+  });
+
+  it('shows the blast as the outcome when nobody pays', () => {
+    const world = bombTower();
+    const h = mount(world);
+    startBomb(world);
+    h.notify();
+    const card = bombCards(h.root)[0]!;
+    h.at(ROLL_MINUTE - 6 * 60 + EVENTS.bomb.detonateAtMinuteOfDay);
+    expect(world.events.some((e) => e.kind === 'bomb')).toBe(false);
+    expect(buttonOf(card, 'bomb.pay')).toBeUndefined();
+    expect(card.textContent).toContain('The bomb went off on floor 3.');
+    expect(bombCards(h.root)).toHaveLength(1);
+  });
+});
+
+describe('the cockroach card', () => {
+  it('is one card for a five room infestation that counts the rooms, and the log keeps five lines', () => {
+    const world = createWorld(4242);
+    place(world, 'lobby', 1, 100);
+    const width = ROOMS.hotelSingle.width;
+    const rooms = [0, 1, 2, 3, 4].map((i) => place(world, 'hotelSingle', 7, 100 + i * width));
+    rooms[0]!.dirty = true;
+    const h = mount(world);
+    const day = (n: number): void => {
+      world.time.minute = n * 1440;
+      tickCockroaches(world);
+      h.notify();
+    };
+    day(1);
+    day(1 + EVENTS.cockroaches.dirtyDaysBeforeInfested);
+    expect(roachCards(h.root)).toHaveLength(1);
+    expect(roachCards(h.root)[0]!.textContent).toContain('Cockroaches on floor 7');
+    for (let d = 1; d <= 4; d += 1) day(1 + EVENTS.cockroaches.dirtyDaysBeforeInfested + d * EVENTS.cockroaches.spreadDays);
+    expect(rooms.every((r) => r.infested)).toBe(true);
+    expect(toastsOf(h.root)).toHaveLength(1);
+    expect(roachCards(h.root)[0]!.textContent).toContain('Cockroaches on floor 7, 5 rooms');
+    const lines = world.log.filter((e) => e.text.startsWith('Cockroaches moved into the ') || e.text.startsWith('The cockroaches spread to the '));
+    expect(lines).toHaveLength(5);
+    // It closes like any card, and the infestation goes on without it.
+    click(closeOf(roachCards(h.root)[0]!));
+    expect(roachCards(h.root)).toHaveLength(0);
+    for (const room of rooms) room.infested = false;
+    h.notify();
+    expect(roachCards(h.root)).toHaveLength(0);
+  });
+
+  it('says when the cockroaches are gone', () => {
+    const world = createWorld(4242);
+    const room = place(world, 'hotelSingle', 7, 100);
+    const h = mount(world);
+    room.infested = true;
+    log(world, 'Cockroaches moved into the single room on floor 7.', 'alert', { roomId: room.id });
+    h.notify();
+    expect(roachCards(h.root)[0]!.textContent).toContain('Cockroaches on floor 7');
+    room.infested = false;
+    h.notify();
+    expect(roachCards(h.root)[0]!.textContent).toContain(ROACHES_GONE);
+  });
+
+  it('names an infestation that spans floors', () => {
+    expect(roachHeadline([7], 1)).toBe('Cockroaches on floor 7');
+    expect(roachHeadline([7, 8, 9], 3)).toBe('Cockroaches on floors 7 to 9, 3 rooms');
   });
 });
 
