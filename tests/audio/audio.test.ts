@@ -55,6 +55,8 @@ class StubNode {
   frequency = new StubParam();
   detune = new StubParam();
   delayTime = new StubParam();
+  threshold = new StubParam(); knee = new StubParam(); ratio = new StubParam();
+  attack = new StubParam(); release = new StubParam();
   onended: (() => void) | null = null;
   type = '';
   buffer: unknown = null;
@@ -80,6 +82,7 @@ class StubContext {
   gains: StubNode[] = [];
   filters: StubNode[] = [];
   delays: StubNode[] = [];
+  compressors: StubNode[] = [];
   constructor() {
     StubContext.constructed += 1;
   }
@@ -95,6 +98,7 @@ class StubContext {
     const n = new StubNode(); this.filters.push(n); return n;
   }
   createDelay(): StubNode { const n = new StubNode(); this.delays.push(n); return n; }
+  createDynamicsCompressor(): StubNode { const n = new StubNode(); this.compressors.push(n); return n; }
   createBufferSource(): StubNode {
     const n = new StubNode();
     this.sources.push(n);
@@ -342,8 +346,9 @@ describe('the AudioContext and the master toggle', () => {
       clearInterval: () => {},
     });
     target.fire('pointerdown');
-    // The bed: the 4 kHz chirp and its 12 Hz pulse, and one looping brown noise source.
-    expect(ctxs[0]!.oscillators.map((o) => o.frequency.value)).toContain(4000);
+    // The bed: band-limited noise cricket rustle and its 12 Hz pulse.
+    expect(ctxs[0]!.filters.some(f => f.type === 'highpass' && f.frequency.value === 3000)).toBe(true);
+    expect(ctxs[0]!.oscillators.map((o) => o.frequency.value)).not.toContain(4000);
     expect(ctxs[0]!.oscillators.map((o) => o.frequency.value)).toContain(12);
     expect(ctxs[0]!.sources.filter((s) => s.loop).length).toBeGreaterThanOrEqual(2);
     sound.destroy();
@@ -432,8 +437,7 @@ describe('six chapter moods and seeded eight-bar phrases', () => {
         expect(12 * Math.log2(fifth.freq / root.freq)).toBeCloseTo(7);
       }
     }
-    const hat = phraseFor(99, 5, 7, 'hat');
-    expect(new Set(hat.map(n => n.freq)).size).toBe(1);
+    expect(phraseFor(99, 5, 7, 'hat')).toEqual([]);
     const leadBars = new Set(phraseFor(99, 6, 7, 'lead').map(n => Math.floor(n.beat / 4)));
     const counterBars = new Set(phraseFor(99, 6, 7, 'counter').map(n => Math.floor(n.beat / 4)));
     expect([...leadBars].some(bar => counterBars.has(bar))).toBe(false);
@@ -441,6 +445,21 @@ describe('six chapter moods and seeded eight-bar phrases', () => {
 });
 
 describe('mixer and weather integration', () => {
+  it('puts the specified compressor, makeup gain, dust and shelf on music only', () => {
+    const game = fakeGame(); const target = fakeTarget(); const ctx = new StubContext();
+    const sound = createSound(game, { target, store: memoryStore(), createContext: () => asCtx(ctx), setInterval: () => 1, clearInterval: () => {} });
+    target.fire('pointerdown'); sound.setEnabled(true);
+    expect(ctx.compressors).toHaveLength(1);
+    const compressor = ctx.compressors[0]!;
+    expect([compressor.threshold.value, compressor.knee.value, compressor.ratio.value,
+      compressor.attack.value, compressor.release.value]).toEqual([-14, 6, 4, 0.01, 0.25]);
+    expect(ctx.gains[1]!.connections).toContain(compressor);
+    expect(compressor.connections).toContain(ctx.gains[2]);
+    expect(ctx.gains[2]!.gain.value).toBeCloseTo(dbToGain(10));
+    expect(ctx.filters.some(f => f.type === 'lowpass' && f.frequency.value === 7000)).toBe(true);
+    expect(ctx.filters.some(f => f.type === 'highshelf' && f.frequency.value === 5000 && f.gain.value === -6)).toBe(true);
+    sound.destroy();
+  });
   it('keeps every bus silent after one off call and has a music-only feedback delay', () => {
     const game = fakeGame(); const target = fakeTarget(); const ctx = new StubContext();
     const sound = createSound(game, { target, store: memoryStore(), createContext: () => asCtx(ctx), setInterval: () => 1, clearInterval: () => {} });
@@ -449,10 +468,10 @@ describe('mixer and weather integration', () => {
     expect(ctx.delays[0]!.delayTime.value).toBeCloseTo(0.31);
     expect(ctx.gains.some(g => g.gain.value === 0.35)).toBe(true);
     expect(ctx.filters.some(f => f.frequency.value === 3000)).toBe(true);
-    expect(ctx.gains[8]!.gain.value).toBeLessThanOrEqual(dbToGain(VINYL_MAX_DB));
+    expect(ctx.gains[9]!.gain.value).toBeLessThanOrEqual(dbToGain(VINYL_MAX_DB));
     expect(ctx.oscillators.some(o => o.frequency.value === 0.3)).toBe(true);
     sound.setEnabled(false);
-    for (const bus of [ctx.gains[0], ctx.gains[1], ctx.gains[4], ctx.gains[5]]) expect(bus!.gain.value).toBe(0);
+    for (const bus of [ctx.gains[0], ctx.gains[1], ctx.gains[5], ctx.gains[6]]) expect(bus!.gain.value).toBe(0);
     sound.destroy();
   });
   it('stops the kit and ducks music on a fire beat; tempo stays fixed as energy changes', () => {
@@ -464,8 +483,8 @@ describe('mixer and weather integration', () => {
     const tempo = sound.tempo;
     const before = ctx.gains[1]!.gain.value;
     game.emit({ kind: 'beat', beat: { code: 'fire.started', minute: 0 } });
-    expect(ctx.gains[6]!.gain.value).toBe(0);
     expect(ctx.gains[7]!.gain.value).toBe(0);
+    expect(ctx.gains[8]!.gain.value).toBe(0);
     expect(ctx.gains[1]!.gain.value).toBeLessThan(before);
     game.state.rooms.set(1, { kind: 'restaurant', occupancy: 24, width: 12 });
     game.state.time.minute = 2 * 1440 + 21 * 60;
@@ -533,9 +552,9 @@ describe('hostile encounter cues and priority', () => {
     game.emit(beat('theft.started'));
     expect(sound.tensionLevel).toBe(0.5);
     expect(ctx.oscillators.slice(before, before + 3).map(o => o.frequency.value)).toEqual([146.83, 123.47, 185]);
-    expect(ctx.gains[6]!.gain.value).toBeGreaterThan(0);
     expect(ctx.gains[7]!.gain.value).toBeGreaterThan(0);
-    expect(ctx.gains[7]!.gain.value).toBeLessThan(1);
+    expect(ctx.gains[8]!.gain.value).toBeGreaterThan(0);
+    expect(ctx.gains[8]!.gain.value).toBeLessThan(1);
     sound.destroy();
   });
 
@@ -547,7 +566,7 @@ describe('hostile encounter cues and priority', () => {
     expect(sound.tensionLevel).toBe(0.5);
     const ticks = ctx.oscillators.slice(before);
     expect(ticks.map(o => o.frequency.value)).toEqual([784, 988]);
-    for (const tick of ticks) expect((tick.connections[0] as StubNode).connections).toContain(ctx.gains[4]);
+    for (const tick of ticks) expect((tick.connections[0] as StubNode).connections).toContain(ctx.gains[5]);
     sound.destroy();
   });
 
@@ -580,8 +599,8 @@ describe('hostile encounter cues and priority', () => {
     expect(second.sound.tensionLevel).toBe(0.5);
     second.game.emit(beat('fire.started'));
     expect(second.sound.tensionLevel).toBe(1);
-    expect(second.ctx.gains[6]!.gain.value).toBe(0);
     expect(second.ctx.gains[7]!.gain.value).toBe(0);
+    expect(second.ctx.gains[8]!.gain.value).toBe(0);
     second.game.emit(beat('theft.caught'));
     expect(second.sound.tensionLevel).toBe(1); // theft's late outcome cannot clear the fire
     second.sound.destroy();

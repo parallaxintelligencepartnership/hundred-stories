@@ -73,7 +73,16 @@ export function venueFillFor(rooms: Iterable<Pick<Room, 'kind' | 'occupancy' | '
 }
 
 /** Thresholds define how much of the chapter's band plays at the current energy. */
-export function activeLayers(chapter: Chapter, energy: number, tension: number, weekend = false): Voice[] {
+export function activeLayers(chapter: Chapter, energy: number, tension: number, weekend = false, phraseIndex = 0): Voice[] {
+  if (chapter === 5 && energy >= 0.3) {
+    // The five-star room is a small combo: one featured melody per phrase.
+    const featured: Voice[] = weekend ? ['vibes', 'counter', 'pluck'] : ['vibes', 'counter', 'guitar'];
+    const choice = featured[((phraseIndex % featured.length) + featured.length) % featured.length]!;
+    const core: Voice[] = ['piano', 'bass', 'drums', 'pad'];
+    if (energy >= ENTRY_THRESHOLD[choice]) core.push(choice);
+    return core.filter(voice => energy >= ENTRY_THRESHOLD[voice]
+      && !(tension >= 0.8 && voice === 'drums'));
+  }
   return voicesFor(chapter, weekend).filter(voice =>
     energy >= ENTRY_THRESHOLD[voice]
       && !(tension > 0.2 && voice === 'kinetic')

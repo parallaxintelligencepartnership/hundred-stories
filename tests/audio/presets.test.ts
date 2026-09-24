@@ -23,6 +23,7 @@ class Param {
 }
 class Node {
   gain = new Param(); frequency = new Param(); detune = new Param(); delayTime = new Param();
+  threshold = new Param(); knee = new Param(); ratio = new Param(); attack = new Param(); release = new Param();
   onended: (() => void) | null = null; type = ''; buffer: unknown = null; loop = false;
   connect(): void {} disconnect(): void {} start(): void {} stop(): void {}
 }
@@ -32,6 +33,7 @@ class Ctx {
   createGain(): Node { return new Node(); }
   createBiquadFilter(): Node { return new Node(); }
   createDelay(): Node { return new Node(); }
+  createDynamicsCompressor(): Node { return new Node(); }
   createBufferSource(): Node { return new Node(); }
   createBuffer(_c: number, length: number): { getChannelData(): Float32Array } { const d = new Float32Array(length); return { getChannelData: () => d }; }
   resume(): Promise<void> { this.state = 'running'; return Promise.resolve(); }

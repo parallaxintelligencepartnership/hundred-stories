@@ -27,7 +27,7 @@ function degreeNote(chapter: Chapter, degree: number, octave: number, beat: numb
 
 /** Pure, seeded variation of ASCENT and LIVES-INSIDE across eight bars. */
 export function phraseFor(seed: number, chapter: Chapter, phraseIndex: number, voice: Voice, style: PhraseStyle = {}): Note[] {
-  if (voice === 'drums') return [];
+  if (voice === 'drums' || voice === 'hat') return []; // both are noise percussion
   const notes: Note[] = [];
   const roots = [0, 3, 4, 0, 5, 3, 4, 0];
   const ascent = [0, 2, 4, 5, 7];
@@ -47,16 +47,12 @@ export function phraseFor(seed: number, chapter: Chapter, phraseIndex: number, v
       notes.push(degreeNote(chapter, root + 4, -2, at + 2, 1.2, velocity * 0.8));
       continue;
     }
-    if (voice === 'hat') {
-      // C7 is in every chapter mode. The pitch is constant; only dynamics move.
-      for (let i = 0; i < 4; i += 1) notes.push(degreeNote(chapter, 0, 3, at + i, 0.06, velocity * 0.62));
-      continue;
-    }
     if (voice === 'pulse' || voice === 'kinetic') {
       const divisions = voice === 'kinetic' ? 16 : 8;
       for (let i = 0; i < divisions; i += 1) {
         if (i % 4 !== 0 && hashed(seed, chapter, phraseIndex, voice, bar * 16 + i + 100) < 0.26) continue;
-        notes.push(degreeNote(chapter, root + (i % 4 === 0 ? 0 : 4), voice === 'kinetic' ? 0 : -1, at + i * 4 / divisions, voice === 'kinetic' ? 0.12 : 0.22, velocity * 0.5));
+        // Kinetic notes carry timing only; drums.ts renders each as a filtered noise click.
+        notes.push(degreeNote(chapter, voice === 'kinetic' ? 0 : root + (i % 4 === 0 ? 0 : 4), voice === 'kinetic' ? -2 : -1, at + i * 4 / divisions, voice === 'kinetic' ? 0.06 : 0.22, velocity * 0.5));
       }
       continue;
     }
@@ -98,6 +94,11 @@ export function phraseFor(seed: number, chapter: Chapter, phraseIndex: number, v
   const density = Math.min(1, Math.max(0.4, style.density ?? 1));
   const selected = density === 1 ? notes : notes.filter((note, index) => note.beat % 4 === 0 || hashed(seed, chapter, phraseIndex, voice, 400 + index) < density);
   if (style.key) for (const note of selected) note.freq *= 2 ** (style.key / 12);
+  // Octave folding preserves the chosen scale while bounding every sustained fundamental.
+  for (const note of selected) {
+    const ceiling = voice === 'vibes' ? 1046 : 1500;
+    while (note.freq > ceiling) note.freq /= 2;
+  }
   // Index influences the seed, and therefore the entire pattern. A tiny velocity signature
   // ensures adjacent long-session phrases stay distinct even if two random choices coincide.
   if (selected[0]) selected[0].vel = Math.min(1, selected[0].vel + (phraseIndex % 997) * 0.000001);

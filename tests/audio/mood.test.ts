@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { activeLayers, easeMood, moodFor, venueFillFor, type MoodInput } from '../../src/audio/mood';
-import { drumHitsFor, kickPatternFor, lazyOffsetMs } from '../../src/audio/drums';
-import { chordColourFor, cutoffForWarmth, keyFor, swingFor, tempoFor } from '../../src/audio/score';
+import { drumHitsFor, kickPatternFor, lazyOffsetMs, NOISE_PEAK } from '../../src/audio/drums';
+import { chordColourFor, cutoffForWarmth, keyFor, swingFor, tempoFor, VOICES, CHAPTER_VOICES } from '../../src/audio/score';
 import { phraseFor } from '../../src/audio/phrase';
 
 const clear = { kind: 'clear', from: 'clear', blend: 1, intensity: 1 } as const;
@@ -66,6 +66,35 @@ describe('pure live mood', () => {
 });
 
 describe('lofi groove', () => {
+  it('bounds all voice filters and the playable vibes range', () => {
+    expect(Object.values(VOICES).every(voice => voice.cutoff <= 7000)).toBe(true);
+    expect(VOICES.vibes.cutoff).toBe(4000);
+    expect(VOICES.vibes.tremolo).toBeGreaterThanOrEqual(4);
+    expect(VOICES.vibes.tremolo).toBeLessThanOrEqual(5);
+    for (let seed = 0; seed < 20; seed += 1) {
+      const vibes = phraseFor(seed, 5, seed, 'vibes', { key: keyFor(seed) });
+      expect(Math.max(...vibes.map(note => note.freq))).toBeLessThanOrEqual(1046);
+    }
+  });
+  it('keeps noise hats and kinetic clicks below -24 dBFS after makeup', () => {
+    const gain = 10 ** (10 / 20);
+    for (const kind of ['hat', 'open', 'kinetic'] as const) {
+      const velocity = kind === 'kinetic' ? 0.5 : 0.22;
+      expect(20 * Math.log10(NOISE_PEAK[kind] * velocity * gain)).toBeLessThanOrEqual(-24);
+    }
+    expect(VOICES.hat.peak).toBe(0);
+    expect(VOICES.kinetic.peak).toBe(0);
+    expect(VOICES.vibes.release).toBeLessThan(0.5);
+  });
+  it('limits the full five-star band to five voices and rotates its melody', () => {
+    expect(CHAPTER_VOICES[5]).toContain('pad');
+    const first = activeLayers(5, 1, 0, true, 0);
+    expect(first).toHaveLength(5);
+    expect(first).toContain('bass'); expect(first).toContain('drums'); expect(first).toContain('pad');
+    const melodic = new Set(['piano', 'guitar', 'pluck', 'pulse', 'brass', 'horn', 'counter', 'vibes', 'lead']);
+    expect(first.filter(voice => melodic.has(voice)).length).toBeLessThanOrEqual(3);
+    expect(activeLayers(5, 1, 0, true, 1)).not.toEqual(first);
+  });
   it('keeps snares on beats two and four in every seeded kick pattern', () => {
     const patterns = new Set<string>();
     for (let i = 0; i < 32; i += 1) {

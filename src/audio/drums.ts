@@ -1,7 +1,9 @@
 import type { AudioContextLike } from './audio';
 import { swingFor } from './score';
 
-export type DrumKind = 'kick' | 'snare' | 'hat' | 'ghost' | 'open';
+export type DrumKind = 'kick' | 'snare' | 'hat' | 'ghost' | 'open' | 'kinetic';
+/** Conservative source peaks; both noise layers also pass through the music bus. */
+export const NOISE_PEAK = { hat: 0.06, open: 0.06, ghost: 0.02, kinetic: 0.035 } as const;
 export interface DrumHit { kind: DrumKind; beat: number; lateSeconds: number; velocity: number }
 export const KICK_PATTERNS: readonly (readonly number[])[] = [
   [0, 2.5], [0, 2], [0, 1.75, 2.5], [0, 2.75],
@@ -62,15 +64,20 @@ export function playDrum(ctx: AudioContextLike, out: AudioNode, hit: DrumHit, at
     gain.gain.exponentialRampToValueAtTime(0.0001, at + duration);
     osc.connect(gain); gain.connect(out); osc.start(at); osc.stop(at + duration + 0.01); started.push(osc);
   };
-  const burst = (kind: 'bandpass' | 'highpass', hz: number, duration: number, peak: number) => {
+  const burst = (kind: 'bandpass' | 'highpass', hz: number, duration: number, peak: number, bounded = false) => {
     const src = ctx.createBufferSource(); src.buffer = noiseBuffer(ctx);
     const filter = ctx.createBiquadFilter(); filter.type = kind; filter.frequency.setValueAtTime(hz, at);
+    const top = bounded ? ctx.createBiquadFilter() : null;
+    if (top) { top.type = 'lowpass'; top.frequency.setValueAtTime(7000, at); }
     const gain = ctx.createGain(); gain.gain.setValueAtTime(peak * hit.velocity, at);
     gain.gain.exponentialRampToValueAtTime(0.0001, at + duration);
-    src.connect(filter); filter.connect(gain); gain.connect(out); src.start(at); src.stop(at + duration + 0.01); started.push(src);
+    src.connect(filter); if (top) { filter.connect(top); top.connect(gain); } else filter.connect(gain);
+    gain.connect(out); src.start(at); src.stop(at + duration + 0.01); started.push(src);
   };
   if (hit.kind === 'kick') tone(120, 0.12, 0.22, true);
   else if (hit.kind === 'snare') { burst('bandpass', 1450, 0.09, 0.16); tone(180, 0.09, 0.075); }
-  else burst('highpass', hit.kind === 'open' ? 4100 : 5200, hit.kind === 'open' ? 0.17 : 0.045, hit.kind === 'ghost' ? 0.055 : 0.09);
+  else burst('highpass', hit.kind === 'open' ? 4100 : 5200,
+    hit.kind === 'open' ? 0.07 : hit.kind === 'kinetic' ? 0.055 : 0.045,
+    NOISE_PEAK[hit.kind], true);
   return started;
 }

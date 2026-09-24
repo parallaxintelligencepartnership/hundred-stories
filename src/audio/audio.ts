@@ -89,6 +89,7 @@ export type AudioContextLike = Pick<
   | 'createBuffer'
   | 'createBufferSource'
   | 'createDelay'
+  | 'createDynamicsCompressor'
   | 'resume'
   | 'suspend'
 >;
@@ -256,7 +257,7 @@ interface AmbientBed {
   stop(): void;
 }
 
-/** Brown noise low passed at 300 Hz, and a 4 kHz sine pulsed at 12 Hz behind a random gate. */
+/** Brown traffic noise and quiet filtered-noise cricket rustle behind a random gate. */
 function createBed(ctx: AudioContextLike, out: AudioNode): AmbientBed {
   const seconds = 4;
   const brown = ctx.createBuffer(1, ctx.sampleRate * seconds, ctx.sampleRate);
@@ -278,9 +279,11 @@ function createBed(ctx: AudioContextLike, out: AudioNode): AmbientBed {
   low.connect(traffic);
   traffic.connect(out);
 
-  const chirp = ctx.createOscillator();
-  chirp.type = 'sine';
-  chirp.frequency.value = 4000;
+  const chirp = ctx.createBufferSource();
+  chirp.buffer = whiteNoise(ctx);
+  chirp.loop = true;
+  const chirpHigh = ctx.createBiquadFilter(); chirpHigh.type = 'highpass'; chirpHigh.frequency.value = 3000;
+  const chirpLow = ctx.createBiquadFilter(); chirpLow.type = 'lowpass'; chirpLow.frequency.value = 7000;
   const pulse = ctx.createGain();
   pulse.gain.value = 0.5;
   const lfo = ctx.createOscillator();
@@ -294,7 +297,7 @@ function createBed(ctx: AudioContextLike, out: AudioNode): AmbientBed {
   gate.gain.value = 0;
   const crickets = ctx.createGain();
   crickets.gain.value = 0;
-  chirp.connect(pulse);
+  chirp.connect(chirpHigh); chirpHigh.connect(chirpLow); chirpLow.connect(pulse);
   pulse.connect(gate);
   gate.connect(crickets);
   crickets.connect(out);
@@ -406,6 +409,10 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
   let master: GainNode | null = null;
   let musicBus: GainNode | null = null;
   let musicColour: BiquadFilterNode | null = null;
+  let musicDust: BiquadFilterNode | null = null;
+  let musicShelf: BiquadFilterNode | null = null;
+  let musicCompressor: DynamicsCompressorNode | null = null;
+  let musicMakeup: GainNode | null = null;
   let hatBus: GainNode | null = null;
   let drumsBus: GainNode | null = null;
   let vinylGain: GainNode | null = null;
@@ -443,7 +450,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
   let nextBar = 0;
   let nextBarIndex = 0;
   const musicFilters = new Map<BiquadFilterNode, number>();
-  const scheduledMusic = new Set<OscillatorNode>();
+  const scheduledMusic = new Set<AudioScheduledSourceNode>();
   const scheduledDrums = new Set<AudioScheduledSourceNode>();
   let lastBell = -Infinity;
   let lastThunder = -Infinity;
@@ -486,22 +493,31 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
         return; // no Web Audio in this browser: stay silent
       }
       master = ctx.createGain(); master.gain.value = 1; master.connect(ctx.destination);
-      musicBus = ctx.createGain(); musicBus.gain.value = (settings.music ?? 60) / 100; musicBus.connect(master);
+      musicBus = ctx.createGain(); musicBus.gain.value = (settings.music ?? 60) / 100;
+      musicCompressor = ctx.createDynamicsCompressor();
+      musicCompressor.threshold.value = -14; musicCompressor.knee.value = 6;
+      musicCompressor.ratio.value = 4; musicCompressor.attack.value = 0.01;
+      musicCompressor.release.value = 0.25;
+      musicMakeup = ctx.createGain(); musicMakeup.gain.value = dbToGain(10);
+      musicBus.connect(musicCompressor); musicCompressor.connect(musicMakeup); musicMakeup.connect(master);
       musicColour = ctx.createBiquadFilter(); musicColour.type = 'lowpass';
       musicColour.frequency.value = cutoffForWarmth(easedMood.warmth);
-      musicColour.connect(musicBus);
+      musicDust = ctx.createBiquadFilter(); musicDust.type = 'lowpass'; musicDust.frequency.value = 7000;
+      musicShelf = ctx.createBiquadFilter(); musicShelf.type = 'highshelf';
+      musicShelf.frequency.value = 5000; musicShelf.gain.value = -6;
+      musicColour.connect(musicDust); musicDust.connect(musicShelf); musicShelf.connect(musicBus);
       // Feedback delay keeps the score warm without a convolver or recorded impulse.
       const wet = ctx.createGain(); wet.gain.value = dbToGain(REVERB_WET_DB);
       const delay = ctx.createDelay(1); delay.delayTime.value = REVERB_DELAY_SECONDS;
       const low = ctx.createBiquadFilter(); low.type = 'lowpass'; low.frequency.value = REVERB_CUTOFF_HZ;
       const feedback = ctx.createGain(); feedback.gain.value = REVERB_FEEDBACK;
       musicBus.connect(wet); wet.connect(delay); delay.connect(low);
-      low.connect(master); low.connect(feedback); feedback.connect(delay);
+      low.connect(musicCompressor); low.connect(feedback); feedback.connect(delay);
       effectsBus = ctx.createGain();
       effectsBus.gain.value = settings.effects / 100;
       effectsBus.connect(master);
       ambientBus = ctx.createGain();
-      ambientBus.gain.value = settings.ambient / 100;
+      ambientBus.gain.value = settings.ambient / 100 * dbToGain(-10);
       ambientBus.connect(master);
       hatBus = ctx.createGain(); hatBus.gain.value = 1; hatBus.connect(musicColour);
       drumsBus = ctx.createGain(); drumsBus.gain.value = 1; drumsBus.connect(musicColour);
@@ -513,7 +529,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
     if (master) master.gain.setValueAtTime(1, ctx.currentTime);
     musicBus?.gain.setValueAtTime((settings.music ?? 60) / 100 * dbToGain(-6 * easedMood.tension), ctx.currentTime);
     effectsBus?.gain.setValueAtTime(settings.effects / 100, ctx.currentTime);
-    ambientBus?.gain.setValueAtTime(settings.ambient / 100, ctx.currentTime);
+    ambientBus?.gain.setValueAtTime(settings.ambient / 100 * dbToGain(-10), ctx.currentTime);
     startTexture();
     if (!unsubEvents) unsubEvents = game.subscribeEvents(onEvent);
     if (!unsubClock) unsubClock = game.subscribe(onClock);
@@ -748,7 +764,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
     };
     if (voice === 'piano') {
       const chorus = c.createOscillator(); chorus.type = 'triangle';
-      chorus.frequency.setValueAtTime(note.freq, when); chorus.detune.setValueAtTime(5, when);
+      chorus.frequency.setValueAtTime(note.freq, when); chorus.detune.setValueAtTime(4, when);
       if (tapeDepth) tapeDepth.connect(chorus.detune);
       const soft = c.createGain(); soft.gain.value = 0.12;
       chorus.connect(soft); soft.connect(filter); chorus.start(when); chorus.stop(when + duration + 0.02);
@@ -782,7 +798,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
         const weekend = heard.mood.isWeekend;
         const chapters = previousChapter && at >= transitionAt && at < transitionAt + 3 ? [previousChapter, chapter] : [at < transitionAt && previousChapter ? previousChapter : chapter];
         const available = new Set<Voice>(chapters.flatMap(playing => voicesFor(playing, weekend)));
-        const wanted = new Set<Voice>(chapters.flatMap(playing => activeLayers(playing, easedMood.energy, easedMood.tension, weekend)));
+        const wanted = new Set<Voice>(chapters.flatMap(playing => activeLayers(playing, easedMood.energy, easedMood.tension, weekend, phraseIndex)));
         const layers = new Map<Voice, { from: number; to: number }>();
         for (const voice of new Set<Voice>([...available, ...layerMix.keys()])) {
           const from = layerMix.get(voice) ?? 0;
@@ -806,13 +822,19 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
               const fade = previousChapter && when >= transitionAt && when < transitionAt + 3
                 ? playing === chapter ? (when - transitionAt) / 3 : 1 - (when - transitionAt) / 3 : 1;
               const layerFade = layer.from + (layer.to - layer.from) * within / 4;
-              if (layerFade > 0) playScoreNote(voice, note, when, fade * layerFade);
+              if (layerFade > 0 && voice === 'kinetic' && hatBus) {
+                const sources = playDrum(ctx, hatBus, { kind: 'kinetic', beat: within, lateSeconds: 0, velocity: note.vel * fade * layerFade }, when);
+                for (const source of sources) {
+                  scheduledMusic.add(source);
+                  source.onended = () => scheduledMusic.delete(source);
+                }
+              } else if (layerFade > 0) playScoreNote(voice, note, when, fade * layerFade);
             }
           }
         }
         if (!urgent(threat) && easedMood.tension < 0.8) {
           const drumLayer = layers.get('drums');
-          const hatLayer = layers.get('hat');
+          const hatLayer = layers.get('hat') ?? (chapter === 5 ? drumLayer : undefined);
           if (drumsBus && hatBus && ctx && (drumLayer?.to || hatLayer?.to)) {
             for (const hit of drumHitsFor(game.world.seed, phraseIndex, barIndex, Math.max(0.15, easedMood.energy))) {
               if (easedMood.tension >= 0.3 && (hit.kind === 'ghost' || hit.kind === 'open')) continue;
@@ -942,7 +964,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
     setAmbient(level) {
       settings.ambient = clampLevel(level);
       writeSoundSettings(settings, store);
-      if (ctx && ambientBus) ambientBus.gain.setTargetAtTime(settings.ambient / 100, ctx.currentTime, 0.05);
+      if (ctx && ambientBus) ambientBus.gain.setTargetAtTime(settings.ambient / 100 * dbToGain(-10), ctx.currentTime, 0.05);
       if (settings.on) syncBed();
     },
     destroy() {

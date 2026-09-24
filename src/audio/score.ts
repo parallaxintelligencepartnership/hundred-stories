@@ -38,7 +38,7 @@ export const CHAPTER_VOICES: Readonly<Record<Chapter, readonly Voice[]>> = {
   2: ['piano', 'bass', 'drums', 'hat', 'guitar'],
   3: ['piano', 'bass', 'drums', 'hat', 'guitar', 'pulse', 'brass'],
   4: ['piano', 'bass', 'drums', 'hat', 'guitar', 'pulse', 'brass', 'horn', 'counter'],
-  5: ['piano', 'bass', 'drums', 'hat', 'guitar', 'pulse', 'brass', 'horn', 'counter', 'vibes', 'kinetic'],
+  5: ['piano', 'bass', 'drums', 'hat', 'pad', 'guitar', 'pulse', 'brass', 'horn', 'counter', 'vibes', 'kinetic'],
   6: ['piano', 'bass', 'drums', 'hat', 'pad', 'lead', 'counter', 'strings', 'guitar', 'pulse', 'brass', 'horn', 'vibes', 'kinetic'],
 };
 
@@ -64,7 +64,7 @@ export function inChapterScale(chapter: Chapter, frequency: number): boolean {
   return CHAPTER_SCALES[chapter].includes(((midi - 60) % 12 + 12) % 12);
 }
 
-/** One small replaceable synth recipe per instrument. Peaks remain below -6 dBFS on the music bus. */
+/** One small replaceable synth recipe per instrument. The bus dynamics set final loudness. */
 export interface VoiceDefinition {
   wave: OscillatorType;
   attack: number;
@@ -75,21 +75,21 @@ export interface VoiceDefinition {
   tremolo?: number;
 }
 export const VOICES: Readonly<Record<Voice, VoiceDefinition>> = {
-  piano: { wave: 'triangle', attack: 0.025, release: 0.48, peak: 0.036, cutoff: 1900 },
+  piano: { wave: 'triangle', attack: 0.025, release: 0.48, peak: 0.18, cutoff: 1900 },
   drums: { wave: 'sine', attack: 0.005, release: 0.12, peak: 0.1, cutoff: 900 },
-  bass: { wave: 'sine', attack: 0.025, release: 0.65, peak: 0.07, cutoff: 500 },
-  hat: { wave: 'triangle', attack: 0.002, release: 0.042, peak: 0.004, cutoff: 5000 },
-  guitar: { wave: 'triangle', attack: 0.008, release: 0.2, peak: 0.027, cutoff: 2600, detune: 4 },
-  pluck: { wave: 'triangle', attack: 0.008, release: 0.19, peak: 0.015, cutoff: 2300, detune: 3 },
-  pulse: { wave: 'triangle', attack: 0.008, release: 0.12, peak: 0.014, cutoff: 1200 },
-  brass: { wave: 'sawtooth', attack: 0.17, release: 0.38, peak: 0.015, cutoff: 1350 },
-  horn: { wave: 'sawtooth', attack: 0.12, release: 0.5, peak: 0.012, cutoff: 1000 },
-  counter: { wave: 'sine', attack: 0.03, release: 0.5, peak: 0.025, cutoff: 2000 },
-  vibes: { wave: 'sine', attack: 0.004, release: 0.32, peak: 0.035, cutoff: 3300, detune: 3, tremolo: 6 },
-  kinetic: { wave: 'triangle', attack: 0.004, release: 0.075, peak: 0.008, cutoff: 2000 },
-  pad: { wave: 'sine', attack: 0.45, release: 2.2, peak: 0.02, cutoff: 1300 },
-  lead: { wave: 'triangle', attack: 0.04, release: 0.72, peak: 0.032, cutoff: 2600 },
-  strings: { wave: 'sawtooth', attack: 0.58, release: 2.5, peak: 0.01, cutoff: 950, detune: 5 },
+  bass: { wave: 'sine', attack: 0.025, release: 0.65, peak: 0.3, cutoff: 500 },
+  hat: { wave: 'sine', attack: 0.002, release: 0.045, peak: 0, cutoff: 7000 }, // noise voice in drums.ts
+  guitar: { wave: 'triangle', attack: 0.008, release: 0.2, peak: 0.13, cutoff: 2600, detune: 4 },
+  pluck: { wave: 'triangle', attack: 0.008, release: 0.19, peak: 0.08, cutoff: 2300, detune: 3 },
+  pulse: { wave: 'triangle', attack: 0.008, release: 0.12, peak: 0.07, cutoff: 1200 },
+  brass: { wave: 'sawtooth', attack: 0.17, release: 0.38, peak: 0.08, cutoff: 1350 },
+  horn: { wave: 'sawtooth', attack: 0.12, release: 0.5, peak: 0.065, cutoff: 1000 },
+  counter: { wave: 'sine', attack: 0.03, release: 0.5, peak: 0.12, cutoff: 2000 },
+  vibes: { wave: 'sine', attack: 0.004, release: 0.32, peak: 0.15, cutoff: 4000, detune: 3, tremolo: 4.5 },
+  kinetic: { wave: 'sine', attack: 0.002, release: 0.06, peak: 0, cutoff: 7000 }, // noise voice in drums.ts
+  pad: { wave: 'sine', attack: 0.45, release: 2.2, peak: 0.08, cutoff: 1300 },
+  lead: { wave: 'triangle', attack: 0.04, release: 0.72, peak: 0.15, cutoff: 2600 },
+  strings: { wave: 'sawtooth', attack: 0.58, release: 2.5, peak: 0.055, cutoff: 950, detune: 4 },
 };
 
 /** Entries are relative to the continuous arrangement, not separate tracks. */
