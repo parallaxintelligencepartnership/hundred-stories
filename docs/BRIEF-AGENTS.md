@@ -7,6 +7,7 @@ Read first: docs/DESIGN.md, src/sim/types.ts, src/sim/rules.ts, src/sim/world.ts
 - Do not run git commit or git add. The orchestrator commits.
 - Stub files already exist for every sim module with the exact exported signatures below. Replace the body, keep the signatures.
 - Sim modules: no DOM, no Date, no Math.random; use world.rng. Every number comes from rules.ts.
+- Verification is one pass (Matt, 2026-09-23). Run your own new tests and a narrow typecheck while you work; run the full `npm test`, `npm run typecheck` and `npm run build` once, at the end, never after every edit. No sweep, closeout, version bump or deploy inside a package: one closeout and one deploy cover the whole run, and Claude runs the deploy, never Matt.
 - Tests: vitest, under tests/sim/<module>.test.ts (or tests/scenarios/). Run only your file: `npx vitest run tests/sim/<module>.test.ts`. Typecheck with `npx tsc --noEmit 2>&1 | grep -E 'src/(sim|render|ui|game)/<yourfile>'`; other agents' files may be mid-edit, only yours must be clean.
 - Report under 300 words: files, exported API as built, test names and counts, anything you had to define locally, anything you could not do.
 - UI strings: plain English, US spelling, sentence case, no em dashes or hyphens used as dashes.
