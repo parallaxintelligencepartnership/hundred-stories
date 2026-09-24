@@ -1,6 +1,6 @@
 # Audio listening pass — 2026-09-24
 
-Status: implemented on `audio/listening-pass`, pending Matthew's listening review. No push or deployment.
+Status: Matthew accepted the before/after audio and revised game on 2026-09-24. Approved for integration into local main; explicitly hold push/deployment for additional work with Claude.
 
 Matthew has heard the empty and one-star game only. This pass therefore concentrates the composed arrangement and before/after comparisons on chapter one. Shared mix, cue, scheduler, and mute improvements also apply to later chapters; their musical character still needs human listening review.
 
@@ -18,7 +18,7 @@ Matthew has heard the empty and one-star game only. This pass therefore concentr
 
 ## Listening preview
 
-Worktree: `/private/tmp/hundred-stories-audio`
+Original review worktree: `/private/tmp/hundred-stories-audio` (closed after acceptance). Preview page and local WAVs preserved in the main checkout.
 
 Start: `npm run dev -- --host 0.0.0.0 --port 4187 --strictPort`
 
@@ -33,7 +33,7 @@ The preview is a separate origin with separate saves. Export/import a live save 
 Re-render revised recordings:
 
 ```sh
-AUDIO_OUT=/private/tmp/hundred-stories-audio/audio-preview/after AUDIO_PRESETS=empty-foundations,sunny-morning-1star AUDIO_SECONDS=105 npm run audio:samples
+AUDIO_OUT=audio-preview/after AUDIO_PRESETS=empty-foundations,sunny-morning-1star AUDIO_SECONDS=105 npm run audio:samples
 ```
 
 Baseline recordings were captured at base `86b4107` before audio edits, with only the empty preset and render-script options added. Preserve `audio-preview/before/` for this review; rerunning the current branch into that folder would overwrite the baseline.
@@ -53,4 +53,6 @@ Baseline recordings were captured at base `86b4107` before audio edits, with onl
 - STILL OPEN: listen for 15–20 minutes on phone speakers and headphones, including construction, elevator bursts, and mute/resume. Later chapters need their own listening review before any broader composition changes.
 - STILL OPEN (deferred, outside audio scope): older handoff items about routing, rent UI, visual art and story progression. This pass does not alter those systems.
 
-Next action: Matthew listens and gives feedback. Keep live unchanged until that review is accepted.
+Listening accepted: Matthew confirmed the extra kicks were gone and the rhythm improved in the revised game. An occasional off-beat blurb remained but was acceptable; its cause was not diagnosed.
+
+Next action: continue other changes with Claude on local main. Do not push or deploy until Matthew authorizes the combined release. See `docs/reviews/2026-09-24-audio-closeout.md`.

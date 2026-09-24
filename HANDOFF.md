@@ -1,3 +1,5 @@
+> **Latest local work — 2026-09-24:** Matthew accepted the audio listening pass and revised game. Audio implementation: `c01e0fe`. See [audio closeout](docs/reviews/2026-09-24-audio-closeout.md) for validation and remaining listening limits. Integrate locally for further work with Claude; **hold push/deployment until the combined changes are authorized**. Comparison WAVs are local ignored files under `audio-preview/`.
+
 # Handoff: 2026-09-20b performance round, rent, sixth ship
 
 Written at the end of the session that shipped 0.2.3 (tag `ship-2026-09-20b`). Everything below is a claim with a check. Run the check before trusting the claim.
