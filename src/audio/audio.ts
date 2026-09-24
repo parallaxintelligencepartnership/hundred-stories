@@ -331,8 +331,10 @@ export const REVERB_FEEDBACK = 0.35;
 export const REVERB_CUTOFF_HZ = 3000;
 export const REVERB_WET_DB = -12;
 /**
- * Vinyl crackle, dBFS RMS before the music slider, which scales it like every other music voice.
- * No hiss: sparse pops only, and none while rain or a storm gives the bed its own texture.
+ * Vinyl crackle gain in dB (unit-RMS pops times this), before the music slider, which scales it
+ * like every other music voice. At the default slider (60) it measures -52.8 dBFS RMS at the
+ * output: -48, then -4.4 dB of slider and -0.4 dB of low-pass. No hiss: sparse pops only, and
+ * none while rain or a storm gives the bed its own texture.
  */
 export const TEXTURE_DB = -48;
 /** The crackle: at most this many pops in any second, each shorter than `popSeconds`, under a low-pass. */

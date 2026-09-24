@@ -220,7 +220,7 @@ describe('music master chain', () => {
     expect(limiter!.connections).toContain(ctx.destination);
     expect([limiter!.threshold.value, limiter!.ratio.value]).toEqual([LIMITER.threshold, LIMITER.ratio]);
   });
-  it('adds sparse crackle only, at -48 dBFS before the music slider, and a 4 cent tape wobble', () => {
+  it('adds sparse crackle only, -48 dB before the slider and about -52.8 dBFS at the default, and a 4 cent tape wobble', () => {
     expect(TEXTURE_DB).toBe(-48);
     expect(TAPE_WOBBLE_CENTS).toBe(4);
     const { ctx } = listen('sunny-morning-1star', 101);
@@ -232,6 +232,9 @@ describe('music master chain', () => {
     const shelf = lowpass.connections[0] as Node;
     const slider = shelf.connections[0] as Node;
     expect(slider.gain.value).toBeCloseTo(0.6);
+    // At the default slider: -48 dB times 0.6 is -52.4 dB of gain; the 4 kHz low-pass takes
+    // another 0.4 dB off the unit-RMS pops, so the crackle measures -52.8 dBFS RMS at the output.
+    expect(20 * Math.log10(texture.gain.value * slider.gain.value)).toBeCloseTo(-52.4, 1);
     // The crackle source goes through a 4 kHz low-pass into the texture gain.
     const crackleLow = ctx.of('filter').find(f => f.connections.includes(texture))!;
     expect([crackleLow.type, crackleLow.frequency.value]).toEqual(['lowpass', 4000]);
