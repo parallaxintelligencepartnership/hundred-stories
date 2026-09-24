@@ -4,6 +4,7 @@
 import type { GameApi, GameEvent } from '../game/api';
 import { clockOf } from '../sim/types';
 import { weatherAt } from '../game/weather';
+import type { MoodInput } from './mood';
 import { VOICES, chapterFor, cutoffForWarmth, isNight, hatVelocityMultiplier, keyFor, tempoFor, type Chapter, type Voice } from './score';
 import { phraseFor, voicesFor, type Note } from './phrase';
 import { activeLayers, easeMood, moodFor, venueFillFor, type Mood } from './mood';
@@ -351,7 +352,30 @@ export interface Sound {
   readonly filterHz?: number;
   readonly mood?: Mood;
   readonly activeVoices?: readonly Voice[];
+  /**
+   * Pins the mood inputs and the chapter over the live world until called with null. The source
+   * gets the context seconds since the pin started counting (from the pin, or from the context's
+   * creation when pinned before it). Listening presets use it; the game never does.
+   */
+  pin?(source: PinSource | null): void;
   destroy(): void;
+}
+
+/** Everything the score reads from the world, pinned for listening. */
+export interface PinnedInputs extends MoodInput { chapter: Chapter }
+export type PinSource = (elapsedSeconds: number) => PinnedInputs;
+
+/**
+ * A dev hook: deps and a creation callback applied to the next controllers. src/main.ts sets it
+ * only under import.meta.env.DEV (?audio); in production nothing sets it and it stays null.
+ */
+export interface SoundDevHook {
+  deps?: SoundDeps;
+  created?(sound: Sound): void;
+}
+let devHook: SoundDevHook | null = null;
+export function setSoundDevHook(hook: SoundDevHook | null): void {
+  devHook = hook;
 }
 
 function browserContext(): AudioContextLike {
@@ -363,7 +387,8 @@ function browserContext(): AudioContextLike {
 
 type SoundGame = Pick<GameApi, 'world' | 'subscribe' | 'subscribeEvents'>;
 
-export function createSound(game: SoundGame, deps: SoundDeps = {}): Sound {
+export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
+  const deps: SoundDeps = devHook?.deps ? { ...devHook.deps, ...depsIn } : depsIn;
   const store = deps.store === undefined ? browserStore() : deps.store;
   const settings = readSoundSettings(store);
   const target: GestureTarget | null = deps.target ?? (typeof window !== 'undefined' ? window : null);
@@ -422,6 +447,23 @@ export function createSound(game: SoundGame, deps: SoundDeps = {}): Sound {
   let weatherLfo: OscillatorNode | null = null;
   let weatherGain: GainNode | null = null;
   let weatherSource: AudioBufferSourceNode | null = null;
+  let pinned: PinSource | null = null;
+  let pinnedAt: number | null = null;
+
+  /** The score's inputs now: the pinned preset while one is set, else the live world. */
+  function inputs(): { mood: MoodInput; minute: number } {
+    if (pinned) {
+      if (ctx && pinnedAt === null) pinnedAt = ctx.currentTime;
+      const p = pinned(ctx && pinnedAt !== null ? Math.max(0, ctx.currentTime - pinnedAt) : 0);
+      return { mood: { minuteOfDay: p.minuteOfDay, isWeekend: p.isWeekend, venueFill: p.venueFill, weather: p.weather, tension: p.tension }, minute: p.minuteOfDay };
+    }
+    const clock = clockOf(game.world.time.minute);
+    return {
+      mood: { minuteOfDay: clock.minuteOfDay, isWeekend: clock.isWeekend, venueFill: venueFillFor(game.world.rooms?.values() ?? []),
+        weather: weatherAt(game.world.seed, game.world.time.minute), tension: tension ? 1 : 0 },
+      minute: game.world.time.minute,
+    };
+  }
 
   const onGesture = (): void => {
     gestured = true;
@@ -537,7 +579,7 @@ export function createSound(game: SoundGame, deps: SoundDeps = {}): Sound {
         const next = chapterFor(highest);
         const stinger: Cue = event.to >= 6 ? 'tower' : (`star${Math.max(2, Math.min(5, event.to))}` as Cue);
         playNamedCue(stinger);
-        if (next !== chapter) {
+        if (next !== chapter && !pinned) {
           previousChapter = chapter; chapter = next;
           transitionAt = Math.ceil((ctx.currentTime + (next === 6 ? cueDuration(stinger) : 0)) / barSeconds) * barSeconds;
         }
@@ -595,7 +637,7 @@ export function createSound(game: SoundGame, deps: SoundDeps = {}): Sound {
   }
 
   function onClock(): void {
-    const m = game.world.time.minute % 1440;
+    const m = ((inputs().minute % 1440) + 1440) % 1440;
     if (m === lastMinuteOfDay) return;
     lastMinuteOfDay = m;
     applyMix(m);
@@ -604,10 +646,7 @@ export function createSound(game: SoundGame, deps: SoundDeps = {}): Sound {
   }
 
   function targetForBar(): void {
-    const clock = clockOf(game.world.time.minute);
-    targetMood = moodFor({ minuteOfDay: clock.minuteOfDay, isWeekend: clock.isWeekend,
-      venueFill: venueFillFor(game.world.rooms?.values() ?? []),
-      weather: weatherAt(game.world.seed, game.world.time.minute), tension: tension ? 1 : 0 });
+    targetMood = moodFor(inputs().mood);
   }
 
   function advanceMood(): void {
@@ -622,7 +661,8 @@ export function createSound(game: SoundGame, deps: SoundDeps = {}): Sound {
     filterHz = cutoffForWarmth(easedMood.warmth);
     musicColour?.frequency.setTargetAtTime(filterHz, ctx.currentTime, 0.15);
     const kitStopped = tension || easedMood.tension > 0.2;
-    hatBus?.gain.setTargetAtTime(kitStopped || isNight(game.world.time.minute) ? 0 : hatVelocityMultiplier(game.world.time.minute), ctx.currentTime, 0.08);
+    const minute = inputs().minute;
+    hatBus?.gain.setTargetAtTime(kitStopped || isNight(minute) ? 0 : hatVelocityMultiplier(minute), ctx.currentTime, 0.08);
     drumsBus?.gain.setTargetAtTime(kitStopped ? 0 : 1, ctx.currentTime, 0.08);
     musicBus?.gain.setTargetAtTime((settings.music ?? 60) / 100 * dbToGain(-6 * easedMood.tension), ctx.currentTime, 0.1);
     for (const [filter, cutoff] of musicFilters) filter.frequency.setTargetAtTime(Math.min(cutoff, filterHz), ctx.currentTime, 0.15);
@@ -684,8 +724,9 @@ export function createSound(game: SoundGame, deps: SoundDeps = {}): Sound {
         const barIndex = nextBarIndex++;
         const phraseIndex = Math.floor(barIndex / 8);
         const barInPhrase = barIndex % 8;
-        const night = isNight(game.world.time.minute);
-        const weekend = clockOf(game.world.time.minute).isWeekend;
+        const heard = inputs();
+        const night = isNight(heard.minute);
+        const weekend = heard.mood.isWeekend;
         const chapters = previousChapter && at >= transitionAt && at < transitionAt + 3 ? [previousChapter, chapter] : [at < transitionAt && previousChapter ? previousChapter : chapter];
         const available = new Set<Voice>(chapters.flatMap(playing => voicesFor(playing, weekend)));
         const wanted = new Set<Voice>(chapters.flatMap(playing => activeLayers(playing, easedMood.energy, easedMood.tension, weekend)));
@@ -743,7 +784,7 @@ export function createSound(game: SoundGame, deps: SoundDeps = {}): Sound {
 
   function syncWeather(): void {
     if (!ctx || !ambientBus) return;
-    const snapshot = weatherAt(game.world.seed, game.world.time.minute);
+    const snapshot = inputs().mood.weather;
     if (snapshot.kind !== weatherKind) {
       weatherKind = snapshot.kind;
       if (weatherGain) weatherGain.gain.setTargetAtTime(0, ctx.currentTime, 1);
@@ -830,6 +871,19 @@ export function createSound(game: SoundGame, deps: SoundDeps = {}): Sound {
     get filterHz() { return filterHz; },
     get mood() { return { ...easedMood }; },
     get activeVoices() { return [...activeVoices]; },
+    pin(source) {
+      pinned = source;
+      pinnedAt = ctx ? ctx.currentTime : null;
+      if (source) chapter = source(0).chapter;
+      else chapter = chapterFor(highest);
+      previousChapter = null;
+      // A listening preset is heard at once: the mood snaps to it rather than easing over minutes.
+      targetForBar();
+      easedMood = { ...targetMood };
+      lastMoodMs = now();
+      lastMinuteOfDay = -1;
+      if (ctx) { onClock(); syncMusic(); }
+    },
     setAmbient(level) {
       settings.ambient = clampLevel(level);
       writeSoundSettings(settings, store);
@@ -842,5 +896,6 @@ export function createSound(game: SoundGame, deps: SoundDeps = {}): Sound {
       sleep();
     },
   };
+  devHook?.created?.(sound);
   return sound;
 }

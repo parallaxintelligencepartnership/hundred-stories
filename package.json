@@ -20,6 +20,7 @@
     "og": "node scripts/make-og.mjs",
     "icons": "node scripts/make-icons.mjs",
     "store:shots": "node scripts/make-store-shots.mjs",
+    "audio:samples": "node scripts/render-audio-samples.mjs",
     "deploy": "npm run build && npx wrangler deploy"
   },
   "keywords": [],

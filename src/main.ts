@@ -43,6 +43,24 @@ export function applyDevWeather(search: string, dev: boolean, world: { time: { m
   return kind !== null || hour !== null;
 }
 
+/** The dev listening module's surface; a type only, so production imports nothing. */
+type DevAudio = Pick<typeof import('./audio/presets'), 'armDevAudio'>;
+
+/**
+ * The listening path, dev only like ?smoke: ?audio=<preset> turns sound on for this load without
+ * saving it, pins the preset, and music starts on the first pointer or key press; with
+ * &render=<seconds> it renders offline to window.__audioSample instead. Unknown presets are
+ * ignored. `dev` is import.meta.env.DEV at the call; with it false nothing is read or loaded.
+ */
+export async function applyDevAudio(search: string, dev: boolean, load: () => Promise<DevAudio>): Promise<boolean> {
+  if (!dev) return false;
+  const params = new URLSearchParams(search);
+  const name = params.get('audio');
+  if (name === null) return false;
+  const { armDevAudio } = await load();
+  return armDevAudio(name, params.get('render'));
+}
+
 const defaultDeps: BootDeps = {
   createRenderer,
   createGame,
@@ -83,6 +101,7 @@ export async function boot(app: HTMLElement, deps: BootDeps = defaultDeps): Prom
     if (resumed.ok) game.world.log.push({ minute: game.world.time.minute, text: 'Welcome back. Your tower was restored from the last autosave.', level: 'info' });
   }
   applyDevWeather(deps.search(), import.meta.env.DEV, game.world);
+  if (import.meta.env.DEV) await applyDevAudio(deps.search(), import.meta.env.DEV, () => import('./audio/presets'));
   let renderer;
   try {
     renderer = await deps.createRenderer(view, game.world);
