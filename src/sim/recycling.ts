@@ -23,7 +23,7 @@ import { findRoute } from './routing';
 import { ROOMS, WASTE } from './rules';
 import { clockOf, riderClassOf } from './types';
 import type { CollectorState, Id, Leg, Room, RoomKind, Sim, World } from './types';
-import { addSim, allocId, log, roomsOfKind } from './world';
+import { addSim, allocId, log, removeSim, roomsOfKind } from './world';
 
 /** Preference weight only: one floor away counts as this many tiles when picking the nearest room. */
 const FLOOR_PREFERENCE_TILES = 10;
@@ -87,8 +87,37 @@ export function collectorsOf(world: World, center: Room): Sim[] {
   return out;
 }
 
+/** How many collectors this center staffs: set at each roll, WASTE.workersPerCenter until the first. */
+export function workerTarget(center: Room): number {
+  return center.wasteWorkers ?? WASTE.workersPerCenter;
+}
+
+/** The count a roll sets: one more worker per WASTE.roomsPerWorker rooms that gained waste, within the bounds. */
+export function workersFor(wasteRooms: number): number {
+  const wanted = WASTE.workersPerCenter + Math.floor(wasteRooms / WASTE.roomsPerWorker);
+  return Math.max(WASTE.workersPerCenter, Math.min(WASTE.maxWorkers, wanted));
+}
+
+/** Let the newest workers go (highest ids first) until the center is down to its count. */
+function dismissExtra(world: World, center: Room): void {
+  const target = workerTarget(center);
+  if (center.tenants.length <= target) return;
+  const keep = [...center.tenants].sort((a, b) => a - b).slice(0, target);
+  for (const id of center.tenants) {
+    if (keep.includes(id)) continue;
+    const sim = world.sims.get(id);
+    if (sim && sim.inCarId !== null) {
+      for (const shaft of world.shafts.values()) {
+        for (const car of shaft.cars) car.passengers = car.passengers.filter((p) => p !== id);
+      }
+    }
+    removeSim(world, id);
+  }
+  center.tenants = center.tenants.filter((id) => keep.includes(id));
+}
+
 function staffCenter(world: World, center: Room): void {
-  while (center.tenants.length < WASTE.workersPerCenter) {
+  while (center.tenants.length < workerTarget(center)) {
     const worker: Sim = {
       id: allocId(world),
       kind: 'collector',
@@ -386,6 +415,7 @@ export function rollWaste(world: World): WasteRoll {
     center.wasteCollectedToday = 0;
     center.wasteUnreachable = [];
   }
+  let wasteRooms = 0;
   for (const room of rooms) {
     if (!PRODUCERS.has(room.kind)) continue;
     if (room.wasteBacklogSince != null && !((room.waste ?? 0) > 0)) {
@@ -398,6 +428,7 @@ export function rollWaste(world: World): WasteRoll {
     if (people > 0 && !room.onFire) {
       const load = Math.min(WASTE.dailyCap, Math.ceil(people / WASTE.perLoad));
       room.waste = Math.min(WASTE.roomCap, (room.waste ?? 0) + load);
+      wasteRooms += 1;
     }
     room.wastePeak = room.occupancy;
     room.wasteDays = (room.waste ?? 0) >= WASTE.backlogAt ? (room.wasteDays ?? 0) + 1 : 0;
@@ -407,6 +438,12 @@ export function rollWaste(world: World): WasteRoll {
       log(world, `Waste is piling up in the ${describe(room)}. Nobody has collected it for ${WASTE.graceDays} days.`, 'warn', { roomId: room.id });
     }
     if (room.wasteBacklogSince != null) holdDirty(room);
+  }
+  // Collection grows with the tower: the next tick hires up to the count, and the extra go now.
+  const workers = workersFor(wasteRooms);
+  for (const center of centers) {
+    center.wasteWorkers = workers;
+    dismissExtra(world, center);
   }
   return out;
 }
@@ -431,6 +468,7 @@ export function collectorStatus(world: World, sim: Sim): string {
 }
 
 export interface CenterSummary {
+  workers: number;
   collectedToday: number;
   backlogRooms: number;
   unreachableFloors: number[];
@@ -440,6 +478,7 @@ export function centerSummary(world: World, center: Room): CenterSummary {
   let backlogRooms = 0;
   for (const room of world.rooms.values()) if (room.wasteBacklogSince != null) backlogRooms += 1;
   return {
+    workers: workerTarget(center),
     collectedToday: center.wasteCollectedToday ?? 0,
     backlogRooms,
     unreachableFloors: [...(center.wasteUnreachable ?? [])],

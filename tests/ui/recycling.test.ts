@@ -66,6 +66,7 @@ describe('the recycling center panel', () => {
     expect(items).toHaveLength(2);
     const lines = items.map((n) => n.textContent);
     for (const id of c.tenants) expect(lines).toContain(`${personName(world.seed, id)}Off shift`);
+    expect(rowValue(panel, 'Workers')).toBe('2 (grows with the tower)');
     expect(rowValue(panel, 'Collected today')).toBe('0 units');
     expect(rowValue(panel, 'Rooms in backlog')).toBe('0');
     expect(rowValue(panel, 'Cannot reach')).toBe('None');

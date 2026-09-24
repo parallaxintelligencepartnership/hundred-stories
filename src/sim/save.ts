@@ -286,6 +286,9 @@ function firstInvalidField(d: SaveData): string | null {
     for (const key of ['wastePeak', 'wasteCollectedAt', 'wasteCollectedToday'] as const) {
       if (room[key] !== undefined && (!isFiniteNumber(room[key]) || (room[key] as number) < 0)) return `${at}.${key}`;
     }
+    if (room.wasteWorkers !== undefined && (!isInteger(room.wasteWorkers) || room.wasteWorkers < WASTE.workersPerCenter || room.wasteWorkers > WASTE.maxWorkers)) {
+      return `${at}.wasteWorkers`;
+    }
     if (room.wasteUnreachable !== undefined && (!Array.isArray(room.wasteUnreachable) || !room.wasteUnreachable.every(isInteger))) {
       return `${at}.wasteUnreachable`;
     }
@@ -569,6 +572,7 @@ function roomForHash(room: Room) {
     wasteCollectedAt: room.wasteCollectedAt ?? undefined,
     wasteCollectedToday: room.wasteCollectedToday || undefined,
     wasteUnreachable: room.wasteUnreachable && room.wasteUnreachable.length > 0 ? [...room.wasteUnreachable] : undefined,
+    wasteWorkers: room.wasteWorkers ?? undefined,
   } satisfies Record<keyof Room, unknown>;
 }
 

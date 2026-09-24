@@ -430,6 +430,7 @@ describe('hashWorld covers every field in types.ts', () => {
       wasteCollectedAt: (r: Room) => (r.wasteCollectedAt = 600),
       wasteCollectedToday: (r: Room) => (r.wasteCollectedToday = 7),
       wasteUnreachable: (r: Room) => (r.wasteUnreachable = [7]),
+      wasteWorkers: (r: Room) => (r.wasteWorkers = 4),
     } satisfies Record<keyof Room, (room: Room) => unknown>;
 
     for (const [field, change] of Object.entries(changes)) {

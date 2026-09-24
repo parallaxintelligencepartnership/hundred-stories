@@ -410,6 +410,7 @@ export function collectionLines(world: World, center: Room): [string, string][] 
   const units = sum.collectedToday === 1 ? '1 unit' : `${formatCount(sum.collectedToday)} units`;
   const floors = sum.unreachableFloors;
   return [
+    ['Workers', `${formatCount(sum.workers)} (grows with the tower)`],
     ['Collected today', units],
     ['Rooms in backlog', formatCount(sum.backlogRooms)],
     ['Cannot reach', floors.length === 0 ? 'None' : `${floors.length === 1 ? 'Floor' : 'Floors'} ${floors.map(floorWord).join(', ')}`],

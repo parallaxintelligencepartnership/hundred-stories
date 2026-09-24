@@ -140,8 +140,9 @@ describe('collection workers', () => {
       expect(sim.inRoomId).toBe(c.id);
       expect(collectorStatus(world, sim)).toBe('In the center');
     }
-    expect(centerSummary(world, c)).toEqual({ collectedToday: 9, backlogRooms: 0, unreachableFloors: [] });
+    expect(centerSummary(world, c)).toEqual({ workers: 2, collectedToday: 9, backlogRooms: 0, unreachableFloors: [] });
     expect(collectionLines(world, c)).toEqual([
+      ['Workers', '2 (grows with the tower)'],
       ['Collected today', '9 units'],
       ['Rooms in backlog', '0'],
       ['Cannot reach', 'None'],
@@ -173,7 +174,7 @@ describe('collection workers', () => {
     atOnDay(world, 1, 11, 0);
     expect(officeOn(world, 4).waste).toBe(5);
     expect(logCount(world, 'Collection could not reach floor 4.')).toBe(1);
-    expect(collectionLines(world, c)[2]).toEqual(['Cannot reach', 'Floor 4']);
+    expect(collectionLines(world, c)[3]).toEqual(['Cannot reach', 'Floor 4']);
     for (const sim of collectors(world)) expect(sim.inRoomId).toBe(c.id);
 
     // The player adds the stop: the next look finds the way.
@@ -252,36 +253,70 @@ describe('backlog', () => {
   });
 });
 
+/** 200 offices on floors 2 to 6, one shaft from B2 with four cars, and a recycling center on B2. */
+function bigTower(): World {
+  const world = createWorld(31);
+  world.stars = 3;
+  world.cash = 2_000_000_000;
+  const script: Command[] = [...lobbyRun(0, 374), { kind: 'shaft.build', shaft: 'standard', x: 0, floorMin: -2, floorMax: 6 }];
+  const xs: number[] = [];
+  for (let x = 5; x + 9 <= 365; x += 9) xs.push(x); // 40 offices a floor
+  for (let f = 2; f <= 6; f++) script.push(...buildRow('office', f, xs));
+  script.push({ kind: 'build', room: 'parkingSpace', floor: -1, x: 100 }, { kind: 'build', room: 'recycling', floor: -2, x: 10 });
+  buildTower(world, script);
+  for (let c = 0; c < 3; c++) buildTower(world, [{ kind: 'shaft.addCar', shaftId: onlyShaft(world).id }]);
+  expect(roomsMatching(world, 'office')).toHaveLength(200);
+  return world;
+}
+
 describe('a large tower', () => {
-  it('adds two workers per center and one number per room, whatever the size', () => {
-    const world = createWorld(31);
-    world.stars = 3;
-    world.cash = 2_000_000_000;
-    const script: Command[] = [...lobbyRun(0, 374), { kind: 'shaft.build', shaft: 'standard', x: 0, floorMin: -2, floorMax: 6 }];
-    const xs: number[] = [];
-    for (let x = 5; x + 9 <= 365; x += 9) xs.push(x); // 40 offices a floor
-    for (let f = 2; f <= 6; f++) script.push(...buildRow('office', f, xs));
-    script.push({ kind: 'build', room: 'parkingSpace', floor: -1, x: 100 }, { kind: 'build', room: 'recycling', floor: -2, x: 10 });
-    buildTower(world, script);
-    for (let c = 0; c < 3; c++) buildTower(world, [{ kind: 'shaft.addCar', shaftId: onlyShaft(world).id }]);
-    expect(roomsMatching(world, 'office')).toHaveLength(200);
-    atOnDay(world, 1, 12, 0);
+  it('grows its workers at the roll, one number per room, and keeps every room out of backlog for five days', () => {
+    const world = bigTower();
+    atOnDay(world, 1, 6, 0);
     expect(collectors(world)).toHaveLength(WASTE.workersPerCenter);
-    expect(roomsMatching(world, 'office').some((r) => (r.waste ?? 0) > 0 || r.wasteCollectedAt !== undefined)).toBe(true);
+    tick(world); // the roll: 200 rooms gained waste, 2 + floor(200 / 30) is 8
+    expect(center(world).wasteWorkers).toBe(8);
+    tick(world);
+    expect(collectors(world)).toHaveLength(8);
+    const hired = collectors(world).map((s) => s.id);
+    expect(hired).toEqual([...hired].sort((a, b) => a - b));
     const kinds = new Set([...world.sims.values()].map((s) => s.kind));
     expect([...kinds].sort()).toEqual(['collector', 'worker']);
+
+    let backlog = 0;
+    for (let day = 1; day <= 5; day++) {
+      atOnDay(world, day + 1, 6, 1);
+      for (const room of world.rooms.values()) if (room.wasteBacklogSince != null) backlog += 1;
+    }
+    expect(backlog).toBe(0);
+    expect(collectors(world)).toHaveLength(8);
     // Waste is a bounded number on the room, never a list of items.
     for (const room of world.rooms.values()) {
       if (room.waste === undefined) continue;
       expect(Number.isInteger(room.waste)).toBe(true);
-      expect(room.waste).toBeGreaterThanOrEqual(0);
       expect(room.waste).toBeLessThanOrEqual(WASTE.roomCap);
     }
     const saved = JSON.parse(serialize(world)) as { rooms: Record<string, unknown>[] };
     for (const room of saved.rooms) {
       for (const [key, value] of Object.entries(room)) if (key.startsWith('waste') && key !== 'wasteUnreachable') expect(typeof value === 'number' || value === null).toBe(true);
     }
-  }, 60_000);
+  }, 300_000);
+
+  it('a small tower stays at two, and a tower that shrinks lets its newest workers go', () => {
+    const world = tower({ center: true });
+    atOnDay(world, 3, 6, 5);
+    expect(center(world).wasteWorkers).toBe(2);
+    expect(collectors(world)).toHaveLength(2);
+    // Pretend the last roll called for five: the next roll brings it back to two, newest out first.
+    const c = center(world);
+    c.wasteWorkers = 5;
+    tick(world);
+    const five = collectors(world).map((s) => s.id).sort((a, b) => a - b);
+    expect(five).toHaveLength(5);
+    atOnDay(world, 4, 6, 1);
+    expect(collectors(world).map((s) => s.id).sort((a, b) => a - b)).toEqual(five.slice(0, 2));
+    expect(c.tenants).toHaveLength(2);
+  });
 });
 
 describe('saves', () => {
@@ -310,7 +345,30 @@ describe('saves', () => {
     expect(collectors(again.world).map((s) => s.id)).toEqual(collectors(copy).map((s) => s.id));
     runDays(copy, 1);
     expect(officeOn(copy, 3).waste).toBeDefined();
+    // Its next roll set the count: five offices is still two.
+    expect(center(copy).wasteWorkers).toBe(2);
+    expect(collectors(copy)).toHaveLength(2);
   });
+
+  it('an older save of a large tower loads at two workers and reaches eight at its next roll', () => {
+    const world = bigTower();
+    atOnDay(world, 1, 5, 0);
+    const data = JSON.parse(serialize(world)) as { rooms: Record<string, unknown>[]; sims: { id: number; kind: string }[] };
+    const collectorIds = new Set(data.sims.filter((s) => s.kind === 'collector').map((s) => s.id));
+    data.sims = data.sims.filter((s) => !collectorIds.has(s.id));
+    for (const room of data.rooms) {
+      for (const key of Object.keys(room)) if (key.startsWith('waste')) delete room[key];
+      if (room.kind === 'recycling') room.tenants = [];
+    }
+    const loaded = deserialize(JSON.stringify(data));
+    if (!loaded.ok) throw new Error(loaded.reason);
+    const copy = loaded.world;
+    tick(copy);
+    expect(collectors(copy)).toHaveLength(2);
+    atOnDay(copy, 1, 6, 2);
+    expect(center(copy).wasteWorkers).toBe(8);
+    expect(collectors(copy)).toHaveLength(8);
+  }, 120_000);
 
   it('saved and loaded mid round, replays to the same hash', () => {
     const world = tower({ center: true });

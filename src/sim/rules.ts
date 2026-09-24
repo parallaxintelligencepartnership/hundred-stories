@@ -239,7 +239,8 @@ export const THEFT = {
  * 06:00 roll every room of a producing kind that anyone used since the last roll gains
  * min(dailyCap, ceil(people / perLoad)) units, up to roomCap. A room at or above backlogAt for
  * graceDays rolls in a row is in backlog: its dirty flag is held (EVAL.dirtyPenalty) until it is
- * emptied, and clears at the next roll after. Each center staffs workersPerCenter collectors,
+ * emptied, and clears at the next roll after. Each center staffs workersPerCenter collectors
+ * (more as the tower grows: see roomsPerWorker and maxWorkers),
  * on shift from shiftStart to shiftEnd (minute of day, end exclusive), who carry up to
  * workerCapacity units, spend collectMinutes at a room and unloadMinutes at the center.
  * recheckMinutes: how long a worker with nothing reachable waits before looking again.
@@ -250,7 +251,9 @@ export const WASTE = {
   perLoad: 8,
   backlogAt: 6,
   graceDays: 2,
-  workersPerCenter: 2,
+  workersPerCenter: 2, // the floor: a center never has fewer
+  maxWorkers: 8,
+  roomsPerWorker: 30, // at each roll: workersPerCenter + floor(rooms that gained waste / roomsPerWorker), up to maxWorkers
   shiftStart: 9 * 60,
   shiftEnd: 17 * 60,
   workerCapacity: 12,

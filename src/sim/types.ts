@@ -98,6 +98,8 @@ export interface Room {
   /** Recycling centers only: units brought in since the last 06:00 roll, and floors a worker could not reach today. */
   wasteCollectedToday?: number;
   wasteUnreachable?: number[];
+  /** Recycling centers only: how many collectors it staffs, set at each roll; absent means WASTE.workersPerCenter. */
+  wasteWorkers?: number;
 }
 
 export interface Car {
