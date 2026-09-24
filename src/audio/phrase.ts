@@ -1,7 +1,8 @@
-import { CHAPTER_VOICES, midiHz, scaleMidi, type Chapter, type Voice } from './score';
+import { CHAPTER_VOICES, CHORD_INTERVALS, chordColourFor, midiHz, scaleMidi, type Chapter, type Voice } from './score';
 
 /** Beat is measured from the start of an eight-bar phrase; dur is in beats. */
 export interface Note { beat: number; freq: number; dur: number; vel: number }
+export interface PhraseStyle { density?: number; key?: number; warmth?: number; tension?: number; energy?: number; night?: boolean }
 
 // Same 32-bit avalanche as weatherAt's mix; local so audio cannot change the weather contract.
 function mix(a: number, b: number): number {
@@ -25,7 +26,8 @@ function degreeNote(chapter: Chapter, degree: number, octave: number, beat: numb
 }
 
 /** Pure, seeded variation of ASCENT and LIVES-INSIDE across eight bars. */
-export function phraseFor(seed: number, chapter: Chapter, phraseIndex: number, voice: Voice): Note[] {
+export function phraseFor(seed: number, chapter: Chapter, phraseIndex: number, voice: Voice, style: PhraseStyle = {}): Note[] {
+  if (voice === 'drums') return [];
   const notes: Note[] = [];
   const roots = [0, 3, 4, 0, 5, 3, 4, 0];
   const ascent = [0, 2, 4, 5, 7];
@@ -59,12 +61,20 @@ export function phraseFor(seed: number, chapter: Chapter, phraseIndex: number, v
       continue;
     }
     if (voice === 'pad' || voice === 'strings') {
+      if (style.warmth !== undefined) {
+        const chordRoot = scaleMidi(chapter, root, -2);
+        for (const semitones of CHORD_INTERVALS[chordColourFor(style.warmth, style.tension)]) {
+          notes.push({ beat: at, freq: midiHz(chordRoot + semitones), dur: 3.8, vel: velocity * 0.38 });
+        }
+        continue;
+      }
       for (const degree of [root, root + 2, root + 4]) notes.push(degreeNote(chapter, degree, voice === 'strings' ? -1 : -2, at, 3.8, velocity * 0.55));
       continue;
     }
     // Lead and answer alternate bars. Their melodic density never competes in one bar.
     if (voice === 'lead' && bar % 2 === 1 || voice === 'counter' && bar % 2 === 0) continue;
-    const motif = voice === 'counter' || (voice === 'guitar' || voice === 'pluck') && bar % 2 === 1 ? lives : ascent;
+    const quietAnswer = (voice === 'piano' || voice === 'lead' || voice === 'brass') && (style.night || (style.energy ?? 0.7) < 0.4);
+    const motif = voice === 'counter' || quietAnswer || (voice === 'guitar' || voice === 'pluck') && bar % 2 === 1 ? lives : ascent;
     const count = voice === 'brass' || voice === 'horn' ? 2 : voice === 'guitar' || voice === 'pluck' ? 4 : voice === 'vibes' ? 3 : motif.length;
     for (let i = 0; i < count; i += 1) {
       if (i > 0 && hashed(seed, chapter, phraseIndex, voice, 200 + bar * 8 + i) < 0.2) continue;
@@ -78,11 +88,20 @@ export function phraseFor(seed: number, chapter: Chapter, phraseIndex: number, v
     if (chapter >= 4 && voice === 'horn' && bar === 3) {
       lives.forEach((degree, i) => notes.push(degreeNote(chapter, degree, -1, at + i * 0.8, 0.55, velocity * 0.7)));
     }
+    if (voice === 'piano' && style.warmth !== undefined) {
+      const chordRoot = scaleMidi(chapter, root, -1);
+      for (const semitones of CHORD_INTERVALS[chordColourFor(style.warmth, style.tension)]) {
+        notes.push({ beat: at, freq: midiHz(chordRoot + semitones), dur: 2.5, vel: velocity * 0.42 });
+      }
+    }
   }
+  const density = Math.min(1, Math.max(0.4, style.density ?? 1));
+  const selected = density === 1 ? notes : notes.filter((note, index) => note.beat % 4 === 0 || hashed(seed, chapter, phraseIndex, voice, 400 + index) < density);
+  if (style.key) for (const note of selected) note.freq *= 2 ** (style.key / 12);
   // Index influences the seed, and therefore the entire pattern. A tiny velocity signature
   // ensures adjacent long-session phrases stay distinct even if two random choices coincide.
-  if (notes[0]) notes[0].vel = Math.min(1, notes[0].vel + (phraseIndex % 997) * 0.000001);
-  return notes;
+  if (selected[0]) selected[0].vel = Math.min(1, selected[0].vel + (phraseIndex % 997) * 0.000001);
+  return selected;
 }
 
 export function voicesFor(chapter: Chapter, weekend: boolean): readonly Voice[] {

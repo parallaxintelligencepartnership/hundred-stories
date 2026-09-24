@@ -4,8 +4,10 @@
 import type { GameApi, GameEvent } from '../game/api';
 import { clockOf } from '../sim/types';
 import { weatherAt } from '../game/weather';
-import { BAR_SECONDS, BEAT_SECONDS, TEMPO, VOICES, chapterFor, isNight, hatVelocityMultiplier, type Chapter, type Voice } from './score';
+import { VOICES, chapterFor, cutoffForWarmth, isNight, hatVelocityMultiplier, keyFor, tempoFor, type Chapter, type Voice } from './score';
 import { phraseFor, voicesFor, type Note } from './phrase';
+import { activeLayers, easeMood, moodFor, venueFillFor, type Mood } from './mood';
+import { drumHitsFor, playDrum } from './drums';
 import { beatCue, cueDuration, type Cue } from './cues';
 
 export const SOUND_KEY = 'hs.sound';
@@ -223,6 +225,7 @@ export const REVERB_DELAY_SECONDS = 0.31;
 export const REVERB_FEEDBACK = 0.35;
 export const REVERB_CUTOFF_HZ = 3000;
 export const REVERB_WET_DB = -12;
+export const VINYL_MAX_DB = -30;
 
 /**
  * How loud each bed is at this minute of the day, 0 to 1 before the dB and the slider.
@@ -346,6 +349,8 @@ export interface Sound {
   readonly weatherKind?: string;
   readonly tempo?: number;
   readonly filterHz?: number;
+  readonly mood?: Mood;
+  readonly activeVoices?: readonly Voice[];
   destroy(): void;
 }
 
@@ -373,6 +378,11 @@ export function createSound(game: SoundGame, deps: SoundDeps = {}): Sound {
   let musicBus: GainNode | null = null;
   let musicColour: BiquadFilterNode | null = null;
   let hatBus: GainNode | null = null;
+  let drumsBus: GainNode | null = null;
+  let vinylGain: GainNode | null = null;
+  let vinylSource: AudioBufferSourceNode | null = null;
+  let tapeLfo: OscillatorNode | null = null;
+  let tapeDepth: GainNode | null = null;
   let effectsBus: GainNode | null = null;
   let ambientBus: GainNode | null = null;
   let bed: AmbientBed | null = null;
@@ -383,6 +393,17 @@ export function createSound(game: SoundGame, deps: SoundDeps = {}): Sound {
   const lastPlayed = new Map<Effect, number>();
   let highest: number = game.world.stars;
   let chapter = chapterFor(highest);
+  const tempo = tempoFor(game.world.seed);
+  const beatSeconds = 60 / tempo;
+  const barSeconds = 4 * beatSeconds;
+  const key = keyFor(game.world.seed);
+  const initialClock = clockOf(game.world.time.minute);
+  let targetMood = moodFor({ minuteOfDay: initialClock.minuteOfDay, isWeekend: initialClock.isWeekend,
+    venueFill: venueFillFor(game.world.rooms?.values() ?? []), weather: weatherAt(game.world.seed, game.world.time.minute), tension: 0 });
+  let easedMood: Mood = { ...targetMood };
+  let lastMoodMs = now();
+  const layerMix = new Map<Voice, number>();
+  let activeVoices: Voice[] = [];
   let previousChapter: Chapter | null = null;
   let transitionAt = 0;
   let tension = false;
@@ -393,6 +414,7 @@ export function createSound(game: SoundGame, deps: SoundDeps = {}): Sound {
   let nextBarIndex = 0;
   const musicFilters = new Map<BiquadFilterNode, number>();
   const scheduledMusic = new Set<OscillatorNode>();
+  const scheduledDrums = new Set<AudioScheduledSourceNode>();
   let lastBell = -Infinity;
   let lastThunder = -Infinity;
   let tensionOsc: OscillatorNode | null = null;
@@ -419,7 +441,7 @@ export function createSound(game: SoundGame, deps: SoundDeps = {}): Sound {
       master = ctx.createGain(); master.gain.value = 1; master.connect(ctx.destination);
       musicBus = ctx.createGain(); musicBus.gain.value = (settings.music ?? 60) / 100; musicBus.connect(master);
       musicColour = ctx.createBiquadFilter(); musicColour.type = 'lowpass';
-      musicColour.frequency.value = isNight(game.world.time.minute) ? 900 : 3200;
+      musicColour.frequency.value = cutoffForWarmth(easedMood.warmth);
       musicColour.connect(musicBus);
       // Feedback delay keeps the score warm without a convolver or recorded impulse.
       const wet = ctx.createGain(); wet.gain.value = dbToGain(REVERB_WET_DB);
@@ -435,12 +457,17 @@ export function createSound(game: SoundGame, deps: SoundDeps = {}): Sound {
       ambientBus.gain.value = settings.ambient / 100;
       ambientBus.connect(master);
       hatBus = ctx.createGain(); hatBus.gain.value = 1; hatBus.connect(musicColour);
+      drumsBus = ctx.createGain(); drumsBus.gain.value = 1; drumsBus.connect(musicColour);
+      vinylGain = ctx.createGain(); vinylGain.gain.value = dbToGain(VINYL_MAX_DB - 2); vinylGain.connect(musicColour);
+      tapeDepth = ctx.createGain(); tapeDepth.gain.value = 4;
     }
     if (ctx.state === 'suspended') void ctx.resume().catch(() => {});
+    lastMoodMs = now();
     if (master) master.gain.setValueAtTime(1, ctx.currentTime);
-    musicBus?.gain.setValueAtTime((settings.music ?? 60) / 100 * (tension ? 0.5 : 1), ctx.currentTime);
+    musicBus?.gain.setValueAtTime((settings.music ?? 60) / 100 * dbToGain(-6 * easedMood.tension), ctx.currentTime);
     effectsBus?.gain.setValueAtTime(settings.effects / 100, ctx.currentTime);
     ambientBus?.gain.setValueAtTime(settings.ambient / 100, ctx.currentTime);
+    startTexture();
     if (!unsubEvents) unsubEvents = game.subscribeEvents(onEvent);
     if (!unsubClock) unsubClock = game.subscribe(onClock);
     lastMinuteOfDay = -1;
@@ -448,6 +475,28 @@ export function createSound(game: SoundGame, deps: SoundDeps = {}): Sound {
     syncBed();
     syncWeather();
     syncMusic();
+  }
+
+  function startTexture(): void {
+    if (!ctx || !vinylGain || !tapeDepth) return;
+    if (!vinylSource) {
+      const length = ctx.sampleRate * 2;
+      const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      let state = (game.world.seed ^ 0x35a1b2c3) >>> 0;
+      for (let i = 0; i < data.length; i += 1) {
+        state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+        const hiss = ((state / 4294967296) * 2 - 1) * 0.18;
+        data[i] = Math.max(-1, Math.min(1, hiss + (state % 10007 === 0 ? 0.65 : 0)));
+      }
+      const src = ctx.createBufferSource(); src.buffer = buffer; src.loop = true;
+      const filter = ctx.createBiquadFilter(); filter.type = 'lowpass'; filter.frequency.value = 4200;
+      src.connect(filter); filter.connect(vinylGain); src.start(); vinylSource = src;
+    }
+    if (!tapeLfo) {
+      tapeLfo = ctx.createOscillator(); tapeLfo.type = 'sine'; tapeLfo.frequency.value = 0.3;
+      tapeLfo.connect(tapeDepth); tapeLfo.start();
+    }
   }
 
   function sleep(): void {
@@ -460,13 +509,18 @@ export function createSound(game: SoundGame, deps: SoundDeps = {}): Sound {
     musicTimer = 0;
     for (const source of scheduledMusic) { try { source.stop(); } catch { /* already stopped */ } }
     scheduledMusic.clear(); musicFilters.clear();
+    for (const source of scheduledDrums) { try { source.stop(); } catch { /* already stopped */ } }
+    scheduledDrums.clear();
+    if (vinylSource) { try { vinylSource.stop(); } catch { /* already stopped */ } }
+    if (tapeLfo) { try { tapeLfo.stop(); } catch { /* already stopped */ } }
+    vinylSource = null; tapeLfo = null;
     if (weatherSource) { try { weatherSource.stop(); } catch { /* already stopped */ } }
     if (weatherLfo) { try { weatherLfo.stop(); } catch { /* already stopped */ } }
     if (tensionOsc) { try { tensionOsc.stop(); } catch { /* already stopped */ } }
     weatherLfo = null; tensionOsc = null; tensionGain = null;
     weatherSource = null; weatherGain = null;
     if (ctx) {
-      for (const bus of [musicBus, ambientBus, effectsBus, master]) {
+      for (const bus of [musicBus, ambientBus, effectsBus, drumsBus, hatBus, master]) {
         if (!bus) continue;
         bus.gain.cancelScheduledValues(ctx.currentTime);
         bus.gain.setValueAtTime(0, ctx.currentTime);
@@ -485,7 +539,7 @@ export function createSound(game: SoundGame, deps: SoundDeps = {}): Sound {
         playNamedCue(stinger);
         if (next !== chapter) {
           previousChapter = chapter; chapter = next;
-          transitionAt = Math.ceil((ctx.currentTime + (next === 6 ? cueDuration(stinger) : 0)) / BAR_SECONDS) * BAR_SECONDS;
+          transitionAt = Math.ceil((ctx.currentTime + (next === 6 ? cueDuration(stinger) : 0)) / barSeconds) * barSeconds;
         }
       }
       return;
@@ -493,12 +547,14 @@ export function createSound(game: SoundGame, deps: SoundDeps = {}): Sound {
     if (event.kind === 'beat') {
       const name = beatCue(event.beat.code, event.beat.value);
       if (name === 'fire.start' || name === 'bomb.start') {
-        tension = true; musicBus?.gain.setTargetAtTime((settings.music ?? 60) / 200, ctx.currentTime, 0.1); playNamedCue(name);
+        tension = true; targetMood = { ...targetMood, tension: 1 }; playNamedCue(name);
+        hatBus?.gain.setValueAtTime(0, ctx.currentTime); drumsBus?.gain.setValueAtTime(0, ctx.currentTime);
+        musicBus?.gain.setTargetAtTime((settings.music ?? 60) / 100 * dbToGain(-6), ctx.currentTime, 0.1);
         if (!tensionOsc && musicBus) { tensionOsc = ctx.createOscillator(); tensionOsc.type = 'sine'; tensionOsc.frequency.value = name === 'fire.start' ? 110 : 55; tensionGain = ctx.createGain(); tensionGain.gain.value = 0.025; tensionOsc.connect(tensionGain); tensionGain.connect(musicBus); tensionOsc.start(); }
         return;
       }
       if (name === 'release.up' || name === 'release.down') {
-        tension = false; playNamedCue(name); musicBus?.gain.setTargetAtTime((settings.music ?? 60) / 100, ctx.currentTime, 2);
+        tension = false; targetMood = { ...targetMood, tension: 0 }; playNamedCue(name);
         if (tensionGain) tensionGain.gain.setTargetAtTime(0, ctx.currentTime, 0.15);
         if (tensionOsc) { tensionOsc.stop(ctx.currentTime + 1); tensionOsc = null; tensionGain = null; }
         return;
@@ -543,22 +599,45 @@ export function createSound(game: SoundGame, deps: SoundDeps = {}): Sound {
     if (m === lastMinuteOfDay) return;
     lastMinuteOfDay = m;
     applyMix(m);
-    filterHz = isNight(m) ? 900 : 3200;
-    musicColour?.frequency.setTargetAtTime(filterHz, ctx?.currentTime ?? 0, 0.15);
-    hatBus?.gain.setValueAtTime(isNight(m) ? 0 : hatVelocityMultiplier(m), ctx?.currentTime ?? 0);
-    if (ctx) for (const [filter, cutoff] of musicFilters) filter.frequency.setTargetAtTime(Math.min(cutoff, filterHz), ctx.currentTime, 0.15);
+    applyMoodSound();
     syncWeather();
+  }
+
+  function targetForBar(): void {
+    const clock = clockOf(game.world.time.minute);
+    targetMood = moodFor({ minuteOfDay: clock.minuteOfDay, isWeekend: clock.isWeekend,
+      venueFill: venueFillFor(game.world.rooms?.values() ?? []),
+      weather: weatherAt(game.world.seed, game.world.time.minute), tension: tension ? 1 : 0 });
+  }
+
+  function advanceMood(): void {
+    const current = now();
+    easedMood = easeMood(easedMood, targetMood, (current - lastMoodMs) / 1000);
+    lastMoodMs = current;
+    applyMoodSound();
+  }
+
+  function applyMoodSound(): void {
+    if (!ctx) return;
+    filterHz = cutoffForWarmth(easedMood.warmth);
+    musicColour?.frequency.setTargetAtTime(filterHz, ctx.currentTime, 0.15);
+    const kitStopped = tension || easedMood.tension > 0.2;
+    hatBus?.gain.setTargetAtTime(kitStopped || isNight(game.world.time.minute) ? 0 : hatVelocityMultiplier(game.world.time.minute), ctx.currentTime, 0.08);
+    drumsBus?.gain.setTargetAtTime(kitStopped ? 0 : 1, ctx.currentTime, 0.08);
+    musicBus?.gain.setTargetAtTime((settings.music ?? 60) / 100 * dbToGain(-6 * easedMood.tension), ctx.currentTime, 0.1);
+    for (const [filter, cutoff] of musicFilters) filter.frequency.setTargetAtTime(Math.min(cutoff, filterHz), ctx.currentTime, 0.15);
   }
 
   function playScoreNote(voice: Voice, note: Note, when: number, fade: number): void {
     if (!ctx || !musicColour) return;
     const c = ctx;
     const def = VOICES[voice];
-    const duration = Math.max(def.attack + 0.02, Math.min(def.release, note.dur * BEAT_SECONDS));
+    const duration = Math.max(def.attack + 0.02, Math.min(def.release, note.dur * beatSeconds));
     const peak = Math.max(0.0002, def.peak * note.vel * fade);
     const osc = c.createOscillator(); osc.type = def.wave;
     osc.frequency.setValueAtTime(note.freq, when);
     if (def.detune) osc.detune.setValueAtTime(def.detune, when);
+    if ((voice === 'piano' || voice === 'pluck' || voice === 'guitar') && tapeDepth) tapeDepth.connect(osc.detune);
     const filter = c.createBiquadFilter(); filter.type = 'lowpass';
     filter.frequency.setValueAtTime(Math.min(def.cutoff, filterHz), when);
     musicFilters.set(filter, def.cutoff);
@@ -569,7 +648,20 @@ export function createSound(game: SoundGame, deps: SoundDeps = {}): Sound {
     osc.connect(filter); filter.connect(env); env.connect(voice === 'hat' && hatBus ? hatBus : musicColour);
     osc.start(when); osc.stop(when + duration + 0.02);
     scheduledMusic.add(osc);
-    osc.onended = () => { scheduledMusic.delete(osc); musicFilters.delete(filter); osc.disconnect(); filter.disconnect(); env.disconnect(); };
+    osc.onended = () => {
+      scheduledMusic.delete(osc); musicFilters.delete(filter);
+      if ((voice === 'piano' || voice === 'pluck' || voice === 'guitar') && tapeDepth) tapeDepth.disconnect(osc.detune);
+      osc.disconnect(); filter.disconnect(); env.disconnect();
+    };
+    if (voice === 'piano') {
+      const chorus = c.createOscillator(); chorus.type = 'triangle';
+      chorus.frequency.setValueAtTime(note.freq, when); chorus.detune.setValueAtTime(5, when);
+      if (tapeDepth) tapeDepth.connect(chorus.detune);
+      const soft = c.createGain(); soft.gain.value = 0.12;
+      chorus.connect(soft); soft.connect(filter); chorus.start(when); chorus.stop(when + duration + 0.02);
+      scheduledMusic.add(chorus);
+      chorus.onended = () => { scheduledMusic.delete(chorus); tapeDepth?.disconnect(chorus.detune); chorus.disconnect(); soft.disconnect(); };
+    }
     if (def.tremolo) {
       const lfo = c.createOscillator(); lfo.type = 'sine'; lfo.frequency.setValueAtTime(def.tremolo, when);
       const depth = c.createGain(); depth.gain.value = peak * 0.12;
@@ -581,29 +673,65 @@ export function createSound(game: SoundGame, deps: SoundDeps = {}): Sound {
 
   function syncMusic(): void {
     if (!ctx || !musicBus || musicTimer) return;
-    nextBar = Math.ceil(ctx.currentTime / BAR_SECONDS) * BAR_SECONDS;
+    nextBar = Math.ceil(ctx.currentTime / barSeconds) * barSeconds;
     nextBarIndex = 0;
     const schedule = () => {
       if (!ctx || !musicBus || !settings.on) return;
+      advanceMood();
       while (nextBar < ctx.currentTime + 4) {
-        const at = nextBar; nextBar += BAR_SECONDS;
+        const at = nextBar; nextBar += barSeconds;
+        targetForBar(); // venue occupancy is read only here, once per musical bar
         const barIndex = nextBarIndex++;
         const phraseIndex = Math.floor(barIndex / 8);
         const barInPhrase = barIndex % 8;
         const night = isNight(game.world.time.minute);
         const weekend = clockOf(game.world.time.minute).isWeekend;
-        filterHz = night ? 900 : 3200;
         const chapters = previousChapter && at >= transitionAt && at < transitionAt + 3 ? [previousChapter, chapter] : [at < transitionAt && previousChapter ? previousChapter : chapter];
+        const available = new Set<Voice>(chapters.flatMap(playing => voicesFor(playing, weekend)));
+        const wanted = new Set<Voice>(chapters.flatMap(playing => activeLayers(playing, easedMood.energy, easedMood.tension, weekend)));
+        const layers = new Map<Voice, { from: number; to: number }>();
+        for (const voice of new Set<Voice>([...available, ...layerMix.keys()])) {
+          const from = layerMix.get(voice) ?? 0;
+          const to = Math.max(0, Math.min(1, from + (wanted.has(voice) ? 0.5 : -0.5)));
+          layerMix.set(voice, to);
+          layers.set(voice, { from, to });
+        }
+        activeVoices = [...available].filter(voice => (layers.get(voice)?.to ?? 0) > 0);
+        const density = 0.4 + 0.6 * easedMood.energy;
         for (const playing of chapters) {
           for (const voice of voicesFor(playing, weekend)) {
-            if (voice === 'hat' && night) continue;
-            const phrase = phraseFor(game.world.seed, playing, phraseIndex, voice);
+            if (voice === 'drums' || voice === 'hat') continue;
+            const layer = layers.get(voice);
+            if (!layer || layer.from === 0 && layer.to === 0) continue;
+            const phrase = phraseFor(game.world.seed, playing, phraseIndex, voice,
+              { density, key, warmth: easedMood.warmth, tension: easedMood.tension, energy: easedMood.energy, night });
             for (const note of phrase) {
               if (note.beat < barInPhrase * 4 || note.beat >= (barInPhrase + 1) * 4) continue;
-              const when = at + (note.beat - barInPhrase * 4) * BEAT_SECONDS;
+              const within = note.beat - barInPhrase * 4;
+              const when = at + within * beatSeconds;
               const fade = previousChapter && when >= transitionAt && when < transitionAt + 3
                 ? playing === chapter ? (when - transitionAt) / 3 : 1 - (when - transitionAt) / 3 : 1;
-              playScoreNote(voice, note, when, fade);
+              const layerFade = layer.from + (layer.to - layer.from) * within / 4;
+              if (layerFade > 0) playScoreNote(voice, note, when, fade * layerFade);
+            }
+          }
+        }
+        if (!tension && easedMood.tension <= 0.2) {
+          const drumLayer = layers.get('drums');
+          const hatLayer = layers.get('hat');
+          if (drumsBus && hatBus && ctx && (drumLayer?.to || hatLayer?.to)) {
+            for (const hit of drumHitsFor(game.world.seed, phraseIndex, barIndex, Math.max(0.15, easedMood.energy))) {
+              const layer = hit.kind === 'kick' || hit.kind === 'snare' ? drumLayer : hatLayer;
+              if (!layer) continue;
+              const fade = layer.from + (layer.to - layer.from) * hit.beat / 4;
+              if (fade <= 0) continue;
+              const out = hit.kind === 'kick' || hit.kind === 'snare' ? drumsBus : hatBus;
+              const when = at + hit.beat * beatSeconds + hit.lateSeconds;
+              const sources = playDrum(ctx, out, { ...hit, velocity: hit.velocity * fade }, when);
+              for (const source of sources) {
+                scheduledDrums.add(source);
+                source.onended = () => scheduledDrums.delete(source);
+              }
             }
           }
         }
@@ -693,13 +821,15 @@ export function createSound(game: SoundGame, deps: SoundDeps = {}): Sound {
     setMusic(level) {
       settings.music = clampLevel(level);
       writeSoundSettings(settings, store);
-      if (ctx && musicBus) musicBus.gain.setTargetAtTime((settings.music ?? 60) / 100 * (tension ? 0.5 : 1), ctx.currentTime, 0.05);
+      if (ctx && musicBus) musicBus.gain.setTargetAtTime((settings.music ?? 60) / 100 * dbToGain(-6 * easedMood.tension), ctx.currentTime, 0.05);
     },
     get chapter() { return chapter; },
     get tension() { return tension; },
     get weatherKind() { return weatherKind; },
-    get tempo() { return TEMPO; },
+    get tempo() { return tempo; },
     get filterHz() { return filterHz; },
+    get mood() { return { ...easedMood }; },
+    get activeVoices() { return [...activeVoices]; },
     setAmbient(level) {
       settings.ambient = clampLevel(level);
       writeSoundSettings(settings, store);

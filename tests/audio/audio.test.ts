@@ -13,6 +13,8 @@ import {
   SOUND_EFFECTS_KEY,
   SOUND_KEY,
   SOUND_MUSIC_KEY,
+  VINYL_MAX_DB,
+  dbToGain,
   writeSoundSettings,
   type AudioContextLike,
   type Effect,
@@ -133,7 +135,7 @@ function fakeTarget() {
 function fakeGame() {
   const events = new Set<GameEventListener>();
   const ticks = new Set<() => void>();
-  const state = { seed: 1, stars: 1, time: { minute: 12 * 60 } };
+  const state = { seed: 1, stars: 1, time: { minute: 12 * 60 }, rooms: new Map<number, { kind: 'restaurant'; occupancy: number; width: number }>() };
   return {
     world: state as never,
     state,
@@ -340,8 +342,9 @@ describe('the AudioContext and the master toggle', () => {
     });
     target.fire('pointerdown');
     // The bed: the 4 kHz chirp and its 12 Hz pulse, and one looping brown noise source.
-    expect(ctxs[0]!.oscillators.slice(0, 2).map((o) => o.frequency.value)).toEqual([4000, 12]);
-    expect(ctxs[0]!.sources.filter((s) => s.loop)).toHaveLength(1);
+    expect(ctxs[0]!.oscillators.map((o) => o.frequency.value)).toContain(4000);
+    expect(ctxs[0]!.oscillators.map((o) => o.frequency.value)).toContain(12);
+    expect(ctxs[0]!.sources.filter((s) => s.loop).length).toBeGreaterThanOrEqual(2);
     sound.destroy();
   });
 });
@@ -356,7 +359,8 @@ describe('adaptive score', () => {
     game.emit({ kind: 'stars', from: 3, to: 2 }); expect(sound.chapter).toBe(3);
     expect(isNight(23 * 60 + 30)).toBe(true);
     expect(chapterFor(4)).toBe(4);
-    expect(sound.tempo).toBe(76);
+    expect(sound.tempo).toBeGreaterThanOrEqual(72);
+    expect(sound.tempo).toBeLessThanOrEqual(82);
     sound.destroy();
   });
   it('suppresses ordinary bells during an emergency', () => {
@@ -444,19 +448,47 @@ describe('mixer and weather integration', () => {
     expect(ctx.delays[0]!.delayTime.value).toBeCloseTo(0.31);
     expect(ctx.gains.some(g => g.gain.value === 0.35)).toBe(true);
     expect(ctx.filters.some(f => f.frequency.value === 3000)).toBe(true);
+    expect(ctx.gains[8]!.gain.value).toBeLessThanOrEqual(dbToGain(VINYL_MAX_DB));
+    expect(ctx.oscillators.some(o => o.frequency.value === 0.3)).toBe(true);
     sound.setEnabled(false);
     for (const bus of [ctx.gains[0], ctx.gains[1], ctx.gains[4], ctx.gains[5]]) expect(bus!.gain.value).toBe(0);
     sound.destroy();
   });
-  it('changes the active music filter at 23:30 without changing tempo', () => {
+  it('stops the kit and ducks music on a fire beat; tempo stays fixed as energy changes', () => {
     const game = fakeGame(); const target = fakeTarget(); const ctx = new StubContext();
-    const sound = createSound(game, { target, store: memoryStore(), createContext: () => asCtx(ctx), setInterval: () => 1, clearInterval: () => {} });
+    let t = 0; const timers: Array<() => void> = [];
+    const sound = createSound(game, { target, store: memoryStore(), createContext: () => asCtx(ctx), now: () => t,
+      setInterval: fn => { timers.push(fn); return timers.length; }, clearInterval: () => {} });
     target.fire('pointerdown'); sound.setEnabled(true);
     const tempo = sound.tempo;
-    game.state.time.minute = 23 * 60 + 30; game.tick();
-    expect(sound.filterHz).toBe(900);
+    const before = ctx.gains[1]!.gain.value;
+    game.emit({ kind: 'beat', beat: { code: 'fire.started', minute: 0 } });
+    expect(ctx.gains[6]!.gain.value).toBe(0);
+    expect(ctx.gains[7]!.gain.value).toBe(0);
+    expect(ctx.gains[1]!.gain.value).toBeLessThan(before);
+    game.state.rooms.set(1, { kind: 'restaurant', occupancy: 24, width: 12 });
+    game.state.time.minute = 2 * 1440 + 21 * 60;
+    ctx.currentTime = 10; timers.at(-1)!();
+    t = 20000; ctx.currentTime = 20; timers.at(-1)!();
     expect(sound.tempo).toBe(tempo);
-    expect(ctx.filters.some(f => f.frequency.value === 900)).toBe(true);
+    sound.destroy();
+  });
+  it('changes the active music filter at 23:30 without changing tempo', () => {
+    const game = fakeGame(); const target = fakeTarget(); const ctx = new StubContext();
+    game.state.seed = Array.from({ length: 100 }, (_, i) => i).find(i => weatherAt(i, 720).kind === 'clear' && weatherAt(i, 1410).kind === 'clear')!;
+    let t = 0; const timers: Array<() => void> = [];
+    const sound = createSound(game, { target, store: memoryStore(), createContext: () => asCtx(ctx), now: () => t,
+      setInterval: fn => { timers.push(fn); return timers.length; }, clearInterval: () => {} });
+    target.fire('pointerdown'); sound.setEnabled(true);
+    const tempo = sound.tempo;
+    const dayFilter = sound.filterHz!;
+    game.state.time.minute = 23 * 60 + 30; game.tick();
+    ctx.currentTime = 5; timers.at(-1)!(); // request the new bar's night target
+    t = 20000; ctx.currentTime = 10; timers.at(-1)!(); // ease toward it in real time
+    expect(sound.filterHz).toBeGreaterThanOrEqual(1200);
+    expect(sound.filterHz).toBeLessThan(dayFilter);
+    expect(sound.tempo).toBe(tempo);
+    expect(ctx.filters.some(f => f.frequency.value === sound.filterHz)).toBe(true);
     sound.destroy();
   });
   it('selects weatherAt beds for every kind and skips thunder under reduced motion', () => {
@@ -472,7 +504,7 @@ describe('mixer and weather integration', () => {
         const sound = createSound(game, { target, store: memoryStore(), createContext: () => asCtx(ctx), now: () => 30000, setInterval: () => 1, clearInterval: () => {} });
         target.fire('pointerdown'); sound.setEnabled(true);
         expect(sound.weatherKind).toBe(kind);
-        if (kind === 'storm') expect(ctx.sources.filter(s => !s.loop)).toHaveLength(0);
+        if (kind === 'storm') expect(ctx.filters.some(f => f.type === 'lowpass' && f.frequency.value === 80)).toBe(false);
         sound.destroy();
       }
     } finally {
