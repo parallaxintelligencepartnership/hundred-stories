@@ -10,6 +10,16 @@ export function keyFor(seed: number): number {
   return keys[(Math.imul((seed | 0) ^ 0x5bd1e995, 0xc2b2ae35) >>> 0) % keys.length]!;
 }
 export function swingFor(energy: number): number { return 0.66 - 0.08 * Math.min(1, Math.max(0, energy)); }
+/** Straight grid position to swung position: offbeat eighths land at `swing` of the beat. */
+export function swingBeat(beat: number, swing: number): number {
+  const whole = Math.floor(beat);
+  const frac = beat - whole;
+  if (Math.abs(frac - 0.5) < 1e-9) return whole + swing;
+  if (Math.abs(frac - 0.25) < 1e-9) return whole + swing / 2;
+  if (Math.abs(frac - 0.75) < 1e-9) return whole + swing + (1 - swing) / 2;
+  return beat;
+}
+
 export const BEAT_SECONDS = 60 / TEMPO;
 export const BAR_SECONDS = BEAT_SECONDS * 4;
 export const PHRASE_BARS = 8;
@@ -64,33 +74,47 @@ export function inChapterScale(chapter: Chapter, frequency: number): boolean {
   return CHAPTER_SCALES[chapter].includes(((midi - 60) % 12 + 12) % 12);
 }
 
-/** One small replaceable synth recipe per instrument. The bus dynamics set final loudness. */
+/**
+ * One small replaceable synth recipe per instrument. `maxHz` bounds the fundamental: every
+ * phrase folds notes down by octaves until they sit at or under it, so no voice can hold a
+ * tone above 1 kHz. Peaks are linear on the music bus before the compressor.
+ */
 export interface VoiceDefinition {
   wave: OscillatorType;
   attack: number;
   release: number;
   peak: number;
   cutoff: number;
+  maxHz: number;
+  /** Level the note settles to after its strike, as a fraction of peak; 0 rings straight out. */
+  sustain: number;
   detune?: number;
   tremolo?: number;
 }
+/** The Rhodes-like keys never open above this, however warm the room. */
+export const KEYS_CUTOFF_HZ = 2500;
 export const VOICES: Readonly<Record<Voice, VoiceDefinition>> = {
-  piano: { wave: 'triangle', attack: 0.025, release: 0.48, peak: 0.18, cutoff: 1900 },
-  drums: { wave: 'sine', attack: 0.005, release: 0.12, peak: 0.1, cutoff: 900 },
-  bass: { wave: 'sine', attack: 0.025, release: 0.65, peak: 0.3, cutoff: 500 },
-  hat: { wave: 'sine', attack: 0.002, release: 0.045, peak: 0, cutoff: 7000 }, // noise voice in drums.ts
-  guitar: { wave: 'triangle', attack: 0.008, release: 0.2, peak: 0.13, cutoff: 2600, detune: 4 },
-  pluck: { wave: 'triangle', attack: 0.008, release: 0.19, peak: 0.08, cutoff: 2300, detune: 3 },
-  pulse: { wave: 'triangle', attack: 0.008, release: 0.12, peak: 0.07, cutoff: 1200 },
-  brass: { wave: 'sawtooth', attack: 0.17, release: 0.38, peak: 0.08, cutoff: 1350 },
-  horn: { wave: 'sawtooth', attack: 0.12, release: 0.5, peak: 0.065, cutoff: 1000 },
-  counter: { wave: 'sine', attack: 0.03, release: 0.5, peak: 0.12, cutoff: 2000 },
-  vibes: { wave: 'sine', attack: 0.004, release: 0.32, peak: 0.15, cutoff: 4000, detune: 3, tremolo: 4.5 },
-  kinetic: { wave: 'sine', attack: 0.002, release: 0.06, peak: 0, cutoff: 7000 }, // noise voice in drums.ts
-  pad: { wave: 'sine', attack: 0.45, release: 2.2, peak: 0.08, cutoff: 1300 },
-  lead: { wave: 'triangle', attack: 0.04, release: 0.72, peak: 0.15, cutoff: 2600 },
-  strings: { wave: 'sawtooth', attack: 0.58, release: 2.5, peak: 0.055, cutoff: 950, detune: 4 },
+  piano: { wave: 'sine', attack: 0.014, release: 2.2, peak: 0.075, cutoff: KEYS_CUTOFF_HZ, maxHz: 880, sustain: 0.3, detune: 6 },
+  drums: { wave: 'sine', attack: 0.004, release: 0.42, peak: 0, cutoff: 6000, maxHz: 200, sustain: 0 }, // drums.ts
+  bass: { wave: 'sine', attack: 0.012, release: 1.4, peak: 0.1, cutoff: 200, maxHz: 200, sustain: 0.4 },
+  hat: { wave: 'sine', attack: 0.002, release: 0.04, peak: 0, cutoff: 7000, maxHz: 200, sustain: 0 }, // noise voice in drums.ts
+  guitar: { wave: 'triangle', attack: 0.006, release: 0.28, peak: 0.07, cutoff: 1800, maxHz: 700, sustain: 0, detune: 4 },
+  pluck: { wave: 'triangle', attack: 0.006, release: 0.26, peak: 0.06, cutoff: 1800, maxHz: 700, sustain: 0, detune: 3 },
+  pulse: { wave: 'triangle', attack: 0.01, release: 0.22, peak: 0.035, cutoff: 1200, maxHz: 600, sustain: 0 },
+  brass: { wave: 'sawtooth', attack: 0.18, release: 1.2, peak: 0.03, cutoff: 1100, maxHz: 520, sustain: 0.8 },
+  horn: { wave: 'sawtooth', attack: 0.14, release: 1.2, peak: 0.028, cutoff: 950, maxHz: 440, sustain: 0.8 },
+  counter: { wave: 'triangle', attack: 0.04, release: 0.6, peak: 0.055, cutoff: 1600, maxHz: 800, sustain: 0.6 },
+  vibes: { wave: 'sine', attack: 0.003, release: 0.34, peak: 0.07, cutoff: 3000, maxHz: 1000, sustain: 0, detune: 3, tremolo: 4.5 },
+  kinetic: { wave: 'sine', attack: 0.002, release: 0.05, peak: 0, cutoff: 7000, maxHz: 200, sustain: 0 }, // noise voice in drums.ts
+  pad: { wave: 'sine', attack: 0.6, release: 2.4, peak: 0.022, cutoff: 1100, maxHz: 700, sustain: 1 },
+  lead: { wave: 'triangle', attack: 0.03, release: 0.7, peak: 0.055, cutoff: 1800, maxHz: 880, sustain: 0.6 },
+  strings: { wave: 'sawtooth', attack: 0.7, release: 2.6, peak: 0.012, cutoff: 900, maxHz: 700, sustain: 1, detune: 5 },
 };
+/** Voices that carry a line or comping part; at most three of them sound at once. */
+export const MELODIC: ReadonlySet<Voice> = new Set<Voice>(['piano', 'guitar', 'pluck', 'pulse', 'brass', 'horn', 'counter', 'vibes', 'lead']);
+export const MAX_MELODIC = 3;
+/** Sustained harmony under the band; at most one plays. */
+export const BEDS: ReadonlySet<Voice> = new Set<Voice>(['pad', 'strings']);
 
 /** Entries are relative to the continuous arrangement, not separate tracks. */
 export const ENTRY_THRESHOLD: Readonly<Record<Voice, number>> = {

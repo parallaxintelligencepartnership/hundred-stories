@@ -5,7 +5,7 @@ import type { GameApi, GameEvent } from '../game/api';
 import { clockOf } from '../sim/types';
 import { weatherAt } from '../game/weather';
 import type { MoodInput } from './mood';
-import { VOICES, chapterFor, cutoffForWarmth, isNight, hatVelocityMultiplier, keyFor, tempoFor, type Chapter, type Voice } from './score';
+import { BEDS, MAX_MELODIC, MELODIC, VOICES, chapterFor, cutoffForWarmth, isNight, hatVelocityMultiplier, keyFor, tempoFor, type Chapter, type Voice } from './score';
 import { phraseFor, voicesFor, type Note } from './phrase';
 import { activeLayers, easeMood, moodFor, venueFillFor, type Mood } from './mood';
 import { drumHitsFor, playDrum } from './drums';
@@ -227,7 +227,29 @@ export const REVERB_DELAY_SECONDS = 0.31;
 export const REVERB_FEEDBACK = 0.35;
 export const REVERB_CUTOFF_HZ = 3000;
 export const REVERB_WET_DB = -12;
+/** Hiss and crackle, dBFS RMS at the output with the music slider at its default. */
+export const TEXTURE_DB = -36;
+/** Kept for older callers: the texture never exceeds this. */
 export const VINYL_MAX_DB = -30;
+/** Tape wobble depth in cents, on every pitched voice. */
+export const TAPE_WOBBLE_CENTS = 4;
+export const TAPE_WOBBLE_HZ = 0.3;
+
+/**
+ * The music bus master chain, in signal order: glue compressor, makeup gain, a 7 kHz low-pass
+ * and a -6 dB shelf above 5 kHz. The music slider and the tension duck come after it, so the
+ * compressor hears the same band whatever the volume; a limiter on the output keeps every peak
+ * at or under -1 dBFS.
+ */
+export const MASTER_CHAIN = {
+  compressor: { threshold: -14, knee: 6, ratio: 4, attack: 0.01, release: 0.25 },
+  makeupDb: 2,
+  lowpassHz: 7000,
+  shelf: { hz: 5000, db: -6 },
+} as const;
+export const LIMITER = { threshold: -5, knee: 0, ratio: 20, attack: 0.002, release: 0.1 } as const;
+/** How far ahead the score schedules, in seconds; the timer runs every 500 ms. */
+export const LOOKAHEAD_SECONDS = 2;
 
 /**
  * How loud each bed is at this minute of the day, 0 to 1 before the dB and the slider.
@@ -492,26 +514,33 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
       } catch {
         return; // no Web Audio in this browser: stay silent
       }
-      master = ctx.createGain(); master.gain.value = 1; master.connect(ctx.destination);
+      master = ctx.createGain(); master.gain.value = 1;
       musicBus = ctx.createGain(); musicBus.gain.value = (settings.music ?? 60) / 100;
+      const c = MASTER_CHAIN;
       musicCompressor = ctx.createDynamicsCompressor();
-      musicCompressor.threshold.value = -14; musicCompressor.knee.value = 6;
-      musicCompressor.ratio.value = 4; musicCompressor.attack.value = 0.01;
-      musicCompressor.release.value = 0.25;
-      musicMakeup = ctx.createGain(); musicMakeup.gain.value = dbToGain(10);
-      musicBus.connect(musicCompressor); musicCompressor.connect(musicMakeup); musicMakeup.connect(master);
+      musicCompressor.threshold.value = c.compressor.threshold; musicCompressor.knee.value = c.compressor.knee;
+      musicCompressor.ratio.value = c.compressor.ratio; musicCompressor.attack.value = c.compressor.attack;
+      musicCompressor.release.value = c.compressor.release;
+      musicMakeup = ctx.createGain(); musicMakeup.gain.value = dbToGain(c.makeupDb);
+      musicDust = ctx.createBiquadFilter(); musicDust.type = 'lowpass'; musicDust.frequency.value = c.lowpassHz;
+      musicShelf = ctx.createBiquadFilter(); musicShelf.type = 'highshelf';
+      musicShelf.frequency.value = c.shelf.hz; musicShelf.gain.value = c.shelf.db;
+      musicCompressor.connect(musicMakeup); musicMakeup.connect(musicDust); musicDust.connect(musicShelf);
+      musicShelf.connect(musicBus); musicBus.connect(master);
+      const limiter = ctx.createDynamicsCompressor();
+      limiter.threshold.value = LIMITER.threshold; limiter.knee.value = LIMITER.knee; limiter.ratio.value = LIMITER.ratio;
+      limiter.attack.value = LIMITER.attack; limiter.release.value = LIMITER.release;
+      master.connect(limiter); limiter.connect(ctx.destination);
+      // Pitched voices pass the warmth low-pass; the kit goes straight to the compressor.
       musicColour = ctx.createBiquadFilter(); musicColour.type = 'lowpass';
       musicColour.frequency.value = cutoffForWarmth(easedMood.warmth);
-      musicDust = ctx.createBiquadFilter(); musicDust.type = 'lowpass'; musicDust.frequency.value = 7000;
-      musicShelf = ctx.createBiquadFilter(); musicShelf.type = 'highshelf';
-      musicShelf.frequency.value = 5000; musicShelf.gain.value = -6;
-      musicColour.connect(musicDust); musicDust.connect(musicShelf); musicShelf.connect(musicBus);
-      // Feedback delay keeps the score warm without a convolver or recorded impulse.
+      musicColour.connect(musicCompressor);
+      // Feedback delay keeps the keys warm without a convolver or recorded impulse.
       const wet = ctx.createGain(); wet.gain.value = dbToGain(REVERB_WET_DB);
       const delay = ctx.createDelay(1); delay.delayTime.value = REVERB_DELAY_SECONDS;
       const low = ctx.createBiquadFilter(); low.type = 'lowpass'; low.frequency.value = REVERB_CUTOFF_HZ;
       const feedback = ctx.createGain(); feedback.gain.value = REVERB_FEEDBACK;
-      musicBus.connect(wet); wet.connect(delay); delay.connect(low);
+      musicColour.connect(wet); wet.connect(delay); delay.connect(low);
       low.connect(musicCompressor); low.connect(feedback); feedback.connect(delay);
       effectsBus = ctx.createGain();
       effectsBus.gain.value = settings.effects / 100;
@@ -519,10 +548,12 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
       ambientBus = ctx.createGain();
       ambientBus.gain.value = settings.ambient / 100 * dbToGain(-10);
       ambientBus.connect(master);
-      hatBus = ctx.createGain(); hatBus.gain.value = 1; hatBus.connect(musicColour);
-      drumsBus = ctx.createGain(); drumsBus.gain.value = 1; drumsBus.connect(musicColour);
-      vinylGain = ctx.createGain(); vinylGain.gain.value = dbToGain(VINYL_MAX_DB - 2); vinylGain.connect(musicColour);
-      tapeDepth = ctx.createGain(); tapeDepth.gain.value = 4;
+      hatBus = ctx.createGain(); hatBus.gain.value = 1; hatBus.connect(musicCompressor);
+      drumsBus = ctx.createGain(); drumsBus.gain.value = 1; drumsBus.connect(musicCompressor);
+      // Hiss and crackle join after the compressor so the kit never pumps them.
+      vinylGain = ctx.createGain(); vinylGain.gain.value = dbToGain(TEXTURE_DB) / (DEFAULT_SOUND.music! / 100);
+      vinylGain.connect(musicDust);
+      tapeDepth = ctx.createGain(); tapeDepth.gain.value = TAPE_WOBBLE_CENTS;
     }
     if (ctx.state === 'suspended') void ctx.resume().catch(() => {});
     lastMoodMs = now();
@@ -543,21 +574,31 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
   function startTexture(): void {
     if (!ctx || !vinylGain || !tapeDepth) return;
     if (!vinylSource) {
-      const length = ctx.sampleRate * 2;
+      // Four seconds of seeded tape hiss (band-limited, 300 Hz to 5 kHz) and sparse vinyl
+      // crackle, normalised to unit RMS so vinylGain alone sets the level.
+      const length = ctx.sampleRate * 4;
       const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
       const data = buffer.getChannelData(0);
       let state = (game.world.seed ^ 0x35a1b2c3) >>> 0;
-      for (let i = 0; i < data.length; i += 1) {
-        state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
-        const hiss = ((state / 4294967296) * 2 - 1) * 0.18;
-        data[i] = Math.max(-1, Math.min(1, hiss + (state % 10007 === 0 ? 0.65 : 0)));
+      const rand = (): number => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+      const lowK = 1 - Math.exp(-2 * Math.PI * 5000 / ctx.sampleRate);
+      const highK = 1 - Math.exp(-2 * Math.PI * 300 / ctx.sampleRate);
+      let lowState = 0; let highState = 0; let crackle = 0; let sum = 0;
+      for (let i = 0; i < length; i += 1) {
+        lowState += lowK * (rand() * 2 - 1 - lowState);
+        highState += highK * (lowState - highState);
+        if (rand() < 7 / ctx.sampleRate) crackle = (rand() < 0.5 ? -1 : 1) * (2 + 6 * rand());
+        crackle *= 0.55;
+        data[i] = lowState - highState + crackle;
+        sum += data[i]! * data[i]!;
       }
+      const norm = sum > 0 ? 1 / Math.sqrt(sum / length) : 0;
+      for (let i = 0; i < length; i += 1) data[i] = data[i]! * norm;
       const src = ctx.createBufferSource(); src.buffer = buffer; src.loop = true;
-      const filter = ctx.createBiquadFilter(); filter.type = 'lowpass'; filter.frequency.value = 4200;
-      src.connect(filter); filter.connect(vinylGain); src.start(); vinylSource = src;
+      src.connect(vinylGain); src.start(); vinylSource = src;
     }
     if (!tapeLfo) {
-      tapeLfo = ctx.createOscillator(); tapeLfo.type = 'sine'; tapeLfo.frequency.value = 0.3;
+      tapeLfo = ctx.createOscillator(); tapeLfo.type = 'sine'; tapeLfo.frequency.value = TAPE_WOBBLE_HZ;
       tapeLfo.connect(tapeDepth); tapeLfo.start();
     }
   }
@@ -714,6 +755,11 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
     syncWeather();
   }
 
+  /** Tension as the kit hears it: an all-clear lets the drums back in before the mood eases. */
+  function kitTension(): number {
+    return Math.min(easedMood.tension, targetMood.tension);
+  }
+
   function targetForBar(): void {
     targetMood = moodFor(inputs().mood);
   }
@@ -729,52 +775,75 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
     if (!ctx) return;
     filterHz = cutoffForWarmth(easedMood.warmth);
     musicColour?.frequency.setTargetAtTime(filterHz, ctx.currentTime, 0.15);
-    const kitStopped = urgent(threat) || easedMood.tension >= 0.8;
+    const kitStopped = urgent(threat) || kitTension() >= 0.8;
     const minute = inputs().minute;
-    hatBus?.gain.setTargetAtTime(kitStopped || isNight(minute) ? 0 : hatVelocityMultiplier(minute) * (1 - 0.6 * easedMood.tension), ctx.currentTime, 0.08);
+    // Late at night the hats keep shuffling, softer.
+    hatBus?.gain.setTargetAtTime(kitStopped ? 0 : (isNight(minute) ? 0.6 : hatVelocityMultiplier(minute)) * (1 - 0.6 * easedMood.tension), ctx.currentTime, 0.08);
     drumsBus?.gain.setTargetAtTime(kitStopped ? 0 : 1 - 0.45 * easedMood.tension, ctx.currentTime, 0.08);
     musicBus?.gain.setTargetAtTime((settings.music ?? 60) / 100 * dbToGain(-6 * easedMood.tension), ctx.currentTime, 0.1);
     for (const [filter, cutoff] of musicFilters) filter.frequency.setTargetAtTime(Math.min(cutoff, filterHz), ctx.currentTime, 0.15);
   }
 
+  /** Partials per voice: [wave, frequency ratio, detune cents, level]. */
+  function partialsFor(voice: Voice): ReadonlyArray<readonly [OscillatorType, number, number, number]> {
+    const def = VOICES[voice];
+    switch (voice) {
+      // Rhodes-like: a sine tine, a detuned triangle for the chorus, a faint octave bell.
+      case 'piano': return [['sine', 1, 0, 1], ['triangle', 1, def.detune ?? 6, 0.35], ['sine', 2, -(def.detune ?? 6), 0.1]];
+      // Round: a sine with a little triangle for definition on small speakers.
+      case 'bass': return [['sine', 1, 0, 1], ['triangle', 1, 0, 0.2]];
+      // A struck bar: the fundamental and a faint fourth partial that dies first.
+      case 'vibes': return [['sine', 1, 0, 1], ['sine', 4, def.detune ?? 0, 0.05]];
+      default: return [[def.wave, 1, def.detune ?? 0, 1]];
+    }
+  }
+
   function playScoreNote(voice: Voice, note: Note, when: number, fade: number): void {
-    if (!ctx || !musicColour) return;
+    if (!ctx || !musicColour || !musicCompressor) return;
     const c = ctx;
     const def = VOICES[voice];
-    const duration = Math.max(def.attack + 0.02, Math.min(def.release, note.dur * beatSeconds));
     const peak = Math.max(0.0002, def.peak * note.vel * fade);
-    const osc = c.createOscillator(); osc.type = def.wave;
-    osc.frequency.setValueAtTime(note.freq, when);
-    if (def.detune) osc.detune.setValueAtTime(def.detune, when);
-    if ((voice === 'piano' || voice === 'pluck' || voice === 'guitar') && tapeDepth) tapeDepth.connect(osc.detune);
+    const hold = Math.max(def.attack + 0.02, note.dur * beatSeconds);
+    // Struck voices ring out over `release`; held voices sustain for the note, then let go.
+    const end = def.sustain === 0 ? when + def.release : when + hold + def.release / 4;
+    const coloured = MELODIC.has(voice) || BEDS.has(voice);
     const filter = c.createBiquadFilter(); filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(Math.min(def.cutoff, filterHz), when);
-    musicFilters.set(filter, def.cutoff);
+    filter.frequency.setValueAtTime(coloured ? Math.min(def.cutoff, filterHz) : def.cutoff, when);
+    if (coloured) musicFilters.set(filter, def.cutoff);
     const env = c.createGain();
     env.gain.setValueAtTime(0.0001, when);
-    env.gain.linearRampToValueAtTime(peak, when + Math.min(def.attack, duration * 0.5));
-    env.gain.exponentialRampToValueAtTime(0.0001, when + duration);
-    osc.connect(filter); filter.connect(env); env.connect(voice === 'hat' && hatBus ? hatBus : musicColour);
-    osc.start(when); osc.stop(when + duration + 0.02);
-    scheduledMusic.add(osc);
-    osc.onended = () => {
-      scheduledMusic.delete(osc); musicFilters.delete(filter);
-      if ((voice === 'piano' || voice === 'pluck' || voice === 'guitar') && tapeDepth) tapeDepth.disconnect(osc.detune);
-      osc.disconnect(); filter.disconnect(); env.disconnect();
-    };
-    if (voice === 'piano') {
-      const chorus = c.createOscillator(); chorus.type = 'triangle';
-      chorus.frequency.setValueAtTime(note.freq, when); chorus.detune.setValueAtTime(4, when);
-      if (tapeDepth) tapeDepth.connect(chorus.detune);
-      const soft = c.createGain(); soft.gain.value = 0.12;
-      chorus.connect(soft); soft.connect(filter); chorus.start(when); chorus.stop(when + duration + 0.02);
-      scheduledMusic.add(chorus);
-      chorus.onended = () => { scheduledMusic.delete(chorus); tapeDepth?.disconnect(chorus.detune); chorus.disconnect(); soft.disconnect(); };
+    env.gain.linearRampToValueAtTime(peak, when + def.attack);
+    if (def.sustain === 0) env.gain.setTargetAtTime(0.0001, when + def.attack, def.release / 4);
+    else {
+      env.gain.setTargetAtTime(peak * def.sustain, when + def.attack, Math.max(0.05, def.release / 5));
+      env.gain.setTargetAtTime(0.0001, when + hold, def.release / 16);
+    }
+    filter.connect(env); env.connect(coloured ? musicColour : musicCompressor);
+    const sources: OscillatorNode[] = [];
+    for (const [wave, ratio, cents, level] of partialsFor(voice)) {
+      const osc = c.createOscillator(); osc.type = wave;
+      osc.frequency.setValueAtTime(note.freq * ratio, when);
+      if (cents) osc.detune.setValueAtTime(cents, when);
+      if (tapeDepth) tapeDepth.connect(osc.detune);
+      let into: AudioNode = filter;
+      if (level !== 1) { const g = c.createGain(); g.gain.value = level; g.connect(filter); into = g; }
+      osc.connect(into);
+      osc.start(when); osc.stop(end + 0.05);
+      sources.push(osc);
+    }
+    for (const osc of sources) {
+      scheduledMusic.add(osc);
+      osc.onended = () => {
+        scheduledMusic.delete(osc);
+        if (tapeDepth) { try { tapeDepth.disconnect(osc.detune); } catch { /* already gone */ } }
+        osc.disconnect();
+        if (osc === sources[0]) { musicFilters.delete(filter); filter.disconnect(); env.disconnect(); }
+      };
     }
     if (def.tremolo) {
       const lfo = c.createOscillator(); lfo.type = 'sine'; lfo.frequency.setValueAtTime(def.tremolo, when);
       const depth = c.createGain(); depth.gain.value = peak * 0.12;
-      lfo.connect(depth); depth.connect(env.gain); lfo.start(when); lfo.stop(when + duration + 0.02);
+      lfo.connect(depth); depth.connect(env.gain); lfo.start(when); lfo.stop(end + 0.05);
       scheduledMusic.add(lfo);
       lfo.onended = () => { scheduledMusic.delete(lfo); lfo.disconnect(); depth.disconnect(); };
     }
@@ -787,7 +856,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
     const schedule = () => {
       if (!ctx || !musicBus || !settings.on) return;
       advanceMood();
-      while (nextBar < ctx.currentTime + 4) {
+      while (nextBar < ctx.currentTime + LOOKAHEAD_SECONDS) {
         const at = nextBar; nextBar += barSeconds;
         targetForBar(); // venue occupancy is read only here, once per musical bar
         const barIndex = nextBarIndex++;
@@ -799,12 +868,31 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
         const chapters = previousChapter && at >= transitionAt && at < transitionAt + 3 ? [previousChapter, chapter] : [at < transitionAt && previousChapter ? previousChapter : chapter];
         const available = new Set<Voice>(chapters.flatMap(playing => voicesFor(playing, weekend)));
         const wanted = new Set<Voice>(chapters.flatMap(playing => activeLayers(playing, easedMood.energy, easedMood.tension, weekend, phraseIndex)));
+        // The groove comes back on the bar after an all-clear, while the eased tension still ducks.
+        if (kitTension() < 0.8 && easedMood.tension >= 0.8) {
+          for (const playing of chapters) for (const voice of activeLayers(playing, easedMood.energy, kitTension(), weekend, phraseIndex)) {
+            if (voice !== 'drums' && voice !== 'hat') continue;
+            wanted.add(voice);
+            layerMix.set(voice, Math.max(layerMix.get(voice) ?? 0, 0.5)); // back in on the downbeat
+          }
+        }
         const layers = new Map<Voice, { from: number; to: number }>();
-        for (const voice of new Set<Voice>([...available, ...layerMix.keys()])) {
+        // Voices ease in over two bars. A melodic voice leaves within one bar, and a new one
+        // waits for its slot, so no bar ever holds more than MAX_MELODIC melodic voices.
+        const voices = [...new Set<Voice>([...available, ...layerMix.keys()])];
+        for (const voice of voices) {
           const from = layerMix.get(voice) ?? 0;
-          const to = Math.max(0, Math.min(1, from + (wanted.has(voice) ? 0.5 : -0.5)));
-          layerMix.set(voice, to);
-          layers.set(voice, { from, to });
+          const step = wanted.has(voice) ? 0.5 : MELODIC.has(voice) ? -1 : -0.5;
+          layers.set(voice, { from, to: Math.max(0, Math.min(1, from + step)) });
+        }
+        let sounding = voices.filter(voice => MELODIC.has(voice) && layers.get(voice)!.from > 0).length;
+        for (const voice of voices) {
+          const layer = layers.get(voice)!;
+          if (MELODIC.has(voice) && layer.from === 0 && layer.to > 0) {
+            if (sounding >= MAX_MELODIC) layer.to = 0;
+            else sounding += 1;
+          }
+          layerMix.set(voice, layer.to);
         }
         activeVoices = [...available].filter(voice => (layers.get(voice)?.to ?? 0) > 0);
         const density = 0.4 + 0.6 * easedMood.energy;
@@ -826,28 +914,29 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
                 const sources = playDrum(ctx, hatBus, { kind: 'kinetic', beat: within, lateSeconds: 0, velocity: note.vel * fade * layerFade }, when);
                 for (const source of sources) {
                   scheduledMusic.add(source);
-                  source.onended = () => scheduledMusic.delete(source);
+                  const done = source.onended; source.onended = (e) => { scheduledMusic.delete(source); done?.call(source, e); };
                 }
               } else if (layerFade > 0) playScoreNote(voice, note, when, fade * layerFade);
             }
           }
         }
-        if (!urgent(threat) && easedMood.tension < 0.8) {
+        if (!urgent(threat) && kitTension() < 0.8) {
           const drumLayer = layers.get('drums');
-          const hatLayer = layers.get('hat') ?? (chapter === 5 ? drumLayer : undefined);
+          const hatLayer = layers.get('hat');
           if (drumsBus && hatBus && ctx && (drumLayer?.to || hatLayer?.to)) {
             for (const hit of drumHitsFor(game.world.seed, phraseIndex, barIndex, Math.max(0.15, easedMood.energy))) {
               if (easedMood.tension >= 0.3 && (hit.kind === 'ghost' || hit.kind === 'open')) continue;
-              const layer = hit.kind === 'kick' || hit.kind === 'snare' ? drumLayer : hatLayer;
+              const backbone = hit.kind === 'kick' || hit.kind === 'snare' || hit.kind === 'rim' || hit.kind === 'ghost';
+              const layer = backbone ? drumLayer : hatLayer;
               if (!layer) continue;
               const fade = layer.from + (layer.to - layer.from) * hit.beat / 4;
               if (fade <= 0) continue;
-              const out = hit.kind === 'kick' || hit.kind === 'snare' ? drumsBus : hatBus;
+              const out = backbone ? drumsBus : hatBus;
               const when = at + hit.beat * beatSeconds + hit.lateSeconds;
               const sources = playDrum(ctx, out, { ...hit, velocity: hit.velocity * fade }, when);
               for (const source of sources) {
                 scheduledDrums.add(source);
-                source.onended = () => scheduledDrums.delete(source);
+                const done = source.onended; source.onended = (e) => { scheduledDrums.delete(source); done?.call(source, e); };
               }
             }
           }

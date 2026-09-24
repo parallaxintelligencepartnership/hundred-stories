@@ -14,6 +14,7 @@ import {
   SOUND_KEY,
   SOUND_MUSIC_KEY,
   VINYL_MAX_DB,
+  MASTER_CHAIN,
   dbToGain,
   writeSoundSettings,
   type AudioContextLike,
@@ -22,8 +23,8 @@ import {
 } from '../../src/audio/audio';
 import type { GameEvent, GameEventListener } from '../../src/game/api';
 import { isNight, chapterFor } from '../../src/audio/score';
-import { CHAPTER_SCALES, CHAPTER_VOICES, inChapterScale, scaleMidi, VOICES, type Chapter } from '../../src/audio/score';
-import { phraseFor, voicesFor } from '../../src/audio/phrase';
+import { CHAPTER_SCALES, CHAPTER_VOICES, chordColourFor, inChapterScale, scaleMidi, VOICES, type Chapter } from '../../src/audio/score';
+import { phraseFor, progressionFor, voicesFor } from '../../src/audio/phrase';
 import { vipRatingCue, cueDuration, beatCue } from '../../src/audio/cues';
 import { weatherAt } from '../../src/game/weather';
 
@@ -421,20 +422,25 @@ describe('six chapter moods and seeded eight-bar phrases', () => {
     expect(phrases.every(p => p.length > 0 && p.every(n => n.beat >= 0 && n.beat < 32))).toBe(true);
   });
   it('keeps every voice in its chapter scale and bass on roots or perfect fifths', () => {
-    const roots = [0, 3, 4, 0, 5, 3, 4, 0];
     for (const chapter of [1, 2, 3, 4, 5, 6] as Chapter[]) {
       for (const voice of CHAPTER_VOICES[chapter]) {
         for (const note of phraseFor(99, chapter, 7, voice)) expect(inChapterScale(chapter, note.freq)).toBe(true);
       }
+      // Each bar opens on its chord root; every other bass note is that root, its octave or its
+      // perfect fifth (a pickup on the "and" of four included).
       const bass = phraseFor(99, chapter, 7, 'bass');
-      expect(bass).toHaveLength(16);
+      const chordRoots = progressionFor(99, chapter, 7, chordColourFor(0.7));
       for (let bar = 0; bar < 8; bar += 1) {
-        const root = bass[bar * 2]!;
-        const fifth = bass[bar * 2 + 1]!;
-        const candidate = roots[bar]!;
-        const degree = scaleMidi(chapter, candidate + 4) - scaleMidi(chapter, candidate) === 7 ? candidate : 0;
-        expect(root.freq).toBeCloseTo(440 * 2 ** ((scaleMidi(chapter, degree, -2) - 69) / 12));
-        expect(12 * Math.log2(fifth.freq / root.freq)).toBeCloseTo(7);
+        const notes = bass.filter(n => Math.floor(n.beat / 4) === bar);
+        const degree = chordRoots[bar]!;
+        expect(scaleMidi(chapter, degree + 4) - scaleMidi(chapter, degree)).toBe(7);
+        const rootHz = 440 * 2 ** ((scaleMidi(chapter, degree, -2) - 69) / 12);
+        expect(notes[0]!.beat % 4).toBe(0);
+        expect(notes[0]!.freq).toBeCloseTo(rootHz);
+        for (const note of notes) {
+          const semis = Math.round(12 * Math.log2(note.freq / rootHz));
+          expect([0, 7, 12, -5]).toContain(semis);
+        }
       }
     }
     expect(phraseFor(99, 5, 7, 'hat')).toEqual([]);
@@ -449,13 +455,19 @@ describe('mixer and weather integration', () => {
     const game = fakeGame(); const target = fakeTarget(); const ctx = new StubContext();
     const sound = createSound(game, { target, store: memoryStore(), createContext: () => asCtx(ctx), setInterval: () => 1, clearInterval: () => {} });
     target.fire('pointerdown'); sound.setEnabled(true);
-    expect(ctx.compressors).toHaveLength(1);
+    // The music glue compressor, then the output limiter.
+    expect(ctx.compressors).toHaveLength(2);
     const compressor = ctx.compressors[0]!;
     expect([compressor.threshold.value, compressor.knee.value, compressor.ratio.value,
       compressor.attack.value, compressor.release.value]).toEqual([-14, 6, 4, 0.01, 0.25]);
-    expect(ctx.gains[1]!.connections).toContain(compressor);
     expect(compressor.connections).toContain(ctx.gains[2]);
-    expect(ctx.gains[2]!.gain.value).toBeCloseTo(dbToGain(10));
+    expect(ctx.gains[2]!.gain.value).toBeCloseTo(dbToGain(MASTER_CHAIN.makeupDb));
+    // The slider (gains[1]) feeds the master; effects and ambience bypass the music chain.
+    expect(ctx.gains[1]!.connections).toContain(ctx.gains[0]);
+    for (const bus of [ctx.gains[5]!, ctx.gains[6]!]) {
+      expect(bus.connections).toContain(ctx.gains[0]);
+      expect(bus.connections).not.toContain(compressor);
+    }
     expect(ctx.filters.some(f => f.type === 'lowpass' && f.frequency.value === 7000)).toBe(true);
     expect(ctx.filters.some(f => f.type === 'highshelf' && f.frequency.value === 5000 && f.gain.value === -6)).toBe(true);
     sound.destroy();

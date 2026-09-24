@@ -4,7 +4,7 @@
 //
 // Starts the dev server (the presets are dev only), drives headless Chrome over the DevTools
 // protocol with the SwiftShader flags the game needs to mount, and loads
-// /play/?new&audio=<preset>&render=45 for each preset. The page renders 45 seconds of that preset
+// /play/?new&seed=<fixed>&audio=<preset>&render=45 for each preset. The page renders 45 seconds of that preset
 // through the game's own sound controller on an OfflineAudioContext, encodes a 16-bit stereo
 // 44.1 kHz WAV, and leaves it on window.__audioSample as base64; this script pulls it in chunks
 // and writes docs/reviews/audio-samples-2026-09-23/<preset>.wav. No npm packages.
@@ -22,6 +22,11 @@ const OUT_DIR = join(ROOT, 'docs', 'reviews', 'audio-samples-2026-09-23');
 // The names in src/audio/presets.ts.
 const PRESETS = ['sunny-morning-1star', 'rainy-tuesday-5star', 'weekend-night-5star', 'storm-night-tower', 'fire-3star'];
 const SECONDS = 45;
+// A fixed world seed per preset (the seed picks tempo, key and patterns), so a render is
+// reproducible. --seed-offset N shifts every seed to hear other worlds.
+const offsetArg = process.argv.indexOf('--seed-offset');
+const SEED_OFFSET = offsetArg > 0 ? Number(process.argv[offsetArg + 1]) || 0 : 0;
+const SEEDS = { 'sunny-morning-1star': 101, 'rainy-tuesday-5star': 202, 'weekend-night-5star': 303, 'storm-night-tower': 404, 'fire-3star': 505 };
 const CHUNK = 1 << 20;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -127,7 +132,7 @@ async function launchChrome() {
 }
 
 async function renderOne(browser, base, name) {
-  await browser.send('Page.navigate', { url: `${base}/play/?new&audio=${name}&render=${SECONDS}` });
+  await browser.send('Page.navigate', { url: `${base}/play/?new&seed=${SEEDS[name] + SEED_OFFSET}&audio=${name}&render=${SECONDS}` });
   for (let i = 0; i < 600; i++) {
     await sleep(500);
     const state = await browser.evaluate(`(() => window.__audioSampleError ? 'error:' + window.__audioSampleError
