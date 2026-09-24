@@ -113,3 +113,90 @@ export function composeShareImage(source: HTMLCanvasElement, s: ShareStats): HTM
 
   return canvas;
 }
+
+// ------------------------------------------------------- chronicle image
+
+export const LIST_IMAGE_WIDTH = 1200;
+const LIST_PAD = 48;
+const LIST_TITLE_PX = 36;
+const LIST_BODY_PX = 24;
+const LIST_LINE_GAP = 12;
+
+/** The share card's family at a given weight and size, or the system font when it is not loaded. */
+function listFont(weight: number, px: number): string {
+  const family = "'Bricolage Grotesque', system-ui, sans-serif";
+  try {
+    if (document.fonts?.check?.(`${weight} ${px}px 'Bricolage Grotesque'`)) return `${weight} ${px}px ${family}`;
+  } catch {
+    // fall through to the system font
+  }
+  return `${weight} ${px}px system-ui, sans-serif`;
+}
+
+/** Words into rows no wider than maxWidth; a single word wider than that gets a row of its own. */
+function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
+  const out: string[] = [];
+  let row = '';
+  for (const word of text.split(/\s+/).filter(Boolean)) {
+    const next = row ? `${row} ${word}` : word;
+    if (row && ctx.measureText(next).width > maxWidth) {
+      out.push(row);
+      row = word;
+    } else row = next;
+  }
+  if (row) out.push(row);
+  return out.length > 0 ? out : [''];
+}
+
+/**
+ * A plain list as a canvas in the share card's typography and palette: a title, the lines, and
+ * the site name in the band at the foot. 1200 px wide, as tall as the lines need.
+ */
+export function composeListImage(title: string, lines: readonly string[]): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  const width = LIST_IMAGE_WIDTH;
+  canvas.width = width;
+  canvas.height = 1;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('share: no 2d context');
+
+  const bodyFont = listFont(400, LIST_BODY_PX);
+  ctx.font = bodyFont;
+  const wrapped = lines.map((line) => wrapText(ctx, line, width - LIST_PAD * 2));
+  const rowCount = wrapped.reduce((sum, rows) => sum + rows.length, 0);
+  const rowHeight = Math.round(LIST_BODY_PX * 1.35);
+  const height = LIST_PAD + LIST_TITLE_PX + LIST_LINE_GAP * 2 + rowCount * rowHeight + wrapped.length * LIST_LINE_GAP + BAND_HEIGHT;
+  canvas.height = height; // a resize resets the context, so every style is set after it
+
+  ctx.fillStyle = BAND_BG;
+  ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = BAND_TEXT;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+
+  let y = LIST_PAD;
+  ctx.font = listFont(600, LIST_TITLE_PX);
+  ctx.fillText(title, LIST_PAD, y);
+  y += LIST_TITLE_PX + LIST_LINE_GAP * 2;
+
+  ctx.font = bodyFont;
+  for (const rows of wrapped) {
+    for (const row of rows) {
+      ctx.fillText(row, LIST_PAD, y);
+      y += rowHeight;
+    }
+    y += LIST_LINE_GAP;
+  }
+
+  ctx.font = bandFont();
+  ctx.textBaseline = 'middle';
+  ctx.fillText('Hundred Stories  ·  hundredstories.xyz', LIST_PAD, height - BAND_HEIGHT / 2);
+  return canvas;
+}
+
+/** The canvas as a PNG blob; rejects when the browser cannot encode it. */
+export function canvasToPng(canvas: HTMLCanvasElement): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('share: no png'))), 'image/png');
+  });
+}

@@ -3,9 +3,17 @@
 
 import type { Sound } from '../audio/audio';
 import type { GameApi } from '../game/api';
-import { exportSaveWithDialog, importSaveWithDialog, savePlatform, shareSave } from '../game/storage';
+import {
+  exportImageWithDialog,
+  exportSaveWithDialog,
+  IMAGE_FILE_NAME,
+  importSaveWithDialog,
+  savePlatform,
+  shareImage,
+  shareSave,
+} from '../game/storage';
 import type { Renderer } from '../render/renderer';
-import { composeShareImage, shareMessage, shareStats, shareText, shareUrl } from '../share/share';
+import { canvasToPng, composeListImage, composeShareImage, shareMessage, shareStats, shareText, shareUrl } from '../share/share';
 import { applyTheme, cycleTheme, readTheme, themeLabel } from '../site/theme';
 import { officeQuarterRent } from '../sim/economy';
 import { ECONOMY, EVAL, LIMITS, RENT, ROOMS, SHAFTS, takesRent, WASTE } from '../sim/rules';
@@ -19,6 +27,7 @@ import {
   unfollowSim,
   type StoryBeat,
 } from '../sim/story';
+import { milestoneRecap, NO_STORIES_YET } from '../sim/chronicle';
 import { centerSummary, producesWaste, recyclingCenters, wasteDayStart } from '../sim/recycling';
 import { coverageText } from '../sim/security';
 import { carRangeOf, clockOf } from '../sim/types';
@@ -71,6 +80,10 @@ export interface PanelContext {
   openIntro?: () => void;
   /** Open the stories panel, from its button beside Save and Export. */
   openStories?: () => void;
+  /** Open the last milestone's recap, from the star card and the stories panel. */
+  openRecap?: () => void;
+  /** Open the tower chronicle, from the stories panel. */
+  openChronicle?: () => void;
   /** Put another person or room in the query panel, closing whichever panel asked. */
   select?: (sel: Selection) => void;
 }
@@ -981,7 +994,10 @@ export function createStoriesPanel(game: GameApi, ctx: PanelContext): PanelEleme
   const tower = section('Around the tower');
   const towerList = el('ul', 'hs-story-chapter');
   tower.append(towerList);
-  body.append(following, tower);
+  const milestones = section('Milestones');
+  const milestoneActions = el('div', 'hs-actions');
+  milestones.append(milestoneActions);
+  body.append(following, tower, milestones);
 
   let followKey = '';
   const refresh = (): void => {
@@ -1023,9 +1039,116 @@ export function createStoriesPanel(game: GameApi, ctx: PanelContext): PanelEleme
     }
     const lines = story.recent.slice(-STORIES_TOWER_LINES).map((beat) => towerBeatText(game, beat));
     setLines(towerList, lines.length > 0 ? lines : ['Nothing recorded yet.'], 'li', 'hs-story-item');
+
+    // Reopen the last milestone and the chronicle, whenever the record holds them.
+    const hasRecap = ctx.openRecap !== undefined && story.recent.some((beat) => beat.code === 'star.gained');
+    const hasChronicle = ctx.openChronicle !== undefined && story.chronicle !== null && story.chronicle !== undefined;
+    const milestoneKey = `${hasRecap ? 1 : 0}${hasChronicle ? 1 : 0}`;
+    if (milestoneActions.dataset['key'] !== milestoneKey) {
+      milestoneActions.dataset['key'] = milestoneKey;
+      const actions: HTMLElement[] = [];
+      if (hasRecap) actions.push(button('Last milestone', 'hs-btn', () => ctx.openRecap?.()));
+      if (hasChronicle) actions.push(button('Tower chronicle', 'hs-btn', () => ctx.openChronicle?.()));
+      milestoneActions.replaceChildren(...actions);
+      milestones.hidden = actions.length === 0;
+    }
   };
   refresh();
   panel.refresh = refresh;
+  return panel;
+}
+
+// ------------------------------------------------ milestone recap and chronicle
+
+/**
+ * Stories so far: the last milestone's star, what it opened up, and up to six people and places
+ * whose circumstances changed since the milestone before it. Read from the record when it opens.
+ */
+export function createRecapPanel(game: GameApi, ctx: PanelContext): PanelElement {
+  const { panel, body } = panelShell('Stories so far', 'population', ctx);
+  const recap = milestoneRecap(game.world);
+  if (!recap) {
+    body.append(el('p', 'hs-note', NO_STORIES_YET));
+    return panel;
+  }
+  const star = Math.min(6, Math.max(1, Math.round(recap.star)));
+  const heading = section(star === 6 ? 'Tower status' : `${star} stars`);
+  heading.append(el('p', 'hs-note', recap.unlocks));
+  const people = section('Since the last milestone');
+  const list = el('ul', 'hs-story-chapter');
+  setLines(list, recap.lines.length > 0 ? recap.lines : [NO_STORIES_YET], 'li', 'hs-story-item');
+  people.append(list);
+  body.append(heading, people);
+  return panel;
+}
+
+/** A PNG blob as base64, for the phone share sheet. */
+async function blobBase64(blob: Blob): Promise<string> {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
+}
+
+/**
+ * An image out by platform, the same doors a save uses: the desktop save dialog, the phone share
+ * sheet, or the browser download. Nothing is uploaded. A cancelled dialog or sheet says nothing.
+ */
+export async function exportImage(blob: Blob, ctx: Pick<PanelContext, 'notice'>): Promise<void> {
+  const platform = savePlatform();
+  try {
+    if (platform === 'tauri') {
+      if (await exportImageWithDialog(new Uint8Array(await blob.arrayBuffer()))) ctx.notice('Image saved.');
+    } else if (platform === 'capacitor') {
+      await shareImage(await blobBase64(blob));
+      ctx.notice('Image saved.');
+    } else {
+      const url = URL.createObjectURL(blob);
+      const link = el('a');
+      link.href = url;
+      link.download = IMAGE_FILE_NAME;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      ctx.notice('Image saved.');
+    }
+  } catch (err) {
+    if (/cancel/i.test(String((err as { message?: unknown } | null)?.message ?? err))) return;
+    ctx.notice('The image could not be saved.');
+  }
+}
+
+export const CHRONICLE_TITLE = 'Tower chronicle';
+
+/** The tower chronicle as recorded at Tower status, with a button that saves it as an image. */
+export function createChroniclePanel(game: GameApi, ctx: PanelContext): PanelElement {
+  const { panel, body } = panelShell(CHRONICLE_TITLE, 'population', ctx);
+  const chronicle = game.world.story.chronicle;
+  if (!chronicle) {
+    body.append(el('p', 'hs-note', 'The chronicle is written when the tower reaches Tower status.'));
+    return panel;
+  }
+  const list = el('ul', 'hs-story-chapter');
+  setLines(list, chronicle.lines, 'li', 'hs-story-item');
+  const actions = el('div', 'hs-actions');
+  const save = button('Save as image', 'hs-btn', () => {
+    save.disabled = true;
+    let blob: Promise<Blob>;
+    try {
+      blob = canvasToPng(composeListImage(CHRONICLE_TITLE, chronicle.lines));
+    } catch {
+      blob = Promise.reject(new Error('compose'));
+    }
+    void blob
+      .then((png) => exportImage(png, ctx))
+      .catch(() => ctx.notice('The image could not be made.'))
+      .finally(() => {
+        save.disabled = false;
+      });
+  });
+  actions.append(save);
+  body.append(list, actions);
   return panel;
 }
 

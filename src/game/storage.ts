@@ -365,6 +365,56 @@ export async function importSaveWithDialog(deps?: TauriFileDeps): Promise<string
   return fs.readTextFile(path);
 }
 
+// Images (the tower chronicle) leave by the same doors as a save: the desktop save dialog, the
+// phone share sheet, or, on the web, a download link the ui makes. Nothing is uploaded.
+
+export const IMAGE_FILE_NAME = 'hundred-stories-chronicle.png';
+const IMAGE_FILTERS = [{ name: 'PNG image', extensions: ['png'] }];
+
+/** The slice of the Tauri plugins an image export uses. */
+export interface TauriImageDeps {
+  fs: { writeFile(path: string, data: Uint8Array): Promise<void> };
+  dialog: Pick<TauriDialog, 'save'>;
+}
+
+async function loadTauriImageDeps(): Promise<TauriImageDeps> {
+  const [fs, dialog] = await Promise.all([import('@tauri-apps/plugin-fs'), import('@tauri-apps/plugin-dialog')]);
+  return {
+    fs: { writeFile: (path, data) => fs.writeFile(path, data) },
+    dialog: { save: (options) => dialog.save(options) },
+  };
+}
+
+/** Image export in the desktop shell: a save dialog offering a .png, then the bytes. False when cancelled. */
+export async function exportImageWithDialog(bytes: Uint8Array, deps?: TauriImageDeps): Promise<boolean> {
+  const { fs, dialog } = deps ?? (await loadTauriImageDeps());
+  const path = await dialog.save({ title: 'Save image', defaultPath: IMAGE_FILE_NAME, filters: IMAGE_FILTERS });
+  if (!path) return false;
+  await fs.writeFile(path, bytes);
+  return true;
+}
+
+/** The slice of the Capacitor plugins an image export uses: base64 data with no encoding is binary. */
+export interface ImageShareDeps {
+  fs: { writeFile(options: { path: string; data: string; directory: string }): Promise<{ uri: string }> };
+  share: ShareDeps['share'];
+}
+
+async function loadImageShareDeps(): Promise<ImageShareDeps> {
+  const [{ Filesystem }, { Share }] = await Promise.all([import('@capacitor/filesystem'), import('@capacitor/share')]);
+  return {
+    fs: { writeFile: (options) => Filesystem.writeFile(options as Parameters<typeof Filesystem.writeFile>[0]) },
+    share: { share: (options) => Share.share(options) },
+  };
+}
+
+/** Image export on a phone: written to the cache directory and handed to the share sheet. */
+export async function shareImage(base64: string, deps?: ImageShareDeps): Promise<void> {
+  const { fs, share } = deps ?? (await loadImageShareDeps());
+  const { uri } = await fs.writeFile({ path: IMAGE_FILE_NAME, data: base64, directory: CACHE_DIRECTORY });
+  await share.share({ title: 'Hundred Stories chronicle', files: [uri] });
+}
+
 // Chosen once, on the first save or load at boot, then kept: the platform cannot change
 // under a running page.
 let selected: SaveStorage | null = null;
