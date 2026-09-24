@@ -98,7 +98,7 @@ export default defineConfig(({ mode }) => {
               name: 'Hundred Stories',
               short_name: 'Hundred Stories',
               description:
-                'Hundred Stories is a free tower-building simulation for the browser. Place offices, condos, shops and elevators, keep your tenants happy, and climb from one star to TOWER. Plays offline, saves in your browser, nothing uploaded.',
+                'Hundred Stories is a tower-building simulation for the browser, coming to the App Store, Google Play and Steam. Place offices, condos, shops and elevators, keep your tenants happy, and climb from one star to TOWER. Plays offline, saves in your browser, nothing uploaded.',
               theme_color: '#0b1020',
               background_color: '#0b1020',
               display: 'standalone',
