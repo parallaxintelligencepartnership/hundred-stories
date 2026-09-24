@@ -15,6 +15,10 @@
 //             70 % of bars
 //   tone      the loudest narrowband tone above 1 kHz holding over 30 % of a frame's energy for
 //             more than 0.5 s; none allowed
+//   bursts    50 ms frames where energy above 1 kHz is over 25 % of the frame's energy; under 2 %
+//             of frames. Clear-weather presets only: a rain or storm bed is broadband by design
+//   chapters  rainy-tuesday-5star and weekend-night-5star: 2 to 5 kHz share at most 1 percentage
+//             point above sunny-morning-1star's in the same run (skipped with a note when missing)
 //   bells     for presets that fire elevator arrivals, when the render left a reference without
 //             them in <tmpdir>/hs-audio-reference: RMS at most 1 dB above it
 // fire-3star is judged on seconds 20 to 45 (its first 20 s are the tension state); every other
@@ -132,10 +136,16 @@ function biquad(x, rate, type, hz, q = Math.SQRT1_2) {
   return y;
 }
 
+// Onsets are measured against an absolute floor: a band quieter than -60 dBFS counts as silence,
+// so a rise out of near-silence (a reverb tail, a crackle pop) is not read as a hit. Without the
+// old tape hiss there is no noise floor in the render to do that job.
+const ONSET_FLOOR_DB = -60;
+
 /**
  * Onsets as rises in a band's short-term level: 20 ms RMS every 5 ms, a rise of at least `rise`
  * dB over the quietest of the previous 10 to 40 ms, a local maximum within 50 ms, above a floor
- * 30 dB under the band's loud (95th percentile) level. Returns [{ time, strength }].
+ * 30 dB under the band's loud (95th percentile) level and above ONSET_FLOOR_DB; the level itself
+ * is clamped at ONSET_FLOOR_DB before the rises are taken. Returns [{ time, strength }].
  */
 function onsets(x, rate, rise = 4) {
   const hop = Math.round(rate * 0.005);
@@ -144,10 +154,10 @@ function onsets(x, rate, rise = 4) {
   for (let s = 0; s + win <= x.length; s += hop) {
     let sum = 0;
     for (let i = s; i < s + win; i += 1) sum += x[i] * x[i];
-    env.push(db(sum / win + 1e-12));
+    env.push(Math.max(ONSET_FLOOR_DB, db(sum / win + 1e-12)));
   }
   const sorted = [...env].sort((a, b) => a - b);
-  const floor = sorted[Math.floor(sorted.length * 0.95)] - 30;
+  const floor = Math.max(ONSET_FLOOR_DB, sorted[Math.floor(sorted.length * 0.95)] - 30);
   const d = env.map((v, n) => {
     if (n < 8 || v < floor) return 0;
     let low = Infinity;
@@ -293,6 +303,37 @@ function rhythm(mono, rate, seconds) {
   return { bpm: grid.bpm, lowOnsets: low.length, bars, snareBars };
 }
 
+/** 50 ms frames (Hann, zero-padded FFT) where energy above 1 kHz is over 25 % of the frame's. */
+function bursts(mono, rate) {
+  const n = Math.round(0.05 * rate);
+  const size = 1 << Math.ceil(Math.log2(n));
+  const win = new Float64Array(n);
+  for (let i = 0; i < n; i += 1) win[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / n);
+  const re = new Float64Array(size);
+  const im = new Float64Array(size);
+  const edge = Math.ceil((1000 * size) / rate);
+  let frames = 0, hot = 0;
+  for (let start = 0; start + n <= mono.length; start += n) {
+    re.fill(0); im.fill(0);
+    for (let i = 0; i < n; i += 1) re[i] = mono[start + i] * win[i];
+    fft(re, im);
+    let total = 0, high = 0;
+    for (let k = 1; k < size / 2; k += 1) { const p = re[k] * re[k] + im[k] * im[k]; total += p; if (k >= edge) high += p; }
+    frames += 1;
+    if (total > 0 && high / total > 0.25) hot += 1;
+  }
+  return { frames, hot };
+}
+
+/** Preset name to weather kind, read from src/audio/presets.ts so the two cannot drift. */
+function presetWeather() {
+  const source = readFileSync(join(ROOT, 'src', 'audio', 'presets.ts'), 'utf8');
+  const out = {};
+  for (const m of source.matchAll(/'([a-z0-9-]+)':\s*\{[^}]*weather:\s*'([a-z]+)'/g)) out[m[1]] = m[2];
+  return out;
+}
+const WEATHER = presetWeather();
+
 // ------------------------------------------------------------------ report
 
 function analyse(path) {
@@ -321,6 +362,12 @@ function analyse(path) {
     ['snare', snareShare >= 0.7, `snare on 2 and 4 in ${rh.snareBars}/${rh.bars} bars, ${pct(snareShare)} (want >= 70%)`],
     ['tone', !bt.tone, bt.tone ? `sustained ${bt.tone.hz.toFixed(0)} Hz for ${bt.tone.seconds.toFixed(2)} s from ${(from + bt.tone.at).toFixed(1)} s, ${pct(bt.tone.share)} of frame energy` : 'no sustained tone above 1 kHz'],
   ];
+  const skips = [];
+  if ((WEATHER[name] ?? 'clear') === 'clear') {
+    const bu = bursts(mono, wav.rate);
+    const burstShare = bu.frames ? bu.hot / bu.frames : 0;
+    checks.push(['bursts', burstShare < 0.02, `${bu.hot}/${bu.frames} 50 ms frames with over 25% of their energy above 1 kHz, ${pct(burstShare)} (want < 2%)`]);
+  } else skips.push(['bursts', 'weather bed']);
   const refPath = join(REFERENCE_DIR, `${name}.wav`);
   if (existsSync(refPath)) {
     const ref = readWav(refPath).channels.map((ch) => ch.subarray(a, b));
@@ -329,7 +376,8 @@ function analyse(path) {
   }
   const lines = [`${name}.wav  (judged on ${from.toFixed(0)} to ${to.toFixed(0)} s)`];
   for (const [id, ok, text] of checks) lines.push(`  ${ok ? 'PASS' : 'FAIL'}  ${id.padEnd(8)}${text}`);
-  return { lines, failed: checks.filter((c) => !c[1]).length };
+  for (const [id, why] of skips) lines.push(`  SKIP  ${id.padEnd(8)}${why}`);
+  return { name, lines, checks, highShare: bt.bands[2] };
 }
 
 function inputs(args) {
@@ -337,10 +385,30 @@ function inputs(args) {
   return list.flatMap((p) => (statSync(p).isDirectory() ? readdirSync(p).filter((f) => f.endsWith('.wav')).sort().map((f) => join(p, f)) : [p]));
 }
 
+// A higher star only adds voices, never harshness: each five-star render's 2 to 5 kHz share stays
+// within 1 percentage point of the one-star render's from the same run.
+const FIVE_STAR = ['rainy-tuesday-5star', 'weekend-night-5star'];
+const ONE_STAR = 'sunny-morning-1star';
+function chapters(results) {
+  const one = results.find((r) => r.name === ONE_STAR);
+  for (const r of results) {
+    if (!FIVE_STAR.includes(r.name)) continue;
+    const text = (ok) => `  ${ok ? 'PASS' : 'FAIL'}  ${'chapters'.padEnd(9)}`;
+    if (!one) { r.lines.push(`  SKIP  ${'chapters'.padEnd(9)}${ONE_STAR}.wav is not in this run`); continue; }
+    const ok = r.highShare <= one.highShare + 0.01;
+    r.checks.push(['chapters', ok]);
+    r.lines.push(`${text(ok)}2-5k ${(100 * r.highShare).toFixed(1)}% against ${(100 * one.highShare).toFixed(1)}% at one star (want <= +1 point)`);
+  }
+  for (const name of FIVE_STAR) {
+    if (one && !results.some((r) => r.name === name)) console.log(`  note: ${name}.wav is not in this run; chapters check skipped for it`);
+  }
+}
+
+const results = inputs(process.argv.slice(2).filter((a) => !a.startsWith('--'))).map(analyse);
+chapters(results);
 let failed = 0;
-for (const file of inputs(process.argv.slice(2).filter((a) => !a.startsWith('--')))) {
-  const r = analyse(file);
-  failed += r.failed;
+for (const r of results) {
+  failed += r.checks.filter((c) => !c[1]).length;
   console.log(r.lines.join('\n'));
 }
 console.log(failed ? `${failed} check(s) failed` : 'all checks pass');
