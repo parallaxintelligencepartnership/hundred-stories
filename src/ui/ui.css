@@ -1302,9 +1302,53 @@ a.hs-btn {
 }
 
 .hs-toast {
+  position: relative;
   padding: var(--pad);
   background: var(--steel-2);
   border: 1px solid var(--alert);
+  pointer-events: auto;
+}
+
+/* Every alert closes: the control sits in the top right corner, clear of the text. */
+.hs-toast-body {
+  padding-right: 28px;
+}
+
+.hs-toast-close {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  color: var(--ink);
+  font-size: var(--size-14);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.hs-toast-close:hover {
+  color: var(--amber);
+}
+
+.hs-toast-note {
+  margin: 6px 0 0;
+  font-size: var(--size-12);
+}
+
+/* Three cards at most; the older ones fold into the one line above them. */
+.hs-toast.is-collapsed {
+  display: none;
+}
+
+.hs-toast-more {
+  margin: 0;
+  padding: 2px var(--pad);
+  background: var(--steel-2);
+  border: 1px solid var(--line);
+  font-size: var(--size-12);
   pointer-events: auto;
 }
 
@@ -1808,8 +1852,31 @@ a.hs-btn {
     display: none;
   }
 
-  .hs-minimap:not(.is-hidden) ~ .hs-toasts {
+  /* On a phone the alerts sit under the status bar and never take more than the top quarter of
+     the view; they scroll inside that band, and step left of the map in the corner. */
+  .hs-toasts {
+    top: calc(var(--top-actual, calc(var(--top-h) * 2 + var(--safe-top))) + var(--pad));
+    bottom: auto;
+    left: calc(var(--pad) + var(--safe-left));
     right: calc(var(--pad) + var(--safe-right));
+    width: auto;
+    max-height: 25vh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    gap: 4px;
+  }
+
+  .hs-minimap:not(.is-hidden) ~ .hs-toasts {
+    right: calc(64px + 2 * var(--pad) + var(--safe-right));
+  }
+
+  .hs-toast {
+    padding: 6px;
+  }
+
+  .hs-toast-text {
+    margin-bottom: 4px;
+    font-size: var(--size-12);
   }
 }
 
