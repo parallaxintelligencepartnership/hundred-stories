@@ -9,6 +9,7 @@ import { ROOMS } from '../sim/rules';
 import type { Room, RoomKind, Shaft, ShaftKind, Sim, SimKind, World } from '../sim/types';
 import { addRoom, addShaft, addSim, allocId, createWorld, setOnFire } from '../sim/world';
 import { createRenderer, type Renderer } from './renderer';
+import { parseWeatherQuery, setForcedWeather } from './weather';
 
 function makeRoom(world: World, kind: RoomKind, floor: number, x: number, occupancy: number): Room {
   const rule = ROOMS[kind];
@@ -185,6 +186,23 @@ export function animateDemo(world: World, dt: number, options: DemoAnimationOpti
 }
 
 /**
+ * The weather capture path on the smoke page (dev only, as ?smoke is): ?weather= pins the
+ * weather, ?hour= pins the clock, and either one freezes the demo clock, puts a few commuters
+ * on the street and a basement under part of the lobby, so a capture shows the curb scene in
+ * one fixed moment. Returns whether a capture was asked for.
+ */
+function captureSetup(world: World, search: string): boolean {
+  const { kind, hour } = parseWeatherQuery(search);
+  if (kind === null && hour === null) return false;
+  if (kind !== null) setForcedWeather({ kind, from: kind, blend: 1, intensity: 0.85 });
+  if (hour !== null) world.time.minute = hour * 60;
+  for (let x = 112; x < 136; x += ROOMS.parkingSpace.width) makeRoom(world, 'parkingSpace', -1, x, 1);
+  const kinds: SimKind[] = ['worker', 'resident', 'guest', 'shopper'];
+  for (let i = 0; i < 12; i++) makeSim(world, kinds[i % kinds.length] as SimKind, 1, 100, 0).state = i % 3 === 0 ? 'leaving' : 'outside';
+  return true;
+}
+
+/**
  * Boots the renderer full screen into document.body with the demo world and a
  * small animation loop. Returns the renderer so a caller can tear it down.
  */
@@ -198,6 +216,7 @@ export async function bootSmoke(): Promise<Renderer> {
   document.body.appendChild(host);
 
   const world = buildDemoWorld();
+  const capture = captureSetup(world, location.search);
   const renderer = await createRenderer(host, world);
 
   renderer.onPick((hit) => {
@@ -209,7 +228,9 @@ export async function bootSmoke(): Promise<Renderer> {
   });
 
   renderer.setGhost({ widthTiles: ROOMS.office.width, heightFloors: 1, floor: 7, x: 120, ok: true });
-  renderer.camera.centerOn(3, 130);
+  renderer.camera.centerOn(capture ? 2 : 3, 130);
+  const zoom = Number(new URLSearchParams(location.search).get('zoom'));
+  if (capture && zoom > 0) renderer.camera.zoomAt(zoom / renderer.camera.zoom, window.innerWidth / 2, window.innerHeight / 2);
 
   let last = performance.now();
   let running = true;
@@ -220,7 +241,7 @@ export async function bootSmoke(): Promise<Renderer> {
     last = now;
 
     // One demo day every twelve seconds, so the sky keyframes are easy to see.
-    animateDemo(world, dt, { minutesPerMs: 0.12, fire: true });
+    animateDemo(world, dt, capture ? { minutesPerMs: 0, fire: false } : { minutesPerMs: 0.12, fire: true });
 
     renderer.render(world, 1);
     requestAnimationFrame(frame);
