@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Hundred Stories · Audio listening preview</title>
+<style>
+:root { color-scheme: dark; font-family: system-ui,sans-serif; background: #151b23; color:#eee7db; }
+body { max-width: 900px; margin: auto; padding: 32px 20px 60px; line-height: 1.6; }
+h1 { line-height:1.15; font-size:clamp(2rem,5vw,3rem); }
+a { color:#b8d8c3; } p { max-width:75ch; }
+section { background:#202934; border:1px solid #44505c; border-radius:14px; padding:20px; margin:24px 0; }
+.players { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+audio { width:100%; } button { padding:10px 16px; margin:12px 8px 0 0; border-radius:8px; border:1px solid #788879; background:#c9dfce; color:#16251b; cursor:pointer; font:inherit; }
+small { color:#bec6cc; } .badge { color:#c9dfce; letter-spacing:.12em; text-transform:uppercase; font-size:.75rem; }
+@media(max-width:600px){.players{grid-template-columns:1fr}}
+</style>
+<body>
+<p class="badge">Local listening preview · unpublished</p>
+<h1>A little more room<br>for the tower.</h1>
+<p>Compare the current score with the revised arrangement. Each pair uses the same seed, time of day, weather and volume settings. These 105-second clips cover a complete musical arc.</p>
+<p>The revision removes vinyl crackle, softens percussion, aligns the kick with the bass, reduces the echo and gives the music a quieter passage. Start at your usual listening volume.</p>
+<section data-scene="empty-foundations">
+<h2>Empty foundations</h2><p>Clear weekday morning, no occupied venues. The soundtrack begins at chapter one even before the tower fills.</p>
+<div class="players"><div><b>Before</b><audio controls preload="metadata" src="before/empty-foundations.wav"></audio></div><div><b>Revised</b><audio controls preload="metadata" src="after/empty-foundations.wav"></audio></div></div>
+<button class="switch">Switch version at the same moment</button><button class="quiet">Hear the quieter passage · 82s</button>
+<p><a href="/play/?new&seed=101&audio=empty-foundations">Try this sound in the game</a></p>
+</section>
+<section data-scene="sunny-morning-1star">
+<h2>One-star morning</h2><p>The same morning with modest venue activity. Listen for the softer groove and the way the accompaniment changes across phrases.</p>
+<div class="players"><div><b>Before</b><audio controls preload="metadata" src="before/sunny-morning-1star.wav"></audio></div><div><b>Revised</b><audio controls preload="metadata" src="after/sunny-morning-1star.wav"></audio></div></div>
+<button class="switch">Switch version at the same moment</button><button class="quiet">Hear the quieter passage · 82s</button>
+<p><a href="/play/?new&seed=101&audio=sunny-morning-1star">Try this sound in the game</a></p>
+</section>
+<p><a href="/play/">Open normal gameplay with the revised audio</a> · Enable Sound in Settings. The links above pin the musical mood for comparison; normal gameplay follows your tower.</p>
+<small>This separate local origin has its own save storage. To test your existing tower, export its save from the live game and import it here. The recordings contain the score and ambient bed; test construction and elevator effects in the game.</small>
+<p id="status" role="status"></p>
+<script type="module">
+const players = [...document.querySelectorAll('audio')];
+let active;
+for (const player of players) player.addEventListener('play', () => {
+  players.forEach(other => { if (other !== player) other.pause(); });
+  active = player;
+});
+async function play(player, at) {
+  try { player.currentTime = at; await player.play(); document.querySelector('#status').textContent = ''; }
+  catch { document.querySelector('#status').textContent = 'Press the audio play control to begin.'; }
+}
+for (const section of document.querySelectorAll('section')) {
+  const pair = [...section.querySelectorAll('audio')];
+  section.querySelector('.switch').addEventListener('click', () => {
+    const from = pair.includes(active) ? active : pair[0];
+    const to = pair.find(p => p !== from);
+    const at = from.currentTime;
+    from.pause(); void play(to, at);
+  });
+  section.querySelector('.quiet').addEventListener('click', () => void play(pair[1], 82));
+}
+</script>
+</body></html>

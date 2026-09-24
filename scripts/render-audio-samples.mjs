@@ -18,19 +18,19 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME_PATH = process.env.CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const OUT_DIR = join(ROOT, 'docs', 'reviews', 'audio-samples-2026-09-23');
+const OUT_DIR = process.env.AUDIO_OUT ?? join(ROOT, 'docs', 'reviews', 'audio-samples-2026-09-23');
 // The names in src/audio/presets.ts.
-const PRESETS = ['sunny-morning-1star', 'rainy-tuesday-5star', 'weekend-night-5star', 'storm-night-tower', 'fire-3star', 'rush-hour-3star'];
+const PRESETS = process.env.AUDIO_PRESETS?.split(',') ?? ['sunny-morning-1star', 'rainy-tuesday-5star', 'weekend-night-5star', 'storm-night-tower', 'fire-3star', 'rush-hour-3star'];
 // Presets that fire elevator arrivals also render once without them ("<name>:quiet"), outside
 // the repo, so scripts/analyze-audio-samples.mjs can check what the bells add to the level.
 const WITH_REFERENCE = new Set(['rush-hour-3star']);
 export const REFERENCE_DIR = join(tmpdir(), 'hs-audio-reference');
-const SECONDS = 45;
+const SECONDS = Number(process.env.AUDIO_SECONDS ?? 45);
 // A fixed world seed per preset (the seed picks tempo, key and patterns), so a render is
 // reproducible. --seed-offset N shifts every seed to hear other worlds.
 const offsetArg = process.argv.indexOf('--seed-offset');
 const SEED_OFFSET = offsetArg > 0 ? Number(process.argv[offsetArg + 1]) || 0 : 0;
-const SEEDS = { 'sunny-morning-1star': 101, 'rainy-tuesday-5star': 202, 'weekend-night-5star': 303, 'storm-night-tower': 404, 'fire-3star': 505, 'rush-hour-3star': 606 };
+const SEEDS = { 'empty-foundations': 101, 'sunny-morning-1star': 101, 'rainy-tuesday-5star': 202, 'weekend-night-5star': 303, 'storm-night-tower': 404, 'fire-3star': 505, 'rush-hour-3star': 606 };
 const CHUNK = 1 << 20;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

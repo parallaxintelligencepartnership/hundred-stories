@@ -1,4 +1,5 @@
 import type { AudioContextLike } from './audio';
+import { foundationFigure, sectionFor } from './arrangement';
 import { swingBeat, swingFor } from './score';
 
 export { swingBeat };
@@ -13,7 +14,7 @@ export interface DrumHit { kind: DrumKind; beat: number; lateSeconds: number; ve
 
 /** Peak of each piece at velocity 1, in dBFS on the music bus (before the compressor). */
 export const KIT_PEAK_DB: Readonly<Record<DrumKind, number>> = {
-  kick: -12, snare: -12, rim: -15, ghost: -12, hat: -22, open: -25, kinetic: -30,
+  kick: -17, snare: -16, rim: -21, ghost: -18, hat: -22, open: -25, kinetic: -30,
 };
 /** Kept for callers of the earlier kit: the noise pieces' linear peaks. */
 export const NOISE_PEAK = {
@@ -45,48 +46,48 @@ const unit = (a: number, b: number): number => hash(a, b) / 4294967296;
 export function kickPatternFor(seed: number, phraseIndex: number): readonly number[] {
   return KICK_PATTERNS[hash(seed | 0, phraseIndex | 0) % KICK_PATTERNS.length]!;
 }
-/** The laid-back offset: 30 ms at rest, 15 ms at full energy. */
+/** The laid-back offset: 18 ms at rest, 10 ms at full energy. */
 export function lazyOffsetMs(energy: number): number {
-  return 30 - 15 * Math.min(1, Math.max(0, energy));
+  return 18 - 8 * Math.min(1, Math.max(0, energy));
 }
-export function drumHitsFor(seed: number, phraseIndex: number, barIndex: number, energy: number): DrumHit[] {
+export function drumHitsFor(seed: number, phraseIndex: number, barIndex: number, energy: number, chapter = 6): DrumHit[] {
   if (energy < 0.15) return [];
   const e = Math.min(1, Math.max(0, energy));
   const late = lazyOffsetMs(e) / 1000;
   const swing = swingFor(e);
   const r = (slot: number): number => unit(hash(seed | 0, barIndex | 0), slot);
   const hits: DrumHit[] = [];
-  const kicks = kickPatternFor(seed, phraseIndex);
+  const kicks = chapter === 1 ? [0, ...foundationFigure(phraseIndex, barIndex % 8).filter(([beat]) => e >= 0.35 && beat === 2.5).map(([beat]) => beat)] : kickPatternFor(seed, phraseIndex);
   // The last bar of a phrase sometimes drops the second kick for a breath.
   const lastBar = barIndex % 8 === 7;
   kicks.forEach((beat, i) => {
     if (i > 0 && lastBar && r(1) < 0.5) return;
-    hits.push({ kind: 'kick', beat: swingBeat(beat, swing), lateSeconds: late * 0.6, velocity: i === 0 ? 1 : 0.8 + 0.1 * r(2 + i) });
+    hits.push({ kind: 'kick', beat: swingBeat(beat, swing), lateSeconds: 0, velocity: i === 0 ? 1 : 0.8 + 0.1 * r(2 + i) });
   });
   // Quiet rooms get a rim click instead of the snare; both sit on two and four.
-  const back: DrumKind = e < 0.35 ? 'rim' : 'snare';
+  const back: DrumKind = chapter === 1 ? 'snare' : e < 0.35 ? 'rim' : 'snare';
   for (const beat of SNARE_BEATS) hits.push({ kind: back, beat, lateSeconds: late, velocity: 0.88 + 0.12 * r(10 + beat) });
   // Swung eighth hats: a louder downbeat, a softer skip, with the odd one left out.
   for (let beat = 0; beat < 4; beat += 1) {
     hits.push({ kind: 'hat', beat, lateSeconds: late * 0.8, velocity: 0.75 + 0.15 * r(20 + beat) });
     if (e > 0.3 && !(r(30 + beat) < 0.15)) hits.push({ kind: 'hat', beat: beat + swing, lateSeconds: late * 0.8, velocity: 0.45 + 0.15 * r(40 + beat) });
   }
-  if (e > 0.4) {
+  if (e > 0.7 && (chapter !== 1 || sectionFor(phraseIndex) === 'lift')) {
     // One or two ghost snares on swung sixteenths between the backbeats.
     const ghosts = [1.75, 2.25, 3.75, 0.75];
-    const count = e > 0.75 ? 2 : 1;
+    const count = 1;
     for (let i = 0; i < count; i += 1) {
       const beat = ghosts[(hash(seed ^ barIndex, phraseIndex + i) + i) % ghosts.length]!;
       hits.push({ kind: 'ghost', beat: swingBeat(beat, swing), lateSeconds: late, velocity: 0.16 + 0.06 * r(50 + i) });
     }
   }
-  if (e > 0.5 && barIndex % 2 === 1) hits.push({ kind: 'open', beat: 3 + swing, lateSeconds: late * 0.8, velocity: 0.7 });
+  if (e > 0.7 && barIndex % 4 === 3) hits.push({ kind: 'open', beat: 3 + swing, lateSeconds: late * 0.8, velocity: 0.7 });
   return hits.sort((a, b) => a.beat - b.beat);
 }
 
 /** Seconds each baked piece lasts. */
 const PIECE_SECONDS: Readonly<Record<DrumKind, number>> = {
-  kick: 0.45, snare: 0.24, rim: 0.07, ghost: 0.12, hat: 0.05, open: 0.2, kinetic: 0.06,
+  kick: 0.3, snare: 0.24, rim: 0.07, ghost: 0.12, hat: 0.05, open: 0.2, kinetic: 0.06,
 };
 
 /** RBJ biquad over a Float32Array in place. */
@@ -135,10 +136,8 @@ export function renderPiece(kind: DrumKind, rate: number): Float32Array {
   };
   let out: Float32Array;
   switch (kind) {
-    case 'kick': { // a round thump falling from 120 to 46 Hz, with a soft felt click
-      out = tone(120, 46, 0.035, 0.16, 'sine');
-      const click = noise('bandpass', 1200, 0.8, 3000, 0.004);
-      for (let i = 0; i < n; i += 1) out[i] = out[i]! + 0.08 * click[i]!;
+    case 'kick': { // a shorter rounded thump, without a separate click transient
+      out = tone(95, 48, 0.025, 0.095, 'sine');
       break;
     }
     case 'snare':
@@ -168,6 +167,7 @@ export function renderPiece(kind: DrumKind, rate: number): Float32Array {
       out = noise('bandpass', 4200, 1.2, 7000, 0.015);
       break;
   }
+  for (let i = 0; i < n; i += 1) out[i] = out[i]! * Math.min(1, (n - 1 - i) / (rate * 0.015));
   let peak = 0;
   for (let i = 0; i < n; i += 1) peak = Math.max(peak, Math.abs(out[i]!));
   if (peak > 0) for (let i = 0; i < n; i += 1) out[i] = out[i]! / peak;

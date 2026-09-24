@@ -96,7 +96,7 @@ export const KEYS_CUTOFF_HZ = 2500;
 export const VOICES: Readonly<Record<Voice, VoiceDefinition>> = {
   piano: { wave: 'sine', attack: 0.014, release: 2.2, peak: 0.075, cutoff: KEYS_CUTOFF_HZ, maxHz: 880, sustain: 0.3, detune: 6 },
   drums: { wave: 'sine', attack: 0.004, release: 0.42, peak: 0, cutoff: 6000, maxHz: 200, sustain: 0 }, // drums.ts
-  bass: { wave: 'sine', attack: 0.012, release: 1.4, peak: 0.1, cutoff: 200, maxHz: 200, sustain: 0.4 },
+  bass: { wave: 'sine', attack: 0.022, release: 1.2, peak: 0.075, cutoff: 200, maxHz: 200, sustain: 0.4 },
   hat: { wave: 'sine', attack: 0.002, release: 0.04, peak: 0, cutoff: 7000, maxHz: 200, sustain: 0 }, // noise voice in drums.ts
   guitar: { wave: 'triangle', attack: 0.006, release: 0.28, peak: 0.07, cutoff: 1800, maxHz: 700, sustain: 0, detune: 4 },
   pluck: { wave: 'triangle', attack: 0.006, release: 0.26, peak: 0.06, cutoff: 1800, maxHz: 700, sustain: 0, detune: 3 },
@@ -137,3 +137,16 @@ export const CHORD_INTERVALS: Readonly<Record<ChordColour, readonly number[]>> =
   dominant9: [4, 7, 10, 14],
   minor11: [3, 7, 10, 14, 17],
 };
+
+/** Fit a musical cue to the active mode and world key; alerts keep their distinct pitches. */
+export function musicalHz(hz: number, key: number, chapter: Chapter): number {
+  const midi = Math.round(69 + 12 * Math.log2(hz / 440));
+  let nearest = midi;
+  let distance = Infinity;
+  for (let candidate = midi - 2; candidate <= midi + 2; candidate += 1) {
+    if (CHAPTER_SCALES[chapter].includes(((candidate % 12) + 12) % 12) && Math.abs(candidate - midi) < distance) {
+      nearest = candidate; distance = Math.abs(candidate - midi);
+    }
+  }
+  return midiHz(nearest + key);
+}

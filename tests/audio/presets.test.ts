@@ -98,7 +98,7 @@ describe('listening presets', () => {
     expect(lastMoodInput().tension).toBe(1);
     ctx.currentTime = 19; tick();
     expect(lastMoodInput().tension).toBe(1);
-    ctx.currentTime = 21; tick();
+    ctx.currentTime = 24; tick();
     expect(lastMoodInput().tension).toBe(0);
   });
 

@@ -1,3 +1,4 @@
+import { foundationFigure, sectionFor } from './arrangement';
 import {
   CHAPTER_VOICES, VOICES, chordColourFor, midiHz, scaleMidi, swingBeat, swingFor,
   type Chapter, type ChordColour, type Voice,
@@ -114,29 +115,30 @@ export function phraseFor(seed: number, chapter: Chapter, phraseIndex: number, v
     const at = bar * 4;
     const root = roots[bar]!;
     const chord = chordTones(chapter, root, colour);
-    const velocity = 0.8 + 0.2 * h(70 + bar);
+    const velocity = (0.8 + 0.2 * h(70 + bar)) * (sectionFor(phraseIndex) === 'breathe' ? 0.8 : 1);
     const newChord = bar % 2 === 0;
+    const barFigure = chapter === 1 ? foundationFigure(phraseIndex, bar) : figure;
     switch (voice) {
       case 'bass': {
         const rootMidi = scaleMidi(chapter, root, -2);
         push(at, rootMidi, energy < 0.35 ? 3.5 : 1.75, velocity);
-        if (energy >= 0.35) push(at + sw(2.5), h(10 + bar) < 0.4 ? rootMidi + 12 : rootMidi + 7, 1, velocity * 0.8);
+        if (energy >= 0.35 && (chapter !== 1 || barFigure.some(([beat]) => beat === 2.5))) push(at + sw(2.5), h(10 + bar) < 0.4 ? rootMidi + 12 : rootMidi + 7, 1, velocity * 0.8);
         // A swung pickup on the "and" of four walks into each chord change, and now and then
         // into the second bar of a chord.
-        if (energy >= 0.45 && (!newChord || h(15 + bar) < 0.35)) push(at + sw(3.5), rootMidi + 7, 0.45, velocity * 0.7);
+        if (energy >= 0.45 && (chapter !== 1 || sectionFor(phraseIndex) === 'lift') && (!newChord || h(15 + bar) < 0.35)) push(at + sw(3.5), rootMidi + 7, 0.45, velocity * 0.7);
         break;
       }
       case 'piano': {
         // The figure repeats every bar; a bar sometimes drops its last hit or lifts its top note.
-        const drop = figure.length > 1 && h(20 + bar) < 0.2;
+        const drop = chapter !== 1 && barFigure.length > 1 && h(20 + bar) < 0.2;
         const lift = h(30 + bar) < 0.3;
         const voicing = lift ? [...chord.slice(1), chord[0]! + 12] : chord;
-        figure.forEach(([beat, dur, vel], i) => {
-          if (drop && i === figure.length - 1) return;
+        barFigure.forEach(([beat, dur, vel], i) => {
+          if (drop && i === barFigure.length - 1) return;
           for (const midi of voicing) push(at + sw(beat), midi, dur, velocity * vel * 0.85);
         });
         // A two-note answer at the end of bars four and eight.
-        if (!quiet && (bar === 3 || bar === 7)) {
+        if (!quiet && sectionFor(phraseIndex) !== 'breathe' && (bar === 3 || bar === 7)) {
           const top = chord[chord.length - 1]!;
           push(at + sw(3.5), top + 12 > 81 ? top : top + 12, 0.5, velocity * 0.55);
           push(at + sw(3.75), chord[chord.length - 2]! + 12 > 81 ? chord[chord.length - 2]! : chord[chord.length - 2]! + 12, 0.75, velocity * 0.45);

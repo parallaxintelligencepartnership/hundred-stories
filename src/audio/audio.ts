@@ -5,9 +5,10 @@ import type { GameApi, GameEvent } from '../game/api';
 import { clockOf } from '../sim/types';
 import { weatherAt } from '../game/weather';
 import type { MoodInput } from './mood';
-import { BEDS, MAX_MELODIC, MELODIC, VOICES, chapterFor, cutoffForWarmth, isNight, hatVelocityMultiplier, keyFor, tempoFor, type Chapter, type Voice } from './score';
+import { BEDS, MAX_MELODIC, MELODIC, VOICES, chapterFor, musicalHz, cutoffForWarmth, isNight, hatVelocityMultiplier, keyFor, tempoFor, type Chapter, type Voice } from './score';
 import { phraseFor, voicesFor, type Note } from './phrase';
 import { activeLayers, easeMood, moodFor, venueFillFor, type Mood } from './mood';
+import { sectionFor } from './arrangement';
 import { drumHitsFor, playDrum } from './drums';
 import { beatCue, cueDuration, type Cue } from './cues';
 
@@ -100,7 +101,7 @@ export type Effect = 'chime' | 'door' | 'build' | 'register' | 'alert' | 'star';
 export const EFFECT_OSCILLATORS: Readonly<Record<Effect, number>> = {
   chime: 2, // 660 then 880 Hz
   door: 0, // filtered noise only
-  build: 1, // 40 Hz thump, plus a noise click
+  build: 1, // soft tactile tap, plus a filtered noise brush
   register: 1, // a short 880 Hz bell, after three noise clicks
   alert: 2, // a 220 Hz triangle, twice
   star: 3, // C E G
@@ -113,7 +114,7 @@ export const EFFECT_OSCILLATORS: Readonly<Record<Effect, number>> = {
 export const EFFECT_MIN_GAP_MS: Readonly<Record<Effect, number>> = {
   chime: 700,
   door: 450,
-  build: 60,
+  build: 180,
   register: 500,
   alert: 1200,
   star: 500,
@@ -156,7 +157,8 @@ function noise(ctx: AudioContextLike, out: AudioNode, filter: BiquadFilterType, 
   bq.type = filter;
   bq.frequency.setValueAtTime(hz, at);
   const env = ctx.createGain();
-  env.gain.setValueAtTime(peak, at);
+  env.gain.setValueAtTime(0.0001, at);
+  env.gain.linearRampToValueAtTime(peak, at + Math.min(0.01, dur / 3));
   env.gain.exponentialRampToValueAtTime(0.0001, at + dur);
   src.connect(bq);
   bq.connect(env);
@@ -176,8 +178,8 @@ export function playEffect(ctx: AudioContextLike, out: AudioNode, effect: Effect
       noise(ctx, out, 'bandpass', 900, at, 0.06, 0.35);
       return;
     case 'build':
-      tone(ctx, out, 'sine', 40, at, 0.18, 0.5);
-      noise(ctx, out, 'highpass', 2500, at, 0.015, 0.4);
+      tone(ctx, out, 'sine', 110, at, 0.09, 0.12);
+      noise(ctx, out, 'bandpass', 1100, at, 0.045, 0.06);
       return;
     case 'register':
       for (let i = 0; i < 3; i += 1) noise(ctx, out, 'highpass', 3000, at + i * 0.05, 0.012, 0.45);
@@ -240,7 +242,7 @@ export const BELL = {
   burstWindowMs: 5000,
   /** During a burst: one soft tick at most this often, this loud. */
   tickEveryMs: 5000,
-  tickDb: -26,
+  tickDb: -34,
   doorDb: -22,
 } as const;
 
@@ -280,11 +282,11 @@ export function createBellGate() {
 }
 
 /** One struck, wooden note: a sine and a faint inharmonic overtone, low-passed. */
-function woodNote(ctx: AudioContextLike, out: AudioNode, hz: number, at: number, peak: number, decay: number): void {
+function woodNote(ctx: AudioContextLike, out: AudioNode, hz: number, at: number, peak: number, decay: number, attack: number = BELL.attack): void {
   const lid = ctx.createBiquadFilter(); lid.type = 'lowpass'; lid.frequency.setValueAtTime(BELL.lowpassHz, at);
   const env = ctx.createGain();
   env.gain.setValueAtTime(0.0001, at);
-  env.gain.linearRampToValueAtTime(peak, at + BELL.attack);
+  env.gain.linearRampToValueAtTime(peak, at + attack);
   env.gain.exponentialRampToValueAtTime(0.0001, at + decay);
   lid.connect(env); env.connect(out);
   for (const [ratio, level] of [[1, 1], [2.76, 0.12]] as const) {
@@ -295,14 +297,14 @@ function woodNote(ctx: AudioContextLike, out: AudioNode, hz: number, at: number,
 }
 
 /** The two-note ding for a shaft's timbre. */
-export function playBell(ctx: AudioContextLike, out: AudioNode, shaftId: number, at: number = ctx.currentTime): void {
+export function playBell(ctx: AudioContextLike, out: AudioNode, shaftId: number, at: number = ctx.currentTime, key = 0, chapter?: Chapter): void {
   const [first, second] = BELL_TIMBRES[Math.abs(shaftId) % BELL_TIMBRES.length]!;
-  woodNote(ctx, out, first, at, dbToGain(BELL.peakDb), BELL.decay);
-  woodNote(ctx, out, second, at + BELL.gapSeconds, dbToGain(BELL.peakDb - 2), BELL.decay);
+  woodNote(ctx, out, chapter ? musicalHz(first, key, chapter) : first, at, dbToGain(BELL.peakDb), BELL.decay);
+  woodNote(ctx, out, chapter ? musicalHz(second, key, chapter) : second, at + BELL.gapSeconds, dbToGain(BELL.peakDb - 2), BELL.decay);
 }
 /** The burst tick: one short, soft wooden note. */
 export function playBellTick(ctx: AudioContextLike, out: AudioNode, at: number = ctx.currentTime): void {
-  woodNote(ctx, out, BELL_TIMBRES[0]![1], at, dbToGain(BELL.tickDb), BELL.decay * 0.6);
+  woodNote(ctx, out, BELL_TIMBRES[0]![1], at, dbToGain(BELL.tickDb), BELL.decay, 0.035);
 }
 /** The door swish: band-limited noise in the same struck envelope. */
 export function playDoorSwish(ctx: AudioContextLike, out: AudioNode, at: number = ctx.currentTime): void {
@@ -326,21 +328,11 @@ export function dbToGain(db: number): number {
   return Math.pow(10, db / 20);
 }
 
-export const REVERB_DELAY_SECONDS = 0.31;
-export const REVERB_FEEDBACK = 0.35;
-export const REVERB_CUTOFF_HZ = 3000;
-export const REVERB_WET_DB = -12;
-/**
- * Vinyl crackle gain in dB (unit-RMS pops times this), before the music slider, which scales it
- * like every other music voice. At the default slider (60) it measures -52.8 dBFS RMS at the
- * output: -48, then -4.4 dB of slider and -0.4 dB of low-pass. No hiss: sparse pops only, and
- * none while rain or a storm gives the bed its own texture.
- */
-export const TEXTURE_DB = -48;
-/** The crackle: at most this many pops in any second, each shorter than `popSeconds`, under a low-pass. */
-export const CRACKLE = { maxPerSecond: 6, popSeconds: 0.015, lowpassHz: 4000, muteSeconds: 1 } as const;
-/** Kept for older callers: the texture never exceeds this. */
-export const VINYL_MAX_DB = -30;
+/** Quiet eighth-note echo, locked to the world's tempo. */
+export const REVERB_DELAY_BEATS = 0.5;
+export const REVERB_FEEDBACK = 0.18;
+export const REVERB_CUTOFF_HZ = 2200;
+export const REVERB_WET_DB = -21;
 /** Tape wobble depth in cents, on every pitched voice. */
 export const TAPE_WOBBLE_CENTS = 4;
 export const TAPE_WOBBLE_HZ = 0.3;
@@ -549,9 +541,6 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
   let musicMakeup: GainNode | null = null;
   let hatBus: GainNode | null = null;
   let drumsBus: GainNode | null = null;
-  let vinylGain: GainNode | null = null;
-  let vinylSource: AudioBufferSourceNode | null = null;
-  let vinylLowpass: BiquadFilterNode | null = null;
   let tapeLfo: OscillatorNode | null = null;
   let tapeDepth: GainNode | null = null;
   let effectsBus: GainNode | null = null;
@@ -569,8 +558,9 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
   const barSeconds = 4 * beatSeconds;
   const key = keyFor(game.world.seed);
   const initialClock = clockOf(game.world.time.minute);
+  let cachedVenueFill = venueFillFor(game.world.rooms?.values() ?? []);
   let targetMood = moodFor({ minuteOfDay: initialClock.minuteOfDay, isWeekend: initialClock.isWeekend,
-    venueFill: venueFillFor(game.world.rooms?.values() ?? []), weather: weatherAt(game.world.seed, game.world.time.minute), tension: 0 });
+    venueFill: cachedVenueFill, weather: weatherAt(game.world.seed, game.world.time.minute), tension: 0 });
   let easedMood: Mood = { ...targetMood };
   let lastMoodMs = now();
   const layerMix = new Map<Voice, number>();
@@ -606,7 +596,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
     }
     const clock = clockOf(game.world.time.minute);
     return {
-      mood: { minuteOfDay: clock.minuteOfDay, isWeekend: clock.isWeekend, venueFill: venueFillFor(game.world.rooms?.values() ?? []),
+      mood: { minuteOfDay: clock.minuteOfDay, isWeekend: clock.isWeekend, venueFill: cachedVenueFill,
         weather: weatherAt(game.world.seed, game.world.time.minute), tension: threatLevel(threat) },
       minute: game.world.time.minute,
     };
@@ -650,7 +640,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
       musicColour.connect(musicCompressor);
       // Feedback delay keeps the keys warm without a convolver or recorded impulse.
       const wet = ctx.createGain(); wet.gain.value = dbToGain(REVERB_WET_DB);
-      const delay = ctx.createDelay(1); delay.delayTime.value = REVERB_DELAY_SECONDS;
+      const delay = ctx.createDelay(1); delay.delayTime.value = beatSeconds * REVERB_DELAY_BEATS;
       const low = ctx.createBiquadFilter(); low.type = 'lowpass'; low.frequency.value = REVERB_CUTOFF_HZ;
       const feedback = ctx.createGain(); feedback.gain.value = REVERB_FEEDBACK;
       musicColour.connect(wet); wet.connect(delay); delay.connect(low);
@@ -663,20 +653,16 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
       ambientBus.connect(master);
       hatBus = ctx.createGain(); hatBus.gain.value = 1; hatBus.connect(musicCompressor);
       drumsBus = ctx.createGain(); drumsBus.gain.value = 1; drumsBus.connect(musicCompressor);
-      // The crackle joins after the compressor so the kit never pumps it, and before the slider.
-      vinylGain = ctx.createGain(); vinylGain.gain.value = dbToGain(TEXTURE_DB);
-      vinylGain.connect(musicDust);
-      vinylLowpass = ctx.createBiquadFilter(); vinylLowpass.type = 'lowpass'; vinylLowpass.frequency.value = CRACKLE.lowpassHz;
-      vinylLowpass.connect(vinylGain);
       tapeDepth = ctx.createGain(); tapeDepth.gain.value = TAPE_WOBBLE_CENTS;
     }
     if (ctx.state === 'suspended') void ctx.resume().catch(() => {});
+    if (unsubEvents) return; // Already awake: gestures must not reset smoothing or mute automation.
     lastMoodMs = now();
     if (master) master.gain.setValueAtTime(1, ctx.currentTime);
     musicBus?.gain.setValueAtTime((settings.music ?? 60) / 100 * dbToGain(-6 * easedMood.tension), ctx.currentTime);
     effectsBus?.gain.setValueAtTime(settings.effects / 100, ctx.currentTime);
     ambientBus?.gain.setValueAtTime(settings.ambient / 100 * dbToGain(-10), ctx.currentTime);
-    startTexture();
+    startTape();
     if (!unsubEvents) unsubEvents = game.subscribeEvents(onEvent);
     if (!unsubClock) unsubClock = game.subscribe(onClock);
     lastMinuteOfDay = -1;
@@ -686,34 +672,8 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
     syncMusic();
   }
 
-  function startTexture(): void {
-    if (!ctx || !vinylLowpass || !tapeDepth) return;
-    if (!vinylSource) {
-      // Four seconds of seeded vinyl crackle and silence between: pops spaced more than a sixth
-      // of a second apart (so at most six in any second, across the loop too), each a click that
-      // dies within 8 ms. Normalised to unit RMS so vinylGain alone sets the level.
-      const rate = ctx.sampleRate;
-      const length = rate * 4;
-      const buffer = ctx.createBuffer(1, length, rate);
-      const data = buffer.getChannelData(0);
-      let state = (game.world.seed ^ 0x35a1b2c3) >>> 0;
-      const rand = (): number => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
-      const minGap = Math.ceil(rate / CRACKLE.maxPerSecond) + 1;
-      const popLength = Math.floor(rate * 0.008);
-      const decay = rate * 0.0012;
-      let sum = 0;
-      for (let at = Math.ceil(minGap / 2); at + popLength < length - minGap / 2; at += minGap + Math.floor(rand() * rate * 0.5)) {
-        const amp = (rand() < 0.5 ? -1 : 1) * (0.3 + 0.7 * rand());
-        for (let i = 0; i < popLength; i += 1) {
-          data[at + i] = amp * Math.exp(-i / decay) * (0.5 + rand());
-          sum += data[at + i]! * data[at + i]!;
-        }
-      }
-      const norm = sum > 0 ? 1 / Math.sqrt(sum / length) : 0;
-      for (let i = 0; i < length; i += 1) data[i] = data[i]! * norm;
-      const src = ctx.createBufferSource(); src.buffer = buffer; src.loop = true;
-      src.connect(vinylLowpass); src.start(); vinylSource = src;
-    }
+  function startTape(): void {
+    if (!ctx || !tapeDepth || (settings.music ?? 60) <= 0) return;
     if (!tapeLfo) {
       tapeLfo = ctx.createOscillator(); tapeLfo.type = 'sine'; tapeLfo.frequency.value = TAPE_WOBBLE_HZ;
       tapeLfo.connect(tapeDepth); tapeLfo.start();
@@ -732,14 +692,13 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
     scheduledMusic.clear(); musicFilters.clear();
     for (const source of scheduledDrums) { try { source.stop(); } catch { /* already stopped */ } }
     scheduledDrums.clear();
-    if (vinylSource) { try { vinylSource.stop(); } catch { /* already stopped */ } }
     if (tapeLfo) { try { tapeLfo.stop(); } catch { /* already stopped */ } }
-    vinylSource = null; tapeLfo = null;
+    tapeLfo = null;
     if (weatherSource) { try { weatherSource.stop(); } catch { /* already stopped */ } }
     if (weatherLfo) { try { weatherLfo.stop(); } catch { /* already stopped */ } }
     if (tensionOsc) { try { tensionOsc.stop(); } catch { /* already stopped */ } }
     weatherLfo = null; tensionOsc = null; tensionGain = null;
-    weatherSource = null; weatherGain = null;
+    weatherSource = null; weatherGain = null; weatherKind = 'clear';
     if (ctx) {
       for (const bus of [musicBus, ambientBus, effectsBus, drumsBus, hatBus, master]) {
         if (!bus) continue;
@@ -794,7 +753,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
     if (event.kind === 'car.arrive' || event.kind === 'car.doors') {
       if (settings.effects <= 0) return;
       const heard = event.kind === 'car.arrive' ? bells.arrive(now()) : bells.doors(now());
-      if (heard === 'bell') playBell(ctx, effectsBus, event.shaftId);
+      if (heard === 'bell') playBell(ctx, effectsBus, event.shaftId, ctx.currentTime, key, chapter);
       else if (heard === 'tick') playBellTick(ctx, effectsBus);
       else if (heard === 'door') playDoorSwish(ctx, effectsBus);
       return;
@@ -820,7 +779,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
     drumsBus?.gain.setValueAtTime(urgent(next) ? 0 : 0.775, ctx.currentTime);
     musicBus?.gain.setTargetAtTime((settings.music ?? 60) / 100 * dbToGain(-6 * level), ctx.currentTime, 0.1);
     if (tensionOsc) { try { tensionOsc.stop(); } catch { /* already stopped */ } tensionOsc = null; }
-    if (musicBus) {
+    if (musicBus && (settings.music ?? 60) > 0) {
       tensionOsc = ctx.createOscillator(); tensionOsc.type = 'sine';
       tensionOsc.frequency.value = next === 'fire' ? 110 : next === 'bomb' ? 55 : 93;
       tensionGain = ctx.createGain(); tensionGain.gain.value = next === 'theft' ? 0.014 : 0.025;
@@ -859,11 +818,12 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
       tower: [261, 329, 392, 440, 523, 659, 784, 1047, 784, 1047, 1318, 1047],
     };
     if (name === 'door') { playDoorSwish(ctx, effectsBus); return; }
-    if (name.startsWith('bell')) { playBell(ctx, effectsBus, Number(name.slice(-1))); return; }
+    if (name.startsWith('bell')) { playBell(ctx, effectsBus, Number(name.slice(-1)), ctx.currentTime, key, chapter); return; }
     if (name === 'build' || name === 'register') { playEffect(ctx, effectsBus, name); return; }
     const line = notes[name] ?? [];
     const duration = cueDuration(name);
-    line.forEach((hz, i) => tone(ctx!, effectsBus!, name === 'fire.start' ? 'triangle' : 'sine', hz, ctx!.currentTime + i * duration / line.length, Math.min(0.45, duration / line.length), 0.32));
+    const at = name === 'fire.start' || name === 'bomb.start' ? ctx.currentTime : Math.ceil(ctx.currentTime / beatSeconds) * beatSeconds;
+    line.forEach((hz, i) => tone(ctx!, effectsBus!, name === 'fire.start' ? 'triangle' : 'sine', name === 'fire.start' || name === 'bomb.start' ? hz : musicalHz(hz, key, chapter), at + i * duration / line.length, Math.min(0.45, duration / line.length), 0.32));
   }
 
   function onClock(): void {
@@ -881,6 +841,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
   }
 
   function targetForBar(): void {
+    if (!pinned) cachedVenueFill = venueFillFor(game.world.rooms?.values() ?? []);
     targetMood = moodFor(inputs().mood);
   }
 
@@ -977,15 +938,23 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
       if (!ctx || !musicBus || !settings.on) return;
       advanceMood();
       while (nextBar < ctx.currentTime + LOOKAHEAD_SECONDS) {
+        // A throttled tab skips missed bars instead of firing overdue notes together.
+        if (nextBar < ctx.currentTime - 0.1) {
+          const skipped = Math.ceil((ctx.currentTime - nextBar) / barSeconds);
+          nextBar += skipped * barSeconds; nextBarIndex += skipped;
+          if (nextBar >= ctx.currentTime + LOOKAHEAD_SECONDS) break;
+        }
         const at = nextBar; nextBar += barSeconds;
         targetForBar(); // venue occupancy is read only here, once per musical bar
         const barIndex = nextBarIndex++;
+        if ((settings.music ?? 60) <= 0) { activeVoices = []; continue; }
         const phraseIndex = Math.floor(barIndex / 8);
         const barInPhrase = barIndex % 8;
         const heard = inputs();
         const night = isNight(heard.minute);
         const weekend = heard.mood.isWeekend;
         const chapters = previousChapter && at >= transitionAt && at < transitionAt + 3 ? [previousChapter, chapter] : [at < transitionAt && previousChapter ? previousChapter : chapter];
+        const breathe = sectionFor(phraseIndex) === 'breathe';
         const available = new Set<Voice>(chapters.flatMap(playing => voicesFor(playing, weekend)));
         const wanted = new Set<Voice>(chapters.flatMap(playing => activeLayers(playing, easedMood.energy, easedMood.tension, weekend, phraseIndex)));
         // The groove comes back on the bar after an all-clear, while the eased tension still ducks.
@@ -996,6 +965,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
             layerMix.set(voice, Math.max(layerMix.get(voice) ?? 0, 0.5)); // back in on the downbeat
           }
         }
+        if (breathe) { wanted.delete('drums'); wanted.delete('hat'); wanted.delete('kinetic'); }
         const layers = new Map<Voice, { from: number; to: number }>();
         // Voices ease in over two bars. A melodic voice leaves within one bar, and a new one
         // waits for its slot, so no bar ever holds more than MAX_MELODIC melodic voices.
@@ -1044,7 +1014,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
           const drumLayer = layers.get('drums');
           const hatLayer = layers.get('hat');
           if (drumsBus && hatBus && ctx && (drumLayer?.to || hatLayer?.to)) {
-            for (const hit of drumHitsFor(game.world.seed, phraseIndex, barIndex, Math.max(0.15, easedMood.energy))) {
+            for (const hit of drumHitsFor(game.world.seed, phraseIndex, barIndex, Math.max(0.15, easedMood.energy), chapter)) {
               if (easedMood.tension >= 0.3 && (hit.kind === 'ghost' || hit.kind === 'open')) continue;
               const backbone = hit.kind === 'kick' || hit.kind === 'snare' || hit.kind === 'rim' || hit.kind === 'ghost';
               const layer = backbone ? drumLayer : hatLayer;
@@ -1053,7 +1023,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
               if (fade <= 0) continue;
               const out = backbone ? drumsBus : hatBus;
               const when = at + hit.beat * beatSeconds + hit.lateSeconds;
-              const sources = playDrum(ctx, out, { ...hit, velocity: hit.velocity * fade }, when);
+              const sources = playDrum(ctx, out, { ...hit, velocity: hit.velocity * fade * (chapter === 1 ? 0.7 : 1) }, when);
               for (const source of sources) {
                 scheduledDrums.add(source);
                 const done = source.onended; source.onended = (e) => { scheduledDrums.delete(source); done?.call(source, e); };
@@ -1069,17 +1039,10 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
 
   function syncWeather(): void {
     if (!ctx || !ambientBus) return;
+    if (settings.ambient <= 0) return;
     const snapshot = inputs().mood.weather;
     if (snapshot.kind !== weatherKind) {
       weatherKind = snapshot.kind;
-      if (vinylGain) {
-        // Rain and storms carry their own texture: the crackle steps aside over a second.
-        const t = ctx.currentTime;
-        const to = weatherKind === 'rain' || weatherKind === 'storm' ? 0 : dbToGain(TEXTURE_DB);
-        vinylGain.gain.cancelScheduledValues(t);
-        vinylGain.gain.setValueAtTime(vinylGain.gain.value, t);
-        vinylGain.gain.linearRampToValueAtTime(to, t + CRACKLE.muteSeconds);
-      }
       if (weatherGain) weatherGain.gain.setTargetAtTime(0, ctx.currentTime, 1);
       if (weatherSource) { try { weatherSource.stop(ctx.currentTime + 4); } catch { /* stopped */ } }
       if (weatherLfo) { try { weatherLfo.stop(ctx.currentTime + 4); } catch { /* stopped */ } }
@@ -1154,6 +1117,13 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
     },
     setMusic(level) {
       settings.music = clampLevel(level);
+      if (settings.music === 0) {
+        for (const source of [...scheduledMusic, ...scheduledDrums]) { try { source.stop(); } catch { /* ended */ } }
+        scheduledMusic.clear(); scheduledDrums.clear();
+        if (tapeLfo) { tapeLfo.stop(); tapeLfo = null; }
+        if (tensionOsc) { tensionOsc.stop(); tensionOsc = null; tensionGain = null; }
+        layerMix.clear(); activeVoices = [];
+      } else if (settings.on) startTape();
       writeSoundSettings(settings, store);
       if (ctx && musicBus) musicBus.gain.setTargetAtTime((settings.music ?? 60) / 100 * dbToGain(-6 * easedMood.tension), ctx.currentTime, 0.05);
     },
@@ -1183,7 +1153,12 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
       settings.ambient = clampLevel(level);
       writeSoundSettings(settings, store);
       if (ctx && ambientBus) ambientBus.gain.setTargetAtTime(settings.ambient / 100 * dbToGain(-10), ctx.currentTime, 0.05);
-      if (settings.on) syncBed();
+      if (settings.ambient === 0) {
+        if (weatherSource) { weatherSource.stop(); weatherSource = null; }
+        if (weatherLfo) { weatherLfo.stop(); weatherLfo = null; }
+        weatherGain?.disconnect(); weatherGain = null; weatherKind = 'clear';
+      }
+      if (settings.on) { syncBed(); syncWeather(); }
     },
     destroy() {
       target?.removeEventListener('pointerdown', onGesture, true);

@@ -20,6 +20,7 @@ export interface Preset {
 }
 
 export const PRESETS = {
+  'empty-foundations': { minuteOfDay: 8 * 60 + 30, isWeekend: false, venueFill: 0, weather: 'clear', intensity: 1, chapter: 1 },
   'sunny-morning-1star': { minuteOfDay: 8 * 60 + 30, isWeekend: false, venueFill: 0.3, weather: 'clear', intensity: 1, chapter: 1 },
   'rainy-tuesday-5star': { minuteOfDay: 10 * 60, isWeekend: false, venueFill: 0.2, weather: 'rain', intensity: 0.8, chapter: 5 },
   'weekend-night-5star': { minuteOfDay: 21 * 60 + 30, isWeekend: true, venueFill: 1, weather: 'clear', intensity: 1, chapter: 5 },

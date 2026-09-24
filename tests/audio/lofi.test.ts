@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   BELL, BELL_TIMBRES, createBellGate, playBell, playBellTick, playDoorSwish,
-  createSound, dbToGain, LIMITER, LOOKAHEAD_SECONDS, MASTER_CHAIN, TAPE_WOBBLE_CENTS, TEXTURE_DB,
+  createSound, dbToGain, LIMITER, LOOKAHEAD_SECONDS, MASTER_CHAIN, TAPE_WOBBLE_CENTS,
   type AudioContextLike,
 } from '../../src/audio/audio';
 import { drumHitsFor, KICK_PATTERNS, KIT_PEAK_DB, lazyOffsetMs, renderPiece, SNARE_BEATS, type DrumKind } from '../../src/audio/drums';
@@ -11,7 +11,7 @@ import { activeLayers, moodFor } from '../../src/audio/mood';
 import { chordTones, progressionFor, phraseFor, voicesFor } from '../../src/audio/phrase';
 import { presetInputs, PRESETS, PRESET_NAMES } from '../../src/audio/presets';
 import {
-  CHAPTER_VOICES, KEYS_CUTOFF_HZ, MAX_MELODIC, MELODIC, VOICES, keyFor, swingFor,
+  CHAPTER_VOICES, KEYS_CUTOFF_HZ, MAX_MELODIC, MELODIC, VOICES, keyFor, musicalHz, swingFor,
   type Chapter, type Voice,
 } from '../../src/audio/score';
 
@@ -109,17 +109,17 @@ describe('boom-bap kit', () => {
     for (const beat of offbeats) expect(beat % 1).toBeCloseTo(swingFor(energy));
     expect(drumHitsFor(5, 0, 1, energy).some(h => h.kind === 'ghost')).toBe(true);
   });
-  it('lies back 15 to 30 ms, later as energy falls', () => {
-    expect(lazyOffsetMs(1)).toBe(15);
-    expect(lazyOffsetMs(0)).toBe(30);
+  it('lies back 10 to 18 ms, later as energy falls', () => {
+    expect(lazyOffsetMs(1)).toBe(10);
+    expect(lazyOffsetMs(0)).toBe(18);
     const snareLate = (e: number) => drumHitsFor(1, 0, 0, e).find(h => h.kind === 'snare' || h.kind === 'rim')!.lateSeconds;
     expect(snareLate(0.2)).toBeGreaterThan(snareLate(0.9));
-    expect(snareLate(0.9) * 1000).toBeGreaterThanOrEqual(15);
-    expect(snareLate(0.2) * 1000).toBeLessThanOrEqual(30);
+    expect(snareLate(0.9) * 1000).toBeGreaterThanOrEqual(10);
+    expect(snareLate(0.2) * 1000).toBeLessThanOrEqual(18);
   });
-  it('has real level: kick and snare peak at -12 dBFS on the music bus, hats well under', () => {
-    expect(KIT_PEAK_DB.kick).toBe(-12);
-    expect(KIT_PEAK_DB.snare).toBe(-12);
+  it('keeps percussion restrained and cached pieces peak-normalized', () => {
+    expect(KIT_PEAK_DB.kick).toBe(-17);
+    expect(KIT_PEAK_DB.snare).toBe(-16);
     for (const kind of ['hat', 'open', 'kinetic'] as const) expect(KIT_PEAK_DB[kind]).toBeLessThanOrEqual(-20);
     // Each baked piece is normalised to a peak of exactly 1, so KIT_PEAK_DB is its true peak.
     for (const kind of Object.keys(KIT_PEAK_DB) as DrumKind[]) {
@@ -129,7 +129,8 @@ describe('boom-bap kit', () => {
     const { ctx, run } = listen('weekend-night-5star', 303);
     run(8);
     const loudest = Math.max(...ctx.of('gain').filter(g => g.connections.length && ctx.of('source').some(s => s.connections.includes(g))).map(g => g.gain.value));
-    expect(20 * Math.log10(loudest)).toBeCloseTo(-12, 1);
+    expect(20 * Math.log10(loudest)).toBeLessThanOrEqual(-16);
+    expect(20 * Math.log10(loudest)).toBeGreaterThan(-20);
   });
   it('schedules snares exactly on beats two and four of the live score', () => {
     const { ctx, sound, run } = listen('sunny-morning-1star', 101);
@@ -220,53 +221,44 @@ describe('music master chain', () => {
     expect(limiter!.connections).toContain(ctx.destination);
     expect([limiter!.threshold.value, limiter!.ratio.value]).toEqual([LIMITER.threshold, LIMITER.ratio]);
   });
-  it('adds sparse crackle only, -48 dB before the slider and about -52.8 dBFS at the default, and a 4 cent tape wobble', () => {
-    expect(TEXTURE_DB).toBe(-48);
-    expect(TAPE_WOBBLE_CENTS).toBe(4);
-    const { ctx } = listen('sunny-morning-1star', 101);
-    const lowpass = ctx.of('filter').find(f => f.type === 'lowpass' && f.frequency.value === 7000)!;
-    const makeup = ctx.of('compressor')[0]!.connections[0];
-    const texture = ctx.of('gain').find(g => g !== makeup && g.connections.includes(lowpass))!;
-    // No lift: the texture gain is the level itself, and the music slider after it scales it.
-    expect(texture.gain.value).toBeCloseTo(dbToGain(-48), 8);
-    const shelf = lowpass.connections[0] as Node;
-    const slider = shelf.connections[0] as Node;
-    expect(slider.gain.value).toBeCloseTo(0.6);
-    // At the default slider: -48 dB times 0.6 is -52.4 dB of gain; the 4 kHz low-pass takes
-    // another 0.4 dB off the unit-RMS pops, so the crackle measures -52.8 dBFS RMS at the output.
-    expect(20 * Math.log10(texture.gain.value * slider.gain.value)).toBeCloseTo(-52.4, 1);
-    // The crackle source goes through a 4 kHz low-pass into the texture gain.
-    const crackleLow = ctx.of('filter').find(f => f.connections.includes(texture))!;
-    expect([crackleLow.type, crackleLow.frequency.value]).toEqual(['lowpass', 4000]);
-    const source = ctx.of('source').find(s => s.connections.includes(crackleLow))!;
-    const data = (source.buffer as unknown as { getChannelData(): Float32Array }).getChannelData();
-    // No hiss: silence between pops. Pops: at most 6 in any second, each under 15 ms.
-    const pops: Array<[number, number]> = [];
-    for (let i = 0; i < data.length; i += 1) {
-      if (data[i] === 0) continue;
-      const last = pops[pops.length - 1];
-      if (last && i - last[1] < ctx.sampleRate * 0.02) last[1] = i; else pops.push([i, i]);
+  it('has no looping crackle buffer in any weather, while retaining subtle tape colour', () => {
+    for (const name of PRESET_NAMES) {
+      const { ctx } = listen(name, 101);
+      // The remaining four-second loop is traffic, directly into a 300 Hz filter.
+      const loops = ctx.of('source').filter(s => s.loop && s.buffer?.length === ctx.sampleRate * 4);
+      expect(loops).toHaveLength(1);
+      expect((loops[0]!.connections[0] as Node).frequency.value).toBe(300);
+      expect(ctx.of('gain').some(g => g.gain.value === TAPE_WOBBLE_CENTS)).toBe(true);
     }
-    expect(data.filter(v => v !== 0).length / data.length).toBeLessThan(0.05);
-    expect(pops.length).toBeGreaterThan(0);
-    for (const [from, to] of pops) expect((to - from + 1) / ctx.sampleRate).toBeLessThan(0.015);
-    const looped = [...pops.map(p => p[0]), ...pops.map(p => p[0] + data.length)];
-    for (const at of looped) expect(looped.filter(t => t >= at && t <= at + ctx.sampleRate).length).toBeLessThanOrEqual(6);
-    expect(ctx.of('gain').some(g => g.gain.value === TAPE_WOBBLE_CENTS)).toBe(true);
   });
-  it('mutes the crackle while rain or a storm plays and brings it back when the weather clears', () => {
-    for (const [name, seed] of [['rainy-tuesday-5star', 202], ['storm-night-tower', 404]] as const) {
-      const { ctx, sound, run } = listen(name, seed);
-      const lowpass = ctx.of('filter').find(f => f.type === 'lowpass' && f.frequency.value === 7000)!;
-      const makeup = ctx.of('compressor')[0]!.connections[0];
-      const texture = ctx.of('gain').find(g => g !== makeup && g.connections.includes(lowpass))!;
-      expect(sound.weatherKind).toBe(name === 'rainy-tuesday-5star' ? 'rain' : 'storm');
-      expect(texture.gain.value).toBe(0);
-      run(2);
-      sound.pin!(elapsed => presetInputs('sunny-morning-1star', elapsed));
-      expect(sound.weatherKind).toBe('clear');
-      expect(texture.gain.value).toBeCloseTo(dbToGain(TEXTURE_DB), 8);
-    }
+  it('allocates no music or weather voices while their sliders are zero and resumes afterward', () => {
+    const { ctx, sound, run } = listen('rainy-tuesday-5star', 202);
+    run(5);
+    sound.setMusic!(0); sound.setAmbient(0);
+    const count = ctx.of('osc').length + ctx.of('source').length;
+    run(40);
+    expect(ctx.of('osc').length + ctx.of('source').length).toBe(count);
+    sound.setMusic!(60); sound.setAmbient(50);
+    run(50);
+    expect(ctx.of('osc').length + ctx.of('source').length).toBeGreaterThan(count);
+    expect(sound.weatherKind).toBe('rain');
+  });
+  it('skips missed bars after a long timer stall instead of bunching overdue hits', () => {
+    const { ctx, run } = listen('sunny-morning-1star', 101);
+    const before = ctx.of('source').length;
+    ctx.currentTime = 120;
+    run(124);
+    const newHits = ctx.of('source').slice(before).filter(s => !s.loop);
+    expect(newHits.length).toBeGreaterThan(0);
+    expect(newHits.every(s => s.startedAt! >= 120)).toBe(true);
+  });
+  it('leaves a percussion-free passage in the fourth phrase and returns on the next section', () => {
+    const { ctx, sound, run } = listen('sunny-morning-1star', 101);
+    run(115);
+    const bar = 240 / sound.tempo!;
+    const hits = ctx.of('source').filter(s => !s.loop && s.startedAt !== null);
+    expect(hits.some(s => s.startedAt! >= 26 * bar && s.startedAt! < 32 * bar)).toBe(false);
+    expect(hits.some(s => s.startedAt! >= 33 * bar)).toBe(true);
   });
   it('schedules only a short way ahead so a changed mood is heard within a bar or so', () => {
     expect(LOOKAHEAD_SECONDS).toBeGreaterThan(0.5);
@@ -400,8 +392,8 @@ describe('muted elevator bells', () => {
     const { ctx, sound } = listen('rush-hour-3star', 606);
     const before = ctx.of('osc').length;
     sound.devEvent!({ kind: 'car.arrive', shaftId: 3, carId: 1 });
-    const rung = ctx.of('osc').slice(before).map(o => o.frequency.value).filter(hz => hz < 1000);
-    expect(rung.sort()).toEqual([...BELL_TIMBRES[3]!].sort());
+    const rung = ctx.of('osc').slice(before).filter((_o, i) => i % 2 === 0).map(o => o.frequency.value);
+    expect(rung.sort()).toEqual(BELL_TIMBRES[3]!.map(hz => musicalHz(hz, keyFor(606), 3)).sort());
     const after = ctx.of('osc').length;
     sound.devEvent!({ kind: 'car.arrive', shaftId: 1, carId: 2 }); // same instant: inside the cooldown
     expect(ctx.of('osc')).toHaveLength(after);

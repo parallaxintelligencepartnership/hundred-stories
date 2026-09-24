@@ -13,7 +13,6 @@ import {
   SOUND_EFFECTS_KEY,
   SOUND_KEY,
   SOUND_MUSIC_KEY,
-  VINYL_MAX_DB,
   MASTER_CHAIN,
   dbToGain,
   writeSoundSettings,
@@ -173,7 +172,7 @@ describe('synth', () => {
   });
 
   it('uses the spec pitches', () => {
-    const count = { chime: [660, 880], alert: [220, 220], register: [880], build: [40] } as const;
+    const count = { chime: [660, 880], alert: [220, 220], register: [880], build: [110] } as const;
     for (const [effect, pitches] of Object.entries(count)) {
       const ctx = new StubContext();
       playEffect(asCtx(ctx), ctx.destination as never, effect as Effect, 0);
@@ -194,7 +193,7 @@ describe('synth', () => {
       StubParam.prototype.linearRampToValueAtTime = lin; StubParam.prototype.exponentialRampToValueAtTime = exp;
     }
     expect(ctx.oscillators.map(o => o.frequency.value)).toEqual([880]);
-    expect(peaks).toEqual([0.2]);
+    expect(peaks).toEqual([0.45, 0.45, 0.45, 0.2]);
     // Three 12 ms clicks, then the bell from 0.17 s to 0.32 s.
     expect(Math.max(...ends)).toBeCloseTo(0.17 + 0.15, 6);
   });
@@ -493,10 +492,9 @@ describe('mixer and weather integration', () => {
     const sound = createSound(game, { target, store: memoryStore(), createContext: () => asCtx(ctx), setInterval: () => 1, clearInterval: () => {} });
     target.fire('pointerdown'); sound.setEnabled(true);
     expect(ctx.delays).toHaveLength(1);
-    expect(ctx.delays[0]!.delayTime.value).toBeCloseTo(0.31);
-    expect(ctx.gains.some(g => g.gain.value === 0.35)).toBe(true);
-    expect(ctx.filters.some(f => f.frequency.value === 3000)).toBe(true);
-    expect(ctx.gains[9]!.gain.value).toBeLessThanOrEqual(dbToGain(VINYL_MAX_DB));
+    expect(ctx.delays[0]!.delayTime.value).toBeCloseTo(30 / sound.tempo!);
+    expect(ctx.gains.some(g => g.gain.value === 0.18)).toBe(true);
+    expect(ctx.filters.some(f => f.frequency.value === 2200)).toBe(true);
     expect(ctx.oscillators.some(o => o.frequency.value === 0.3)).toBe(true);
     sound.setEnabled(false);
     for (const bus of [ctx.gains[0], ctx.gains[1], ctx.gains[5], ctx.gains[6]]) expect(bus!.gain.value).toBe(0);
@@ -603,12 +601,12 @@ describe('hostile encounter cues and priority', () => {
     game.emit(beat('theft.started'));
     let before = ctx.oscillators.length;
     game.emit(beat('theft.caught'));
-    expect(ctx.oscillators.slice(before).map(o => o.frequency.value)).toEqual([330, 440]);
+    expect(ctx.oscillators[before + 1]!.frequency.value).toBeGreaterThan(ctx.oscillators[before]!.frequency.value);
     expect(sound.tensionLevel).toBe(0);
     game.emit(beat('theft.started'));
     before = ctx.oscillators.length;
     game.emit(beat('theft.escaped'));
-    expect(ctx.oscillators.slice(before).map(o => o.frequency.value)).toEqual([330, 247]);
+    expect(ctx.oscillators[before + 1]!.frequency.value).toBeLessThan(ctx.oscillators[before]!.frequency.value);
     expect(sound.tensionLevel).toBe(0);
     sound.destroy();
   });

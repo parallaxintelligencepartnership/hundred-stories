@@ -1,4 +1,4 @@
-node_modules/
+node_modules
 dist/
 dev-dist/
 .env
@@ -30,3 +30,6 @@ store/shots/
 *.p8
 *.mobileprovision
 steam_appid.txt
+
+# Local listening comparisons, never shipped
+audio-preview/**/*.wav
