@@ -1,7 +1,8 @@
 // The alert stack: the cards that answer alert lines in the world log, and the short notices a
 // refused command leaves. A fire is one incident with one card that updates in place, however
 // many rooms catch, and that card always carries the player's response. Every card closes, and
-// the stack shows at most three cards with the rest folded into one "and N more" line.
+// the stack shows at most three cards with the rest folded into one "and N more" line. A bomb
+// threat is one card that trades its ransom button for the outcome; an infestation is one card too.
 //
 // The sim logs one line per burning room and has no incident id, so the incident is derived here
 // from the log lines (their text and roomId) and from the fire event in world.events.
@@ -76,6 +77,32 @@ export function fireHeadline(floors: readonly number[], rooms: number): string {
   return rooms > 1 ? `${where}, ${rooms} rooms burning` : where;
 }
 
+/** "Cockroaches on floor 7", "Cockroaches on floor 7, 2 rooms", "Cockroaches on floors 7 to 9, 3 rooms". */
+export function roachHeadline(floors: readonly number[], rooms: number): string {
+  return fireHeadline(floors, 1).replace(/^Fire/, 'Cockroaches') + (rooms > 1 ? `, ${rooms} rooms` : '');
+}
+
+export const ROACHES_GONE = 'The cockroaches are gone';
+export const BOMB_OVER = 'The bomb threat is over.';
+
+type BombLine = 'start' | 'end';
+
+/** Which part of a bomb threat a log line is, by the sim's wording in src/sim/events.ts. */
+export function bombLineOf(entry: LogEntry): BombLine | null {
+  if (entry.level !== 'alert') return null;
+  const text = entry.text;
+  if (text.startsWith('A caller planted a bomb in the ')) return 'start';
+  if (text.startsWith('The bomb went off on floor ') || text.startsWith('Security found the bomb')) return 'end';
+  if (text.startsWith('You paid the ') && text.includes(' ransom and the bomb')) return 'end';
+  return null;
+}
+
+/** A cockroach line: they moved into a room, or spread to one. */
+export function isRoachLine(entry: LogEntry): boolean {
+  if (entry.level !== 'alert') return false;
+  return entry.text.startsWith('Cockroaches moved into the ') || entry.text.startsWith('The cockroaches spread to the ');
+}
+
 export function fireOutText(damaged: number): string {
   return `Fire out, ${damaged} room${damaged === 1 ? '' : 's'} damaged`;
 }
@@ -104,6 +131,10 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
   const cards: Card[] = [];
   const more = el('p', 'hs-toast-more');
   let incident: FireIncident | null = null;
+  /** The bomb threat's card: the ransom line and its button, then the outcome. */
+  let bomb: { card: Card | null; body: HTMLElement | null; closed: boolean } | null = null;
+  /** The infestation's card, drawn from the infested rooms in the world. */
+  let roaches: { card: Card | null; body: HTMLElement | null; closed: boolean; shown: string } | null = null;
 
   function layout(): void {
     for (let i = cards.length - 1; i >= 0; i -= 1) if (cards[i]?.gone) cards.splice(i, 1);
@@ -119,9 +150,11 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
     if (card.gone) return;
     card.gone = true;
     card.node.remove();
-    if (incident?.card === card) {
-      incident.card = null;
-      incident.body = null;
+    for (const held of [incident, bomb, roaches]) {
+      if (held?.card === card) {
+        held.card = null;
+        held.body = null;
+      }
     }
     layout();
   }
@@ -234,18 +267,75 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
       closeIncident(incident);
     }
     if (incident) render(incident);
+    syncBomb(world);
+    syncRoaches(world, roachHeard);
+    roachHeard = false;
   }
 
   // ---------------------------------------------------------------- other alerts
 
-  /** Alerts that need a decision other than a fire's: the bomb ransom. */
-  function commandFor(entry: LogEntry): { label: string; cmd: Command } | null {
-    const text = entry.text.toLowerCase();
-    const hasBomb = deps.getWorld().events.some((event) => event.kind === 'bomb' && !event.found);
-    if (hasBomb && (text.includes('bomb') || text.includes('ransom'))) return { label: 'Pay ransom', cmd: { kind: 'bomb.pay' } };
-    if (hasBomb) return { label: 'Pay ransom', cmd: { kind: 'bomb.pay' } };
-    return null;
+  // ---------------------------------------------------------------- bomb
+
+  function startBomb(text: string): void {
+    if (bomb && !bomb.closed) endBomb(null);
+    const { card, body } = open('hs-toast is-bomb');
+    bomb = { card, body, closed: false };
+    const pay = button('Pay ransom', 'hs-btn', () => {
+      deps.apply({ kind: 'bomb.pay' });
+    });
+    pay.dataset['command'] = 'bomb.pay';
+    const row = el('div', 'hs-actions');
+    row.append(pay);
+    body.append(el('p', 'hs-toast-text', text), row);
   }
+
+  /** The threat ended: the button goes, the outcome shows, and the card leaves after a while. */
+  function endBomb(outcome: string | null): void {
+    if (!bomb || bomb.closed) return;
+    bomb.closed = true;
+    bomb.body?.replaceChildren(el('p', 'hs-toast-text', outcome ?? BOMB_OVER));
+    const card = bomb.card;
+    if (card) deps.later(() => close(card), ALERT_LINGER_MS);
+  }
+
+  function syncBomb(world: World): void {
+    const live = (world.events ?? []).some((e) => e.kind === 'bomb' && !e.found);
+    // A save loaded mid threat still gets its card and its button.
+    if (live && (!bomb || bomb.closed)) startBomb('A bomb is hidden in the tower. Pay the ransom or let security search the tower.');
+    else if (!live && bomb && !bomb.closed) endBomb(null);
+  }
+
+  // ---------------------------------------------------------------- cockroaches
+
+  function syncRoaches(world: World, heard: boolean): void {
+    const floors: number[] = [];
+    let count = 0;
+    for (const room of world.rooms?.values() ?? []) {
+      if (!room.infested) continue;
+      count += 1;
+      for (let f = room.floor; f < room.floor + room.height; f += 1) floors.push(f);
+    }
+    if (count > 0 && (!roaches || roaches.closed)) {
+      // A new infestation opens a card; one already on screen when a save loads is not news.
+      if (!heard) return;
+      const { card, body } = open('hs-toast is-roaches');
+      roaches = { card, body, closed: false, shown: '' };
+    }
+    if (!roaches) return;
+    if (count === 0 && !roaches.closed) {
+      roaches.closed = true;
+      const card = roaches.card;
+      if (card) deps.later(() => close(card), ALERT_LINGER_MS);
+    }
+    const headline = roaches.closed ? ROACHES_GONE : roachHeadline(floors, count);
+    if (headline === roaches.shown || !roaches.body) return;
+    roaches.shown = headline;
+    roaches.body.replaceChildren(el('p', 'hs-toast-text', headline));
+  }
+
+  // ---------------------------------------------------------------- other alerts
+
+  let roachHeard = false;
 
   function onAlert(entry: LogEntry): void {
     const fireLine = fireLineOf(entry);
@@ -253,18 +343,22 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
       onFireLine(fireLine, entry);
       return;
     }
+    const bombLine = bombLineOf(entry);
+    if (bombLine === 'start') {
+      startBomb(entry.text);
+      return;
+    }
+    if (bombLine === 'end') {
+      endBomb(entry.text);
+      return;
+    }
+    if (isRoachLine(entry)) {
+      roachHeard = true;
+      return;
+    }
     const { card, body } = open('hs-toast');
     body.append(el('p', 'hs-toast-text', entry.text));
-    const command = commandFor(entry);
-    if (command) {
-      const row = el('div', 'hs-actions');
-      row.append(
-        button(command.label, 'hs-btn', () => {
-          if (deps.apply(command.cmd).ok) close(card);
-        }),
-      );
-      body.append(row);
-    } else deps.later(() => close(card), ALERT_LINGER_MS);
+    deps.later(() => close(card), ALERT_LINGER_MS);
   }
 
   function notice(text: string): void {
@@ -283,6 +377,9 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
   function reset(): void {
     for (const card of [...cards]) close(card);
     incident = null;
+    bomb = null;
+    roaches = null;
+    roachHeard = false;
   }
 
   return { onAlert, notice, sync, dismissNewest, reset };
