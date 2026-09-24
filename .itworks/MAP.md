@@ -5,6 +5,7 @@ npm run dev (vite; landing on http://localhost:5173, the game on http://localhos
 
 ## Test
 npm test (vitest run); one file: npx vitest run <path>; npm run typecheck (tsc --noEmit)
+audio gate: npm run audio:samples (renders the six presets through headless Chrome) then node scripts/analyze-audio-samples.mjs docs/reviews/audio-samples-2026-09-23/*.wav, every line must PASS or SKIP
 benchmarks: see scripts/bench/README.md (npx vite-node@6.0.0 scripts/bench/bench3.ts prints a 09:00 row and a `<label>-evening` 17:30 row per tower; scripts/bench/hash.ts prints the six hashes a performance change must not move)
 
 ## Layout
@@ -19,13 +20,18 @@ benchmarks: see scripts/bench/README.md (npx vite-node@6.0.0 scripts/bench/bench
 | public/theme.js | plain script every page loads first: applies a stored theme before paint (inline scripts are blocked by the CSP) |
 | src/main.ts | entry point: reads the seed from the query string, boots game, renderer and UI, shows the WebGL message on failure; ?smoke boots the demo world instead |
 | src/sim/ | the pure simulation, no DOM: rules.ts tables plus EDITION (from VITE_EDITION; node is full) and the demo cap box, types.ts and the clock, tick.ts tick order, build (refuses outside the cap in the demo), economy, elevators, evaluation, events, people, routing, stars, rng |
-| src/sim/save.ts | save format v3 (v1 and v2 still load; v3 adds the status bar baselines, the hash projection stays v2): serialize, deserialize with its refusal reasons, and the FNV-1a world hash |
+| src/sim/save.ts | save format v4 (v1 to v3 still load; v3 added the status bar baselines, v4 the chronicle and story state; the hash projection stays v2): serialize, deserialize with its refusal reasons, and the FNV-1a world hash |
+| src/sim/story.ts, chronicle.ts, identity.ts, security.ts, recycling.ts | package 1 story beats per person (a true story from recorded beats, never invented), the milestone recap per star and the tower chronicle at Tower status, named identities, guards on patrol and the one shop theft (caught or escaped), the two named collectors and the waste backlog that turns rooms dirty |
+| src/game/weather.ts | weather outside the tower: derived from seed and minute, never from world.rng, never in the hash; renderer, UI, audio and story prose read this one snapshot |
 | src/game/game.ts | game shell: owns the world and the loop (ticks drain from requestAnimationFrame while visible, a 50 ms timer only while hidden, a visibilitychange listener between start and stop), tools, pointer input, save/load/export/import wiring |
 | src/game/api.ts | the contract the UI is allowed to use |
 | src/game/events.ts | the game event stream (log lines, builds, rent day, stars) the sound and Steam modules listen to |
 | src/game/storage.ts | the save slot per platform: Tauri app data file, Capacitor Filesystem file, else IndexedDB with localStorage fallback; export and import through the desktop dialogs and the phone share sheet |
 | src/render/ | PixiJS scene: renderer.ts (the static tower reconciled only when world.structureVersion or the lit state moves), interpolate.ts (Motion snapshots and lerp), grid.ts (16 px tiles, 72 px floors), palette.ts (colour tokens), art.ts procedural sprites baked at the DPR, light.ts (hour tint and window states), anim.ts (doors, walk cycle), ambient.ts, buildfx.ts, overlays.ts (the information view tints), thumbnail.ts (palette tiles), camera.ts, input.ts, sky.ts (low horizon), smoke.ts demo world (also the landing hero) |
+| src/render/illustrated.ts, figure.ts, person.ts, venue.ts, interiors.ts, curb.ts, hierarchy.ts, weather.ts, weatherfx.ts | the illustrated 2D look inside the 16 px grid (packages 2 and 8b): people and their dress, every room kind's interior, venue identity, the curb scene, far-zoom blocks, sky and cloud easing, rain sheet, wet street, sun and lightning |
 | src/ui/ | DOM overlay: ui.ts shell, panels.ts (save, export, import), palette.ts tiles, status.ts bar, icons.ts, cards.ts and onboarding.ts (intro, guided first tower, tips, goals), prefs.ts, overlays.ts views, hover.ts cards, explain.ts refusals, keys.ts, minimap.ts, demo.ts cap card, format.ts, layout.ts, ui.css |
+| src/ui/alerts.ts, src/ui/vip.ts | one dismissible alert card per fire or bomb (Pay ransom only while the threat stands), the VIP visit card rated from the real visit |
+| src/audio/score.ts, phrase.ts, drums.ts, mood.ts, cues.ts, presets.ts, wav.ts | the generative lofi score: six star chapters (scales, voices per chapter, at most three melodic at once), seeded phrases and comping, boom-bap kit, the live mood axes (energy, warmth, tension), event cues, dev-only listening presets (?audio=<preset>, &render=<seconds> writes a WAV to window.__audioSample) |
 | src/audio/audio.ts, src/steam/steam.ts | Web Audio synth, off by default (no AudioContext until on); Steam star reports through the Tauri report_star command, inert outside Tauri |
 | capacitor.config.ts, ios/, android/ | Capacitor 8 shells (xyz.hundredstories.app) loading dist-app; signing is not configured in the repo |
 | src-tauri/ | Tauri 2 desktop shell (xyz.hundredstories.desktop): tauri.conf.json with its own CSP, capabilities/default.json (app data fs, dialogs), achievements.rs behind the steam cargo feature, Cargo.lock |
@@ -38,7 +44,7 @@ benchmarks: see scripts/bench/README.md (npx vite-node@6.0.0 scripts/bench/bench
 | wrangler.jsonc | Cloudflare Workers static-assets config: dist as the asset directory, the 404 page, custom domain routes for hundredstories.xyz and www, workers_dev and preview_urls disabled |
 | tests/ | vitest suite: sim/ unit tests, scenarios/ scripted tower runs plus helpers.ts, game/ (loop.test.ts drives the frame loop on an injected clock; storage-*.test.ts the native slots on stub plugins), render/ (stub-renderer harness in reconcile.test.ts), ui/ (fake-dom.ts, a node DOM stand-in), audio/, site/, share/, store/, harness.test.ts |
 | deploy/ | pi3 static stack: compose.yml, nginx.conf, deploy.sh with rollback, README runbook, .env.example |
-| docs/ | BRIEF-AGENTS.md implementer brief, DESIGN.md rules and tick order, VISUAL.md art direction |
+| docs/ | BRIEF-AGENTS.md implementer brief, DESIGN.md rules and tick order, VISUAL.md art direction; docs/reviews/ holds the 2026-09-23 direction review, execution plan, baseline, before and after screenshots per package, and audio-samples-2026-09-23 (six WAVs plus analysis.txt) |
 | dist/, dist-app/ | build output, gitignored; npm run build (or build:demo) and npm run build:app |
 
 ## Environment

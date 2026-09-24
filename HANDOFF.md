@@ -93,3 +93,93 @@ Written at the end of the session that shipped 0.2.3 (tag `ship-2026-09-20b`). E
 1. Write the cache invariant as a comment above `cacheOf` in `src/sim/routing.ts` (section 3): the search reads rooms, shafts and car settings only; if it ever reads car positions or calls, the cache must go.
 2. Add the in-minute build test to `tests/sim/routing.test.ts` (section 1) and run `npx vitest run tests/sim/routing.test.ts`.
 3. Rename the REVIEWS.md sweep heading to the sanctioned form and run `bash /Users/matthew/parallax-private/Projects/itworks/scripts/itworks-lint.sh .` to zero warnings.
+
+---
+
+# Addendum: 2026-09-23 Hundred Stories design review
+
+Note added 2026-09-24: the packages this addendum said were not yet built landed later on 2026-09-23 (packages 0 to 8, see DECISIONS.md and the 2026-09-24 checkpoint in .itworks/REVIEWS.md). The checks below describe the state before that work and are kept for the record.
+
+The creative brief is `docs/reviews/2026-09-23-visual-audio-direction.md`; the agent-ready work packages and pass criteria are in `docs/reviews/2026-09-23-execution-plan.md`. Neither is an implemented feature. This addendum records what the next session should verify before building them.
+
+## 1. Blind spots
+
+**Claim:** The proposed illustrated art and weather masks have not been rendered in the game.
+**Evidence:** This session inspected the procedural renderer and current phone/tablet captures, then wrote a direction document; it made no graphics code or assets.
+**Check:** `npm run store:shots` after a visual slice exists, then inspect phone, tablet, and desktop output in `store/shots/` for room legibility and rain outside the cutaway.
+**Priority:** blocker-for-next
+
+**Claim:** The new score has not been composed or listened to on target devices.
+**Evidence:** The audio pass read `src/audio/audio.ts` and event hooks; no recorded score or physical phone listening test exists.
+**Check:** `rg --files public src/audio | rg '\.(ogg|mp3|wav|m4a)$'`, then play the first score slice on a phone speaker and headphones for 20 minutes.
+**Priority:** soon
+
+## 2. Time bombs
+
+**Claim:** Loading an entire 35–50 minute score as decoded Web Audio buffers would put unnecessary memory pressure on phone builds.
+**Evidence:** Current `src/audio/audio.ts` only synthesizes short sounds and a small ambient buffer; the proposed soundtrack is far larger.
+**Check:** `rg -n 'decodeAudioData|createBufferSource|Audio\(' src/audio` after implementation; profile memory while switching from one star chapter to another on a phone.
+**Priority:** soon
+
+## 3. Least certain
+
+**Claim:** A six-chapter, 35–50 minute score is the right production scale for long play.
+**Evidence:** Matt rejected the first small-loop proposal as lacking grandeur; no composed vertical slice has established the exact duration or density.
+**Check:** Produce the 1-star, 3-star, and Tower slices specified in the review, then listen across a 20-minute session at each stage before committing the remaining chapters.
+**Priority:** soon
+
+## 4. Design regret
+
+**Claim:** The first audio brief sized the game around one short theme and too few cues.
+**Evidence:** It missed the six-star progression, VIP/wedding significance, and the requested grand scale; the review document now carries a full chapter plan.
+**Check:** `rg -n 'Score the \*whole rise\*|35–50|Tower, landmark' docs/reviews/2026-09-23-visual-audio-direction.md`.
+**Priority:** whenever
+
+## 5. Hacks ledger
+
+None. This design review changed documentation only.
+
+## 6. Decided not to do
+
+**Claim:** Freeform AI dialogue, a 3D camera rebuild, and weather inside rooms are outside the selected direction.
+**Evidence:** The game promises offline/private play and a clear side-on cutaway; authored event-driven lines and exterior weather fit those constraints.
+**Check:** `rg -n 'Story approach|Visual direction choice|Weather is outside' docs/reviews/2026-09-23-visual-audio-direction.md`.
+**Priority:** whenever
+
+## 7. Tribal knowledge
+
+**Claim:** Security, recycling, and VIP visits exist as progression systems but do not yet create the intended visible character stories.
+**Evidence:** `securityOnDuty` checks only for a room; recycling is a star prerequisite and upkeep cost; `tickVip` places the guest directly in a suite and scores stress.
+**Check:** `rg -n 'securityOnDuty|tickVip|recycling' src/sim/events.ts src/sim/stars.ts src/sim/rules.ts`.
+**Priority:** blocker-for-next
+
+## 8. Skeptic's flag
+
+**Claim:** Story cards could become decorated status messages rather than stories if they do not record a real setup, setback, player-relevant change, and outcome.
+**Evidence:** The current person panel has only position, activity, stress, and leaving reason; the proposed arc has not been played.
+**Check:** After a story slice exists, drive one saved worker or guest through a long wait, tower improvement, and later successful trip; inspect the person card and chronicle for factual continuity.
+**Priority:** blocker-for-next
+
+## 9. Wishlist
+
+**Claim:** A locally saved Tower chronicle would make the game's name and final star feel earned.
+**Evidence:** The landing page promises every floor and person has a story, while the current star change only logs a line; the review proposes a bounded record of real lives and events.
+**Check:** `rg -n 'Why Hundred Stories|Every floor is a story' index.html how-to-play/index.html` and compare a proposed endgame chronicle with `src/sim/stars.ts`.
+**Priority:** soon
+
+## 10. Next steps
+
+**Claim:** The first implementation should prove a person's story and the new art together in a small playable slice.
+**Evidence:** The review names a worker or resident, guest, venue visit, and five new people as a test of identity and causality.
+**Check:** Open `docs/reviews/2026-09-23-visual-audio-direction.md`, then `src/sim/people.ts`, `src/ui/panels.ts`, and `src/render/art.ts` before coding.
+**Priority:** blocker-for-next
+
+**Claim:** VIP travel should be repaired before new hostile and collection loops are added.
+**Evidence:** The four-star VIP gate exists but `tickVip` teleports the guest to the suite, leaving little tower experience to rate.
+**Check:** `sed -n '260,335p' src/sim/events.ts` and `sed -n '105,115p' src/sim/rules.ts`.
+**Priority:** soon
+
+**Claim:** Weather and audio should share one state and semantic event vocabulary.
+**Evidence:** Current `src/render/sky.ts` has only day/night, while `src/audio/audio.ts` maps all alert logs to one effect.
+**Check:** `rg -n 'KEYFRAMES|effectFor|case .log.' src/render/sky.ts src/audio/audio.ts`.
+**Priority:** soon
