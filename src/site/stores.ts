@@ -15,7 +15,8 @@ export const STORE_NAMES: Record<StoreId, string> = {
   steam: 'Steam',
 };
 
-const ORDER: readonly StoreId[] = ['appStore', 'googlePlay', 'steam'];
+// Steam is left out of every public surface for now (Matt, 2026-09-24); the desktop build code stays.
+const ORDER: readonly StoreId[] = ['appStore', 'googlePlay'];
 
 export interface StoreEntry {
   id: StoreId;
@@ -28,9 +29,9 @@ export function storeEntries(links: Record<StoreId, string> = STORE_LINKS): Stor
   return ORDER.map((id) => ({ id, name: STORE_NAMES[id], href: links[id].trim() }));
 }
 
-/** "the App Store, Google Play and Steam", for a sentence. */
+/** "the App Store and Google Play", for a sentence. */
 export function storeNamesText(): string {
-  return `the ${STORE_NAMES.appStore}, ${STORE_NAMES.googlePlay} and ${STORE_NAMES.steam}`;
+  return `the ${STORE_NAMES.appStore} and ${STORE_NAMES.googlePlay}`;
 }
 
 /** The slice of an element this file writes, so the landing page and the game's fake dom both fit. */
@@ -42,6 +43,16 @@ export interface StoreNode {
 
 export interface StoreDoc {
   createElement(tag: 'a' | 'span'): StoreNode;
+}
+
+/**
+ * Appends children to a store node. Every real element (HTMLElement, the test's FakeElement)
+ * has `append` at runtime; the shared StoreNode type leaves it out because HTMLElement's own
+ * `append(...nodes: (Node | string)[])` cannot structurally satisfy a same-shaped constraint, the
+ * same reason challenge.ts and demo.ts cast through `unknown` at their one DOM boundary.
+ */
+function appendChildren(parent: StoreNode, children: StoreNode[]): void {
+  (parent as unknown as { append(...nodes: StoreNode[]): void }).append(...children);
 }
 
 /** One item per store: a link when it has one, else the name and "coming soon" as plain text. */
@@ -62,13 +73,46 @@ export function storeLinkNodes(doc: StoreDoc, links: Record<StoreId, string> = S
   });
 }
 
-/** Fills the landing page's store row. Exported for tests. */
+/** The small top line above a store name: what the button says it will do. */
+function storeLead(id: StoreId, hasHref: boolean): string {
+  if (!hasHref) return 'Coming soon to';
+  return id === 'appStore' ? 'Download on' : 'Get it on';
+}
+
+/**
+ * One big, app-style button per store: a small line ("Coming soon to", "Download on", "Get it
+ * on") above the store's name. Soon entries stay non-links with a muted look; live entries stay
+ * <a>. No store logos or trademark badge artwork, by design.
+ */
+export function storeButtonNodes(doc: StoreDoc, links: Record<StoreId, string> = STORE_LINKS): StoreNode[] {
+  return storeEntries(links).map((entry) => {
+    const lead = storeLead(entry.id, Boolean(entry.href));
+    const top = doc.createElement('span');
+    top.className = 'store-link-top';
+    top.textContent = lead;
+    const name = doc.createElement('span');
+    name.className = 'store-link-name';
+    name.textContent = entry.name;
+
+    const wrapper = entry.href ? doc.createElement('a') : doc.createElement('span');
+    wrapper.className = entry.href ? 'store-link' : 'store-link is-soon';
+    wrapper.setAttribute('aria-label', entry.href ? `${lead} ${entry.name}` : `${entry.name}, coming soon`);
+    if (entry.href) {
+      wrapper.setAttribute('href', entry.href);
+      wrapper.setAttribute('rel', 'noopener');
+    }
+    appendChildren(wrapper, [top, name]);
+    return wrapper;
+  });
+}
+
+/** Fills the landing page's store row with the two-line app-style buttons. Exported for tests. */
 export function mountStoreRow<N extends StoreNode>(
   row: { replaceChildren(...nodes: N[]): void },
   doc: { createElement(tag: 'a' | 'span'): N },
   links: Record<StoreId, string> = STORE_LINKS,
 ): void {
-  row.replaceChildren(...(storeLinkNodes(doc, links) as N[]));
+  row.replaceChildren(...(storeButtonNodes(doc, links) as N[]));
 }
 
 // Guarded like challenge.ts: tests import the pure exports in node, and /play/ has no row.

@@ -77,10 +77,10 @@ describe('the demo cap card', () => {
     const text = host.textContent;
     expect(text).toContain('20 floors');
     expect(text).toContain('150 tiles');
-    expect(text).toContain('the App Store, Google Play and Steam');
+    expect(text).toContain('the App Store and Google Play');
     expect(text).toContain('App Store: coming soon');
     expect(text).toContain('Google Play: coming soon');
-    expect(text).toContain('Steam: coming soon');
+    expect(text).not.toContain('Steam');
     expect(host.descendants().some((n) => n.tagName === 'A')).toBe(false);
   });
 

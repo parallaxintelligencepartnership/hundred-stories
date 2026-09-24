@@ -6,7 +6,7 @@
     <title>Hundred Stories: a tower-building sim you can play in the browser</title>
     <meta
       name="description"
-      content="Hundred Stories is a tower-building simulation for the browser, coming to the App Store, Google Play and Steam. Place offices, condos, shops and elevators, keep your tenants happy, and climb from one star to TOWER. Plays offline, saves in your browser, nothing uploaded."
+      content="Hundred Stories is a tower-building simulation for the browser, coming to the App Store and Google Play. Place offices, condos, shops and elevators, keep your tenants happy, and climb from one star to TOWER. Plays offline, saves in your browser, nothing uploaded."
     />
     <link rel="canonical" href="https://hundredstories.xyz/" />
     <meta property="og:type" content="website" />
@@ -14,7 +14,7 @@
     <meta property="og:title" content="Hundred Stories" />
     <meta
       property="og:description"
-      content="A tower-building sim for the browser, coming to the App Store, Google Play and Steam. Plays offline, saves in your browser, nothing uploaded."
+      content="A tower-building sim for the browser, coming to the App Store and Google Play. Plays offline and saves on your device."
     />
     <meta property="og:url" content="https://hundredstories.xyz/" />
     <meta property="og:image" content="https://hundredstories.xyz/og.png" />
@@ -24,7 +24,7 @@
     <meta name="twitter:title" content="Hundred Stories" />
     <meta
       name="twitter:description"
-      content="A tower-building sim for the browser, coming to the App Store, Google Play and Steam. Plays offline, saves in your browser, nothing uploaded."
+      content="A tower-building sim for the browser, coming to the App Store and Google Play. Plays offline and saves on your device."
     />
     <meta name="twitter:image" content="https://hundredstories.xyz/og.png" />
     <meta name="theme-color" content="#0b1020" />
@@ -69,7 +69,7 @@
               and elevators, keep your tenants happy, and climb from one star to TOWER.
             </p>
             <a class="button" href="/play/">Play in your browser</a>
-            <p class="fineprint">No account. Nothing uploaded.</p>
+            <p class="fineprint">Free in your browser. No sign-up.</p>
           </div>
         </div>
       </section>
@@ -108,20 +108,131 @@
                   like.
                 </p>
               </article>
-              <article class="card">
-                <h3>Yours, and private</h3>
-                <p>
-                  There is no account, no server and nothing tracked. The source is public to
-                  read, so you can see exactly how the tower thinks.
-                </p>
-              </article>
+            </div>
+          </div>
+        </section>
+
+        <section class="floor" aria-labelledby="your-save">
+          <div class="wrap">
+            <p class="floor-tag">B3 &middot; YOUR SAVE</p>
+            <h2 id="your-save">Where your tower lives</h2>
+            <div class="platform-switcher" id="platform-switcher">
+              <div class="platform-tabs" id="platform-tablist" role="tablist" aria-label="Platform">
+                <button
+                  type="button"
+                  class="platform-tab"
+                  role="tab"
+                  id="platform-tab-web"
+                  aria-controls="platform-panel-web"
+                  aria-selected="true"
+                >
+                  Web
+                </button>
+                <button
+                  type="button"
+                  class="platform-tab"
+                  role="tab"
+                  id="platform-tab-ios"
+                  aria-controls="platform-panel-ios"
+                  aria-selected="false"
+                  tabindex="-1"
+                >
+                  iPhone &amp; iPad
+                </button>
+                <button
+                  type="button"
+                  class="platform-tab"
+                  role="tab"
+                  id="platform-tab-android"
+                  aria-controls="platform-panel-android"
+                  aria-selected="false"
+                  tabindex="-1"
+                >
+                  Android
+                </button>
+                <span class="platform-tab-highlight" id="platform-tab-highlight" aria-hidden="true"></span>
+              </div>
+              <div class="platform-panel" id="platform-panel-web" role="tabpanel" aria-labelledby="platform-tab-web">
+                <dl class="platform-rows">
+                  <div class="platform-row">
+                    <dt>Account</dt>
+                    <dd>None. Open the page and play.</dd>
+                  </div>
+                  <div class="platform-row">
+                    <dt>Where it saves</dt>
+                    <dd>In this browser, on this device.</dd>
+                  </div>
+                  <div class="platform-row">
+                    <dt>Backup</dt>
+                    <dd>
+                      Export a save file from the menu any time. Clearing this site's data
+                      deletes the tower.
+                    </dd>
+                  </div>
+                  <div class="platform-row">
+                    <dt>Tracking</dt>
+                    <dd>None. Nothing leaves your device.</dd>
+                  </div>
+                </dl>
+              </div>
+              <div class="platform-panel" id="platform-panel-ios" role="tabpanel" aria-labelledby="platform-tab-ios">
+                <dl class="platform-rows">
+                  <div class="platform-row">
+                    <dt>Account</dt>
+                    <dd>None with us. You download it with your own Apple ID, like any app.</dd>
+                  </div>
+                  <div class="platform-row">
+                    <dt>Where it saves</dt>
+                    <dd>Inside the app, on your iPhone or iPad.</dd>
+                  </div>
+                  <div class="platform-row">
+                    <dt>Backup</dt>
+                    <dd>
+                      Included in your own iCloud or device backup, under your Apple account.
+                      You can also export a file.
+                    </dd>
+                  </div>
+                  <div class="platform-row">
+                    <dt>Tracking</dt>
+                    <dd>None. No analytics, no ads, no servers of ours.</dd>
+                  </div>
+                </dl>
+              </div>
+              <div
+                class="platform-panel"
+                id="platform-panel-android"
+                role="tabpanel"
+                aria-labelledby="platform-tab-android"
+              >
+                <dl class="platform-rows">
+                  <div class="platform-row">
+                    <dt>Account</dt>
+                    <dd>None with us. You download it with your own Google account, like any app.</dd>
+                  </div>
+                  <div class="platform-row">
+                    <dt>Where it saves</dt>
+                    <dd>Inside the app, on your phone or tablet.</dd>
+                  </div>
+                  <div class="platform-row">
+                    <dt>Backup</dt>
+                    <dd>
+                      Included in your own Google backup when it is turned on. You can also
+                      export a file.
+                    </dd>
+                  </div>
+                  <div class="platform-row">
+                    <dt>Tracking</dt>
+                    <dd>None. No analytics, no ads, no servers of ours.</dd>
+                  </div>
+                </dl>
+              </div>
             </div>
           </div>
         </section>
 
         <section class="floor" aria-labelledby="how-it-plays">
           <div class="wrap">
-            <p class="floor-tag">B3 &middot; HOW IT PLAYS</p>
+            <p class="floor-tag">B4 &middot; HOW IT PLAYS</p>
             <h2 id="how-it-plays">How it plays</h2>
             <ol class="steps">
               <li><span class="step-num">01</span>Start with a lobby and a little cash.</li>
@@ -140,7 +251,7 @@
 
         <section class="floor" aria-labelledby="platforms">
           <div class="wrap">
-            <p class="floor-tag">B4 &middot; PHONE, TABLET OR DESKTOP</p>
+            <p class="floor-tag">B5 &middot; PHONE, TABLET OR DESKTOP</p>
             <h2 id="platforms">Phone, tablet or desktop</h2>
             <div class="note">
               <p>
@@ -149,12 +260,17 @@
                 opens like an app.
               </p>
             </div>
-            <p class="store-lead">Coming as an app for phones, tablets and Steam:</p>
+            <h3>Take your tower with you</h3>
+            <p>The full game is coming to iPhone, iPad and Android. Same tower, made for touch.</p>
             <div class="store-row" id="store-row">
-              <span class="store-link is-soon">App Store: coming soon</span>
-              <span class="store-link is-soon">Google Play: coming soon</span>
-              <span class="store-link is-soon">Steam: coming soon</span>
+              <span class="store-link is-soon" aria-label="App Store, coming soon"
+                ><span class="store-link-top">Coming soon to</span><span class="store-link-name">App Store</span></span
+              >
+              <span class="store-link is-soon" aria-label="Google Play, coming soon"
+                ><span class="store-link-top">Coming soon to</span><span class="store-link-name">Google Play</span></span
+              >
             </div>
+            <p><a class="button" href="/play/">Play now in your browser</a></p>
           </div>
         </section>
       </div>
@@ -165,13 +281,12 @@
         <div class="foot-grid">
           <div class="foot-brand">
             <a href="/" aria-label="Hundred Stories home"><img src="/wordmark-line-dark.svg" alt="Hundred Stories" width="1032" height="112"></a>
-            <p>A tower sim for the browser, coming to the App Store, Google Play and Steam. Plays offline, saves on your device, nothing uploaded.</p>
+            <p>A tower sim for the browser, coming to the App Store and Google Play. Plays offline and saves on your device.</p>
           </div>
           <nav class="foot-col" aria-labelledby="foot-play">
             <h2 id="foot-play">Play</h2>
             <a href="/play/">Play in your browser</a>
             <a href="/how-to-play/">How to play</a>
-            <a href="https://github.com/parallaxintelligencepartnership/hundred-stories">Source on GitHub</a>
             <a href="/privacy/">Privacy</a>
           </nav>
           <div class="foot-col">
@@ -182,7 +297,6 @@
           <div class="foot-col">
             <h2>Licence</h2>
             <a href="https://polyformproject.org/licenses/strict/1.0.0">PolyForm Strict 1.0.0</a>
-            <span>Play in the browser. Source available to read.</span>
           </div>
         </div>
         <div class="foot-base">

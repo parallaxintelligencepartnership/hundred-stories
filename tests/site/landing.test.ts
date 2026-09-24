@@ -77,12 +77,13 @@ describe('the page is the building in cross section', () => {
 
   it('sends the landing page underground below the hero, one floor per section', () => {
     expect(landing).toContain('<div class="underground">');
-    expect(landing.match(/<section class="floor"/g)).toHaveLength(4);
+    expect(landing.match(/<section class="floor"/g)).toHaveLength(5);
     for (const tag of [
       'B1 &middot; THE NAME',
       'B2 &middot; WHAT IT IS',
-      'B3 &middot; HOW IT PLAYS',
-      'B4 &middot; PHONE, TABLET OR DESKTOP',
+      'B3 &middot; YOUR SAVE',
+      'B4 &middot; HOW IT PLAYS',
+      'B5 &middot; PHONE, TABLET OR DESKTOP',
     ]) {
       expect(landing).toContain(`<p class="floor-tag">${tag}</p>`);
     }

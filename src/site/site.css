@@ -192,7 +192,7 @@ p {
   display: block;
 }
 
-.wordmark-light {
+.site-wordmark .wordmark-light {
   display: none;
 }
 
@@ -789,34 +789,129 @@ p {
   }
 }
 
-/* Store row: one slab per store, a link once the listing exists, "coming soon" until then. */
-
-.store-lead {
-  margin: 20px 0 8px;
-}
+/* Store row: one big app-style button per store, a link once the listing exists, "coming soon"
+   text until then. No store logos or trademark badge artwork; the two-line label carries it. */
 
 .store-row {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+  margin: 12px 0;
 }
 
 .store-link {
-  display: inline-block;
-  padding: 8px 14px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  min-height: 56px;
+  min-width: 200px;
+  padding: 6px 18px;
   background: var(--w-lobby);
   color: var(--w-text);
   border: 2px solid var(--w-outline);
+  border-radius: 14px;
   box-shadow: 3px 3px 0 var(--w-outline);
   font-family: var(--font-ui);
-  font-size: var(--size-15);
-  font-weight: 600;
   text-decoration: none;
+}
+
+.store-link-top {
+  font-size: var(--size-12);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.store-link-name {
+  font-size: var(--size-20);
+  font-weight: 700;
 }
 
 .store-link.is-soon {
   background: var(--w-security);
   color: var(--w-concrete-line);
   box-shadow: none;
-  font-weight: 500;
+}
+
+/* Platform switcher: three tabs (Web, iPhone & iPad, Android), a sliding highlight behind the
+   selected one. The transition is a transform, killed globally under prefers-reduced-motion. */
+
+.platform-switcher {
+  margin: 20px 0;
+}
+
+.platform-tabs {
+  position: relative;
+  display: flex;
+  padding: 4px;
+  background: var(--w-security);
+  border: 2px solid var(--w-outline);
+  border-radius: 999px;
+}
+
+.platform-tab {
+  position: relative;
+  z-index: 1;
+  flex: 1 1 0;
+  padding: 10px 12px;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  font-family: var(--font-ui);
+  font-size: var(--size-15);
+  font-weight: 600;
+  color: var(--w-text);
+  text-align: center;
+  cursor: pointer;
+}
+
+.platform-tab[aria-selected='true'] {
+  color: var(--w-lobby);
+}
+
+.platform-tab-highlight {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 4px;
+  width: calc((100% - 8px) / 3);
+  background: var(--w-outline);
+  border-radius: 999px;
+  transform: translateX(0);
+  transition: transform 0.2s ease;
+  z-index: 0;
+}
+
+.platform-panel {
+  margin-top: 16px;
+}
+
+.platform-rows {
+  margin: 0;
+}
+
+.platform-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 4px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--w-concrete-line);
+}
+
+.platform-row dt {
+  font-weight: 700;
+  color: var(--w-text);
+}
+
+.platform-row dd {
+  margin: 0;
+  color: var(--w-text-dim);
+}
+
+@media (min-width: 720px) {
+  .platform-row {
+    grid-template-columns: 160px 1fr;
+    align-items: baseline;
+  }
 }
