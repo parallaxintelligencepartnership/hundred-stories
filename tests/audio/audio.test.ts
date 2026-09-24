@@ -318,13 +318,14 @@ describe('the AudioContext and the master toggle', () => {
     const scoreVoices = ctxs[0]!.oscillators.length;
     game.emit({ kind: 'car.arrive', shaftId: 1, carId: 1 });
     game.emit({ kind: 'car.arrive', shaftId: 1, carId: 2 }); // same instant: dropped
-    expect(ctxs[0]!.oscillators).toHaveLength(scoreVoices + 2);
-    t = 399;
-    game.emit({ kind: 'car.arrive', shaftId: 1, carId: 3 });
-    expect(ctxs[0]!.oscillators).toHaveLength(scoreVoices + 2);
-    t = 400;
+    // A bell is two struck notes of two partials each; the global cooldown is 1.5 s.
+    expect(ctxs[0]!.oscillators).toHaveLength(scoreVoices + 4);
+    t = 1499;
     game.emit({ kind: 'car.arrive', shaftId: 1, carId: 3 });
     expect(ctxs[0]!.oscillators).toHaveLength(scoreVoices + 4);
+    t = 6000; // the first two arrivals have left the 5 s burst window
+    game.emit({ kind: 'car.arrive', shaftId: 1, carId: 3 });
+    expect(ctxs[0]!.oscillators).toHaveLength(scoreVoices + 8);
     sound.setEnabled(false);
     expect(ctxs[0]!.gains[0]!.gain.value).toBe(0);
     sound.destroy();

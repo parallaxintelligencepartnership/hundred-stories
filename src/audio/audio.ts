@@ -214,6 +214,109 @@ export function effectFor(event: GameEvent): Effect | null {
   }
 }
 
+// ------------------------------------------------------------ elevator bells
+
+/**
+ * Elevator bells: a muted, wooden two-note ding per shaft timbre that sits in the lofi bed. Each
+ * note is a struck bar (attack under 5 ms, decay under 250 ms) under a 2.5 kHz low-pass, peaking
+ * at -14 dBFS on the effects bus. Pairs are [first, second] fundamentals in Hz.
+ */
+export const BELL_TIMBRES: readonly (readonly [number, number])[] = [
+  [392, 330], // G4 E4
+  [440, 349.23], // A4 F4
+  [493.88, 392], // B4 G4
+  [466.16, 369.99], // B-flat4 F-sharp4
+];
+export const BELL = {
+  attack: 0.004,
+  decay: 0.22,
+  lowpassHz: 2500,
+  peakDb: -14,
+  gapSeconds: 0.11,
+  /** Global cooldown between any two bell or door sounds. */
+  cooldownMs: 1500,
+  /** More than `burstCount` arrivals within `burstWindowMs` is a burst. */
+  burstCount: 3,
+  burstWindowMs: 5000,
+  /** During a burst: one soft tick at most this often, this loud. */
+  tickEveryMs: 5000,
+  tickDb: -26,
+  doorDb: -22,
+} as const;
+
+export type BellSound = 'bell' | 'tick' | 'door' | null;
+
+/**
+ * Decides what an arrival or a door opening sounds like, from when it happens (ms). Every
+ * arrival counts toward the burst window, heard or not. Outside a burst, one sound per global
+ * cooldown; inside one, a single soft tick per tickEveryMs and no doors.
+ */
+export function createBellGate() {
+  const arrivals: number[] = [];
+  let lastSound = -Infinity;
+  let lastTick = -Infinity;
+  const inBurst = (t: number): boolean => {
+    while (arrivals.length && t - arrivals[0]! >= BELL.burstWindowMs) arrivals.shift();
+    return arrivals.length > BELL.burstCount;
+  };
+  return {
+    arrive(t: number): BellSound {
+      arrivals.push(t);
+      if (inBurst(t)) {
+        if (t - lastTick < BELL.tickEveryMs) return null;
+        lastTick = t; lastSound = t;
+        return 'tick';
+      }
+      if (t - lastSound < BELL.cooldownMs) return null;
+      lastSound = t;
+      return 'bell';
+    },
+    doors(t: number): BellSound {
+      if (inBurst(t) || t - lastSound < BELL.cooldownMs) return null;
+      lastSound = t;
+      return 'door';
+    },
+  };
+}
+
+/** One struck, wooden note: a sine and a faint inharmonic overtone, low-passed. */
+function woodNote(ctx: AudioContextLike, out: AudioNode, hz: number, at: number, peak: number, decay: number): void {
+  const lid = ctx.createBiquadFilter(); lid.type = 'lowpass'; lid.frequency.setValueAtTime(BELL.lowpassHz, at);
+  const env = ctx.createGain();
+  env.gain.setValueAtTime(0.0001, at);
+  env.gain.linearRampToValueAtTime(peak, at + BELL.attack);
+  env.gain.exponentialRampToValueAtTime(0.0001, at + decay);
+  lid.connect(env); env.connect(out);
+  for (const [ratio, level] of [[1, 1], [2.76, 0.12]] as const) {
+    const osc = ctx.createOscillator(); osc.type = 'sine'; osc.frequency.setValueAtTime(hz * ratio, at);
+    const g = ctx.createGain(); g.gain.value = level / 1.12;
+    osc.connect(g); g.connect(lid); osc.start(at); osc.stop(at + decay + 0.02);
+  }
+}
+
+/** The two-note ding for a shaft's timbre. */
+export function playBell(ctx: AudioContextLike, out: AudioNode, shaftId: number, at: number = ctx.currentTime): void {
+  const [first, second] = BELL_TIMBRES[Math.abs(shaftId) % BELL_TIMBRES.length]!;
+  woodNote(ctx, out, first, at, dbToGain(BELL.peakDb), BELL.decay);
+  woodNote(ctx, out, second, at + BELL.gapSeconds, dbToGain(BELL.peakDb - 2), BELL.decay);
+}
+/** The burst tick: one short, soft wooden note. */
+export function playBellTick(ctx: AudioContextLike, out: AudioNode, at: number = ctx.currentTime): void {
+  woodNote(ctx, out, BELL_TIMBRES[0]![1], at, dbToGain(BELL.tickDb), BELL.decay * 0.6);
+}
+/** The door swish: band-limited noise in the same struck envelope. */
+export function playDoorSwish(ctx: AudioContextLike, out: AudioNode, at: number = ctx.currentTime): void {
+  const src = ctx.createBufferSource(); src.buffer = whiteNoise(ctx);
+  const band = ctx.createBiquadFilter(); band.type = 'bandpass'; band.frequency.setValueAtTime(700, at);
+  const lid = ctx.createBiquadFilter(); lid.type = 'lowpass'; lid.frequency.setValueAtTime(BELL.lowpassHz, at);
+  const env = ctx.createGain();
+  env.gain.setValueAtTime(0.0001, at);
+  env.gain.linearRampToValueAtTime(dbToGain(BELL.doorDb), at + BELL.attack);
+  env.gain.exponentialRampToValueAtTime(0.0001, at + BELL.decay);
+  src.connect(band); band.connect(lid); lid.connect(env); env.connect(out);
+  src.start(at); src.stop(at + BELL.decay + 0.02);
+}
+
 // ------------------------------------------------------------------ ambient
 
 export const TRAFFIC_DB = -30;
@@ -384,6 +487,8 @@ export interface Sound {
    * creation when pinned before it). Listening presets use it; the game never does.
    */
   pin?(source: PinSource | null): void;
+  /** Dev only: feeds one game event to the controller, as if the game had emitted it. */
+  devEvent?(event: GameEvent): void;
   destroy(): void;
 }
 
@@ -474,7 +579,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
   const musicFilters = new Map<BiquadFilterNode, number>();
   const scheduledMusic = new Set<AudioScheduledSourceNode>();
   const scheduledDrums = new Set<AudioScheduledSourceNode>();
-  let lastBell = -Infinity;
+  const bells = createBellGate();
   let lastThunder = -Infinity;
   let tensionOsc: OscillatorNode | null = null;
   let tensionGain: GainNode | null = null;
@@ -675,9 +780,11 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
     }
     if (tension) return;
     if (event.kind === 'car.arrive' || event.kind === 'car.doors') {
-      if (now() - lastBell < 400) return;
-      lastBell = now();
-      playNamedCue(event.kind === 'car.arrive' ? (`bell${Math.abs(event.shaftId) % 4}` as Cue) : 'door');
+      if (settings.effects <= 0) return;
+      const heard = event.kind === 'car.arrive' ? bells.arrive(now()) : bells.doors(now());
+      if (heard === 'bell') playBell(ctx, effectsBus, event.shaftId);
+      else if (heard === 'tick') playBellTick(ctx, effectsBus);
+      else if (heard === 'door') playDoorSwish(ctx, effectsBus);
       return;
     }
     if (settings.effects <= 0) return;
@@ -733,15 +840,16 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
       tone(ctx, effectsBus, 'sine', 988, at + 0.13, 0.07, 0.16);
       return;
     }
-    const bells = [[660, 880], [587, 784], [698, 932], [523, 698]];
     const notes: Record<string, number[]> = {
       'fire.start': [220, 262], 'bomb.start': [82, 82, 82], 'release.up': [330, 440], 'release.down': [330, 247],
       'vip.notice': [392, 523], 'vip.arrival': [392, 523, 659], 'vip.poor': [440, 330], 'vip.fair': [392, 392], 'vip.good': [330, 440],
       star2: [523, 659], star3: [523, 659, 784], star4: [523, 659, 784, 1047], star5: [523, 659, 784, 1047, 1318],
       tower: [261, 329, 392, 440, 523, 659, 784, 1047, 784, 1047, 1318, 1047],
     };
-    if (name === 'door' || name === 'build' || name === 'register') { playEffect(ctx, effectsBus, name); return; }
-    const line = name.startsWith('bell') ? bells[Number(name.slice(-1))]! : notes[name] ?? [];
+    if (name === 'door') { playDoorSwish(ctx, effectsBus); return; }
+    if (name.startsWith('bell')) { playBell(ctx, effectsBus, Number(name.slice(-1))); return; }
+    if (name === 'build' || name === 'register') { playEffect(ctx, effectsBus, name); return; }
+    const line = notes[name] ?? [];
     const duration = cueDuration(name);
     line.forEach((hz, i) => tone(ctx!, effectsBus!, name === 'fire.start' ? 'triangle' : 'sine', hz, ctx!.currentTime + i * duration / line.length, Math.min(0.45, duration / line.length), 0.32));
   }
@@ -1037,6 +1145,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
     get filterHz() { return filterHz; },
     get mood() { return { ...easedMood }; },
     get activeVoices() { return [...activeVoices]; },
+    devEvent(event) { onEvent(event); },
     pin(source) {
       pinned = source;
       pinnedAt = ctx ? ctx.currentTime : null;

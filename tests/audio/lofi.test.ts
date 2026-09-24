@@ -2,6 +2,7 @@
 // a later change cannot quietly bring back the clipped, alarm-topped score Matt heard.
 import { describe, expect, it } from 'vitest';
 import {
+  BELL, BELL_TIMBRES, createBellGate, playBell, playBellTick, playDoorSwish,
   createSound, dbToGain, LIMITER, LOOKAHEAD_SECONDS, MASTER_CHAIN, TAPE_WOBBLE_CENTS, TEXTURE_DB,
   type AudioContextLike,
 } from '../../src/audio/audio';
@@ -291,5 +292,81 @@ describe('mood shapes the band', () => {
     expect(storm.warmth).toBeLessThan(0.3);
     expect(weekend.warmth).toBeGreaterThan(0.6);
     expect(voicesFor(5, true)).toContain('pluck');
+  });
+});
+
+// ------------------------------------------------------------------ elevator bells
+
+describe('muted elevator bells', () => {
+  it('has four wooden timbres with fundamentals between 330 and 520 Hz', () => {
+    expect(BELL_TIMBRES).toHaveLength(4);
+    for (const pair of BELL_TIMBRES) for (const hz of pair) { expect(hz).toBeGreaterThanOrEqual(330); expect(hz).toBeLessThanOrEqual(520); }
+    expect(new Set(BELL_TIMBRES.map(p => p.join())).size).toBe(4);
+    const ctx = new Ctx();
+    playBell(ctx as unknown as AudioContextLike, ctx.destination as never, 2, 0);
+    const fundamentals = ctx.of('osc').map(o => o.frequency.value).filter(hz => hz < 1000);
+    expect(fundamentals.sort()).toEqual([...BELL_TIMBRES[2]!].sort());
+  });
+  it('strikes like a bar: attack under 5 ms, decay under 250 ms, a 2.5 kHz low-pass, -14 dBFS peak', () => {
+    expect(BELL.attack).toBeLessThan(0.005);
+    expect(BELL.decay).toBeLessThan(0.25);
+    expect(BELL.lowpassHz).toBe(2500);
+    expect(BELL.peakDb).toBe(-14);
+    for (const play of [
+      (c: AudioContextLike, n: AudioNode) => playBell(c, n, 0, 0),
+      (c: AudioContextLike, n: AudioNode) => playBellTick(c, n, 0),
+      (c: AudioContextLike, n: AudioNode) => playDoorSwish(c, n, 0),
+    ]) {
+      const ctx = new Ctx();
+      play(ctx as unknown as AudioContextLike, ctx.destination as never);
+      const lowpasses = ctx.of('filter').filter(f => f.type === 'lowpass');
+      expect(lowpasses.length).toBeGreaterThan(0);
+      for (const f of lowpasses) expect(f.frequency.value).toBe(2500);
+      // Envelope gains end at silence; their loudest point is at most -14 dBFS.
+      const envelopes = ctx.of('gain').filter(g => g.connections.includes(ctx.destination));
+      expect(envelopes.length).toBeGreaterThan(0);
+      for (const env of envelopes) expect(env.gain.value).toBeLessThanOrEqual(0.0001);
+    }
+    // The first note's envelope rises to exactly -14 dBFS; the partial levels sum to at most 1.
+    const ctx = new Ctx();
+    const peaks: number[] = [];
+    const orig = Param.prototype.linearRampToValueAtTime;
+    Param.prototype.linearRampToValueAtTime = function (this: Param, v: number) { peaks.push(v); return orig.call(this, v); };
+    try { playBell(ctx as unknown as AudioContextLike, ctx.destination as never, 1, 0); } finally { Param.prototype.linearRampToValueAtTime = orig; }
+    expect(20 * Math.log10(Math.max(...peaks))).toBeCloseTo(-14, 5);
+    const partials = ctx.of('gain').filter(g => ctx.of('osc').some(o => o.connections.includes(g)));
+    expect(partials.slice(0, 2).reduce((sum, g) => sum + g.gain.value, 0)).toBeLessThanOrEqual(1);
+  });
+  it('waits 1.5 s between any two bell or door sounds', () => {
+    const gate = createBellGate();
+    expect(gate.arrive(0)).toBe('bell');
+    expect(gate.doors(500)).toBe(null);
+    expect(gate.arrive(1400)).toBe(null);
+    expect(gate.doors(3000)).toBe('door');
+    expect(gate.doors(4000)).toBe(null);
+    expect(gate.arrive(4600)).toBe('bell'); // three arrivals in 5 s: not a burst
+  });
+  it('drops to one soft tick per 5 s when more than three cars arrive within 5 s, until the burst passes', () => {
+    const gate = createBellGate();
+    const heard: [number, string | null][] = [];
+    for (let t = 0; t <= 20000; t += 700) heard.push([t, gate.arrive(t)]);
+    expect(heard[0]![1]).toBe('bell');
+    const ticks = heard.filter(([, h]) => h === 'tick').map(([t]) => t);
+    expect(heard.filter(([, h]) => h === 'bell')).toHaveLength(1);
+    expect(ticks[0]).toBe(2100); // the fourth arrival in 5 s
+    for (let i = 1; i < ticks.length; i += 1) expect(ticks[i]! - ticks[i - 1]!).toBeGreaterThanOrEqual(5000);
+    expect(gate.doors(20100)).toBe(null); // no doors inside a burst
+    // Quiet for 5 s: the burst has passed and the next arrival rings again.
+    expect(gate.arrive(26000)).toBe('bell');
+  });
+  it('rings the controller through the gate, one timbre per shaft', () => {
+    const { ctx, sound } = listen('rush-hour-3star', 606);
+    const before = ctx.of('osc').length;
+    sound.devEvent!({ kind: 'car.arrive', shaftId: 3, carId: 1 });
+    const rung = ctx.of('osc').slice(before).map(o => o.frequency.value).filter(hz => hz < 1000);
+    expect(rung.sort()).toEqual([...BELL_TIMBRES[3]!].sort());
+    const after = ctx.of('osc').length;
+    sound.devEvent!({ kind: 'car.arrive', shaftId: 1, carId: 2 }); // same instant: inside the cooldown
+    expect(ctx.of('osc')).toHaveLength(after);
   });
 });

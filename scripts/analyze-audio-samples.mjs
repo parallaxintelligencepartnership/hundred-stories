@@ -15,16 +15,21 @@
 //             70 % of bars
 //   tone      the loudest narrowband tone above 1 kHz holding over 30 % of a frame's energy for
 //             more than 0.5 s; none allowed
+//   bells     for presets that fire elevator arrivals, when the render left a reference without
+//             them in <tmpdir>/hs-audio-reference: RMS at most 1 dB above it
 // fire-3star is judged on seconds 20 to 45 (its first 20 s are the tension state); every other
 // file on the whole render. The onset floor scales with the judged length. Exit code 1 on any FAIL.
 
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_DIR = join(ROOT, 'docs', 'reviews', 'audio-samples-2026-09-23');
 const WINDOWS = { 'fire-3star': [20, 45] };
+// Level references rendered without elevator arrivals by scripts/render-audio-samples.mjs.
+const REFERENCE_DIR = join(tmpdir(), 'hs-audio-reference');
 // --onsets prints the detected onsets of the first 12 judged seconds, for debugging the detector.
 const SHOW_ONSETS = process.argv.includes('--onsets');
 
@@ -316,6 +321,12 @@ function analyse(path) {
     ['snare', snareShare >= 0.7, `snare on 2 and 4 in ${rh.snareBars}/${rh.bars} bars, ${pct(snareShare)} (want >= 70%)`],
     ['tone', !bt.tone, bt.tone ? `sustained ${bt.tone.hz.toFixed(0)} Hz for ${bt.tone.seconds.toFixed(2)} s from ${(from + bt.tone.at).toFixed(1)} s, ${pct(bt.tone.share)} of frame energy` : 'no sustained tone above 1 kHz'],
   ];
+  const refPath = join(REFERENCE_DIR, `${name}.wav`);
+  if (existsSync(refPath)) {
+    const ref = readWav(refPath).channels.map((ch) => ch.subarray(a, b));
+    const refRms = level(ref).rms;
+    checks.push(['bells', lv.rms - refRms <= 1, `the arrivals add ${(lv.rms - refRms).toFixed(2)} dB RMS over the same scene without them, ${refRms.toFixed(1)} dBFS (want <= 1 dB)`]);
+  }
   const lines = [`${name}.wav  (judged on ${from.toFixed(0)} to ${to.toFixed(0)} s)`];
   for (const [id, ok, text] of checks) lines.push(`  ${ok ? 'PASS' : 'FAIL'}  ${id.padEnd(8)}${text}`);
   return { lines, failed: checks.filter((c) => !c[1]).length };

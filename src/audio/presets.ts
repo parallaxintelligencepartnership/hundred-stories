@@ -15,6 +15,8 @@ export interface Preset {
   chapter: Chapter;
   /** Tension held for this many seconds from the start, then released to 0. */
   tensionSeconds?: number;
+  /** Offline renders only: a car.arrive every this many ms, alternating four shafts. */
+  arrivalsEveryMs?: number;
 }
 
 export const PRESETS = {
@@ -23,6 +25,7 @@ export const PRESETS = {
   'weekend-night-5star': { minuteOfDay: 21 * 60 + 30, isWeekend: true, venueFill: 1, weather: 'clear', intensity: 1, chapter: 5 },
   'storm-night-tower': { minuteOfDay: 23 * 60 + 30, isWeekend: false, venueFill: 0.5, weather: 'storm', intensity: 0.9, chapter: 6 },
   'fire-3star': { minuteOfDay: 14 * 60, isWeekend: false, venueFill: 0.4, weather: 'clear', intensity: 1, chapter: 3, tensionSeconds: 20 },
+  'rush-hour-3star': { minuteOfDay: 8 * 60 + 30, isWeekend: false, venueFill: 0.6, weather: 'clear', intensity: 1, chapter: 3, arrivalsEveryMs: 700 },
 } as const satisfies Record<string, Preset>;
 
 export type PresetName = keyof typeof PRESETS;
@@ -82,19 +85,27 @@ function localStore(): SoundStore | null {
  * gets an OfflineAudioContext instead and the result lands on window.__audioSample.
  */
 export function armDevAudio(name: string, render: string | null): boolean {
+  // "<preset>:quiet" renders the preset without its elevator arrivals, as a level reference.
+  const quiet = name.endsWith(':quiet');
+  if (quiet) name = name.slice(0, -':quiet'.length);
   if (!isPreset(name)) return false;
   const seconds = render === null ? NaN : Number(render);
-  if (Number.isFinite(seconds) && seconds > 0) armRender(name, seconds);
+  if (Number.isFinite(seconds) && seconds > 0) armRender(name, seconds, quiet);
   else setSoundDevHook({ deps: { store: sessionOnStore(localStore()) }, created: (sound) => void withDevPresets(sound).setDevPreset(name) });
   return true;
 }
 
 export const RENDER_RATE = 44100;
 const STEP_SECONDS = 0.5;
+/** Finer render steps when a preset fires arrivals, so each lands on its own time. */
+const EVENT_STEP_SECONDS = 0.1;
 
 interface RenderWindow { __audioSample?: string; __audioSampleError?: string }
 
-function armRender(name: PresetName, seconds: number): void {
+function armRender(name: PresetName, seconds: number, quiet = false): void {
+  const p: Preset = PRESETS[name];
+  const every = quiet ? undefined : p.arrivalsEveryMs;
+  const step = p.arrivalsEveryMs ? EVENT_STEP_SECONDS : STEP_SECONDS;
   const w = window as unknown as RenderWindow;
   const offline = new OfflineAudioContext({ numberOfChannels: 2, length: Math.ceil(seconds * RENDER_RATE), sampleRate: RENDER_RATE });
   const timers: Array<() => void> = [];
@@ -120,9 +131,16 @@ function armRender(name: PresetName, seconds: number): void {
       if (!sound.hasContext) { w.__audioSampleError = 'The controller did not build its context.'; return; }
       void (async () => {
         try {
-          for (let t = STEP_SECONDS; t < seconds; t += STEP_SECONDS) {
+          let arrival = 0;
+          const steps = Math.floor(seconds / step - 1e-9);
+          for (let i = 1; i <= steps; i += 1) {
+            const t = Math.round(i * step * 1000) / 1000;
             void offline.suspend(t).then(() => {
               for (const tick of timers) tick();
+              if (every && Math.round(t * 1000) % every === 0) {
+                sound.devEvent?.({ kind: 'car.arrive', shaftId: arrival % 4, carId: arrival });
+                arrival += 1;
+              }
               void offline.resume();
             });
           }

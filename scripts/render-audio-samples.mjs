@@ -20,13 +20,17 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME_PATH = process.env.CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const OUT_DIR = join(ROOT, 'docs', 'reviews', 'audio-samples-2026-09-23');
 // The names in src/audio/presets.ts.
-const PRESETS = ['sunny-morning-1star', 'rainy-tuesday-5star', 'weekend-night-5star', 'storm-night-tower', 'fire-3star'];
+const PRESETS = ['sunny-morning-1star', 'rainy-tuesday-5star', 'weekend-night-5star', 'storm-night-tower', 'fire-3star', 'rush-hour-3star'];
+// Presets that fire elevator arrivals also render once without them ("<name>:quiet"), outside
+// the repo, so scripts/analyze-audio-samples.mjs can check what the bells add to the level.
+const WITH_REFERENCE = new Set(['rush-hour-3star']);
+export const REFERENCE_DIR = join(tmpdir(), 'hs-audio-reference');
 const SECONDS = 45;
 // A fixed world seed per preset (the seed picks tempo, key and patterns), so a render is
 // reproducible. --seed-offset N shifts every seed to hear other worlds.
 const offsetArg = process.argv.indexOf('--seed-offset');
 const SEED_OFFSET = offsetArg > 0 ? Number(process.argv[offsetArg + 1]) || 0 : 0;
-const SEEDS = { 'sunny-morning-1star': 101, 'rainy-tuesday-5star': 202, 'weekend-night-5star': 303, 'storm-night-tower': 404, 'fire-3star': 505 };
+const SEEDS = { 'sunny-morning-1star': 101, 'rainy-tuesday-5star': 202, 'weekend-night-5star': 303, 'storm-night-tower': 404, 'fire-3star': 505, 'rush-hour-3star': 606 };
 const CHUNK = 1 << 20;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -132,7 +136,8 @@ async function launchChrome() {
 }
 
 async function renderOne(browser, base, name) {
-  await browser.send('Page.navigate', { url: `${base}/play/?new&seed=${SEEDS[name] + SEED_OFFSET}&audio=${name}&render=${SECONDS}` });
+  const preset = name.replace(/:quiet$/, '');
+  await browser.send('Page.navigate', { url: `${base}/play/?new&seed=${SEEDS[preset] + SEED_OFFSET}&audio=${encodeURIComponent(name)}&render=${SECONDS}` });
   for (let i = 0; i < 600; i++) {
     await sleep(500);
     const state = await browser.evaluate(`(() => window.__audioSampleError ? 'error:' + window.__audioSampleError
@@ -166,6 +171,12 @@ async function main() {
         const file = join(OUT_DIR, `${name}.wav`);
         writeFileSync(file, wav);
         console.log(`${relative(ROOT, file)}  ${(wav.length / 1e6).toFixed(2)} MB`);
+        if (WITH_REFERENCE.has(name)) {
+          const quiet = await renderOne(browser, dev.base, `${name}:quiet`);
+          mkdirSync(REFERENCE_DIR, { recursive: true });
+          writeFileSync(join(REFERENCE_DIR, `${name}.wav`), quiet);
+          console.log(`${join(REFERENCE_DIR, `${name}.wav`)}  (reference without arrivals)`);
+        }
       } catch (e) {
         failed = true;
         console.error(String(e.message ?? e));

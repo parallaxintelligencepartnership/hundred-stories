@@ -1,33 +1,42 @@
-Soundtrack sample analysis, lofi beat pass (node scripts/analyze-audio-samples.mjs)
-Renders: npm run audio:samples, fixed seeds per preset (sunny 101, rainy 202, weekend 303, storm 404, fire 505).
+Soundtrack sample analysis (node scripts/analyze-audio-samples.mjs)
+Renders: npm run audio:samples, fixed seeds per preset (sunny 101, rainy 202, weekend 303, storm 404, fire 505, rush hour 606).
+rush-hour-3star fires a car.arrive every 700 ms alternating shafts; its bells line compares with the same render without arrivals.
 
-== After ==
+== After: lofi pass and muted elevator bells ==
 fire-3star.wav  (judged on 20 to 45 s)
   PASS  rms     RMS -19.2 dBFS (want -20 to -14)
   PASS  peak    peak -2.7 dBFS (want <= -1)
   PASS  balance <300 Hz 65.4%  300-2k 32.6%  2-5k 1.5%  >5k 0.4% (want >5k < 5%, >2k < 20%)
-  PASS  tempo   74.0 BPM from 36 low-band onsets (want 70 to 85 BPM, >= 34 onsets)
+  PASS  tempo   74.0 BPM from 37 low-band onsets (want 70 to 85 BPM, >= 34 onsets)
   PASS  snare   snare on 2 and 4 in 6/7 bars, 85.7% (want >= 70%)
   PASS  tone    no sustained tone above 1 kHz
 rainy-tuesday-5star.wav  (judged on 0 to 45 s)
   PASS  rms     RMS -18.1 dBFS (want -20 to -14)
   PASS  peak    peak -1.8 dBFS (want <= -1)
   PASS  balance <300 Hz 72.2%  300-2k 26.0%  2-5k 1.4%  >5k 0.4% (want >5k < 5%, >2k < 20%)
-  PASS  tempo   73.0 BPM from 106 low-band onsets (want 70 to 85 BPM, >= 60 onsets)
+  PASS  tempo   73.0 BPM from 107 low-band onsets (want 70 to 85 BPM, >= 60 onsets)
   PASS  snare   snare on 2 and 4 in 12/13 bars, 92.3% (want >= 70%)
   PASS  tone    no sustained tone above 1 kHz
+rush-hour-3star.wav  (judged on 0 to 45 s)
+  PASS  rms     RMS -18.1 dBFS (want -20 to -14)
+  PASS  peak    peak -2.1 dBFS (want <= -1)
+  PASS  balance <300 Hz 80.0%  300-2k 18.1%  2-5k 1.4%  >5k 0.4% (want >5k < 5%, >2k < 20%)
+  PASS  tempo   76.0 BPM from 89 low-band onsets (want 70 to 85 BPM, >= 60 onsets)
+  PASS  snare   snare on 2 and 4 in 13/14 bars, 92.9% (want >= 70%)
+  PASS  tone    no sustained tone above 1 kHz
+  PASS  bells   the arrivals add 0.00 dB RMS over the same scene without them, -18.1 dBFS (want <= 1 dB)
 storm-night-tower.wav  (judged on 0 to 45 s)
   PASS  rms     RMS -17.7 dBFS (want -20 to -14)
   PASS  peak    peak -2.0 dBFS (want <= -1)
   PASS  balance <300 Hz 63.2%  300-2k 35.2%  2-5k 1.3%  >5k 0.3% (want >5k < 5%, >2k < 20%)
-  PASS  tempo   77.0 BPM from 81 low-band onsets (want 70 to 85 BPM, >= 60 onsets)
+  PASS  tempo   77.0 BPM from 80 low-band onsets (want 70 to 85 BPM, >= 60 onsets)
   PASS  snare   snare on 2 and 4 in 13/14 bars, 92.9% (want >= 70%)
   PASS  tone    no sustained tone above 1 kHz
 sunny-morning-1star.wav  (judged on 0 to 45 s)
   PASS  rms     RMS -18.1 dBFS (want -20 to -14)
   PASS  peak    peak -2.2 dBFS (want <= -1)
   PASS  balance <300 Hz 74.4%  300-2k 23.8%  2-5k 1.4%  >5k 0.4% (want >5k < 5%, >2k < 20%)
-  PASS  tempo   76.0 BPM from 82 low-band onsets (want 70 to 85 BPM, >= 60 onsets)
+  PASS  tempo   76.0 BPM from 83 low-band onsets (want 70 to 85 BPM, >= 60 onsets)
   PASS  snare   snare on 2 and 4 in 13/14 bars, 92.9% (want >= 70%)
   PASS  tone    no sustained tone above 1 kHz
 weekend-night-5star.wav  (judged on 0 to 45 s)
