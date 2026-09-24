@@ -73,3 +73,8 @@
 - 2026-09-22 | 0.4.8 went live at 22:53 as a hotfix (tag ship-2026-09-22c, the click-picking fix) and was never recorded; written up on 2026-09-24 from the tag and the Cloudflare version timestamp | why: the record must match what is live
 - 2026-09-24 | tenth ship 0.4.9, tag ship-2026-09-24: the story round, the fire alert fix and the audio fix, deployed by Claude on Matt's "push this to live" | why: Matt played the fresh tower and the fixed score and approved; closeout sweep clean apart from the audit-due IMPORTANT and the browser-probe ADVISORY, both written into SHIPPED.md as OUTSTANDING
 - 2026-09-24 | itworks.build publish not offered for this ship | why: Matt's standing rule is no wall publish while any finding is open, and two are
+- 2026-09-24 | Steam leaves every public surface (landing, guide, privacy, demo card); the Steam build code and Tauri steam feature stay | why: Matt, "we can keep the building for Steam code going"
+- 2026-09-24 | the GitHub source link and "Source available to read." leave every footer; the Requests link stays | why: Matt's call
+- 2026-09-24 | a room needs at least one tile of structure directly under it (above it for basements); one-room overhangs stay legal; demolishing something that is the only support is refused; existing towers are grandfathered | why: Matt, chained overhangs "wouldnt work in real life"
+- 2026-09-24 | no arrivals enter the tower while a fire is burning | why: Matt, people walking into a burning building is bad design
+- 2026-09-24 | leaderboards held: Game Center and Play Games are per-platform, web cannot join, one shared board needs a server | why: Matt agreed to hold
