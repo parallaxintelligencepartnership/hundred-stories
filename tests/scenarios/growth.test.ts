@@ -243,7 +243,9 @@ describe('report: reaching for the third star', () => {
     buildTower(world, [
       { kind: 'build', room: 'security', floor: 12, x: 130 },
       { kind: 'build', room: 'housekeeping', floor: 13, x: 130 },
-      ...buildRow('hotelSingle', 13, packRow(150, 260, ROOMS.hotelSingle.width).slice(0, 12)),
+      // The hotel rooms go on the lunch floor, beside the fast food, where the offices on
+      // floor 10 hold them up; floors 12 and 13 hold nothing past the security office's width.
+      ...buildRow('hotelSingle', COMMERCE_FLOOR, packRow(150, 260, ROOMS.hotelSingle.width).slice(0, 12)),
     ]);
     expect(countRooms(world, 'hotelSingle')).toBe(12);
     expect(countRooms(world, 'security')).toBe(1);

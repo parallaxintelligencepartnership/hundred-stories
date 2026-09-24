@@ -97,6 +97,9 @@ describe('the demo cap on', () => {
   it('allows rooms within the box, edge tiles included', async () => {
     const sim = await demoSim();
     const world = tower(sim);
+    // A lobby tile under each edge office, so each rests on something.
+    expect(sim.build.applyCommand(world, { kind: 'build', room: 'lobby', floor: 1, x: 120 })).toEqual({ ok: true });
+    expect(sim.build.applyCommand(world, { kind: 'build', room: 'lobby', floor: 1, x: 253 })).toEqual({ ok: true });
     expect(sim.build.applyCommand(world, { kind: 'build', room: 'office', floor: 2, x: 112 })).toEqual({ ok: true });
     expect(sim.build.applyCommand(world, { kind: 'build', room: 'office', floor: 2, x: 253 })).toEqual({ ok: true });
     expect(sim.build.applyCommand(world, { kind: 'build', room: 'lobby', floor: 1, x: 261 })).toEqual({ ok: true });
@@ -120,6 +123,8 @@ describe('the full edition', () => {
   it('allows both: above the floor cap and outside the band', () => {
     const world = tower(FULL);
     expect(fullBuild.applyCommand(world, { kind: 'build', room: 'office', floor: 21, x: 150 })).toEqual({ ok: true });
+    // A lobby tile outside the band holds up the office outside the band.
+    expect(fullBuild.applyCommand(world, { kind: 'build', room: 'lobby', floor: 1, x: 104 })).toEqual({ ok: true });
     expect(fullBuild.applyCommand(world, { kind: 'build', room: 'office', floor: 2, x: 100 })).toEqual({ ok: true });
     expect(fullBuild.applyCommand(world, { kind: 'build', room: 'office', floor: 2, x: 150 + 9 })).toEqual({ ok: true });
     expect(fullBuild.applyCommand(world, { kind: 'shaft.build', shaft: 'standard', x: 170, floorMin: 1, floorMax: 21 })).toEqual({ ok: true });

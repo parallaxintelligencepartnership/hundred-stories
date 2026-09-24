@@ -38,8 +38,9 @@ function tower(withSecurity: boolean): World {
   world.cash = 500_000_000;
   const script: Command[] = [...lobbyRun(90, 200), { kind: 'shaft.build', shaft: 'standard', x: 150, floorMin: 1, floorMax: 6 }];
   for (let f = 2; f <= 6; f++) script.push(...buildRow('office', f, [100]));
-  script.push({ kind: 'build', room: 'shop', floor: 5, x: 160 });
-  if (withSecurity) script.push({ kind: 'build', room: 'security', floor: 3, x: 160 });
+  // x 152: over the shaft's last two columns, so the shaft holds them up.
+  script.push({ kind: 'build', room: 'shop', floor: 5, x: 152 });
+  if (withSecurity) script.push({ kind: 'build', room: 'security', floor: 3, x: 152 });
   buildTower(world, script);
   buildTower(world, [{ kind: 'shaft.addCar', shaftId: onlyShaft(world).id }]);
   return world;

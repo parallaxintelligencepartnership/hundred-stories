@@ -393,7 +393,8 @@ describe('saves', () => {
 
 describe('a tower without a center', () => {
   it('a one star tower hashes exactly as it did before waste', () => {
-    // Recorded on 90682ab, before this package.
+    // Recorded on 90682ab, before this package. Re-recorded when rooms had to rest on structure:
+    // the same tower with the second condo moved onto the floor 3 offices hashes 2ee5cd9f on 90682ab too.
     const world = createWorld(1999);
     world.cash = 5_000_000;
     buildTower(world, [
@@ -401,10 +402,10 @@ describe('a tower without a center', () => {
       { kind: 'shaft.build', shaft: 'standard', x: 150, floorMin: 1, floorMax: 6 },
       ...buildRow('office', 2, [100, 109, 118, 127, 160, 169]),
       ...buildRow('office', 3, [100, 109, 118]),
-      ...buildRow('condo', 4, [100, 160]),
+      ...buildRow('condo', 4, [100, 116]),
       ...buildRow('fastFood', 5, [100]),
     ]);
     runDays(world, 3);
-    expect(hashWorld(world)).toBe('efb22060');
+    expect(hashWorld(world)).toBe('2ee5cd9f');
   });
 });

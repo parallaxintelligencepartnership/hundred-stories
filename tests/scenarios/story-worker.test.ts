@@ -29,6 +29,8 @@ const SHAFT_X = 148;
 /** Six offices either side of the shaft, the nearest two against its doors. */
 const OFFICE_XS = [94, 103, 112, 121, 130, 139, 152, 161, 170, 179, 188, 197];
 const NEXT_TO_SHAFT = [139, 152];
+/** The offices past the lobby run (140 to 160), repeated on floor 1 to hold the rest up. */
+const GROUND_XS = [94, 103, 112, 121, 130, 161, 170, 179, 188, 197];
 const TOP_FLOOR = 4;
 
 /**
@@ -38,9 +40,13 @@ const TOP_FLOOR = 4;
  */
 function busyTower(seed = SEED): World {
   const world = createWorld(seed);
+  world.cash = 5_000_000; // the ground floor offices below cost more than the starting cash
   const script: Command[] = [
     ...lobbyRun(140, 160),
     { kind: 'shaft.build', shaft: 'standard', x: SHAFT_X, floorMin: 1, floorMax: TOP_FLOOR },
+    // Ground floor offices hold up the floor 2 offices past the lobby's ends. Their staff never
+    // ride, and the lobby doors stay beside the shaft, so the rides and walks stay short.
+    ...buildRow('office', 1, GROUND_XS),
   ];
   for (let floor = 2; floor <= TOP_FLOOR; floor++) script.push(...buildRow('office', floor, OFFICE_XS));
   buildTower(world, script);

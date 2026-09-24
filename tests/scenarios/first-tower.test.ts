@@ -30,7 +30,7 @@ import {
   runDays,
   simsOfKind,
 } from './helpers';
-import type { Command, World } from '../../src/sim/types';
+import type { Command, Shaft, World } from '../../src/sim/types';
 
 const SEED = 12345;
 
@@ -41,7 +41,8 @@ const SHAFT_X = 176;
 /** Scenario 2: a lobby, one standard shaft up to floor 6, two offices on floors 2 to 5. */
 function firstTowerScript(officeXs: readonly number[] = [158, 185]): Command[] {
   return [
-    ...lobbyRun(150, 200),
+    // The lobby reaches under the leftmost office, so every office rests on it.
+    ...lobbyRun(Math.min(150, ...officeXs), 200),
     { kind: 'shaft.build', shaft: 'standard', x: SHAFT_X, floorMin: 1, floorMax: 6 },
     ...buildRow('office', 2, officeXs),
     ...buildRow('office', 3, officeXs),
@@ -58,26 +59,37 @@ function firstTower(seed = SEED, officeXs?: readonly number[]): World {
 
 /**
  * A thin tower: one shaft from the ground to floor 30 and a floor of offices on top.
- * Floors 2 to 29 only exist to satisfy the support rule, so they are cheap stairs
- * placed two floors apart and out of every route (no stair pair links floor f to f + 1
- * across the gaps, so nobody can walk up).
+ * Every room must rest on structure, so bare filler shafts from floor 2 to floor 29 hold the
+ * office row up, one under each pair of neighbouring offices (overlapping both). They never
+ * reach the lobby and there is nothing on the floors they serve, so nobody rides them.
  */
 function tallTower(cars: number, officeXs: readonly number[], seed = SEED): World {
   const world = createWorld(seed);
+  world.cash = 10_000_000; // the filler shafts cost more than the starting cash
   const filler: Command[] = [];
-  for (let floor = 2; floor <= 28; floor += 2) filler.push({ kind: 'build', room: 'stairs', floor, x: 300 });
+  for (let i = 0; i + 1 < officeXs.length; i += 2) {
+    const right = officeXs[i + 1] as number;
+    filler.push({ kind: 'shaft.build', shaft: 'standard', x: right - 3, floorMin: 2, floorMax: 29 });
+  }
   buildTower(world, [
     ...lobbyRun(160, 190),
     { kind: 'shaft.build', shaft: 'standard', x: SHAFT_X, floorMin: 1, floorMax: 30 },
     ...filler,
     ...buildRow('office', 30, officeXs),
   ]);
-  const shaft = onlyShaft(world);
+  const shaft = mainShaft(world);
   for (let i = 1; i < cars; i++) {
     const added = applyCommand(world, { kind: 'shaft.addCar', shaftId: shaft.id });
     if (!added.ok) throw new Error(`Could not add car ${i + 1}: ${added.reason}`);
   }
   return world;
+}
+
+/** The one shaft people ride: the tall tower adds bare filler shafts beside it. */
+function mainShaft(world: World): Shaft {
+  const shaft = [...world.shafts.values()].find((s) => s.x === SHAFT_X);
+  if (!shaft) throw new Error('No main shaft.');
+  return shaft;
 }
 
 function xsFrom(start: number, count: number, step = ROOMS.office.width): number[] {
@@ -179,13 +191,16 @@ describe('scenario: determinism', () => {
 });
 
 describe('scenario: condos', () => {
-  /** Clear of the lobby footprint: see the noise test below for why that matters. */
+  /**
+   * Past the first tower's lobby (150 to 200), so this test runs the lobby out under them:
+   * a room must rest on structure. The noise test below covers condos over the lobby too.
+   */
   const CONDO_XS = [205, 222, 239];
 
   it('sells every condo and moves the owners in within two weekdays', () => {
     const world = createWorld(SEED);
     buildTower(world, [
-      ...lobbyRun(150, 200),
+      ...lobbyRun(150, 254),
       { kind: 'shaft.build', shaft: 'standard', x: SHAFT_X, floorMin: 1, floorMax: 6 },
       ...buildRow('condo', 2, CONDO_XS),
     ]);
@@ -224,7 +239,7 @@ describe('scenario: a small hotel', () => {
   function hotel(): World {
     const world = createWorld(SEED);
     buildTower(world, [
-      ...lobbyRun(150, 200),
+      ...lobbyRun(150, 243), // out under the housekeeping office and the rooms, which rest on it
       { kind: 'shaft.build', shaft: 'standard', x: SHAFT_X, floorMin: 1, floorMax: 6 },
     ]);
     // Reaching 2 stars needs a population of 300, which this tower will never have, so
@@ -303,7 +318,7 @@ describe('scenario: the morning rush', () => {
     const workersFour = simsOfKind(four, 'worker');
     expect(workersOne).toHaveLength(10 * ROOMS.office.capacity);
     expect(workersFour).toHaveLength(workersOne.length);
-    expect(onlyShaft(four).cars).toHaveLength(4);
+    expect(mainShaft(four).cars).toHaveLength(4);
 
     expect(averageStress(workersFour)).toBeLessThan(averageStress(workersOne));
   });

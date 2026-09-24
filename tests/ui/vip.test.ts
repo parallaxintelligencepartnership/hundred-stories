@@ -21,7 +21,7 @@ function bookedTower(): { world: World; visit: Visit; suite: Room } {
     ...lobbyRun(90, 170),
     { kind: 'shaft.build', shaft: 'standard', x: 150, floorMin: 1, floorMax: 4 },
     { kind: 'build', room: 'office', floor: 2, x: 100 },
-    { kind: 'build', room: 'hotelSuite', floor: 3, x: 160 },
+    { kind: 'build', room: 'hotelSuite', floor: 3, x: 152 }, // over the shaft's last two columns, which hold it up
   ]);
   atOnDay(world, 0, 6, 1);
   const visit = world.events.find((e): e is Visit => e.kind === 'vip');
