@@ -9,6 +9,7 @@
 // to that same counter value. We rely on this instead of adding a restore() to rng.ts,
 // which we are not allowed to touch.
 
+import { buildLogFromSave, buildLogToSave, setBuildLog, type SavedBuildLog } from './buildlog';
 import { createRng } from './rng';
 import { EVENTS, RENT, ROOMS, SHAFTS, WASTE } from './rules';
 import { VIP_PREFERENCES, vipPreference } from './identity';
@@ -20,7 +21,7 @@ import type { ActiveEvent, Car, LogEntry, RiderClass, Room, Shaft, Sim, SimKind,
 /** v1 and pre-rent v2 saves have no `rent`; it is normalized to RENT.default on load. */
 type SaveRoom = Omit<Room, 'rent'> & { rent?: number };
 
-export const SAVE_VERSION = 4;
+export const SAVE_VERSION = 5;
 
 /**
  * Versions this loader understands. v1 has no per car settings and boolean hall calls.
@@ -31,13 +32,15 @@ export const SAVE_VERSION = 4;
  * and its security offices hire their guards on the first tick, in office id order.
  * Waste needs none either: a room without it holds 0 (every reader treats absent as 0), and a
  * recycling center in an older save hires its collectors on the first tick, as guards are hired.
+ * v5 adds the build log (src/sim/buildlog.ts). v1 to v4 load with an empty one marked
+ * startedBeforeLog: the tower plays on, only replay is unavailable for it.
  */
-const READABLE_VERSIONS = [1, 2, 3, 4];
+const READABLE_VERSIONS = [1, 2, 3, 4, 5];
 
 /**
  * The version the hash projection names. It stays at 2 because v3 only added the two display
- * baselines and v4 only the story, which the hash leaves out, so a v4 world hashes exactly as
- * it did under v2.
+ * baselines, v4 only the story and v5 only the build log, which the hash leaves out, so a v5
+ * world hashes exactly as it did under v2.
  */
 const HASH_VERSION = 2;
 
@@ -98,6 +101,7 @@ interface SaveData {
   quarterStartCash?: number | null; // absent before v3
   dayStartPopulation?: number | null; // absent before v3
   story?: unknown; // absent before v4; checked by sanitizeStory, never a reason to refuse
+  buildLog?: SavedBuildLog; // absent before v5; checked by buildLogFromSave, never a reason to refuse
 }
 
 function shaftToSave(shaft: Shaft): SaveShaft {
@@ -156,6 +160,7 @@ function buildSaveData(world: World): SaveData {
     quarterStartCash: world.quarterStartCash,
     dayStartPopulation: world.dayStartPopulation,
     story: world.story,
+    buildLog: buildLogToSave(world),
   };
 }
 
@@ -496,6 +501,8 @@ export function deserialize(text: string): { ok: true; world: World } | { ok: fa
       }),
     );
     world.story = parsed.version >= 4 ? sanitizeStory(parsed.story) : createStoryState();
+    // The build log sits beside the world, not in it, and not in the hash.
+    setBuildLog(world, buildLogFromSave(parsed.version >= 5 ? (parsed.buildLog ?? null) : undefined));
     world.events = parsed.events.map((event) => (event.kind === 'vip' ? loadVipEvent(world, event) : event));
     world.stats = parsed.stats;
     world.gameOver = parsed.gameOver;
@@ -645,6 +652,8 @@ function simForHash(sim: Sim) {
 // quarterStartCash and dayStartPopulation are the status bar's display baselines: nothing in
 // the sim reads them, so they are saved but not hashed, and the bench hashes stay put.
 // story is presentation state (src/sim/story.ts): saved from v4, never read by the tick.
+// The build log (saved from v5) is not a World key at all: it is held beside the world in
+// src/sim/buildlog.ts, so it cannot reach this projection.
 type UnhashedWorldKey =
   | 'log'
   | 'logTotal'

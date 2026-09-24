@@ -13,7 +13,7 @@ describe('the demo tower fixture', () => {
   it('loads as a valid save under the current loader', () => {
     const result = deserialize(fixture);
     expect(result.ok ? 'ok' : result.reason).toBe('ok');
-    expect(SAVE_VERSION).toBe(4);
+    expect(SAVE_VERSION).toBe(5);
   });
 
   it('holds at least one room of every kind, a restaurant among them', () => {

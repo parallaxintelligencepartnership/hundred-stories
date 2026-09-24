@@ -47,6 +47,10 @@ export interface PlacementRect {
 
 export interface GameApi {
   readonly world: World;
+  /**
+   * The one way a player changes the world. An accepted command is kept in the tower's build log
+   * with the minute it went in (src/sim/buildlog.ts), so a save can be replayed.
+   */
   apply(cmd: Command): CommandResult;
   canBuildAt(tool: Tool, floor: number, x: number): CommandResult;
   /** Could this shaft be stretched to this span? The panel asks before it offers the button. */
