@@ -81,3 +81,4 @@
 - 2026-09-24 | this round adds a replayable build log in the save, accessibility inside the UI polish spec, and a daily tower as its own mode with its own save slot (never a toggle inside standard games) | why: Matt, "Add 1 2 and 3"
 - 2026-09-24 | player-facing text never says "seed" (the new-game field becomes "Tower code") and is US English everywhere (color, neighbor, license, center); code identifiers and comments are left alone | why: Matt, "humans dont talk like that" and "US English in game"
 - 2026-09-24 | the new-game "Seed" field is removed, not renamed; a friend's share link starts the same tower automatically; the number stays reachable in the page address for testing | why: Matt, players would never type or share a code (supersedes the "Tower code" line above)
+- 2026-09-24 | the in-game wording sweep also rewrites jargon into plain everyday words for non-technical players, not only UK spellings | why: Matt, the in-game wording needs to be simpler
