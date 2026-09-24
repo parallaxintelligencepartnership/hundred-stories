@@ -168,6 +168,19 @@ export function createTipToast(tip: Tip, onGotIt: () => void): HTMLDivElement {
   return toast;
 }
 
+/**
+ * The star card: the new star, what it opened up, and an optional Stories so far. It sits in the
+ * toast slot beside play, never over it, and Close is always there.
+ */
+export function createStarToast(title: string, unlocks: string, onStories: () => void, onClose: () => void): HTMLDivElement {
+  const toast = el('div', 'hs-toast is-notice is-star');
+  toast.append(el('p', 'hs-toast-text', title), el('p', 'hs-toast-text', unlocks));
+  const row = el('div', 'hs-actions');
+  row.append(button('Stories so far', 'hs-btn', onStories), button('Close', 'hs-btn', onClose));
+  toast.append(row);
+  return toast;
+}
+
 function setText(node: HTMLElement, text: string): void {
   if (node.textContent !== text) node.textContent = text;
 }

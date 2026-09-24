@@ -1,5 +1,6 @@
 // Population and the star ladder. See docs/BRIEF-AGENTS.md.
 
+import { assembleChronicle } from './chronicle';
 import { ROOMS, STARS, type StarRule } from './rules';
 import { recordBeat } from './story';
 import { log } from './world';
@@ -73,5 +74,7 @@ export function recomputeStars(world: World): void {
       minute: world.time.minute,
       value: world.stars,
     });
+    // Tower status writes the chronicle: presentation state, outside the hash like every beat.
+    if (world.stars === 6) world.story.chronicle = assembleChronicle(world);
   }
 }

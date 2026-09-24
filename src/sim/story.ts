@@ -50,15 +50,27 @@ export const STORY_RECENT_CAP = 256;
 export const STORY_FOLLOWED_CAP = 8;
 export const STORY_THREAD_CAP = 6;
 
+export const CHRONICLE_LINE_CAP = 40;
+/** Longest chronicle line an import keeps; a longer one marks the chronicle as damaged. */
+export const CHRONICLE_LINE_CHARS = 400;
+
+/** The tower chronicle, written once the tower reaches Tower status (src/sim/chronicle.ts). */
+export interface Chronicle {
+  lines: string[];
+  minute: number;
+}
+
 export interface StoryState {
   seq: number;
   recent: StoryBeat[];
   followed: number[];
   threads: Record<number, StoryBeat[]>;
+  /** Null until the tower first reaches Tower status. */
+  chronicle: Chronicle | null;
 }
 
 export function createStoryState(): StoryState {
-  return { seq: 0, recent: [], followed: [], threads: {} };
+  return { seq: 0, recent: [], followed: [], threads: {}, chronicle: null };
 }
 
 export function recordBeat(story: StoryState, beat: StoryBeat): void {
@@ -222,7 +234,30 @@ export function sanitizeStory(raw: unknown): StoryState {
   const threads: Record<number, StoryBeat[]> = {};
   for (const id of followed) threads[id] = cleanBeats(rawThreads[String(id)], STORY_THREAD_CAP);
   const seq = finiteOrUndefined(r.seq);
-  return { seq: seq !== undefined && seq >= recent.length ? Math.floor(seq) : recent.length, recent, followed, threads };
+  return {
+    seq: seq !== undefined && seq >= recent.length ? Math.floor(seq) : recent.length,
+    recent,
+    followed,
+    threads,
+    chronicle: cleanChronicle(r.chronicle),
+  };
+}
+
+/**
+ * A saved chronicle, or null. It is kept whole or not at all: a line that is not text, too
+ * many lines, or a minute that is not a number makes it null, never a half chronicle.
+ */
+function cleanChronicle(raw: unknown): Chronicle | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
+  const minute = finiteOrUndefined(r.minute);
+  if (minute === undefined || !Array.isArray(r.lines) || r.lines.length > CHRONICLE_LINE_CAP) return null;
+  const lines: string[] = [];
+  for (const line of r.lines) {
+    if (typeof line !== 'string' || line.length > CHRONICLE_LINE_CHARS) return null;
+    lines.push(line);
+  }
+  return { lines, minute };
 }
 
 // ---------------------------------------------------------------------------

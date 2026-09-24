@@ -9,7 +9,8 @@ import type { GameApi, Placement, Speed, Tool } from '../game/api';
 import type { Renderer } from '../render/renderer';
 import { describeBeat, followSim, isFollowed, storyName, type StoryBeat } from '../sim/story';
 import type { Command, LogEntry, World } from '../sim/types';
-import { createIntroPanel, createSideCard, createTipToast } from './cards';
+import { createIntroPanel, createSideCard, createStarToast, createTipToast } from './cards';
+import { unlocksText } from '../sim/chronicle';
 import { createAlertStack } from './alerts';
 import { createDemoCapCard, isDemoCapEntry } from './demo';
 import { formatFloorShort, formatMoney, formatTimestamp } from './format';
@@ -37,9 +38,11 @@ import { chromeInsets, isSheetLayout, placementBoxes } from './layout';
 import type { Box } from './layout';
 import {
   button,
+  createChroniclePanel,
   createFinancesPanel,
   createLogPanel,
   createQueryPanel,
+  createRecapPanel,
   createSettingsPanel,
   createSharePanel,
   createStoriesPanel,
@@ -60,8 +63,10 @@ export interface Ui {
   update(): void;
 }
 
-type PanelKind = 'none' | 'finances' | 'log' | 'settings' | 'share' | 'intro' | 'stories';
+type PanelKind = 'none' | 'finances' | 'log' | 'settings' | 'share' | 'intro' | 'stories' | 'recap' | 'chronicle';
 
+/** Real milliseconds the star card stays up unless closed first. */
+export const STAR_CARD_LINGER_MS = 20_000;
 /** A followed person's story line takes the ticker at most this often, in real time. */
 export const STORY_TICKER_GAP_MS = 30_000;
 
@@ -182,6 +187,9 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   let storyShownAt = Number.NEGATIVE_INFINITY;
   /** The guided first tower follows its first worker once, then leaves the cast to the player. */
   let metFirstWorker = false;
+  /** The star card: the story seq it last looked at, and the card on screen, if any. */
+  let starStorySeq = 0;
+  let starToast: HTMLElement | null = null;
 
   const shell = el('div', 'hs-ui');
   // The icon symbols, once for the whole chrome; every icon() refers to them by id.
@@ -394,6 +402,12 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     openStories() {
       setPanel('stories');
     },
+    openRecap() {
+      setPanel('recap');
+    },
+    openChronicle() {
+      setPanel('chronicle');
+    },
     select(sel) {
       // A name in a list is a way into that person: the list's panel steps aside for theirs.
       if (panelKind !== 'none') panelKind = 'none';
@@ -456,7 +470,50 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     watchForTips(world, speed);
     showNextTip();
     refreshTicker();
+    watchStars(world);
     drainAlerts();
+  }
+
+  /**
+   * A star.gained beat since the last look puts up the star card: the new star, what it opened,
+   * and Stories so far. It never pauses play and goes on Close, on the next star, or on its own.
+   */
+  function watchStars(world: World): void {
+    const story = world.story;
+    if (!story) return;
+    const fresh = Math.max(0, Math.min(story.seq - starStorySeq, story.recent.length));
+    starStorySeq = story.seq;
+    let gained: StoryBeat | null = null;
+    for (let i = story.recent.length - 1; i >= story.recent.length - fresh; i -= 1) {
+      const beat = story.recent[i];
+      if (beat && beat.code === 'star.gained') {
+        gained = beat;
+        break;
+      }
+    }
+    if (!gained) return;
+    starToast?.remove();
+    const node = createStarToast(
+      describeBeat(gained, world),
+      unlocksText(gained.value ?? 1),
+      () => {
+        node.remove();
+        if (starToast === node) starToast = null;
+        setPanel('recap');
+      },
+      () => {
+        node.remove();
+        if (starToast === node) starToast = null;
+      },
+    );
+    starToast = node;
+    toasts.append(node);
+    const timer = setTimeout(() => {
+      timers.delete(timer);
+      node.remove();
+      if (starToast === node) starToast = null;
+    }, STAR_CARD_LINGER_MS);
+    timers.add(timer);
   }
 
   function refreshHoverReadout(): void {
@@ -496,6 +553,9 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     lastQuarterSeen = world.stats?.lastQuarter ?? null;
     populationWatch = { population: world.population, since: world.time.minute };
     tickerStorySeq = world.story?.seq ?? 0; // beats already recorded are history, not news
+    starStorySeq = world.story?.seq ?? 0;
+    starToast?.remove();
+    starToast = null;
     const empty = world.rooms.size === 0 && world.shafts.size === 0;
     if (empty && !introSeen) {
       introShownThisSession = true;
@@ -833,7 +893,11 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
               ? createSharePanel(game, renderer, ctx)
               : panelKind === 'stories'
                 ? createStoriesPanel(game, ctx)
-                : createQueryPanel(game, selection ?? {}, ctx);
+                : panelKind === 'recap'
+                  ? createRecapPanel(game, ctx)
+                  : panelKind === 'chronicle'
+                    ? createChroniclePanel(game, ctx)
+                    : createQueryPanel(game, selection ?? {}, ctx);
 
     mountedPanel = panel;
     panelSlot.append(panel);
