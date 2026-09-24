@@ -270,3 +270,9 @@ Scope: closeout sweep, 56efafd, five lens runbooks + history audit. Not covered:
 - [x] IMPORTANT | testing | the Tauri slot's mkdir retry was decorative: deleting `dirReady = null` left 956 green, so one failed directory creation would make every later autosave in the session fail (src/game/storage.ts:245) | Evidence: mutation in a scratch clone, 956 green while broken | Evidence to close: a test red when the reset is removed | Closed 2026-09-22: tests/game/storage-tauri.test.ts "tries the directory again on the next save after making it failed once", 16 green, 1 red with the reset removed, green restored
 ### Reckoning
 Reckoning 2026-09-22b: eleven sweep findings, six fixed in the sweep and five fixed after it (360 px status bar, npm audit via a uuid override, version stamps at 0.4.7 with a test, native chunks out of the web precache, the demo card in ui.css, paused hover refresh), each with evidence on its line. Fonts bundled after the sweep (9d6f049): font-src 'self', re-checked by tests/site/fonts.test.ts and the headers file byte-identical to dist. No finding open, none accepted, no accepted risk standing. Ship: 0.4.7, tag ship-2026-09-22b, one deploy for the look, UX and store rounds. Not covered: application logic (audit tier); last audit 2026-09-19 @047d32b.
+
+## Checkpoint 2026-09-23 - fire alert spam, reported from live play at 6362576 - lenses: production-readiness
+
+### Findings
+
+- [ ] IMPORTANT | production-readiness | a fire floods the screen with alerts: every room that catches fire raises its own alert card, the cards cannot be dismissed and they cover the tower (Matt, live play 2026-09-23: "the alerts SPAM the whole screen and are unstoppable and each item that caught fire alerted") | Evidence to close: a scripted fire spreading across five rooms produces one alert that updates its count, is dismissible, and the log keeps one line per room
