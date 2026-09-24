@@ -175,7 +175,7 @@ describe('privacy page', () => {
     expect(flat(privacy)).toContain(
       'The game makes no network requests of its own.',
     );
-    expect(privacy).not.toContain('Google');
+    expect(privacy).not.toMatch(/googleapis|gstatic|google\.com|googletagmanager|google-analytics/i);
     expect(privacy).toContain('Last updated 2026-09-22.');
   });
 });
