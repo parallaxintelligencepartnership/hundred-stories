@@ -3,6 +3,7 @@
 // Every number comes from rules.ts; nothing here is inlined.
 
 import { EVAL, NOISE, RENT, ROOMS, takesRent } from './rules';
+import { isFollowed, recordBeat } from './story';
 import { log } from './world';
 import type { Id, Room, RoomKind, World } from './types';
 
@@ -140,9 +141,16 @@ export function evaluateRoom(world: World, room: Room): number {
 
 function moveOut(world: World, room: Room): void {
   const reason = leaveReasonFor(world, room);
+  // Story: every followed tenant gets their closing beat; the rest of the room shares one.
+  let roomBeat = false;
   for (const id of room.tenants) {
     const sim = world.sims.get(id);
     if (!sim) continue;
+    const followed = isFollowed(world.story, id);
+    if (followed || !roomBeat) {
+      recordBeat(world.story, { code: 'room.vacated', minute: world.time.minute, simId: id, roomId: room.id, value: 1 });
+      if (!followed) roomBeat = true;
+    }
     sim.state = 'leaving';
     sim.leaveReason = reason;
     sim.homeRoomId = null;

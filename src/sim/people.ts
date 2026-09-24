@@ -9,7 +9,8 @@
 import { hallCallPending, requestHallCall } from './elevators';
 import { recordCondoSale, recordHotelNight, recordVisit } from './economy';
 import { ensureRouting, entrances, findRoute, isReachableFromLobby } from './routing';
-import { ECONOMY, ROOMS, SCHEDULES, STRESS } from './rules';
+import { ECONOMY, ROOMS, SCHEDULES, STORY, STRESS } from './rules';
+import { isFollowed, recordBeat, recordSimBeat, type StoryBeat, type StoryState } from './story';
 import { clockOf, riderClassOf } from './types';
 import type {
   Clock,
@@ -259,6 +260,7 @@ function startTrip(world: World, sim: Sim, goal: ScheduleEntry['goal']): boolean
   sim.route = [...withoutStandingRides(legs), { kind: 'enter', roomId: room.id }];
   sim.state = 'walking';
   sim.waitStart = null;
+  markTripStart(world, sim);
   return true;
 }
 
@@ -307,6 +309,7 @@ function leaveTower(world: World, sim: Sim): void {
   }
   sim.route = withoutStandingRides(legs);
   sim.state = 'walking';
+  markTripStart(world, sim);
 }
 
 // ---------------------------------------------------------------------------
@@ -404,6 +407,7 @@ function enterRoom(world: World, sim: Sim, room: Room): void {
     leaveTower(world, sim);
     return;
   }
+  finishTrip(world, sim, room.id);
   sim.inRoomId = room.id;
   sim.inCarId = null;
   sim.state = 'inRoom';
@@ -429,6 +433,7 @@ function arriveWithoutRoom(world: World, sim: Sim): void {
     return;
   }
   if (sim.state !== 'walking') return;
+  finishTrip(world, sim, undefined);
   // The route already carried this sim to the door, so leave it standing where it stopped.
   sim.state = 'outside';
   sim.waitStart = null;
@@ -448,6 +453,11 @@ function departRoom(world: World, sim: Sim): void {
 
 function checkOutOfHotel(world: World, sim: Sim, room: Room): void {
   room.tenants = room.tenants.filter((id) => id !== sim.id);
+  recordSimBeat(
+    world.story,
+    { code: 'room.vacated', minute: world.time.minute, simId: sim.id, roomId: room.id, value: sim.leaveReason !== null ? 1 : 0 },
+    STORY.unfollowedBeatGapMinutes,
+  );
   if (room.tenants.length > 0) return;
   room.dirty = true;
   room.dirtySinceMinute = world.time.minute;
@@ -460,10 +470,15 @@ function checkOutOfHotel(world: World, sim: Sim, room: Room): void {
 // ---------------------------------------------------------------------------
 
 function updateStress(world: World): void {
+  followOpenWaits(world);
   for (const sim of [...world.sims.values()]) {
     if (sim.state === 'waiting') {
       // The goals card's count of waits over five minutes: each counts once, the minute it passes.
-      if (sim.waitStart !== null && world.time.minute - sim.waitStart === LONG_WAIT_MINUTES + 1) recordLongWait(world);
+      if (sim.waitStart !== null) {
+        const waited = world.time.minute - sim.waitStart;
+        if (waited === LONG_WAIT_MINUTES + 1) recordLongWait(world);
+        if (waited === STORY.longWaitMinutes + 1) recordLongWaitBeat(world, sim, sim.waitStart);
+      }
       sim.stress = Math.min(STRESS.giveUp, sim.stress + STRESS.perWaitingMinute);
       // A sim can abandon a trip once a day. On the way out, or on the way home after
       // giving up, there is nothing left to abandon: giving up again would clear the
@@ -532,6 +547,15 @@ function routeDestination(world: World, sim: Sim): { at: { floor: number; x: num
 }
 
 function giveUp(world: World, sim: Sim): void {
+  const dest = routeDestination(world, sim).roomId;
+  const beat: StoryBeat & { simId: number } = {
+    code: 'trip.gaveUp',
+    minute: world.time.minute,
+    simId: sim.id,
+    value: sim.waitStart !== null ? world.time.minute - sim.waitStart : 0,
+  };
+  if (dest !== null) beat.roomId = dest;
+  recordSimBeat(world.story, beat, STORY.unfollowedBeatGapMinutes);
   sim.stress = STRESS.giveUp;
   sim.route = [];
   sim.waitStart = null;
@@ -679,6 +703,7 @@ function assignCleaning(world: World, keeper: Sim, room: Room): boolean {
   departRoom(world, keeper);
   keeper.route = [...withoutStandingRides(legs), { kind: 'enter', roomId: room.id }];
   keeper.state = 'walking';
+  markTripStart(world, keeper);
   return true;
 }
 
@@ -702,6 +727,64 @@ function finishCleaning(world: World, keeper: Sim): void {
   departRoom(world, keeper);
   keeper.route = [...withoutStandingRides(legs), { kind: 'enter', roomId: office.id }];
   keeper.state = 'walking';
+  markTripStart(world, keeper);
+}
+
+// ---------------------------------------------------------------------------
+// 7. Story: beats written beside the moves above, never read back by the tick
+// ---------------------------------------------------------------------------
+
+/**
+ * A long wait's beat keeps counting while the same wait goes on, so the chapter shows the
+ * whole wait, not the minute it crossed the line. Keyed by the story, so a load starts empty;
+ * holds only waits that were recorded, which the spacing in recordSimBeat keeps to a few.
+ */
+const openWaits = new WeakMap<StoryState, Map<Id, { beat: StoryBeat; waitStart: number }>>();
+
+function recordLongWaitBeat(world: World, sim: Sim, waitStart: number): void {
+  const beat: StoryBeat & { simId: number } = {
+    code: 'wait.long',
+    minute: world.time.minute,
+    simId: sim.id,
+    value: world.time.minute - waitStart,
+  };
+  const dest = routeDestination(world, sim).roomId;
+  if (dest !== null) beat.roomId = dest;
+  if (!recordSimBeat(world.story, beat, STORY.unfollowedBeatGapMinutes)) return;
+  let open = openWaits.get(world.story);
+  if (!open) openWaits.set(world.story, (open = new Map()));
+  open.set(sim.id, { beat, waitStart });
+}
+
+/** Bring each recorded wait up to date, and let go of the ones that ended. */
+function followOpenWaits(world: World): void {
+  const open = openWaits.get(world.story);
+  if (!open || open.size === 0) return;
+  for (const [simId, entry] of open) {
+    const sim = world.sims.get(simId);
+    if (!sim || sim.state !== 'waiting' || sim.waitStart !== entry.waitStart) {
+      open.delete(simId);
+      continue;
+    }
+    entry.beat.value = world.time.minute - entry.waitStart;
+  }
+}
+
+/** A followed sim starting a trip notes the minute, for the arrival beat. */
+function markTripStart(world: World, sim: Sim): void {
+  if (isFollowed(world.story, sim.id)) sim.storyTripStart = world.time.minute;
+  else if (sim.storyTripStart !== undefined) delete sim.storyTripStart;
+}
+
+/** A trip ended where it was going: a followed sim records how long it took. */
+function finishTrip(world: World, sim: Sim, roomId: Id | undefined): void {
+  const start = sim.storyTripStart;
+  if (start === undefined) return;
+  delete sim.storyTripStart;
+  if (!isFollowed(world.story, sim.id)) return;
+  const beat: StoryBeat = { code: 'trip.arrived', minute: world.time.minute, simId: sim.id, value: world.time.minute - start };
+  if (roomId !== undefined) beat.roomId = roomId;
+  recordBeat(world.story, beat);
 }
 
 // ---------------------------------------------------------------------------

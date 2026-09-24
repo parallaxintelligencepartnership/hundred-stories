@@ -304,9 +304,12 @@ export function nudgeCounts(world: Pick<World, 'rooms' | 'time'> & Partial<Pick<
 
 // ------------------------------------------------------------------- tips
 
-export type TipId = 'longWait' | 'tenantLeft' | 'firstRent' | 'firstEvent' | 'nightSpeed' | 'firstPanel';
+export type TipId = 'longWait' | 'tenantLeft' | 'firstRent' | 'firstEvent' | 'nightSpeed' | 'firstPanel' | 'meetPerson';
 
-export const TIP_IDS: readonly TipId[] = ['longWait', 'tenantLeft', 'firstRent', 'firstEvent', 'nightSpeed', 'firstPanel'];
+export const TIP_IDS: readonly TipId[] = ['longWait', 'tenantLeft', 'firstRent', 'firstEvent', 'nightSpeed', 'firstPanel', 'meetPerson'];
+
+/** The one tip that may show over a guide step: the first person story belongs to the first tower. */
+export const TIP_OVER_GUIDE: TipId = 'meetPerson';
 
 export interface Tip {
   id: TipId;
@@ -332,6 +335,8 @@ export const TIP_TEXT = {
   nightSpeed: (mode: string): string =>
     `${mode}: from ${clockHour(SCHEDULES.nightStart)} to ${clockHour(SCHEDULES.nightEnd)} the clock runs faster while the tower sleeps.`,
   firstPanel: (): string => 'Panels show the details, and Close puts one away while the tower keeps running.',
+  meetPerson: (name: string): string =>
+    `Meet ${name}, the first to work in your first office. Open the office and pick their name: the person panel keeps their story, and you are following it.`,
 };
 
 /** The reason behind the newest move out: the key whose count grew since the last look. */
@@ -371,9 +376,9 @@ export class TipQueue {
     return true;
   }
 
-  /** The tip to show now, or null when there is none or the moment is wrong. */
-  next(blocked: boolean): Tip | null {
-    if (blocked) return null;
+  /** The tip to show now, or null when there is none or the moment is wrong. `except` may show anyway. */
+  next(blocked: boolean, except?: TipId): Tip | null {
+    if (blocked) return except !== undefined ? (this.waiting.find((tip) => tip.id === except) ?? null) : null;
     return this.waiting[0] ?? null;
   }
 

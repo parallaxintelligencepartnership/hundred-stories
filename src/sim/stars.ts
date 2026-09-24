@@ -1,6 +1,7 @@
 // Population and the star ladder. See docs/BRIEF-AGENTS.md.
 
 import { ROOMS, STARS, type StarRule } from './rules';
+import { recordBeat } from './story';
 import { log } from './world';
 import type { Star, Stats, World } from './types';
 
@@ -67,5 +68,10 @@ export function recomputeStars(world: World): void {
   if (world.stars !== before) {
     const verb = world.stars > before ? 'Reached' : 'Fell to';
     log(world, `${verb} ${STARS[world.stars].label}.`);
+    recordBeat(world.story, {
+      code: world.stars > before ? 'star.gained' : 'star.lost',
+      minute: world.time.minute,
+      value: world.stars,
+    });
   }
 }

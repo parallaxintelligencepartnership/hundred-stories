@@ -6,6 +6,7 @@ import { EVENTS, STRESS } from './rules';
 import { ROOMS } from './rules';
 import { clockOf, TOWER_WIDTH } from './types';
 import type { ActiveEvent, Command, CommandResult, Id, Room, RoomKind, Sim, World } from './types';
+import { isFollowed, recordBeat, type StoryBeat } from './story';
 import { addSim, allocId, groundLobby, log, removeRoom, removeSim, roomsOfKind, setOccupancy, setOnFire } from './world';
 
 // Defined here because rules.ts has no calendar constants. One tick is one minute.
@@ -77,6 +78,11 @@ function describe(room: Room): string {
   return `${label(room.kind)} on floor ${room.floor}`;
 }
 
+/** A story beat beside an event's log line. Presentation only: nothing here reads it back. */
+function towerBeat(world: World, code: StoryBeat['code'], facts: Omit<StoryBeat, 'code' | 'minute'>): void {
+  recordBeat(world.story, { code, minute: world.time.minute, ...facts });
+}
+
 function eventOf<K extends ActiveEvent['kind']>(world: World, kind: K): Extract<ActiveEvent, { kind: K }> | undefined {
   return world.events.find((e) => e.kind === kind) as Extract<ActiveEvent, { kind: K }> | undefined;
 }
@@ -110,8 +116,16 @@ function pickTargetRoom(world: World, key: 'fire' | 'bomb'): Room | undefined {
 
 /** Tenants of a room that is about to disappear head for the exit. */
 function evictInto(world: World, room: Room, reason: string): void {
+  // Story: every followed tenant gets their closing beat; the rest of the room shares one.
+  // value 0: the room was lost, which says nothing about how they felt about it.
+  let roomBeat = false;
   for (const sim of world.sims.values()) {
     if (sim.homeRoomId !== room.id && sim.inRoomId !== room.id) continue;
+    const followed = isFollowed(world.story, sim.id);
+    if (sim.homeRoomId === room.id && (followed || !roomBeat)) {
+      recordBeat(world.story, { code: 'room.vacated', minute: world.time.minute, simId: sim.id, roomId: room.id, value: 0 });
+      if (!followed) roomBeat = true;
+    }
     sim.state = 'leaving';
     sim.leaveReason = reason;
     sim.route = [];
@@ -141,6 +155,7 @@ export function startFire(world: World): void {
     spreadAt: world.time.minute + EVENTS.fire.spreadMinutes,
   });
   log(world, `Fire broke out in the ${describe(room)}. Call a helicopter or wait for security.`, 'alert', { roomId: room.id });
+  towerBeat(world, 'fire.started', { roomId: room.id });
 }
 
 function spreadFire(world: World, event: Extract<ActiveEvent, { kind: 'fire' }>): void {
@@ -163,6 +178,7 @@ function spreadFire(world: World, event: Extract<ActiveEvent, { kind: 'fire' }>)
 }
 
 function endFire(world: World, event: Extract<ActiveEvent, { kind: 'fire' }>, how: string): void {
+  const firstRoom = event.roomIds[0];
   let lost = 0;
   let cost = 0;
   for (const id of event.roomIds) {
@@ -176,6 +192,7 @@ function endFire(world: World, event: Extract<ActiveEvent, { kind: 'fire' }>, ho
   endEvent(world, event);
   const rooms = `${lost} room${lost === 1 ? '' : 's'}`;
   log(world, `${how}. ${rooms} burned down and clearing the damage cost ${formatDollars(cost)}.`, 'alert');
+  towerBeat(world, 'fire.resolved', firstRoom !== undefined ? { roomId: firstRoom, value: lost } : { value: lost });
 }
 
 export function tickFire(world: World, event: Extract<ActiveEvent, { kind: 'fire' }>): void {
@@ -212,6 +229,7 @@ export function startBomb(world: World): void {
     'alert',
     { roomId: room.id },
   );
+  towerBeat(world, 'bomb.started', { roomId: room.id });
 }
 
 function detonate(world: World, event: Extract<ActiveEvent, { kind: 'bomb' }>): void {
@@ -224,6 +242,7 @@ function detonate(world: World, event: Extract<ActiveEvent, { kind: 'bomb' }>): 
   endEvent(world, event);
   const rooms = `${doomed.length} room${doomed.length === 1 ? '' : 's'}`;
   log(world, `The bomb went off on floor ${floor}. ${rooms} were destroyed and the repairs cost ${formatDollars(EVENTS.bomb.damageCash)}.`, 'alert');
+  towerBeat(world, 'bomb.failed', bombRoom ? { roomId: bombRoom.id } : {});
 }
 
 function distanceFrom(from: Room | undefined, room: Room): number {
@@ -240,6 +259,7 @@ export function tickBomb(world: World, event: Extract<ActiveEvent, { kind: 'bomb
       event.found = true;
       const room = world.rooms.get(event.roomId);
       log(world, `Security found the bomb${room ? ` in the ${describe(room)}` : ''} and took it away.`, 'alert');
+      towerBeat(world, 'bomb.resolved', { roomId: event.roomId });
       endEvent(world, event);
       return;
     }
@@ -292,6 +312,7 @@ export function startVip(world: World): void {
     suiteId: suite.id,
   });
   log(world, `A VIP is coming to the ${describe(suite)} tomorrow. Keep the elevators quick.`, 'alert', { roomId: suite.id });
+  towerBeat(world, 'vip.notice', { simId: sim.id, roomId: suite.id });
 }
 
 /** calm is good, pink is fair, red is poor. Thresholds come from STRESS. */
@@ -314,8 +335,10 @@ export function tickVip(world: World, event: Extract<ActiveEvent, { kind: 'vip' 
       sim.inRoomId = suite.id;
       setOccupancy(world, suite, suite.occupancy + 1);
       log(world, `The VIP checked into the ${describe(suite)}.`, 'info', { roomId: suite.id, simId: sim.id });
+      towerBeat(world, 'vip.arrival', { simId: sim.id, roomId: suite.id });
     } else {
       log(world, 'The VIP arrived but the suite was gone.', 'alert', { simId: sim.id });
+      towerBeat(world, 'vip.arrival', { simId: sim.id });
     }
     sim.state = 'inRoom';
     sim.stayUntil = event.leavesAt;
@@ -332,6 +355,7 @@ export function tickVip(world: World, event: Extract<ActiveEvent, { kind: 'vip' 
   removeSim(world, sim.id);
   endEvent(world, event);
   log(world, `The VIP checked out and rated the tower ${rating}.`, 'alert');
+  towerBeat(world, 'vip.rated', { simId: sim.id, value: rating === 'good' ? 2 : rating === 'fair' ? 1 : 0 });
 }
 
 // ---------------------------------------------------------------- cockroaches
@@ -486,6 +510,7 @@ export function handleEventCommand(world: World, cmd: Extract<Command, { kind: '
     endEvent(world, event);
     const room = world.rooms.get(event.roomId);
     log(world, `You paid the ${formatDollars(event.ransom)} ransom and the bomb${room ? ` in the ${describe(room)}` : ''} was handed over.`, 'alert');
+    towerBeat(world, 'bomb.resolved', { roomId: event.roomId });
     return { ok: true };
   }
 

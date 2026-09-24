@@ -1,7 +1,8 @@
 // The first run on a fake DOM, a stub game and the fake store: the intro shows once, the guide
 // follows the world and not the clock, the card lights the tile and bands the tower, the tips
 // fire once each and wait for the guide, and Help brings the intro back.
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createStoryState, followSim, recordBeat, storyName } from '../../src/sim/story';
 import { createUi } from '../../src/ui/ui';
 import { FakeDom, type FakeElement } from './fake-dom';
 
@@ -200,6 +201,37 @@ describe('guided first tower', () => {
     expect(game.bands[game.bands.length - 1]).toBe(null);
   });
 
+  it('follows the first worker of the first office and introduces them in one tip, over the guide', () => {
+    const game = stubGame();
+    const world = game.world as Stub['world'] & { seed: number; story: ReturnType<typeof createStoryState> };
+    world.seed = 5;
+    world.story = createStoryState();
+    const { root } = mount(game);
+    click(buttonNamed(introOf(root) as FakeElement, 'Skip'));
+    addRoom(game, { kind: 'lobby', floor: 1, x: 180, width: 20 });
+    const office = addRoom(game, { kind: 'office', floor: 2, x: 185, width: 9, tenants: [] });
+    game.world.shafts.set(99, { id: 99, floorMin: 1, floorMax: 2 });
+    game.notify();
+    expect(world.story.followed).toEqual([]);
+
+    office['vacant'] = false;
+    office['tenants'] = [501, 502];
+    game.world.sims.set(501, { id: 501, kind: 'worker' });
+    game.world.sims.set(502, { id: 502, kind: 'worker' });
+    game.notify();
+    expect(cardOf(root).textContent).toContain('Step 5 of 5'); // the guide is still open
+    expect(world.story.followed).toEqual([501]);
+    const tips = tipsOf(root);
+    expect(tips).toHaveLength(1);
+    expect(tips[0]?.textContent).toContain(`Meet ${storyName(world as never, 501)}`);
+    expect(tips[0]?.textContent).toContain('person panel');
+
+    click(buttonNamed(root, 'Got it'));
+    game.notify();
+    expect(tipsOf(root)).toHaveLength(0);
+    expect(world.story.followed).toEqual([501]);
+  });
+
   it('lights the target tile and bands the tower for each step', () => {
     const game = stubGame();
     const { root } = mount(game);
@@ -341,5 +373,65 @@ describe('tips', () => {
     expect(tipsOf(root)).toHaveLength(0); // the guide's step card is open
     click(buttonNamed(cardOf(root), 'Skip')); // the guide, from its card header
     expect(tipsOf(root)).toHaveLength(1);
+  });
+});
+
+describe('ticker story lines', () => {
+  it('shows a followed person in a quiet moment, at most every 30 seconds, never over an alert or a new log line', () => {
+    let now = 100_000;
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now);
+    try {
+      const game = stubGame();
+      const world = game.world as Stub['world'] & { seed: number; story: ReturnType<typeof createStoryState> };
+      world.seed = 5;
+      world.story = createStoryState();
+      addRoom(game, { kind: 'lobby', floor: 1, x: 180, width: 20 }); // a standing tower: no intro
+      const { root } = mount(game);
+      const text = (): string => one(root, 'hs-ticker-text')?.textContent ?? '';
+      const log = (line: string, level: 'info' | 'alert'): void => {
+        (world.log as unknown as { minute: number; text: string; level: string }[]).push({ minute: 500, text: line, level });
+        world.logTotal += 1;
+      };
+      followSim(world.story, 501);
+      const name = storyName(world as never, 501);
+
+      log('Built a lobby on floor 1.', 'info');
+      game.notify();
+      expect(text()).toBe('Built a lobby on floor 1.');
+
+      recordBeat(world.story, { code: 'wait.long', minute: 510, simId: 502, value: 8 }); // not followed
+      game.notify();
+      expect(text()).toBe('Built a lobby on floor 1.');
+
+      recordBeat(world.story, { code: 'wait.long', minute: 511, simId: 501, value: 8 });
+      game.notify();
+      expect(text().startsWith(`${name}: `)).toBe(true);
+      expect(text().toLowerCase()).toContain('eight minutes');
+
+      now += 10_000;
+      recordBeat(world.story, { code: 'trip.arrived', minute: 520, simId: 501, value: 3 });
+      game.notify();
+      expect(text().toLowerCase()).toContain('eight minutes'); // too soon for another
+
+      now += 30_000;
+      log('Fire broke out in the office on floor 2.', 'alert');
+      recordBeat(world.story, { code: 'trip.arrived', minute: 530, simId: 501, value: 3 });
+      game.notify();
+      expect(text()).toBe('Fire broke out in the office on floor 2.'); // the alert wins the batch
+
+      recordBeat(world.story, { code: 'trip.arrived', minute: 540, simId: 501, value: 3 });
+      game.notify();
+      expect(text()).toBe('Fire broke out in the office on floor 2.'); // and is not covered
+
+      log('Built an office on floor 2.', 'info');
+      game.notify();
+      now += 30_000;
+      recordBeat(world.story, { code: 'trip.arrived', minute: 550, simId: 501, value: 3 });
+      game.notify();
+      expect(text().startsWith(`${name}: `)).toBe(true);
+      expect(text().toLowerCase()).toContain('three minutes');
+    } finally {
+      clock.mockRestore();
+    }
   });
 });

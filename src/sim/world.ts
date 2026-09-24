@@ -3,6 +3,7 @@
 
 import { createRng } from './rng';
 import { LIMITS } from './rules';
+import { createStoryState } from './story';
 import type { FloorIndex, Id, LogEntry, Room, Shaft, Sim, World } from './types';
 
 export function createWorld(seed: number): World {
@@ -36,6 +37,7 @@ export function createWorld(seed: number): World {
     routingDirty: true,
     structureVersion: 0,
     longWaits: emptyLongWaits(),
+    story: createStoryState(),
     gameOver: null,
   };
 }

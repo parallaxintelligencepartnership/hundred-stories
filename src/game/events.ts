@@ -36,6 +36,8 @@ export interface EventTap {
   quarter: number;
   /** Car id to whether its doors were open. */
   doors: Map<Id, boolean>;
+  /** The story's beat counter when the tap last looked. Beats are tracked by seq, not index: recent is capped. */
+  storySeq: number;
 }
 
 function absoluteQuarter(minute: number): number {
@@ -45,7 +47,7 @@ function absoluteQuarter(minute: number): number {
 
 /** A tap primed on this world: nothing that is already true counts as news. */
 export function createTap(world: World): EventTap {
-  const tap: EventTap = { logTotal: 0, stars: 0, quarter: 0, doors: new Map() };
+  const tap: EventTap = { logTotal: 0, stars: 0, quarter: 0, doors: new Map(), storySeq: 0 };
   primeTap(tap, world);
   return tap;
 }
@@ -55,6 +57,7 @@ export function primeTap(tap: EventTap, world: World): void {
   tap.logTotal = world.logTotal;
   tap.stars = world.stars;
   tap.quarter = absoluteQuarter(world.time.minute);
+  tap.storySeq = world.story?.seq ?? 0;
   tap.doors.clear();
   for (const shaft of world.shafts.values()) {
     for (const car of shaft.cars) tap.doors.set(car.id, car.state === 'doorsOpen');
@@ -75,6 +78,18 @@ export function drainTap(tap: EventTap, world: World, emit: GameEventListener): 
     if (entry) emit({ kind: 'log', entry });
   }
   tap.logTotal = world.logTotal;
+
+  // Story beats since the last look, oldest first. More than the list holds arrived only if
+  // a batch outran it; then what the list still has is what there is to tell.
+  const story = world.story;
+  if (story) {
+    const freshBeats = Math.max(0, Math.min(story.seq - tap.storySeq, story.recent.length));
+    for (let i = story.recent.length - freshBeats; i < story.recent.length; i += 1) {
+      const beat = story.recent[i];
+      if (beat) emit({ kind: 'beat', beat });
+    }
+    tap.storySeq = story.seq;
+  }
 
   const quarter = absoluteQuarter(world.time.minute);
   if (quarter > tap.quarter) emit({ kind: 'rentDay' });

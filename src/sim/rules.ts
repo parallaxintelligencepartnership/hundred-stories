@@ -124,6 +124,17 @@ export const STRESS = {
   waitBandMinutes: { calm: 5, pink: 15 }, // for the UI legend only
 };
 
+/**
+ * Story beats: presentation only. The tick never reads them and they never enter the hash.
+ * longWaitMinutes matches LONG_WAIT_MINUTES in world.ts, the goals card's long wait.
+ * unfollowedBeatGapMinutes spaces out beats about people nobody follows, tower wide, so a
+ * tower of 15,000 cannot flood the recent list; followed people always record.
+ */
+export const STORY = {
+  longWaitMinutes: 5,
+  unfollowedBeatGapMinutes: 10,
+};
+
 export const EVAL = {
   leaveThreshold: 0.34, // red zone; a full day here and the tenant leaves
   leaveAfterMinutes: 1440,
