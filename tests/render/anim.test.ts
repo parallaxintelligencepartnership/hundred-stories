@@ -1,25 +1,27 @@
-// Motion rules from look round ship L3: the door frame picker and the door tween, the walk
-// cycle by elapsed time, the sway and the shuffle, and the outfit as a pure function of the id.
+// Motion rules: the door frame picker and the door tween (look round ship L3), the walk cycle by
+// elapsed time, and the package 2 poses: the waiting weight shift, the impatient glance, the held
+// activity poses, reduced motion, and the mirrored frames that share a texture.
 
 import { describe, expect, it } from 'vitest';
 import {
-  decodeOutfit,
+  canonicalFrame,
   DOOR_FRAMES,
   DOOR_TWEEN_MS,
   doorFrameOf,
-  OUTFIT_COUNT,
-  outfitCodeOf,
-  outfitOf,
-  PARTICLE_OUTFITS,
-  particleOutfitOf,
+  FRAME,
+  GLANCE_EVERY_MS,
+  GLANCE_MS,
+  isMirrored,
   isStepping,
   poseAt,
-  SHUFFLE_MS,
+  SHIFT_MS,
   stepDoor,
-  SWAY_MS,
   walkFrameAt,
   WALK_FRAME_MS,
 } from '../../src/render/anim';
+import { poseOf } from '../../src/render/renderer';
+import { STORY } from '../../src/sim/rules';
+import type { Sim } from '../../src/sim/types';
 
 describe('door frames', () => {
   it('bakes five positions from closed to open', () => {
@@ -83,42 +85,11 @@ describe('walk cycle', () => {
     expect(walkFrameAt(360 * 100 + 250)).toBe(2);
   });
 
-  it('walks a walker through all three frames and holds everyone else still', () => {
+  it('walks a walker through all three frames and holds a standing person still', () => {
     const seen = new Set<number>();
     for (let t = 0; t < 360; t += 40) seen.add(poseAt('walk', 11, t, false).frame);
     expect([...seen].sort()).toEqual([0, 1, 2]);
-    for (let t = 0; t < 2000; t += 50) {
-      expect(poseAt('wait', 11, t, false).frame).toBe(0);
-      expect(poseAt('fret', 11, t, false).frame).toBe(0);
-      expect(poseAt('still', 11, t, false)).toEqual({ frame: 0, dx: 0, dy: 0 });
-    }
-  });
-
-  it('bobs a waiting person 1 px every 800 ms', () => {
-    const at = (t: number): number => poseAt('wait', 4, t, false).dy;
-    const values = new Set<number>();
-    for (let t = 0; t < 4 * SWAY_MS; t += 100) values.add(at(t));
-    expect([...values].sort()).toEqual([-1, 0]);
-    // a change happens only on an 800 ms boundary of this person's phase
-    let changes = 0;
-    for (let t = 0; t < 8 * SWAY_MS; t += 10) if (at(t) !== at(t + 10)) changes++;
-    expect(changes).toBe(8);
-  });
-
-  it('shuffles a red band waiter 2 px side to side every 400 ms', () => {
-    const at = (t: number): number => poseAt('fret', 4, t, false).dx;
-    const values = new Set<number>();
-    for (let t = 0; t < 4 * SHUFFLE_MS; t += 50) values.add(at(t));
-    expect(Math.max(...values) - Math.min(...values)).toBe(2);
-    let changes = 0;
-    for (let t = 0; t < 8 * SHUFFLE_MS; t += 10) if (at(t) !== at(t + 10)) changes++;
-    expect(changes).toBe(8);
-  });
-
-  it('holds every pose still under reduced motion', () => {
-    for (const pose of ['walk', 'wait', 'fret', 'still'] as const) {
-      for (let t = 0; t < 2000; t += 70) expect(poseAt(pose, 9, t, true)).toEqual({ frame: 0, dx: 0, dy: 0 });
-    }
+    for (let t = 0; t < 2000; t += 50) expect(poseAt('still', 11, t, false)).toEqual({ frame: 0, dx: 0, dy: 0 });
   });
 
   it('counts a walker as stepping only while its position keeps changing', () => {
@@ -135,58 +106,77 @@ describe('walk cycle', () => {
   });
 });
 
-describe('outfits', () => {
-  it('is a pure function of the id, the same on every call', () => {
-    for (let id = 0; id < 500; id++) {
-      expect(outfitCodeOf(id)).toBe(outfitCodeOf(id));
-      expect(outfitOf(id)).toEqual(outfitOf(id));
-      expect(outfitCodeOf(id)).toBeGreaterThanOrEqual(0);
-      expect(outfitCodeOf(id)).toBeLessThan(OUTFIT_COUNT);
+describe('waiting, impatience and activity poses (package 2)', () => {
+  it('shifts a waiting person from one foot to the other every 1.4 s, and never glances', () => {
+    const at = (t: number): number => poseAt('wait', 4, t, false).frame;
+    const seen = new Set<number>();
+    let changes = 0;
+    for (let t = 0; t < 8 * SHIFT_MS; t += 10) {
+      seen.add(at(t));
+      if (at(t) !== at(t + 10)) changes++;
+    }
+    expect([...seen].sort()).toEqual([FRAME.shiftLeft, FRAME.shiftRight].sort());
+    expect(changes).toBe(8);
+  });
+
+  it('adds a glance at the watch for 700 ms in every 3.2 s once impatient', () => {
+    let glancing = 0;
+    const samples = GLANCE_EVERY_MS * 5;
+    for (let t = 0; t < samples; t += 10) if (poseAt('impatient', 9, t, false).frame === FRAME.glance) glancing += 10;
+    expect(glancing / samples).toBeCloseTo(GLANCE_MS / GLANCE_EVERY_MS, 1);
+    const others = new Set<number>();
+    for (let t = 0; t < samples; t += 10) others.add(poseAt('impatient', 9, t, false).frame);
+    expect(others.has(FRAME.shiftLeft) || others.has(FRAME.shiftRight)).toBe(true);
+  });
+
+  it('holds activity poses: sitting and browsing do not move', () => {
+    for (let t = 0; t < 3000; t += 70) {
+      expect(poseAt('sit', 3, t, false).frame).toBe(FRAME.sit);
+      expect(poseAt('browse', 3, t, false).frame).toBe(FRAME.browse);
     }
   });
 
-  it('is the same across a save round trip, which keeps only the id', () => {
-    const ids = [1, 2, 3, 97, 4096, 123457];
-    const before = ids.map(outfitCodeOf);
-    const reloaded = (JSON.parse(JSON.stringify(ids)) as number[]).map(outfitCodeOf);
-    expect(reloaded).toEqual(before);
-  });
-
-  it('pins a few ids so the look of a saved tower cannot drift', () => {
-    expect([1, 2, 3, 4, 5, 1000].map(outfitCodeOf)).toEqual([18, 7, 17, 15, 18, 15]);
-  });
-
-  it('spreads hat, bag, coat and all four colour sets across a crowd', () => {
-    const codes = new Set<number>();
-    const colours = new Set<number>();
-    let hats = 0;
-    let bags = 0;
-    let coats = 0;
-    for (let id = 1; id <= 400; id++) {
-      codes.add(outfitCodeOf(id));
-      const o = outfitOf(id);
-      colours.add(o.colours);
-      if (o.hat) hats++;
-      if (o.bag) bags++;
-      if (o.coat) coats++;
-    }
-    expect(codes.size).toBe(OUTFIT_COUNT);
-    expect([...colours].sort()).toEqual([0, 1, 2, 3]);
-    for (const n of [hats, bags, coats]) {
-      expect(n).toBeGreaterThan(120);
-      expect(n).toBeLessThan(280);
+  it('holds every pose on its first frame under reduced motion, the impatient glance as a static tilt', () => {
+    const first: Record<string, number> = { walk: FRAME.stand, still: FRAME.stand, wait: FRAME.shiftLeft, impatient: FRAME.glance, sit: FRAME.sit, browse: FRAME.browse };
+    for (const pose of ['walk', 'wait', 'impatient', 'still', 'sit', 'browse'] as const) {
+      for (let t = 0; t < 5000; t += 70) expect(poseAt(pose, 9, t, true)).toEqual({ frame: first[pose], dx: 0, dy: 0 });
     }
   });
 
-  it('decodes every code and keeps the colour set and coat for the crowd atlas', () => {
-    for (let c = 0; c < OUTFIT_COUNT; c++) {
-      const o = decodeOutfit(c);
-      const p = decodeOutfit(particleOutfitOf(c));
-      expect(p.colours).toBe(o.colours);
-      expect(p.coat).toBe(o.coat);
-      expect(p.hat).toBe(false);
-      expect(p.bag).toBe(false);
-      expect(particleOutfitOf(c)).toBeLessThan(PARTICLE_OUTFITS);
+  it('bakes the mirrored stride and the right shift as their twins, flipped', () => {
+    expect(canonicalFrame(FRAME.strideMirrored)).toBe(FRAME.stride);
+    expect(canonicalFrame(FRAME.shiftRight)).toBe(FRAME.shiftLeft);
+    for (const f of [FRAME.stand, FRAME.stride, FRAME.shiftLeft, FRAME.glance, FRAME.sit, FRAME.browse]) {
+      expect(canonicalFrame(f)).toBe(f);
+      expect(isMirrored(f)).toBe(false);
     }
+    expect(isMirrored(FRAME.strideMirrored)).toBe(true);
+    expect(isMirrored(FRAME.shiftRight)).toBe(true);
+  });
+});
+
+describe('poseOf: what a person is doing, from their state', () => {
+  function sim(state: Sim['state'], waitStart: number | null = null): Sim {
+    return {
+      id: 4, kind: 'worker', homeRoomId: null, pos: { floor: 2, x: 10 }, inCarId: null, inRoomId: 1, route: [], state, stress: 0,
+      waitStart, schedule: [], nextScheduleIndex: 0, stayUntil: null, wallet: 0, leaveReason: null,
+    };
+  }
+
+  it('walks while stepping, stands when held up', () => {
+    expect(poseOf(sim('walking'), true, 100)).toBe('walk');
+    expect(poseOf(sim('leaving'), false, 100)).toBe('still');
+  });
+
+  it('turns impatient once a wait passes STORY.longWaitMinutes', () => {
+    expect(poseOf(sim('waiting', 100), false, 100 + STORY.longWaitMinutes)).toBe('wait');
+    expect(poseOf(sim('waiting', 100), false, 101 + STORY.longWaitMinutes)).toBe('impatient');
+  });
+
+  it('sits at an office or a restaurant, browses in a shop, stands in a hotel room', () => {
+    expect(poseOf(sim('inRoom'), false, 0, 'office')).toBe('sit');
+    expect(poseOf(sim('inRoom'), false, 0, 'restaurant')).toBe('sit');
+    expect(poseOf(sim('inRoom'), false, 0, 'shop')).toBe('browse');
+    expect(poseOf(sim('inRoom'), false, 0, 'hotelSingle')).toBe('still');
   });
 });

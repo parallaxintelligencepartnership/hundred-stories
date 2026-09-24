@@ -8,10 +8,12 @@
 
 import { Container, Sprite, Texture } from 'pixi.js';
 import type { Id, RoomKind, World } from '../sim/types';
-import { CINEMA_MARQUEE_COLOURS, cinemaMarquee, restaurantSteamPoint, shopSignStrip } from './art';
+import { CINEMA_MARQUEE_COLOURS, cinemaMarquee } from './art';
+import { restaurantSteamPoint, shopSignStrip } from './illustrated';
 import { floorTopY } from './camera';
 import { TILE_PX } from './grid';
 import { PALETTE } from './palette';
+import { venueOpen } from './venue';
 
 export const SIGN_BLINK_MS = 900;
 export const MARQUEE_STEP_MS = 600;
@@ -94,8 +96,11 @@ export function steamPuffs(elapsedMs: number): { dx: number; dy: number; alpha: 
 export interface Ambient {
   /** Match the emitters to the rooms in the world. None under reduced motion. */
   sync(world: World, reducedMotion: boolean): void;
-  /** Advance by `dtMs` of real time; the shop signs blink only at night. */
-  update(dtMs: number, night: boolean): void;
+  /**
+   * Advance by `dtMs` of real time; the shop signs blink only at night, and only while the shop
+   * is open at game minute `minute` (venue.ts venueOpen) when one is given.
+   */
+  update(dtMs: number, night: boolean, minute?: number): void;
   /** How many emitters are live, for the tests. */
   count(): number;
   destroy(): void;
@@ -158,7 +163,8 @@ export function createAmbient(layer: Container): Ambient {
       for (const id of [...live.keys()]) if (!seen.has(id)) drop(id);
     },
 
-    update(dtMs, night) {
+    update(dtMs, night, minute) {
+      const shopOpen = minute === undefined || venueOpen('shop', minute);
       if (live.size === 0) return;
       clock += Math.max(0, dtMs);
       const lit = signLit(clock);
@@ -168,7 +174,7 @@ export function createAmbient(layer: Container): Ambient {
         if (e.kind === 'sign') {
           const s = sprites[0];
           if (!s) continue;
-          s.visible = night;
+          s.visible = night && shopOpen;
           s.tint = lit ? PALETTE.amber : SIGN_OFF;
         } else if (e.kind === 'marquee') {
           const s = sprites[0];

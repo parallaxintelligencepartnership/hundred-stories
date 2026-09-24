@@ -100,6 +100,41 @@ export const PALETTE = {
   },
 } as const;
 
+/**
+ * Far zoom (below 0.5): every room is one flat block in its category colour with a 1 px outline,
+ * and the share of its capacity inside now fills it from the floor up in a lighter tint of the
+ * same colour. Categories share a hue so the tower reads as districts: offices blue, homes warm,
+ * hotels violet, food orange, shops green, services teal and slate.
+ */
+export const BLOCK: Record<RoomKind, number> = {
+  lobby: 0xcfc9b8,
+  skyLobby: 0xcfc9b8,
+  stairs: 0x9aa3ae,
+  escalator: 0x9aa3ae,
+  office: 0x4f78b0,
+  condo: 0xc2925a,
+  hotelSingle: 0x8a67ad,
+  hotelTwin: 0x7d5aa3,
+  hotelSuite: 0x6c4b94,
+  fastFood: 0xe0913c,
+  restaurant: 0xcf5f3a,
+  shop: 0x4c9a66,
+  cinema: 0x4a4a7a,
+  partyHall: 0xc46aa0,
+  medical: 0x4fa89c,
+  security: 0x5f7089,
+  housekeeping: 0x9a8f6a,
+  parkingRamp: 0x7d818a,
+  parkingSpace: 0x7d818a,
+  recycling: 0x6f9a5a,
+  metro: 0x5a6f8f,
+  cathedral: 0xb8a67a,
+};
+/** The block outline, one screen pixel at any zoom. */
+export const BLOCK_OUTLINE = 0x222222;
+/** How far the occupancy fill lifts the block colour toward white. */
+export const BLOCK_FILL_LIFT = 0.45;
+
 /** Every silhouette is inked in this against the light walls. */
 export const INK = 0x222222;
 

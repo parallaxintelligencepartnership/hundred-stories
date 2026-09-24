@@ -1,5 +1,12 @@
-// Procedural pixel art for the tower cross section. See docs/VISUAL.md and docs/DESIGN.md section 9.
-// No image assets: every texture is baked from Graphics primitives once and cached by key.
+// Procedural art for the tower cross section. See docs/VISUAL.md and docs/DESIGN.md section 9.
+// No image assets: every texture is baked once and cached by key, in one of two classes
+// (decision of 2026-09-23, package 2):
+//
+// structural: room shells, slabs, shafts, the ghost. Pixel art from Graphics primitives, baked
+//   at bakeResolution with nearest sampling, as below.
+// illustrated: people, venue fixtures and signs, the elevator car, the curb scene. Anti-aliased
+//   canvas paths with 2 px dark outlines (figure.ts, illustrated.ts), baked at twice
+//   bakeResolution with linear sampling, so silhouettes are smooth at zoom 1 and crisp close up.
 //
 // The grid is 16 px tiles and 72 px floors (grid.ts), drawn on integer pixels with antialias
 // off and baked at the device pixel ratio rounded to 1 or 2, so the art stays crisp at the
@@ -12,11 +19,31 @@
 // scale they were drawn through), cars with five baked door positions, people with three
 // walk frames and outfits, shafts, the ghost.
 
-import { Container, Graphics, Rectangle } from 'pixi.js';
-import type { Renderer, Texture } from 'pixi.js';
+import { CanvasSource, Container, Graphics, Rectangle, Texture } from 'pixi.js';
+import type { Renderer } from 'pixi.js';
+import { LOOK_KEYS } from '../sim/identity';
 import type { RoomKind, ShaftKind, SimKind, StressBand } from '../sim/types';
 import { SHAFTS } from '../sim/rules';
-import { DOOR_FRAMES, decodeOutfit, doorFrameOf, OUTFIT_COLOURS, type SimFrame } from './anim';
+import { canonicalFrame, DOOR_FRAMES, doorFrameOf, FRAME, type PersonFrame } from './anim';
+import { BODY_COUNT, drawPerson, drawProp, drawStressMark, lookCode, MARK_H, MARK_W, personKey, PROP_SIZE, type Ctx2D, type PropKind } from './figure';
+import {
+  closedBand,
+  drawCarIllustrated,
+  drawClosed,
+  drawGlow,
+  drawSign,
+  drawUmbrella,
+  drawVehicle,
+  drawVenueFixtures,
+  GLOW_PX,
+  signBoard,
+  UMBRELLA_H,
+  UMBRELLA_W,
+  VEHICLE_SIZE,
+  VENUE_BAND,
+  type VehicleKind,
+} from './illustrated';
+import type { Treatment, VenueKind } from './venue';
 import {
   CAR_CLEAR_PX,
   CAR_INSET_PX,
@@ -64,9 +91,77 @@ export interface Art {
   shaft(kind: ShaftKind, floors: number): Texture;
   /** A car with its doors at `door` (0 closed, 1 open), baked at the nearest of DOOR_FRAMES. */
   car(kind: ShaftKind, door: number): Texture;
-  /** A person in walk frame `frame`, in outfit `outfit` (anim.ts outfit code), or plain without one. */
-  sim(kind: SimKind, band: StressBand, frame: SimFrame, outfit?: number): Texture;
+  /**
+   * A person in frame `frame` (anim.ts PersonFrame), with look code `look` (figure.ts: build and
+   * look key). Stress is not drawn into the person: the renderer puts a mark over the head.
+   */
+  sim(kind: SimKind, band: StressBand, frame: PersonFrame, look?: number): Texture;
   ghost(widthTiles: number, heightFloors: number, ok: boolean): Texture;
+  // The illustrated extras. Optional, so an Art without them (the flat fallback) draws none.
+  /** A venue's fixtures in one of its treatments, over its shell (VENUE_SHELL), VENUE_BAND tall. */
+  venue?(kind: VenueKind, widthTiles: number, treatment: Treatment): Texture;
+  /** A sign board with its brand, the board's size (illustrated.ts signBoard). */
+  sign?(kind: 'shop' | 'restaurant', widthTiles: number, name: string, accent: number): Texture;
+  /** The closed-hours shutter (shop) or drawn blinds (office, restaurant), closedBand tall. */
+  closed?(kind: VenueKind, widthTiles: number): Texture;
+  /** The shared soft glow behind a lit sign and under a lit venue's ceiling, tinted where used. */
+  glow?(): Texture;
+  /** What a role carries, drawn over the person (figure.ts propPlacement). */
+  prop?(prop: PropKind): Texture;
+  /** The stress mark over a head, MARK_W by MARK_H. */
+  mark?(mark: 'dot' | 'bang'): Texture;
+  umbrella?(colour: number): Texture;
+  vehicle?(kind: VehicleKind): Texture;
+  /** The crowd atlas for particle mode, built on first use; null if it cannot be built. */
+  crowd?(): CrowdAtlas | null;
+  /** How many textures are baked and their bytes at the bake resolution (width x height x 4). */
+  stats?(): TextureStats;
+  /**
+   * Free every person texture that no sprite shows (`live`) and nobody asked for in `idleMs`:
+   * people come and go all day, and a pose nobody holds should not stay on the GPU. Returns how
+   * many were freed.
+   */
+  sweep?(live: ReadonlySet<Texture>, idleMs: number): number;
+}
+
+export interface CrowdAtlas {
+  /** The atlas cell for a person: walk frames show the stride, every other frame stands. */
+  frameOf(kind: SimKind, look: number, frame: PersonFrame): Texture;
+}
+
+export interface TextureStats {
+  textures: number;
+  bytes: number;
+  structural: { textures: number; bytes: number };
+  illustrated: { textures: number; bytes: number };
+  /** Bytes per texture family, the part of the key before the first colon. */
+  byFamily: Record<string, number>;
+}
+
+/**
+ * The two texture classes. Structural textures bake at bakeResolution and sample nearest;
+ * illustrated ones bake at `scale` times bakeResolution with anti-aliasing and sample linear.
+ */
+export const TEXTURE_CLASS = {
+  structural: { scale: 1, scaleMode: 'nearest', antialias: false },
+  illustrated: { scale: 2, scaleMode: 'linear', antialias: true },
+} as const;
+
+/**
+ * The room variant that draws the shell alone (walls, windows, slab, outline) for a venue kind:
+ * its fixtures, sign and lighting are illustrated layers on top. Variants 0 and 1 still draw the
+ * whole pixel room, which the palette thumbnails are cut from.
+ */
+export const VENUE_SHELL = 2;
+
+/** The crowd atlas layout: every kind and look key across, every build by stand and stride down. */
+export const CROWD_KINDS: readonly SimKind[] = ['worker', 'resident', 'guest', 'shopper', 'diner', 'staff', 'visitor', 'vip'];
+export const CROWD_COLS = CROWD_KINDS.length * LOOK_KEYS;
+export const CROWD_ROWS = BODY_COUNT * 2;
+
+/** Which window band a kind has, for the far zoom veil over it. */
+export function hasWindowBand(kind: RoomKind): boolean {
+  return WINDOWS[kind] === 'glass';
 }
 
 /** Texture sizes, in logical pixels, so the renderer and the tests share one rule. */
@@ -79,6 +174,7 @@ export const TEXTURE_SIZE = {
     height: FLOOR_PX - CAR_CLEAR_PX + CAR_SHADOW_PX,
   }),
   sim: () => ({ width: SIM_W, height: SIM_H }),
+  venue: (tiles: number) => ({ width: tiles * TILE_PX, height: FLOOR_PX }),
   ghost: (tiles: number, floors: number) => ({ width: tiles * TILE_PX, height: floors * FLOOR_PX }),
 } as const;
 
@@ -900,8 +996,8 @@ function drawFastFood(g: Graphics, by: number, ty: number, w: number, v: number,
 
 const RESTAURANT_BAR_W = 88;
 
-/** Where the plate on the kitchen pass sits, the source of the restaurant's steam (ambient.ts). */
-export function restaurantSteamPoint(w: number): { x: number; y: number } {
+/** Where the plate on the pixel restaurant's pass sits (the palette thumbnail's art). */
+function pixelSteamPoint(w: number): { x: number; y: number } {
   const barX = w - RESTAURANT_BAR_W - 4;
   return { x: barX + 14, y: BASE - 36 };
 }
@@ -926,7 +1022,7 @@ function drawRestaurant(g: Graphics, by: number, ty: number, w: number, v: numbe
   for (let x = barX + 12; x < barX + RESTAURANT_BAR_W - 4; x += 14) {
     outline(g, x - 8, by - 18, 12, 14, D.wood, 1); // raised panels
   }
-  const steam = restaurantSteamPoint(w);
+  const steam = pixelSteamPoint(w);
   box(g, steam.x - 8, by - 30, 16, 2, D.linen); // the plate on the pass
   box(g, steam.x - 5, by - 34, 10, 4, v === 0 ? D.shelfGoodsA : D.leaf); // what is on it
   panel(g, barX + 32, ty, RESTAURANT_BAR_W - 36, 18, D.woodDark); // back shelf
@@ -947,8 +1043,8 @@ function drawRestaurant(g: Graphics, by: number, ty: number, w: number, v: numbe
 
 const SHOP_COUNTER_W = 64;
 
-/** The strip under the shop's sign board, the one that blinks at night (ambient.ts). */
-export function shopSignStrip(w: number): { x: number; y: number; w: number; h: number } {
+/** The strip under the pixel shop's sign board (the palette thumbnail's art). */
+function pixelSignStrip(w: number): { x: number; y: number; w: number; h: number } {
   const counterX = w - SHOP_COUNTER_W - 6;
   return { x: counterX - 2, y: INTERIOR_TOP + 12, w: SHOP_COUNTER_W + 4, h: 2 };
 }
@@ -970,7 +1066,7 @@ function drawShop(g: Graphics, by: number, ty: number, w: number, v: number, lit
       panel(g, hx, ty + 8, 8, 18 + (i % 2) * 4, c); // a garment
     }
   }
-  const sign = shopSignStrip(w);
+  const sign = pixelSignStrip(w);
   panel(g, counterX - 2, ty, SHOP_COUNTER_W + 4, 12, v === 0 ? PALETTE.amber : D.shelfGoodsB); // sign board
   for (let i = 0; counterX + 4 + i * 10 + 6 <= counterX + SHOP_COUNTER_W; i++) box(g, counterX + 4 + i * 10, ty + 4, 6, 4, INK);
   box(g, sign.x, sign.y, sign.w, sign.h, lit ? PALETTE.amber : D.metalDark); // the strip the sign lights
@@ -1659,138 +1755,6 @@ function drawShaft(g: Graphics, kind: ShaftKind, w: number, h: number): void {
   }
 }
 
-/**
- * A car, `w` by `bodyH` with its cast shadow CAR_SHADOW_PX tall on top. The standard car is
- * 56 by 60: 2 px trim, a right shadow face, a 52 by 4 ceiling light, a 44 by 48 door opening
- * at (6, 8) with two panels that slide outward, a 4 px bottom plate. `door` is how far the
- * panels have slid, 0 closed to 1 open: each panel travels 8 px of its 22 at 1 (Astra
- * section 1), scaled with the car, and the renderer tweens between five baked positions.
- */
-function drawCar(g: Graphics, kind: ShaftKind, w: number, bodyH: number, door: number): void {
-  box(g, 0, 0, w, CAR_SHADOW_PX, PALETTE.slabShadow, SLAB_SHADOW_ALPHA); // cast shadow up the shaft
-  const top = CAR_SHADOW_PX;
-  box(g, 0, top, w, bodyH, PALETTE.carTrim);
-  box(g, LINE_PX, top + LINE_PX, w - 2 * LINE_PX, bodyH - 2 * LINE_PX, PALETTE.carBody);
-  box(g, w - LINE_PX - 4, top + LINE_PX, 4, bodyH - 2 * LINE_PX, PALETTE.carShade); // shadow face
-  box(g, LINE_PX, top + LINE_PX, w - 2 * LINE_PX, 4, PALETTE.carLight); // ceiling light strip
-  vline(g, LINE_PX, top + 6, bodyH - 10, PALETTE.carDoor, 1); // the lit edge of the body
-  const ox = 6;
-  const oy = top + 8;
-  const ow = w - 2 * ox;
-  const oh = bodyH - 12;
-  box(g, ox, oy, ow, oh, PALETTE.carInterior); // the cavity behind the doors
-  box(g, ox, oy, ow, oh, PALETTE.carLight, 0.3); // the car is lit inside, full or empty
-  const panelW = Math.floor(ow / 2);
-  const open = Math.min(1, Math.max(0, door));
-  // Each panel slides outward, clipped to the opening: drawn narrower, never outside it.
-  const slide = Math.round(((panelW * 8) / 22) * open);
-  const leftW = panelW - slide;
-  const rightX = ox + panelW + slide;
-  const rightW = ox + ow - rightX;
-  box(g, ox, oy, leftW, oh, PALETTE.carDoor);
-  box(g, rightX, oy, rightW, oh, PALETTE.carDoor);
-  if (slide > 0) {
-    vline(g, ox + leftW - 1, oy, oh, PALETTE.carTrim, 1); // the panel edges
-    vline(g, rightX, oy, oh, PALETTE.carTrim, 1);
-  } else {
-    vline(g, ox + panelW - 1, oy, oh, PALETTE.carTrim); // the door line
-  }
-  if (kind === 'service') box(g, ox + 2, oy + 4, leftW - 4, 4, PALETTE.detail.metalDark);
-  if (kind === 'express') box(g, ox + 2, oy + oh - 16, leftW - 4, 4, PALETTE.amber);
-  box(g, 0, top + bodyH - 4, w, 4, PALETTE.carTrim); // bottom plate
-}
-
-/**
- * The limbs of one walk frame. 0 stands, arms hanging and legs upright; 1 strides, the
- * leading leg reaching out to the edge of the box and the far arm swinging back; 2 is 1
- * mirrored. Only the limbs mirror: what a person carries stays in the same hand.
- */
-function drawLimbs(g: Graphics, frame: SimFrame, body: number): void {
-  if (frame === 0) {
-    box(g, 2, 12, 2, 14, body); // arms hanging
-    box(g, 12, 12, 2, 14, body);
-    box(g, 4, 28, 2, 20, body); // legs upright, a four pixel gap between them
-    box(g, 10, 28, 2, 20, body);
-    return;
-  }
-  const m = frame === 2;
-  const at = (x: number, y: number, w: number, h: number): void => box(g, m ? SIM_W - x - w : x, y, w, h, body);
-  at(2, 14, 2, 12); // the near arm swinging forward and down
-  at(12, 10, 2, 12); // the far arm swinging back and up
-  at(4, 28, 2, 6); // the leading leg: hip, knee, then planted out wide
-  at(2, 34, 2, 8);
-  at(0, 42, 4, 6);
-  at(10, 28, 2, 10); // the trailing leg, pushing off behind
-  at(12, 38, 2, 8);
-  at(12, 46, 4, 2);
-}
-
-/**
- * A person, 16 by 48: a straight double of the 0.3 figure. The feet fill the bottom rows so
- * the sprite's lower edge lands on the slab line, and the top four rows stay clear for a hat.
- * Head 8 by 4 with its top corners rounded, a neck notch, torso 18, legs 20. The outfit (a
- * colour set, a coat, a hat, a bag) is drawn in accents so the stress colour still carries
- * the head, the arms, the legs and the middle of the body. Nothing may reach outside the box:
- * at one tile wide the figures stand shoulder to shoulder in a lift queue, so a stray pixel
- * lands on the neighbor.
- */
-function drawSim(g: Graphics, kind: SimKind, band: StressBand, frame: SimFrame, outfit: number): void {
-  const body = band === 'calm' ? PALETTE.sim.calm : band === 'pink' ? PALETTE.sim.pink : PALETTE.sim.red;
-  box(g, 5, 4, 6, 1, body); // crown, one pixel in at each corner
-  box(g, 4, 5, 8, 3, body); // head
-  box(g, 6, 8, 4, 2, body); // neck, the notch that separates head from shoulders
-  box(g, 4, 10, 8, 18, body); // torso
-  drawLimbs(g, frame, body);
-  if (outfit >= 0) {
-    const o = decodeOutfit(outfit);
-    const { main, trim } = OUTFIT_COLOURS[o.colours];
-    if (o.coat) {
-      box(g, 4, 10, 2, 20, main); // the coat's two fronts, open over the body, to below the hip
-      box(g, 10, 10, 2, 20, main);
-      box(g, 6, 10, 1, 3, main); // lapels
-      box(g, 9, 10, 1, 3, main);
-    } else {
-      box(g, 4, 26, 8, 2, trim); // a belt
-    }
-    if (o.hat && kind !== 'vip') {
-      box(g, 5, 1, 6, 3, main); // crown of the hat
-      box(g, 3, 3, 10, 2, main); // brim
-    }
-    if (o.bag) {
-      box(g, 3, 12, 1, 8, trim); // the strap
-      box(g, 0, 20, 4, 6, trim); // a bag at the hip
-      box(g, 0, 20, 4, 1, INK);
-    }
-  }
-  // small per kind accents, kept clear of the legs
-  switch (kind) {
-    case 'worker':
-      box(g, 12, 22, 4, 6, PALETTE.detail.woodDark); // briefcase
-      break;
-    case 'guest':
-      box(g, 12, 20, 4, 8, PALETTE.detail.chairA); // suitcase
-      break;
-    case 'shopper':
-      box(g, 12, 22, 4, 6, PALETTE.detail.shelfGoodsA); // shopping bag
-      break;
-    case 'staff':
-      box(g, 4, 10, 8, 2, PALETTE.simAccent); // uniform collar
-      break;
-    case 'vip':
-      box(g, 2, 2, 12, 2, PALETTE.amber); // hat brim
-      box(g, 4, 0, 8, 2, PALETTE.amber);
-      break;
-    case 'diner':
-      box(g, 12, 22, 4, 4, PALETTE.detail.linen);
-      break;
-    case 'resident':
-      box(g, 4, 10, 8, 2, PALETTE.detail.blanketA); // scarf
-      break;
-    case 'visitor':
-      break;
-  }
-}
-
 function drawGhost(g: Graphics, w: number, h: number, ok: boolean): void {
   const color = ok ? PALETTE.ghostOk : PALETTE.alert;
   box(g, 0, 0, w, h, color, 0.18);
@@ -1813,16 +1777,41 @@ function roomContainer(kind: RoomKind, tiles: number, floors: number, v: number,
   const g = new Graphics();
   drawShell(g, kind, w, h, state);
   const full = FULL_HEIGHT.has(kind);
-  if (full) drawNativeInterior(g, kind, 0, w, h, v, lit, lamp);
-  else for (let f = 0; f < floors; f++) drawNativeInterior(g, kind, f * FLOOR_PX, w, FLOOR_PX, v, lit, lamp);
+  if (v !== VENUE_SHELL) {
+    if (full) drawNativeInterior(g, kind, 0, w, h, v, lit, lamp);
+    else for (let f = 0; f < floors; f++) drawNativeInterior(g, kind, f * FLOOR_PX, w, FLOOR_PX, v, lit, lamp);
+  }
   drawCellOutline(g, w, h, floors, !full);
   root.addChild(g);
   return root;
 }
 
-export function createArt(renderer: Renderer): Art {
+/** A canvas to draw an illustrated texture on; the DOM's by default, a fake in the tests. */
+export type CanvasFactory = (width: number, height: number) => HTMLCanvasElement | OffscreenCanvas;
+
+function domCanvas(width: number, height: number): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  return canvas;
+}
+
+export function createArt(renderer: Renderer, options: { createCanvas?: CanvasFactory; resolution?: 1 | 2 } = {}): Art {
   const cache = new Map<string, Texture>();
-  const resolution = bakeResolution(typeof window === 'undefined' ? 1 : window.devicePixelRatio);
+  const resolution = options.resolution ?? bakeResolution(typeof window === 'undefined' ? 1 : window.devicePixelRatio);
+  const makeCanvas = options.createCanvas ?? domCanvas;
+  const illustratedScale = TEXTURE_CLASS.illustrated.scale * resolution;
+  const counts = { structural: { textures: 0, bytes: 0 }, illustrated: { textures: 0, bytes: 0 } };
+  const byFamily: Record<string, number> = {};
+  /** Person textures: when each was last asked for, and its bytes, for sweep. */
+  const personUsed = new Map<string, number>();
+  const personBytes = new Map<string, number>();
+  const now = (): number => (typeof performance === 'undefined' ? Date.now() : performance.now());
+  const count = (key: string, bytes: number): void => {
+    const family = key.slice(0, key.indexOf(':') >>> 0);
+    byFamily[family] = (byFamily[family] ?? 0) + bytes;
+  };
+  let crowdAtlas: CrowdAtlas | null | undefined;
 
   function bakeTarget(key: string, w: number, h: number, make: () => Container): Texture {
     const hit = cache.get(key);
@@ -1832,11 +1821,14 @@ export function createArt(renderer: Renderer): Art {
       target,
       frame: new Rectangle(0, 0, w, h),
       resolution,
-      antialias: false,
-      textureSourceOptions: { scaleMode: 'nearest' },
+      antialias: TEXTURE_CLASS.structural.antialias,
+      textureSourceOptions: { scaleMode: TEXTURE_CLASS.structural.scaleMode },
     });
     target.destroy({ children: true });
     cache.set(key, texture);
+    counts.structural.textures += 1;
+    counts.structural.bytes += Math.ceil(w * resolution) * Math.ceil(h * resolution) * 4;
+    count(key, Math.ceil(w * resolution) * Math.ceil(h * resolution) * 4);
     return texture;
   }
 
@@ -1848,11 +1840,41 @@ export function createArt(renderer: Renderer): Art {
     });
   }
 
+  /**
+   * An illustrated texture: drawn on an anti-aliased canvas at illustratedScale, sampled linear.
+   * `originY` crops the top: the canvas starts that many logical px down the drawing.
+   */
+  function paint(key: string, w: number, h: number, draw: (ctx: CanvasRenderingContext2D) => void, scale = illustratedScale, originY = 0): Texture {
+    const person = key.startsWith('person:');
+    if (person) personUsed.set(key, now());
+    const hit = cache.get(key);
+    if (hit) return hit;
+    const pw = Math.max(1, Math.ceil(w * scale));
+    const ph = Math.max(1, Math.ceil(h * scale));
+    const canvas = makeCanvas(pw, ph);
+    const ctx = canvas.getContext('2d') as CanvasRenderingContext2D | null;
+    if (ctx) {
+      ctx.scale(scale, scale);
+      ctx.translate(0, -originY);
+      draw(ctx);
+    }
+    const texture = new Texture({
+      source: new CanvasSource({ resource: canvas as HTMLCanvasElement, resolution: scale, scaleMode: TEXTURE_CLASS.illustrated.scaleMode }),
+      label: key,
+    });
+    cache.set(key, texture);
+    counts.illustrated.textures += 1;
+    counts.illustrated.bytes += pw * ph * 4;
+    count(key, pw * ph * 4);
+    if (person) personBytes.set(key, pw * ph * 4);
+    return texture;
+  }
+
   return {
     room(kind, width, height, variant, state) {
       const tiles = Math.max(1, Math.round(width));
       const floors = Math.max(1, Math.round(height));
-      const v = ((Math.round(variant) % 2) + 2) % 2;
+      const v = Math.round(variant) === VENUE_SHELL ? VENUE_SHELL : ((Math.round(variant) % 2) + 2) % 2;
       const { width: w, height: h } = TEXTURE_SIZE.room(tiles, floors);
       return bakeTarget(`room:${kind}:${tiles}:${floors}:${v}:${state}`, w, h, () =>
         roomContainer(kind, tiles, floors, v, state),
@@ -1873,15 +1895,19 @@ export function createArt(renderer: Renderer): Art {
 
     car(kind, door) {
       const { width: w, height: h } = TEXTURE_SIZE.car(kind);
-      const frame = doorFrameOf(door);
-      return bake(`car:${kind}:${frame}`, w, h, (g) => drawCar(g, kind, w, h - CAR_SHADOW_PX, DOOR_FRAMES[frame]));
+      // Three baked door positions of the five: closed, half and open. The tween still runs on
+      // the five, and a quarter reads as half at 60 ms a step (the texture budget, package 2).
+      const frame = [0, 2, 2, 2, 4][doorFrameOf(door)] as 0 | 2 | 4;
+      return paint(`car:${kind}:${frame}`, w, h, (ctx) => drawCarIllustrated(ctx, kind, w, h - CAR_SHADOW_PX, DOOR_FRAMES[frame], CAR_SHADOW_PX));
     },
 
-    sim(kind, band, frame, outfit) {
+    sim(kind, _band, frame, look) {
       const { width: w, height: h } = TEXTURE_SIZE.sim();
-      const f: SimFrame = frame === 1 || frame === 2 ? frame : 0;
-      const o = outfit === undefined || outfit < 0 ? -1 : Math.trunc(outfit);
-      return bake(`sim:${kind}:${band}:${f}:${o}`, w, h, (g) => drawSim(g, kind, band, f, o));
+      const f = (Number.isInteger(frame) && frame >= 0 && frame <= 7 ? frame : FRAME.stand) as PersonFrame;
+      const code = look === undefined || look < 0 ? 0 : Math.trunc(look);
+      // Mirrored frames share their twin's texture; the renderer flips the sprite (anim.ts isMirrored).
+      const baked = canonicalFrame(f);
+      return paint(personKey(kind, baked, code), w, h, (ctx) => drawPerson(ctx as unknown as Ctx2D, kind, code, baked));
     },
 
     ghost(widthTiles, heightFloors, ok) {
@@ -1889,6 +1915,133 @@ export function createArt(renderer: Renderer): Art {
       const floors = Math.max(1, Math.round(heightFloors));
       const { width: w, height: h } = TEXTURE_SIZE.ghost(tiles, floors);
       return bake(`ghost:${tiles}:${floors}:${ok ? 1 : 0}`, w, h, (g) => drawGhost(g, w, h, ok));
+    },
+
+    venue(kind, widthTiles, treatment) {
+      const tiles = Math.max(1, Math.round(widthTiles));
+      const { width: w } = TEXTURE_SIZE.venue(tiles);
+      return paint(`venue:${kind}:${tiles}:${treatment}`, w, VENUE_BAND.height, (ctx) => drawVenueFixtures(ctx, kind, treatment, w), illustratedScale, VENUE_BAND.top);
+    },
+
+    sign(kind, widthTiles, name, accent) {
+      const board = signBoard(kind, Math.max(1, Math.round(widthTiles)) * TILE_PX);
+      return paint(`sign:${kind}:${board.w}:${name}:${accent}`, board.w, board.h, (ctx) => drawSign(ctx, board, name, accent));
+    },
+
+    closed(kind, widthTiles) {
+      const tiles = Math.max(1, Math.round(widthTiles));
+      const { width: w } = TEXTURE_SIZE.venue(tiles);
+      const band = closedBand(kind);
+      return paint(`closed:${kind}:${tiles}`, w, band.height, (ctx) => drawClosed(ctx, kind, w), illustratedScale, band.top);
+    },
+
+    glow() {
+      // A soft gradient with no edges: the structural resolution is plenty.
+      return paint('glow', GLOW_PX, GLOW_PX, (ctx) => drawGlow(ctx), resolution);
+    },
+
+    prop(prop) {
+      const { w, h } = PROP_SIZE[prop];
+      return paint(`prop:${prop}`, w, h, (ctx) => drawProp(ctx as unknown as Ctx2D, prop));
+    },
+
+    mark(mark) {
+      return paint(`mark:${mark}`, MARK_W, MARK_H, (ctx) => drawStressMark(ctx as unknown as Ctx2D, mark));
+    },
+
+    umbrella(colour) {
+      return paint(`umbrella:${colour}`, UMBRELLA_W, UMBRELLA_H, (ctx) => drawUmbrella(ctx, colour));
+    },
+
+    vehicle(kind) {
+      const { w, h } = VEHICLE_SIZE[kind];
+      return paint(`vehicle:${kind}`, w, h, (ctx) => drawVehicle(ctx, kind));
+    },
+
+    crowd() {
+      if (crowdAtlas !== undefined) return crowdAtlas;
+      crowdAtlas = null;
+      try {
+        // One canvas at the structural resolution: at crowd zoom a person is a few pixels tall.
+        const cellW = SIM_W;
+        const cellH = SIM_H;
+        const atlas = paint(
+          'crowd',
+          CROWD_COLS * cellW,
+          CROWD_ROWS * cellH,
+          (ctx) => {
+            for (let k = 0; k < CROWD_KINDS.length; k++) {
+              for (let l = 0; l < LOOK_KEYS; l++) {
+                for (let b = 0; b < BODY_COUNT; b++) {
+                  for (let s = 0; s < 2; s++) {
+                    ctx.save();
+                    ctx.translate((k * LOOK_KEYS + l) * cellW, (b * 2 + s) * cellH);
+                    drawPerson(ctx as unknown as Ctx2D, CROWD_KINDS[k] as SimKind, lookCode(b, l), s === 0 ? FRAME.stand : FRAME.stride);
+                    ctx.restore();
+                  }
+                }
+              }
+            }
+          },
+          resolution,
+        );
+        const cells = new Map<number, Texture>();
+        crowdAtlas = {
+          frameOf(kind, look, frame) {
+            const k = Math.max(0, CROWD_KINDS.indexOf(kind));
+            const codes = BODY_COUNT * LOOK_KEYS;
+            const code = ((Math.trunc(look) % codes) + codes) % codes;
+            const col = k * LOOK_KEYS + (code % LOOK_KEYS);
+            const row = Math.floor(code / LOOK_KEYS) * 2 + (frame === FRAME.stride || frame === FRAME.strideMirrored ? 1 : 0);
+            const id = row * CROWD_COLS + col;
+            let cell = cells.get(id);
+            if (!cell) {
+              cell = new Texture({ source: atlas.source, frame: new Rectangle(col * cellW, row * cellH, cellW, cellH) });
+              cells.set(id, cell);
+            }
+            return cell;
+          },
+        };
+      } catch (error) {
+        console.warn('render: crowd atlas failed, staying on sprites', error);
+        crowdAtlas = null;
+      }
+      return crowdAtlas;
+    },
+
+    sweep(live, idleMs) {
+      const t = now();
+      let freed = 0;
+      for (const [key, used] of personUsed) {
+        if (t - used < idleMs) continue;
+        const texture = cache.get(key);
+        if (texture && live.has(texture)) continue;
+        personUsed.delete(key);
+        if (!texture) continue;
+        cache.delete(key);
+        try {
+          texture.destroy(true);
+        } catch (error) {
+          console.warn('render: freeing a person texture failed', error);
+        }
+        const bytes = personBytes.get(key) ?? 0;
+        personBytes.delete(key);
+        counts.illustrated.textures -= 1;
+        counts.illustrated.bytes -= bytes;
+        byFamily['person'] = (byFamily['person'] ?? 0) - bytes;
+        freed += 1;
+      }
+      return freed;
+    },
+
+    stats() {
+      return {
+        textures: counts.structural.textures + counts.illustrated.textures,
+        bytes: counts.structural.bytes + counts.illustrated.bytes,
+        structural: { ...counts.structural },
+        illustrated: { ...counts.illustrated },
+        byFamily: { ...byFamily },
+      };
     },
   };
 }

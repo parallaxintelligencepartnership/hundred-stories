@@ -4,7 +4,9 @@
 import type { Sound } from '../audio/audio';
 import type { GameApi } from '../game/api';
 import { exportSaveWithDialog, importSaveWithDialog, savePlatform, shareSave } from '../game/storage';
+import { drawPortrait, personLookCode, type Ctx2D } from '../render/figure';
 import type { Renderer } from '../render/renderer';
+import { isVenueKind, venueLine, venueOf } from '../render/venue';
 import { composeShareImage, shareMessage, shareStats, shareText, shareUrl } from '../share/share';
 import { applyTheme, cycleTheme, readTheme, themeLabel } from '../site/theme';
 import { officeQuarterRent } from '../sim/economy';
@@ -230,6 +232,11 @@ function roomPanel(roomId: Id, game: GameApi, ctx: PanelContext): PanelElement {
       ? formatFloorRange(room.floor, room.floor + room.height - 1)
       : formatFloor(room.floor);
   body.append(el('p', 'hs-note', where));
+  // A shop or restaurant goes by the brand on its sign, an office by its line of work: the
+  // same pure function of seed and room id the renderer draws the sign from (render/venue.ts).
+  if (isVenueKind(room.kind)) {
+    body.append(el('p', 'hs-note hs-venue', venueLine(room.kind, venueOf(game.world.seed, room.id, room.kind))));
+  }
 
   const evaluation = section('Evaluation');
   const bar = evalBar(room.eval);
@@ -386,6 +393,33 @@ function occupantIds(game: GameApi, room: Room): Id[] {
   return out;
 }
 
+/** The person panel's portrait, in css px. */
+export const PORTRAIT_PX = 48;
+
+/**
+ * A person's portrait: the same figure the world draws (render/figure.ts), from the same build
+ * and identity look key, cropped to head and shoulders. Drawn once: a look never changes.
+ */
+function portrait(game: GameApi, sim: Sim): HTMLCanvasElement {
+  const canvas = el('canvas', 'hs-portrait');
+  const ratio = Math.min(3, Math.max(1, Math.round(globalThis.devicePixelRatio ?? 1)));
+  canvas.width = PORTRAIT_PX * ratio;
+  canvas.height = PORTRAIT_PX * ratio;
+  canvas.style.width = `${PORTRAIT_PX}px`;
+  canvas.style.height = `${PORTRAIT_PX}px`;
+  canvas.style.flex = '0 0 auto';
+  canvas.style.borderRadius = '4px';
+  canvas.setAttribute('role', 'img');
+  canvas.setAttribute('aria-label', `Portrait of ${storyName(game.world, sim.id)}`);
+  const context = canvas.getContext?.('2d');
+  if (context) {
+    const look = personLookCode(game.world.seed, sim.id, sim.kind);
+    context.scale(ratio, ratio);
+    drawPortrait(context as unknown as Ctx2D, sim.kind, look, PORTRAIT_PX);
+  }
+  return canvas;
+}
+
 function simPanel(simId: Id, game: GameApi, ctx: PanelContext): PanelElement {
   const sim = game.world.sims.get(simId) as Sim;
   const { panel, body } = panelShell(SIM_KINDS[sim.kind], 'population', ctx);
@@ -394,7 +428,13 @@ function simPanel(simId: Id, game: GameApi, ctx: PanelContext): PanelElement {
   // what helps. Words are built here, when the panel opens or refreshes, never in the tick.
   const who = section('Who');
   const whoLines = el('div', 'hs-story-who');
-  who.append(whoLines);
+  // The portrait beside the lines: the sprite in the world, head and shoulders.
+  const whoRow = el('div', 'hs-story-who-row');
+  whoRow.style.display = 'flex';
+  whoRow.style.gap = '10px';
+  whoRow.style.alignItems = 'flex-start';
+  whoRow.append(portrait(game, sim), whoLines);
+  who.append(whoRow);
   const mind = section('On their mind');
   const mindLine = el('p', 'hs-story-line');
   mind.append(mindLine);
