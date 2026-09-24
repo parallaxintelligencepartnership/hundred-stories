@@ -264,6 +264,23 @@ function startTrip(world: World, sim: Sim, goal: ScheduleEntry['goal']): boolean
   return true;
 }
 
+/**
+ * The VIP walks in from the ground lobby and heads for the suite by the normal routing and
+ * elevator rules. False when no route exists; the caller (events.ts) ends the visit then.
+ */
+export function sendVipToSuite(world: World, sim: Sim, suite: Room): boolean {
+  ensureRouting(world);
+  const door = entrances(world).find((p) => p.floor === 1);
+  if (door) sim.pos = { floor: door.floor, x: door.x };
+  const legs = findRoute(world, sim.pos, { floor: suite.floor, x: roomCenter(suite) }, routeOpts(sim));
+  if (!legs) return false;
+  sim.route = [...withoutStandingRides(legs), { kind: 'enter', roomId: suite.id }];
+  sim.state = 'walking';
+  sim.waitStart = null;
+  markTripStart(world, sim);
+  return true;
+}
+
 function pickRoomOfKind(world: World, sim: Sim, kind: RoomKind): Room | undefined {
   const wanted = DINING_KINDS.has(kind) ? DINING_KINDS : new Set<RoomKind>([kind]);
   let best: Room | undefined;

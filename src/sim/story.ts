@@ -3,7 +3,7 @@
  * Package 1 attaches this as world.story and persists it in save v4.
  */
 
-import { personIdentity, personName, personVoice } from './identity';
+import { personIdentity, personName, personVoice, vipPreference } from './identity';
 import { ROOMS, STARS } from './rules';
 import { clockOf } from './types';
 import type { Leg, Room, Sim, Star, World } from './types';
@@ -352,7 +352,7 @@ export const ROLE_LABELS: Record<Sim['kind'], string> = {
   diner: 'Diner',
   staff: 'Housekeeper',
   visitor: 'Visitor',
-  vip: 'VIP',
+  vip: 'VIP guest',
 };
 
 /** The card's four headings, in the order the panel shows them. */
@@ -508,10 +508,16 @@ export function personCard(world: World, sim: Sim): PersonCard {
     lookKey: identity.lookKey,
     voiceKey: identity.voiceKey,
     who,
-    mind: goalLine(world, sim),
+    mind: sim.kind === 'vip' ? `${goalLine(world, sim)}. Cares most about ${vipPreferenceOf(world, sim.id)}` : goalLine(world, sim),
     chapter: chapter.length > 0 ? chapter : [NOTHING_RECORDED],
     helps: helpsFor(beats, sim),
   };
+}
+
+/** A VIP's preference: the one their visit carries, or the identity hash's pick. */
+function vipPreferenceOf(world: World, simId: number): string {
+  for (const event of world.events) if (event.kind === 'vip' && event.simId === simId) return event.preference;
+  return vipPreference(world.seed, simId);
 }
 
 /** A name for anyone the story mentions, here or gone. */

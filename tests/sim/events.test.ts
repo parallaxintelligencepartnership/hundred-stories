@@ -5,9 +5,12 @@ import {
   hooksActive,
   resetEventTestHooks,
   tickEvents,
-  vipRatingFor,
+  vipRatingOf,
+  vipSuiteBand,
+  vipWaitBand,
 } from '../../src/sim/events';
-import { EVENTS, ROOMS, STRESS } from '../../src/sim/rules';
+import { personName, vipPreference } from '../../src/sim/identity';
+import { EVAL, EVENTS, ROOMS } from '../../src/sim/rules';
 import { deserialize, serialize } from '../../src/sim/save';
 import type { ActiveEvent, Room, RoomKind, Star, World } from '../../src/sim/types';
 import { addRoom, allocId, createWorld } from '../../src/sim/world';
@@ -215,61 +218,52 @@ describe('VIP', () => {
     return place(world, 'hotelSuite', 5, 200);
   }
 
-  function runVisit(stress: number): void {
-    visitedTower();
-    at(world, ROLL_MINUTE);
-    const visit = eventOf(world, 'vip') as Extract<ActiveEvent, { kind: 'vip' }>;
-    at(world, visit.arrivesAt);
-    const sim = world.sims.get(visit.simId);
-    if (sim) sim.stress = stress;
-    at(world, visit.leavesAt);
-  }
-
-  it('spawns a vip sim into a free suite and marks the suite tenants', () => {
+  it('books a vip sim into a free suite, named, with a preference, and holds the suite', () => {
     const suite = visitedTower();
     at(world, ROLL_MINUTE);
-    const visit = eventOf(world, 'vip');
-    expect(visit?.suiteId).toBe(suite.id);
-    const sim = world.sims.get(visit?.simId ?? 0);
+    const visit = eventOf(world, 'vip') as Extract<ActiveEvent, { kind: 'vip' }>;
+    expect(visit.suiteId).toBe(suite.id);
+    expect(visit.phase).toBe('notice');
+    expect(visit.preference).toBe(vipPreference(world.seed, visit.simId));
+    const sim = world.sims.get(visit.simId);
     expect(sim?.kind).toBe('vip');
     expect(sim?.state).toBe('outside');
     expect(suite.tenants).toEqual([sim?.id]);
-    expect(world.log.at(-1)?.text).toBe('A VIP is coming to the suite on floor 5 tomorrow. Keep the elevators quick.');
+    expect(world.log.at(-1)?.text).toBe(
+      `A VIP, ${personName(world.seed, visit.simId)}, is coming to the suite on floor 5 tomorrow. They care most about ${visit.preference}.`,
+    );
   });
 
-  it('checks in when the notice period is up', () => {
-    visitedTower();
+  it('no longer places the vip straight into the suite: with no way up the visit ends with the reason', () => {
+    const suite = visitedTower();
     at(world, ROLL_MINUTE);
     const visit = eventOf(world, 'vip') as Extract<ActiveEvent, { kind: 'vip' }>;
     expect(visit.arrivesAt).toBe(ROLL_MINUTE + EVENTS.vip.noticeDays * 1440);
     at(world, visit.arrivesAt);
-    const sim = world.sims.get(visit.simId);
-    expect(sim?.state).toBe('inRoom');
-    expect(sim?.pos.floor).toBe(5);
-  });
-
-  it('rates the tower good when the vip stays calm', () => {
-    runVisit(0);
-    expect(world.stats.vipRating).toBe('good');
-    expect(world.sims.size).toBe(0);
+    expect(world.sims.has(visit.simId)).toBe(false);
+    expect(suite.occupancy).toBe(0);
+    expect(suite.tenants).toEqual([]);
     expect(eventOf(world, 'vip')).toBeUndefined();
-  });
-
-  it('rates the tower fair when the vip goes pink', () => {
-    runVisit(STRESS.pink);
-    expect(world.stats.vipRating).toBe('fair');
-  });
-
-  it('rates the tower poor when the vip goes red', () => {
-    runVisit(STRESS.red);
     expect(world.stats.vipRating).toBe('poor');
-    expect(world.log.at(-1)?.text).toBe('The VIP checked out and rated the tower poor.');
+    expect(world.log.at(-1)?.text).toBe('The VIP left: no way up to floor 5.');
   });
 
-  it('bands the rating on the stress thresholds', () => {
-    expect(vipRatingFor(STRESS.pink - 0.01)).toBe('good');
-    expect(vipRatingFor(STRESS.red - 0.01)).toBe('fair');
-    expect(vipRatingFor(1)).toBe('poor');
+  it('bands the wait on the VIP rules', () => {
+    expect(vipWaitBand(0)).toBe('good');
+    expect(vipWaitBand(EVENTS.vip.goodMaxWaitMinutes)).toBe('good');
+    expect(vipWaitBand(EVENTS.vip.goodMaxWaitMinutes + 1)).toBe('fair');
+    expect(vipWaitBand(EVENTS.vip.fairMaxWaitMinutes)).toBe('fair');
+    expect(vipWaitBand(EVENTS.vip.fairMaxWaitMinutes + 1)).toBe('poor');
+  });
+
+  it('rates the lowest of the wait, suite and safety bands', () => {
+    const clean = { longestWait: 1, checkInClean: true, checkInEval: 1, incident: false };
+    expect(vipRatingOf(clean)).toBe('good');
+    expect(vipRatingOf({ ...clean, longestWait: 5 })).toBe('fair');
+    expect(vipRatingOf({ ...clean, checkInClean: false })).toBe('poor');
+    expect(vipRatingOf({ ...clean, checkInEval: EVAL.leaveThreshold - 0.01 })).toBe('fair');
+    expect(vipRatingOf({ ...clean, incident: true })).toBe('poor');
+    expect(vipSuiteBand(null, null)).toBe('good');
   });
 
   it('does not visit when every suite is taken', () => {

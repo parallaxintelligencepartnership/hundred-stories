@@ -191,10 +191,51 @@ export interface LogEntry {
   simId?: Id;
 }
 
+/** The three things a VIP can care most about. Shown to the player; chosen from the identity hash. */
+export type VipPreference = 'quick elevators' | 'a clean suite' | 'a quiet floor';
+
+export type VipRating = 'poor' | 'fair' | 'good';
+
+/**
+ * Where a VIP visit stands: announced and waiting for tomorrow, on the way up from the
+ * lobby, staying in the suite, or checked out and on the way out of the tower.
+ */
+export type VipPhase = 'notice' | 'route' | 'stay' | 'checkout';
+
+export interface VipEvent {
+  kind: 'vip';
+  simId: Id;
+  arrivesAt: number; // the minute the VIP walks into the ground lobby
+  leavesAt: number; // the minute the stay ends; set again at check in
+  score: number; // 0 poor, 0.5 fair, 1 good once rated
+  suiteId: Id | null;
+  phase: VipPhase;
+  preference: VipPreference;
+  longestWait: number; // minutes, the longest single elevator wait so far
+  waitingSince: number | null; // the minute the current wait for a car began, null when not waiting
+  checkInClean: boolean | null; // the suite's cleanliness at check in, null before it
+  checkInEval: number | null; // the suite's rating at check in, null before it
+  incident: boolean; // a fire or a bomb was active while the VIP was in the tower
+}
+
+/** The last VIP visit, kept after the event clears so the player can see why it rated as it did. */
+export interface VipVisitRecord {
+  simId: Id;
+  minute: number;
+  rating: VipRating;
+  preference: VipPreference;
+  longestWait: number;
+  waitBand: VipRating;
+  suiteClean: boolean | null; // null when the VIP never reached the suite
+  suiteBand: VipRating;
+  incident: boolean;
+  reason: string | null; // why the visit ended early, null for a full stay
+}
+
 export type ActiveEvent =
   | { kind: 'fire'; roomIds: Id[]; startedAt: number; spreadAt: number }
   | { kind: 'bomb'; roomId: Id; ransom: number; detonateAt: number; found: boolean }
-  | { kind: 'vip'; simId: Id; arrivesAt: number; leavesAt: number; score: number; suiteId: Id | null }
+  | VipEvent
   | { kind: 'santa'; startedAt: number; x: number }
   | { kind: 'wedding'; startedAt: number };
 
@@ -207,6 +248,7 @@ export interface Stats {
   avgWaitMinutes: number;
   tenantsLeftReasons: Record<string, number>;
   badQuarterStreak?: number; // consecutive quarters below the bankruptcy line; saved with the world
+  lastVip?: VipVisitRecord; // absent until the first visit ends; saved with the world
 }
 
 export interface FloorIndex {

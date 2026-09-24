@@ -183,7 +183,14 @@ export const ECONOMY = {
 export const EVENTS = {
   fire: { minStar: 2 as Star, dailyChance: 0.01, spreadMinutes: 30, helicopterCost: 250_000, securityPutOutMinutes: 45, damagePerRoom: 20_000 },
   bomb: { minStar: 3 as Star, dailyChance: 0.008, ransom: 500_000, detonateAtMinuteOfDay: 13 * 60, securitySearchMinutesPerFloor: 3, damageCash: 2_000_000, damageRooms: 4 },
-  vip: { minStar: 3 as Star, noticeDays: 1, quarterlyChance: 0.5, stayMinutes: 600, goodWaitMinutes: 5, fairWaitMinutes: 12 },
+  /**
+   * The VIP visit. The rating is the lowest of three bands: the longest single elevator wait on
+   * the way in or out (good up to goodMaxWaitMinutes, fair up to fairMaxWaitMinutes, poor past
+   * it), the suite (dirty at check in is poor, a room rating below the fair band is fair), and
+   * safety (any fire or bomb while the VIP is in the tower is poor). A VIP who waits longer than
+   * giveUpWaitMinutes without boarding leaves.
+   */
+  vip: { minStar: 3 as Star, noticeDays: 1, quarterlyChance: 0.5, stayMinutes: 600, goodMaxWaitMinutes: 3, fairMaxWaitMinutes: 8, giveUpWaitMinutes: 30 },
   cockroaches: { dirtyDaysBeforeInfested: 3, spreadDays: 2 },
   santa: { minuteOfDay: 20 * 60, tilesPerMinute: 6 },
   wedding: { weekendMinuteOfDay: 12 * 60, durationMinutes: 180 },
