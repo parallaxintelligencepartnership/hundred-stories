@@ -4,6 +4,8 @@
 // runs when createStatusBar is called.
 
 import { NIGHT_MULTIPLIER, type Speed } from '../game/api';
+import { weatherLabel, type WeatherKind } from '../game/weather';
+import { weatherNow } from '../render/weather';
 import { ROOMS, SCHEDULES, STARS } from '../sim/rules';
 import { clockOf } from '../sim/types';
 import type { Star, World } from '../sim/types';
@@ -161,6 +163,22 @@ export function speedModeText(speed: Speed, minute: number): string {
   return `Night x${NIGHT_MULTIPLIER}, effective x${speed * NIGHT_MULTIPLIER}`;
 }
 
+// --------------------------------------------------------------- weather
+
+/** The weather word's two letter form, shown under 400 px where the word does not fit. */
+export function weatherShort(kind: WeatherKind): string {
+  switch (kind) {
+    case 'clear':
+      return 'CL';
+    case 'overcast':
+      return 'OV';
+    case 'rain':
+      return 'RN';
+    case 'storm':
+      return 'ST';
+  }
+}
+
 // ------------------------------------------------------------------- DOM
 
 export interface StatusBar {
@@ -169,6 +187,8 @@ export interface StatusBar {
   population: HTMLDivElement;
   stars: HTMLDivElement;
   clock: HTMLDivElement;
+  /** The weather word inside the clock readout. */
+  weather: HTMLSpanElement;
   /** The night mode chip that sits beside the speed buttons. */
   mode: HTMLSpanElement;
   update(world: World, speed: Speed): void;
@@ -270,12 +290,19 @@ export function createStatusBar(): StatusBar {
   const clockAmPm = h('span', 'hs-clock-ampm');
   clockValue.append(clockDigits, clockAmPm);
   const dateValue = h('span', 'hs-readout-meta');
-  clockText.append(clockValue, dateValue);
+  // The weather beside the time: the word, or its two letters under 400 px (ui.css).
+  const weather = h('span', 'hs-weather');
+  const weatherWord = h('span', 'hs-weather-word');
+  const weatherAbbr = h('span', 'hs-weather-short');
+  weatherAbbr.setAttribute('aria-hidden', 'true');
+  weather.append(weatherWord, weatherAbbr);
+  clockText.append(clockValue, dateValue, weather);
   clock.append(dial as unknown as HTMLElement, clockText);
 
   const mode = h('span', 'hs-speed-mode is-hidden');
 
   let lastMinuteOfDay = -1;
+  let weatherShown: WeatherKind | null = null;
   let tipKey = '';
   let earnedShown = -1;
 
@@ -334,6 +361,13 @@ export function createStatusBar(): StatusBar {
     setText(clockAmPm, time.slice(split));
     const date = formatDate(world.time.minute);
     setText(dateValue, date);
+    const kind = weatherNow(world.seed, world.time.minute).kind;
+    if (kind !== weatherShown) {
+      weatherShown = kind;
+      setText(weatherWord, weatherLabel(kind));
+      setText(weatherAbbr, weatherShort(kind));
+      setAttr(weather, 'title', `Weather: ${weatherLabel(kind)}`);
+    }
     setAttr(clock, 'title', date); // a phone hides the date line; the tooltip keeps it
 
     const modeText = speedModeText(speed, world.time.minute);
@@ -346,6 +380,7 @@ export function createStatusBar(): StatusBar {
     population,
     stars,
     clock,
+    weather,
     mode,
     update,
     destroy() {

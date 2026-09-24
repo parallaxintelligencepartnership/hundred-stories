@@ -15,7 +15,10 @@ import {
   quarterDelta,
   quarterDeltaText,
   speedModeText,
+  weatherShort,
 } from '../../src/ui/status';
+import { weatherAt, weatherLabel, type WeatherKind } from '../../src/game/weather';
+import { setForcedWeather } from '../../src/render/weather';
 import { FakeDom, type FakeElement } from './fake-dom';
 
 let dom: FakeDom;
@@ -149,5 +152,37 @@ describe('status bar on the page', () => {
     dom.created = 0;
     for (let i = 0; i < 10; i += 1) bar.update(stubWorld(), 1);
     expect(dom.created).toBe(0);
+  });
+});
+
+describe('weather readout beside the clock', () => {
+  afterEach(() => setForcedWeather(null));
+  const find = (root: FakeElement, c: string): FakeElement => {
+    const node = [root, ...root.descendants()].find((n) => n.className.split(' ').includes(c));
+    if (!node) throw new Error(`no ${c}`);
+    return node;
+  };
+  const kinds: WeatherKind[] = ['clear', 'overcast', 'rain', 'storm'];
+
+  it('names each kind with weatherLabel and a two letter short form', () => {
+    expect(kinds.map(weatherLabel)).toEqual(['Clear', 'Overcast', 'Rain', 'Storm']);
+    expect(kinds.map(weatherShort)).toEqual(['CL', 'OV', 'RN', 'ST']);
+  });
+
+  it('shows the word and its short form inside the clock, updated when the kind changes', () => {
+    const bar = createStatusBar();
+    const clock = bar.clock as unknown as FakeElement;
+    for (const kind of kinds) {
+      setForcedWeather({ kind, from: kind, blend: 1, intensity: 1 });
+      bar.update(stubWorld(), 1);
+      expect(find(clock, 'hs-weather-word').textContent).toBe(weatherLabel(kind));
+      expect(find(clock, 'hs-weather-short').textContent).toBe(weatherShort(kind));
+      expect(find(clock, 'hs-weather').getAttribute('title')).toBe(`Weather: ${weatherLabel(kind)}`);
+    }
+    // Unpinned, the readout follows the forecast for the tower's seed.
+    setForcedWeather(null);
+    const world = stubWorld();
+    bar.update(world, 1);
+    expect(find(clock, 'hs-weather-word').textContent).toBe(weatherLabel(weatherAt(world.seed, world.time.minute).kind));
   });
 });

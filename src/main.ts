@@ -2,6 +2,7 @@ import { createRenderer } from './render/renderer';
 import { createUi } from './ui/ui';
 import { createGame } from './game/game';
 import { createSteam } from './steam/steam';
+import { parseWeatherQuery, setForcedWeather } from './render/weather';
 
 export interface BootDeps {
   createRenderer: typeof createRenderer;
@@ -22,6 +23,24 @@ export interface BootDeps {
 export function inShell(global: object = globalThis): boolean {
   const g = global as { Capacitor?: { isNativePlatform?: () => boolean }; __TAURI__?: unknown; __TAURI_INTERNALS__?: unknown };
   return g.__TAURI__ != null || g.__TAURI_INTERNALS__ != null || g.Capacitor?.isNativePlatform?.() === true;
+}
+
+/**
+ * The capture path, dev only like ?smoke: ?weather=clear|overcast|rain|storm pins the weather
+ * the renderer and the status bar show, and ?hour=0..23 moves the clock forward to that hour.
+ * `dev` is import.meta.env.DEV at the call; with it false nothing is read and nothing changes.
+ */
+export function applyDevWeather(search: string, dev: boolean, world: { time: { minute: number } }): boolean {
+  if (!dev) return false;
+  const { kind, hour } = parseWeatherQuery(search);
+  if (kind !== null) setForcedWeather({ kind, from: kind, blend: 1, intensity: 0.85 });
+  if (hour !== null) {
+    const now = world.time.minute;
+    let minute = Math.floor(now / 1440) * 1440 + hour * 60;
+    if (minute < now) minute += 1440;
+    world.time.minute = minute;
+  }
+  return kind !== null || hour !== null;
 }
 
 const defaultDeps: BootDeps = {
@@ -63,6 +82,7 @@ export async function boot(app: HTMLElement, deps: BootDeps = defaultDeps): Prom
     const resumed = await game.load();
     if (resumed.ok) game.world.log.push({ minute: game.world.time.minute, text: 'Welcome back. Your tower was restored from the last autosave.', level: 'info' });
   }
+  applyDevWeather(deps.search(), import.meta.env.DEV, game.world);
   let renderer;
   try {
     renderer = await deps.createRenderer(view, game.world);
