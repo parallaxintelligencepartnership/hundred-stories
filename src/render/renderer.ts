@@ -19,13 +19,12 @@ import {
   Particle,
   ParticleContainer,
   Rectangle,
-  RenderTexture,
   Sprite,
   Texture,
   type Renderer as PixiRenderer,
 } from 'pixi.js';
 import { stressBand } from '../sim/people';
-import { ROOMS } from '../sim/rules';
+import { ROOMS, STORY } from '../sim/rules';
 import { clockOf, TOWER_WIDTH, type Car, type Id, type Room, type RoomKind, type Shaft, type ShaftKind, type Sim, type SimKind, type StressBand, type World } from '../sim/types';
 import { roomsOnFloor, shaftAt } from '../sim/world';
 import {
@@ -40,7 +39,10 @@ import {
   SLAB_PX,
   TEXTURE_SIZE,
   TILE_PX,
+  VENUE_SHELL,
+  hasWindowBand,
   type Art,
+  type CrowdAtlas,
 } from './art';
 import {
   createCamera,
@@ -67,20 +69,41 @@ import { createAmbient } from './ambient';
 import {
   DOOR_FRAMES,
   doorFrameOf,
+  FRAME,
   isStepping,
-  outfitCodeOf,
-  PARTICLE_OUTFITS,
-  particleOutfitOf,
+  PERSON_FRAME_COUNT,
   poseAt,
-  SIM_FRAMES,
   stepDoor,
   type DoorFrame,
+  type PersonFrame,
   type Pose,
-  type SimFrame,
 } from './anim';
+import { createCurb, lobbyDoors } from './curb';
+import { placePerson, type PersonSprites } from './person';
+import { bodyOf, LOOK_CODES, lookCode, MARK_H, MARK_W, markBottomAboveFeet, personLookCode, stressMarkOf, type StressMark } from './figure';
+import { INTERIOR_TOP, WIN_SILL, WIN_TOP } from './grid';
+import { layerPlan, occupancyLevel, zoomTier, type LayerPlan, type ZoomTier } from './hierarchy';
+import {
+  carIndicator,
+  closedBand,
+  POOL_ALPHA,
+  POOL_H,
+  POOL_STEP,
+  POOL_TINT,
+  POOL_W,
+  RESTAURANT_PASS_W,
+  SHOP_COUNTER_W,
+  SIGN_DARK_TINT,
+  SIGN_GLOW_TINT,
+  signBoard,
+  VENUE_BAND,
+  type SignState,
+} from './illustrated';
+import { BLOCK, BLOCK_FILL_LIFT, BLOCK_OUTLINE, PALETTE } from './palette';
+import { isVenueKind, venueOpen, venueOf, type Venue, type VenueKind } from './venue';
 import { createBuildFx } from './buildfx';
 import { Motion, TELEPORT_TILES } from './interpolate';
-import { floorsWithPeople, LIGHT_ALPHA, lightBand, lightTintAt, windowStateOf, windowStatesFor, type WindowState } from './light';
+import { floorsWithPeople, LIGHT_ALPHA, lerpColor, lightBand, lightTintAt, windowStateOf, windowStatesFor, type WindowState } from './light';
 import { createOverlayPass, type OverlayKind, type ViewRect } from './overlays';
 import { createSky, isNight, nightness, skyBackground, type Sky } from './sky';
 import { easeView, settledView, weatherLightTint, weatherNow, weatherSkyColor, type Rect as WeatherRect } from './weather';
@@ -228,6 +251,8 @@ const NO_FLOORS: ReadonlySet<number> = new Set<number>();
  * reads as one room.
  */
 function roomVariant(room: Room): number {
+  // A venue's shell is plain: its fixtures, sign and lighting are illustrated layers on top.
+  if (isVenueKind(room.kind)) return VENUE_SHELL;
   return room.width <= 2 ? Math.floor(room.x / 6) % 2 : room.id % 2;
 }
 
@@ -252,35 +277,33 @@ export function bakeRoomStates(art: Art, world: World): number {
 }
 
 const SIM_KINDS: readonly SimKind[] = ['worker', 'resident', 'guest', 'shopper', 'diner', 'staff', 'visitor', 'vip'];
-const STRESS_BANDS: readonly StressBand[] = ['calm', 'pink', 'red'];
 
-/** How many outfit codes a sprite key has room for (anim.ts OUTFIT_COUNT), plus one for none. */
-const OUTFIT_SLOTS = 33;
-
-/** A numeric stand-in for the `${kind}|${band}|${frame}|${outfit}` string, cheap to build every frame. */
-export function simKeyOf(kind: SimKind, band: StressBand, frame: SimFrame, outfit: number): number {
-  const base = (SIM_KINDS.indexOf(kind) * STRESS_BANDS.length + STRESS_BANDS.indexOf(band)) * SIM_FRAMES.length + frame;
-  return base * OUTFIT_SLOTS + (outfit + 1);
+/**
+ * A numeric stand-in for a person sprite's `${kind}|${frame}|${look}` key, cheap to build every
+ * frame. Stress is not in it: stress is a mark over the head, not a different person.
+ */
+export function simKeyOf(kind: SimKind, frame: PersonFrame, look: number): number {
+  return (SIM_KINDS.indexOf(kind) * PERSON_FRAME_COUNT + frame) * LOOK_CODES + look;
 }
 
 /**
- * The crowd atlas: every kind, band and walk frame, in the PARTICLE_OUTFITS outfits the atlas
- * carries (colour set and coat; hat and bag are sprite only). Sized so the texture stays inside
- * ATLAS_BUDGET_PX device pixels on a side at a device pixel ratio of 2: 8 kinds by 8 outfits is
- * 64 cells of 16 px, 1024 css px, 2048 device px wide; 3 bands by 3 frames is 9 rows of 48 px.
- * Carrying all 32 outfits would need 8192 device px, past what a phone GPU is promised.
+ * The crowd atlas (art.ts crowd) stays inside ATLAS_BUDGET_PX device pixels on a side at a device
+ * pixel ratio of 2: 8 kinds by 8 look keys is 64 cells of 16 px, 1024 css px, 2048 device px
+ * wide; 5 builds by stand and stride is 10 rows of 48 px, 960 device px tall.
  */
 export const ATLAS_BUDGET_PX = 2048;
-export const ATLAS_COLS = SIM_KINDS.length * PARTICLE_OUTFITS;
-export const ATLAS_ROWS = STRESS_BANDS.length * SIM_FRAMES.length;
 
 /**
- * What a drawn person is doing, for the walk cycle, the sway and the shuffle. A walker walks
- * only while it is actually moving (`stepping`); stopped, it stands.
+ * What a drawn person is doing, for the walk cycle, the waiting weight shift and glance, and the
+ * activity pose inside a room. A walker walks only while it is actually moving (`stepping`);
+ * stopped, it stands. A waiter turns impatient once the wait passes STORY.longWaitMinutes.
  */
-export function poseOf(sim: Sim, band: StressBand, stepping: boolean): Pose {
+export function poseOf(sim: Sim, stepping: boolean, minute: number, roomKind?: RoomKind): Pose {
   if (sim.state === 'walking' || sim.state === 'leaving') return stepping ? 'walk' : 'still';
-  if (sim.state === 'waiting') return band === 'red' ? 'fret' : 'wait';
+  if (sim.state === 'waiting') {
+    return sim.waitStart !== null && minute - sim.waitStart > STORY.longWaitMinutes ? 'impatient' : 'wait';
+  }
+  if (sim.state === 'inRoom' && roomKind) return ACTIVITY[roomKind] ?? 'still';
   return 'still';
 }
 
@@ -338,6 +361,9 @@ interface ShaftEntry {
 
 interface CarEntry {
   node: Sprite;
+  /** The floor indicator: the floor and a direction arrow in lit segments, redrawn on change. */
+  indicator: Graphics;
+  indicatorKey: string;
   /** The hoist cable from the car's roof to the top of the shaft, a 2 px line scaled to length. */
   cable: Graphics;
   kind: ShaftKind;
@@ -351,10 +377,41 @@ interface CarEntry {
   latch: boolean;
 }
 
-interface SimEntry {
+interface SimEntry extends PersonSprites {
   node: Sprite;
   simKey: number;
+  /** The stress mark over the head, made the first time the person is stressed. */
+  mark: Sprite | null;
+  markKind: StressMark;
 }
+
+/** A venue's illustrated layers over its shell, and the state they last showed. */
+interface VenueEntry {
+  kind: VenueKind;
+  width: number;
+  venue: Venue;
+  fixtures: Sprite;
+  sign: Sprite | null;
+  signGlow: Sprite | null;
+  closed: Sprite | null;
+  pool: Container | null;
+  staff: Sprite | null;
+  state: string;
+  /** The room's top left, world px, for the layers made later (the shutter, the staff). */
+  x: number;
+  y: number;
+}
+
+/** Which rooms sit people down or have them browse, for the activity pose. */
+const ACTIVITY: Partial<Record<RoomKind, Pose>> = { office: 'sit', restaurant: 'sit', fastFood: 'sit', shop: 'browse' };
+
+/** The venue clock: closed-hours state is looked at again every this many game minutes. */
+const VENUE_CLOCK_MINUTES = 10;
+/** Person textures nobody shows and nobody has asked for in PERSON_IDLE_MS are freed this often. */
+const SWEEP_EVERY_MS = 2000;
+const PERSON_IDLE_MS = 4000;
+/** Far zoom blocks are redrawn this often, in real ms, so their occupancy fill stays current. */
+const BLOCKS_REFRESH_MS = 400;
 
 function canvasTexture(width: number, height: number, draw: (ctx: CanvasRenderingContext2D) => void): Texture {
   try {
@@ -485,9 +542,14 @@ export function fallbackArt(_renderer: PixiRenderer | null): Art {
   };
 }
 
-/** Wraps the real art module so a throw from any one call degrades to the fallback. */
+/**
+ * Wraps the real art module so a throw from any one call degrades to the fallback. The
+ * illustrated extras are optional: an Art without one draws none of it, and one that throws
+ * turns the extras off (an empty texture) without taking the whole tower down with it.
+ */
 function guardArt(primary: Art, backup: Art): Art {
   let broken = false;
+  let extrasBroken = false;
   const call = <T extends keyof Art>(name: T, run: (art: Art) => Texture): Texture => {
     if (!broken) {
       try {
@@ -499,7 +561,20 @@ function guardArt(primary: Art, backup: Art): Art {
     }
     return run(backup);
   };
-  return {
+  const extra = <A extends unknown[]>(name: string, fn: (...args: A) => Texture): ((...args: A) => Texture) => {
+    return (...args: A): Texture => {
+      if (!broken && !extrasBroken) {
+        try {
+          return fn(...args);
+        } catch (error) {
+          extrasBroken = true;
+          console.warn(`render: art.${name} failed, the illustrated extras are off`, error);
+        }
+      }
+      return Texture.EMPTY;
+    };
+  };
+  const guarded: Art = {
     room: (kind, width, height, variant, state) => call('room', (a) => a.room(kind, width, height, variant, state)),
     slab: (widthTiles) => call('slab', (a) => a.slab(widthTiles)),
     shaft: (kind, floors) => call('shaft', (a) => a.shaft(kind, floors)),
@@ -507,6 +582,22 @@ function guardArt(primary: Art, backup: Art): Art {
     sim: (kind, band, frame, outfit) => call('sim', (a) => a.sim(kind, band, frame, outfit)),
     ghost: (widthTiles, heightFloors, ok) => call('ghost', (a) => a.ghost(widthTiles, heightFloors, ok)),
   };
+  const p = primary;
+  if (p.venue) guarded.venue = extra('venue', p.venue);
+  if (p.sign) guarded.sign = extra('sign', p.sign);
+  if (p.closed) guarded.closed = extra('closed', p.closed);
+  if (p.glow) guarded.glow = extra('glow', p.glow);
+  if (p.prop) guarded.prop = extra('prop', p.prop);
+  if (p.mark) guarded.mark = extra('mark', p.mark);
+  if (p.umbrella) guarded.umbrella = extra('umbrella', p.umbrella);
+  if (p.vehicle) guarded.vehicle = extra('vehicle', p.vehicle);
+  if (p.crowd) {
+    const crowd = p.crowd;
+    guarded.crowd = () => (broken ? null : crowd());
+  }
+  if (p.stats) guarded.stats = p.stats;
+  if (p.sweep) guarded.sweep = p.sweep;
+  return guarded;
 }
 
 /** Floors a shaft actually spans, remembering that floor 0 does not exist. */
@@ -677,7 +768,9 @@ export async function createRenderer(
   // Cars draw over their cables: one layer of hoist lines, then the car sprites.
   const cableLayer = new Container();
   const carSpriteLayer = new Container();
-  layers.cars.addChild(cableLayer, carSpriteLayer);
+  // Each car's floor indicator, drawn over the housing baked into the car.
+  const indicatorLayer = new Container();
+  layers.cars.addChild(cableLayer, carSpriteLayer, indicatorLayer);
 
   const slabLayer = new Container();
   const roomLayer = new Container();
@@ -689,10 +782,50 @@ export async function createRenderer(
   // so a sim between two rooms is never walking on sky.
   const floorStrips = new Graphics();
   // Slabs sit over the rooms: each casts its shadow onto the top of the floor below it.
-  layers.tower.addChild(floorStrips, roomLayer, slabLayer, shaftLayer, connectorLayer);
+  // The veil that mutes the window band below zoom 0.75, over the shells and under the signs.
+  const windowVeil = new Graphics();
+  windowVeil.visible = false;
+  // A venue's illustrated layers: staff behind the fixtures, then the fixtures and signs, then
+  // the closed-hours shutters, then the night's pools of light.
+  const venueStaffLayer = new Container();
+  const venueLayer = new Container();
+  const venueClosedLayer = new Container();
+  const venuePoolLayer = new Container();
+  // Far zoom: every room as one category block.
+  const blockLayer = new Graphics();
+  blockLayer.visible = false;
+  // Labels name the layers the zoom hierarchy switches, for the tests and the pixi devtools.
+  roomLayer.label = 'rooms';
+  connectorLayer.label = 'connectors';
+  windowVeil.label = 'window veil';
+  blockLayer.label = 'blocks';
+  layers.tower.addChild(
+    floorStrips,
+    roomLayer,
+    windowVeil,
+    venueStaffLayer,
+    venueLayer,
+    venueClosedLayer,
+    venuePoolLayer,
+    slabLayer,
+    shaftLayer,
+    connectorLayer,
+    blockLayer,
+  );
 
   const simSpriteLayer = new Container();
-  layers.sims.addChild(simSpriteLayer);
+  // What people carry, in front of them.
+  const propLayer = new Container();
+  // Stress marks over the heads, and the one person drawn at far zoom: the selected one.
+  const markLayer = new Container();
+  const soloLayer = new Container();
+  const soloSprite = new Sprite();
+  soloSprite.anchor.set(0.5, 1);
+  soloSprite.visible = false;
+  soloLayer.addChild(soloSprite);
+  simSpriteLayer.label = 'people';
+  soloLayer.label = 'selected person';
+  layers.sims.addChild(simSpriteLayer, propLayer, markLayer, soloLayer);
 
   const fadeCover = new Graphics();
   app.stage.addChild(fadeCover);
@@ -715,6 +848,31 @@ export async function createRenderer(
   }
 
   bakeRoomStates(art, world);
+
+  // The curb scene on the street outside the ground lobby, behind the tower.
+  const curb = createCurb(layers.ground, () => art);
+  let curbDoors: { left: number; right: number } | null = null;
+
+  // Visual hierarchy by zoom: which layers draw, and how strongly (hierarchy.ts).
+  let tier: ZoomTier = 'full';
+  let plan: LayerPlan = layerPlan(tier);
+  let veilDirty = true;
+  let blocksDirty = true;
+  let blocksAge = 0;
+  let venueClock = -1;
+  let sweepAge = 0;
+
+  /** A person's look code: build and identity look key, cached per id (a pure function of both). */
+  const lookCodes = new Map<Id, number>();
+  function lookOf(w: World, sim: Sim): number {
+    let code = lookCodes.get(sim.id);
+    if (code === undefined) {
+      if (lookCodes.size > 8192) lookCodes.clear();
+      code = personLookCode(w.seed, sim.id, sim.kind);
+      lookCodes.set(sim.id, code);
+    }
+    return code;
+  }
 
   const camera = createCamera();
   camera.setViewport(app.screen.width, app.screen.height);
@@ -773,6 +931,7 @@ export async function createRenderer(
   ghostSprite.visible = false;
   const selectionBox = new Graphics();
   selectionBox.visible = false;
+  selectionBox.label = 'selection';
   // The information views tint under the ghost and the selection ring, above the light layer so
   // their colours read the same at midnight as at noon.
   const overlayTint = new Graphics();
@@ -781,74 +940,32 @@ export async function createRenderer(
   const overlayPass = createOverlayPass(overlayTint);
   const overlayView: ViewRect = { left: 0, top: 0, right: 0, bottom: 0 };
 
-  // Sim particle mode: one shared atlas so every particle draws from one source.
+  // Sim particle mode: one shared atlas (art.crowd) so every particle draws from one source.
   let particles: ParticleContainer | null = null;
-  let particleAtlas: Map<number, Texture> | null = null;
-  let atlasTexture: RenderTexture | null = null;
+  let crowdAtlas: CrowdAtlas | null = null;
   let particleMode = false;
   const simParticles = new Map<Id, Particle>();
 
-  function buildParticleAtlas(): Map<number, Texture> | null {
-    try {
-      const cols = ATLAS_COLS;
-      const rows = ATLAS_ROWS;
-      const rt = RenderTexture.create({
-        width: cols * SIM_WIDTH_PX,
-        height: rows * SIM_HEIGHT_PX,
-        resolution: bakeResolution(window.devicePixelRatio),
-        antialias: false,
-        scaleMode: 'nearest',
-      });
-      const staging = new Container();
-      const map = new Map<number, Texture>();
-      for (let c = 0; c < cols; c++) {
-        const kind = SIM_KINDS[Math.floor(c / PARTICLE_OUTFITS)] as SimKind;
-        const outfit = c % PARTICLE_OUTFITS;
-        for (let b = 0; b < STRESS_BANDS.length; b++) {
-          const band = STRESS_BANDS[b] as StressBand;
-          for (const frame of SIM_FRAMES) {
-            const row = b * SIM_FRAMES.length + frame;
-            const sprite = new Sprite(art.sim(kind, band, frame, outfit));
-            sprite.position.set(c * SIM_WIDTH_PX, row * SIM_HEIGHT_PX);
-            sprite.setSize(SIM_WIDTH_PX, SIM_HEIGHT_PX);
-            staging.addChild(sprite);
-            map.set(
-              simKeyOf(kind, band, frame, outfit),
-              new Texture({
-                source: rt.source,
-                frame: new Rectangle(c * SIM_WIDTH_PX, row * SIM_HEIGHT_PX, SIM_WIDTH_PX, SIM_HEIGHT_PX),
-              }),
-            );
-          }
-        }
-      }
-      app.renderer.render({ container: staging, target: rt });
-      staging.destroy({ children: true });
-      atlasTexture = rt;
-      return map;
-    } catch (error) {
-      console.warn('render: sim atlas failed, staying on sprites', error);
-      return null;
-    }
+  function dropSimEntry(id: Id, entry: SimEntry): void {
+    entry.node.destroy();
+    entry.mark?.destroy();
+    entry.prop?.destroy();
+    simSprites.delete(id);
   }
 
   function enterParticleMode(): boolean {
     if (particles) return true;
-    const atlas = particleAtlas ?? buildParticleAtlas();
+    const atlas = crowdAtlas ?? art.crowd?.() ?? null;
     if (!atlas) return false;
-    particleAtlas = atlas;
-    const first = atlas.values().next().value;
+    crowdAtlas = atlas;
     particles = new ParticleContainer({
-      ...(first ? { texture: first } : {}),
+      texture: atlas.frameOf('worker', 0, FRAME.stand),
       dynamicProperties: { position: true, uvs: true, color: false, rotation: false, vertex: false },
       roundPixels: true,
       boundsArea: new Rectangle(-4000, -4000, 20000, 20000),
     });
     layers.sims.addChild(particles);
-    for (const [id, entry] of simSprites) {
-      entry.node.destroy();
-      simSprites.delete(id);
-    }
+    for (const [id, entry] of simSprites) dropSimEntry(id, entry);
     simSpriteLayer.removeChildren();
     particleMode = true;
     return true;
@@ -908,6 +1025,7 @@ export async function createRenderer(
 
   function rebuildFloorStrips(w: World): void {
     const extents = builtFloorExtents(w);
+    curbDoors = lobbyDoors(w);
     weatherTower = towerRectOf(extents);
     weatherBasement = basementSpanOf(extents);
     floorStrips.clear();
@@ -986,6 +1104,7 @@ export async function createRenderer(
       // A room the player just placed settles, puffs dust and flashes; one loaded with the
       // world, or drawn on the first pass, simply appears. Nothing under reduced motion.
       if (placed && animateNew && !reducedMotion) buildFx.start([entry.node, slab.node], px, py, pw, ph);
+      if (art.venue && isVenueKind(room.kind)) syncVenue(w, room, px, py);
     }
 
     for (const [id, entry] of roomSprites) {
@@ -993,11 +1112,269 @@ export async function createRenderer(
       entry.node.destroy();
       roomSprites.delete(id);
     }
+    for (const [id, entry] of venueSprites) {
+      if (seenRooms.has(id) && w.rooms.get(id)?.kind === entry.kind) continue;
+      dropVenue(id, entry);
+    }
+    veilDirty = true;
+    blocksDirty = true;
+    updateVenues(w, night);
     for (const [id, entry] of slabSprites) {
       if (seenRooms.has(id)) continue;
       entry.node.destroy();
       slabSprites.delete(id);
     }
+  }
+
+  // ---------------------------------------------------------------- venues
+
+  const venueSprites = new Map<Id, VenueEntry>();
+
+  function layerSprite(layer: Container, texture: Texture, x: number, y: number, w: number, h: number): Sprite {
+    const sprite = new Sprite(texture);
+    sprite.position.set(x, y);
+    sprite.setSize(w, h);
+    layer.addChild(sprite);
+    return sprite;
+  }
+
+  function dropVenue(id: Id, entry: VenueEntry): void {
+    for (const node of [entry.fixtures, entry.sign, entry.signGlow, entry.closed, entry.pool, entry.staff]) node?.destroy({ children: true });
+    venueSprites.delete(id);
+  }
+
+  /** Make or move one venue's layers. Fixtures and sign follow its treatment and brand (venue.ts). */
+  function syncVenue(w: World, room: Room, px: number, py: number): void {
+    const kind = room.kind as VenueKind;
+    const width = room.width * TILE_PX;
+    let entry = venueSprites.get(room.id);
+    if (entry && entry.width !== room.width) {
+      dropVenue(room.id, entry);
+      entry = undefined;
+    }
+    if (!entry && art.venue) {
+      const venue = venueOf(w.seed, room.id, kind);
+      const fixtures = layerSprite(venueLayer, art.venue(kind, room.width, venue.treatment), 0, 0, width, VENUE_BAND.height);
+      let sign: Sprite | null = null;
+      let signGlow: Sprite | null = null;
+      if (kind !== 'office' && art.sign) {
+        const board = signBoard(kind, width);
+        if (art.glow) {
+          signGlow = layerSprite(venueLayer, art.glow(), 0, 0, board.w + 24, board.h + 20);
+          signGlow.tint = SIGN_GLOW_TINT;
+          signGlow.visible = false;
+        }
+        sign = layerSprite(venueLayer, art.sign(kind, room.width, venue.name, venue.accent), 0, 0, board.w, board.h);
+      }
+      let pool: Container | null = null;
+      if (art.glow) {
+        // Warm pools of light under the ceiling: the shared glow, one every POOL_STEP px.
+        pool = new Container();
+        for (let x = POOL_STEP / 2; x < width; x += POOL_STEP) {
+          const glow = layerSprite(pool, art.glow(), x - POOL_W / 2, INTERIOR_TOP - 2, POOL_W, POOL_H);
+          glow.tint = POOL_TINT;
+          glow.alpha = POOL_ALPHA;
+        }
+        pool.visible = false;
+        venuePoolLayer.addChild(pool);
+      }
+      // The shutter and the staff are made the first time they show (updateVenues).
+      entry = { kind, width: room.width, venue, fixtures, sign, signGlow, closed: null, pool, staff: null, state: '', x: px, y: py };
+      venueSprites.set(room.id, entry);
+    }
+    if (!entry) return;
+    entry.x = px;
+    entry.y = py;
+    entry.fixtures.position.set(px, py + VENUE_BAND.top);
+    entry.closed?.position.set(px, py + closedBand(kind).top);
+    entry.pool?.position.set(px, py);
+    if (kind !== 'office') {
+      const board = signBoard(kind, width);
+      entry.sign?.position.set(px + board.x, py + board.y);
+      entry.signGlow?.position.set(px + board.x - 12, py + board.y - 10);
+      const behind = kind === 'shop' ? width - 6 - SHOP_COUNTER_W / 2 : width - 6 - RESTAURANT_PASS_W / 2 - 12;
+      entry.staff?.position.set(px + behind, py + FLOOR_PX - SLAB_TOP_PX);
+    }
+  }
+
+  /**
+   * Closed hours, lit signs, light pools and staff, from the schedules and the room's occupancy.
+   * Nothing is baked here: shutters, pools and glows show and hide, a closed sign is tinted.
+   */
+  function updateVenues(w: World, night: boolean): void {
+    for (const [id, v] of venueSprites) {
+      const room = w.rooms.get(id);
+      if (!room) continue;
+      const open = venueOpen(v.kind, w.time.minute);
+      const occupied = room.occupancy > 0;
+      const key = `${open ? 1 : 0}${night ? 1 : 0}${occupied ? 1 : 0}`;
+      if (key === v.state) continue;
+      v.state = key;
+      const sign: SignState = !open ? 'dark' : night ? 'lit' : 'day';
+      if (!open && !v.closed && art.closed) {
+        const band = closedBand(v.kind);
+        v.closed = layerSprite(venueClosedLayer, art.closed(v.kind, room.width), v.x, v.y + band.top, v.width * TILE_PX, band.height);
+      }
+      if (open && occupied && !v.staff && v.kind !== 'office') {
+        // A clerk behind the counter, a cook at the pass: drawn behind the fixtures.
+        const width = v.width * TILE_PX;
+        const look = lookCode(bodyOf(w.seed, id + 7919), (id * 5 + 3) % 8);
+        v.staff = new Sprite(art.sim('diner', 'calm', FRAME.stand, look));
+        v.staff.anchor.set(0.5, 1);
+        v.staff.setSize(SIM_WIDTH_PX, SIM_HEIGHT_PX);
+        const behind = v.kind === 'shop' ? width - 6 - SHOP_COUNTER_W / 2 : width - 6 - RESTAURANT_PASS_W / 2 - 12;
+        v.staff.position.set(v.x + behind, v.y + FLOOR_PX - SLAB_TOP_PX);
+        venueStaffLayer.addChild(v.staff);
+      }
+      if (v.closed) v.closed.visible = !open;
+      if (v.pool) v.pool.visible = night && occupied;
+      if (v.staff) v.staff.visible = open && occupied;
+      if (v.sign) v.sign.tint = sign === 'dark' ? SIGN_DARK_TINT : 0xffffff;
+      if (v.signGlow) v.signGlow.visible = sign === 'lit';
+    }
+  }
+
+  // ---------------------------------------------------------------- hierarchy
+
+  function applyTier(next: ZoomTier): void {
+    if (next === tier) return;
+    tier = next;
+    plan = layerPlan(tier);
+    const rooms = plan.rooms;
+    roomLayer.visible = rooms;
+    slabLayer.visible = rooms;
+    venueStaffLayer.visible = rooms;
+    venueLayer.visible = rooms;
+    venueClosedLayer.visible = rooms;
+    venuePoolLayer.visible = rooms;
+    ambientLayer.visible = plan.ambient;
+    connectorLayer.visible = plan.connectors > 0;
+    connectorLayer.alpha = plan.connectors;
+    windowVeil.visible = plan.windowVeil > 0;
+    windowVeil.alpha = plan.windowVeil;
+    blockLayer.visible = plan.blocks;
+    if (plan.blocks) blocksDirty = true;
+  }
+
+  /** The wall coloured veil over every window band, muting the repetition at broad zoom. */
+  function rebuildVeil(w: World): void {
+    veilDirty = false;
+    windowVeil.clear();
+    for (const room of w.rooms.values()) {
+      if (!hasWindowBand(room.kind)) continue;
+      const px = room.x * TILE_PX;
+      const pw = room.width * TILE_PX;
+      for (let f = room.floor; f < room.floor + room.height; f++) {
+        windowVeil.rect(px, floorTopY(f) + WIN_TOP, pw, WIN_SILL + LINE_PX - WIN_TOP).fill(PALETTE.wall[room.kind]);
+      }
+    }
+  }
+
+  /** Far zoom: one flat block per room, its occupancy a lighter fill from the floor up. */
+  function rebuildBlocks(w: World): void {
+    blocksDirty = false;
+    blocksAge = 0;
+    blockLayer.clear();
+    // Lobby segments are one tile each: outlined one by one they read as a comb, so a run of
+    // them is outlined once, as the one lobby the player sees.
+    const lobbyRuns = new Map<number, { x: number; end: number }[]>();
+    for (const room of w.rooms.values()) {
+      if (drawsOverRooms(room.kind)) continue;
+      if (room.kind === 'lobby' || room.kind === 'skyLobby') {
+        const runs = lobbyRuns.get(room.floor + room.height * 1000) ?? [];
+        runs.push({ x: room.x, end: room.x + room.width });
+        lobbyRuns.set(room.floor + room.height * 1000, runs);
+      }
+      const x = room.x * TILE_PX;
+      const y = floorTopY(room.floor + room.height - 1);
+      const bw = room.width * TILE_PX;
+      const bh = room.height * FLOOR_PX;
+      const base = BLOCK[room.kind];
+      blockLayer.rect(x, y, bw, bh).fill(base);
+      const level = occupancyLevel(room);
+      if (level > 0) blockLayer.rect(x, y + bh * (1 - level), bw, bh * level).fill(lerpColor(base, 0xffffff, BLOCK_FILL_LIFT));
+      if (room.kind !== 'lobby' && room.kind !== 'skyLobby') blockLayer.rect(x, y, bw, bh).stroke({ width: 1, color: BLOCK_OUTLINE, pixelLine: true });
+    }
+    for (const [key, runs] of lobbyRuns) {
+      const height = Math.floor(key / 1000);
+      const floor = key - height * 1000;
+      runs.sort((a, b) => a.x - b.x);
+      let start = runs[0]?.x ?? 0;
+      let end = start;
+      const outline = (): void => {
+        blockLayer.rect(start * TILE_PX, floorTopY(floor + height - 1), (end - start) * TILE_PX, height * FLOOR_PX).stroke({ width: 1, color: BLOCK_OUTLINE, pixelLine: true });
+      };
+      for (const run of runs) {
+        if (run.x > end) {
+          outline();
+          start = run.x;
+        }
+        end = Math.max(end, run.end);
+      }
+      outline();
+    }
+  }
+
+  // ---------------------------------------------------------------- car indicators
+
+  /** A three by five segment face per digit, one bit a cell, top row first. */
+  const DIGITS: Record<string, readonly number[]> = {
+    '0': [7, 5, 5, 5, 7],
+    '1': [2, 6, 2, 2, 7],
+    '2': [7, 1, 7, 4, 7],
+    '3': [7, 1, 3, 1, 7],
+    '4': [5, 5, 7, 1, 1],
+    '5': [7, 4, 7, 1, 7],
+    '6': [7, 4, 7, 5, 7],
+    '7': [7, 1, 1, 2, 2],
+    '8': [7, 5, 7, 5, 7],
+    '9': [7, 5, 7, 1, 7],
+    B: [6, 5, 6, 5, 6],
+  };
+  const LED = 0xffb347;
+
+  /** The car's floor and direction, lit in the housing baked above its doors. */
+  function drawIndicator(entry: CarEntry, car: Car, x: number, y: number): void {
+    const floor = Math.round(car.y);
+    const label = floor < 0 ? `B${-floor}` : `${Math.max(1, floor)}`;
+    const key = `${label}|${car.dir}`;
+    const size = TEXTURE_SIZE.car(entry.kind);
+    const box = carIndicator(size.width, 4);
+    entry.indicator.position.set(x - size.width / 2 + box.x, y - size.height + box.y);
+    if (key === entry.indicatorKey) return;
+    entry.indicatorKey = key;
+    const g = entry.indicator;
+    g.clear();
+    const text = label.slice(-2);
+    const textW = text.length * 4 - 1;
+    const arrowW = car.dir === 0 ? 0 : 4;
+    let cx = Math.round((box.w - textW - arrowW) / 2);
+    const cy = 1.5;
+    if (car.dir !== 0) {
+      const up = car.dir > 0;
+      g.poly(up ? [cx, cy + 3.5, cx + 1.5, cy + 0.5, cx + 3, cy + 3.5] : [cx, cy + 1.5, cx + 3, cy + 1.5, cx + 1.5, cy + 4.5]).fill(LED);
+      cx += arrowW;
+    }
+    for (const ch of text) {
+      const rows = DIGITS[ch];
+      if (rows) rows.forEach((bits, r) => {
+        for (let c = 0; c < 3; c++) if (bits & (4 >> c)) g.rect(cx + c, cy + r, 1, 1).fill(LED);
+      });
+      cx += 4;
+    }
+  }
+
+  /** At far zoom only the selected person is drawn, standing where the selection ring is. */
+  function drawSolo(w: World): void {
+    const sim = selection?.simId !== undefined ? w.sims.get(selection.simId) : undefined;
+    if (!sim || !simIsVisible(sim)) {
+      soloSprite.visible = false;
+      return;
+    }
+    soloSprite.texture = art.sim(sim.kind, stressBand(sim.stress), FRAME.stand, lookOf(w, sim));
+    soloSprite.setSize(SIM_WIDTH_PX, SIM_HEIGHT_PX);
+    soloSprite.position.set(sim.pos.x * TILE_PX, simFeetY(sim.pos.floor));
+    soloSprite.visible = true;
   }
 
   // The static tower (floor strips, rooms, slabs, shafts, fire markers) is reconciled only
@@ -1063,6 +1440,7 @@ export async function createRenderer(
       if (seenCars.has(id)) continue;
       entry.node.destroy();
       entry.cable.destroy();
+      entry.indicator.destroy();
       carSprites.delete(id);
       carMotion.forget(id);
     }
@@ -1099,7 +1477,9 @@ export async function createRenderer(
       // scale, not a Graphics rebuild.
       const cable = new Graphics().rect(-CABLE_PX / 2, 0, CABLE_PX, 1).fill(CABLE_COLOR);
       cableLayer.addChild(cable);
-      entry = { node: sprite, cable, kind: shaft.kind, door, frame: doorFrameOf(door), open, latch: false };
+      const indicator = new Graphics();
+      indicatorLayer.addChild(indicator);
+      entry = { node: sprite, cable, indicator, indicatorKey: '', kind: shaft.kind, door, frame: doorFrameOf(door), open, latch: false };
       carSprites.set(car.id, entry);
     } else if (entry.kind !== shaft.kind) {
       entry.kind = shaft.kind;
@@ -1116,9 +1496,43 @@ export async function createRenderer(
     entry.cable.position.set(target.x, shaftTop);
     entry.cable.scale.y = Math.max(0, roof - shaftTop);
     entry.cable.visible = roof > shaftTop;
+    drawIndicator(entry, car, target.x, target.y);
+  }
+
+  /** The stress mark over one person's head: a pink dot, a red exclamation, or nothing. */
+  function syncMark(entry: SimEntry, band: StressBand, look: number, x: number, y: number): void {
+    const mark = art.mark ? stressMarkOf(band) : null;
+    if (!mark || !art.mark) {
+      if (entry.mark) entry.mark.visible = false;
+      return;
+    }
+    if (!entry.mark) {
+      entry.mark = new Sprite(art.mark(mark));
+      entry.mark.anchor.set(0.5, 1);
+      markLayer.addChild(entry.mark);
+      entry.markKind = mark;
+    } else if (entry.markKind !== mark) {
+      entry.mark.texture = art.mark(mark);
+      entry.markKind = mark;
+    }
+    entry.mark.visible = true;
+    entry.mark.setSize(MARK_W, MARK_H);
+    entry.mark.position.set(x, y - markBottomAboveFeet(look));
   }
 
   function reconcileSims(w: World, alpha: number): void {
+    // Far zoom: nobody but the selected person, so the blocks read as the tower.
+    const solo = plan.people === 'selected';
+    simSpriteLayer.visible = !solo;
+    propLayer.visible = !solo;
+    markLayer.visible = !solo;
+    if (particles) particles.visible = !solo;
+    if (solo) {
+      drawSolo(w);
+      return;
+    }
+    soloSprite.visible = false;
+
     // One pass over every sim: the crowd sample and visibility are decided once here, and
     // the loop below walks only the sims that are drawn.
     drawnSims.length = 0;
@@ -1149,17 +1563,18 @@ export async function createRenderer(
       seenSims.add(sim.id);
       const kind = sim.kind;
       const band = stressBand(sim.stress);
-      // The walk cycle, the sway and the shuffle run on real time; the outfit is the id's.
+      // The walk cycle, the weight shift and the glance run on real time; the look is the id's.
       let step = simSteps.get(sim.id);
       if (!step) simSteps.set(sim.id, (step = { x: sim.pos.x, at: -Infinity }));
       else if (step.x !== sim.pos.x) {
         step.x = sim.pos.x;
         step.at = now;
       }
-      const pose = poseAt(poseOf(sim, band, isStepping(step.at, now)), sim.id, now, reducedMotion);
+      const roomKind = sim.state === 'inRoom' && sim.inRoomId !== null ? w.rooms.get(sim.inRoomId)?.kind : undefined;
+      const pose = poseAt(poseOf(sim, isStepping(step.at, now), w.time.minute, roomKind), sim.id, now, reducedMotion);
       const frame = pose.frame;
-      const outfit = outfitCodeOf(sim.id);
-      const simKey = simKeyOf(kind, band, frame, outfit);
+      const look = lookOf(w, sim);
+      const simKey = simKeyOf(kind, frame, look);
       const point = simMoves(sim)
         ? // Feet on the slab top, not the bottom of the floor band.
           interpolated(simMotion, sim.id, sim.pos.x * TILE_PX, simFeetY(sim.pos.floor), alpha)
@@ -1167,10 +1582,7 @@ export async function createRenderer(
       const drawX = point.x + pose.dx;
       const drawY = point.y + pose.dy;
 
-      const atlasTile =
-        particleMode && particles && particleAtlas
-          ? particleAtlas.get(simKeyOf(kind, band, frame, particleOutfitOf(outfit)))
-          : undefined;
+      const atlasTile = particleMode && particles && crowdAtlas ? crowdAtlas.frameOf(kind, look, frame) : undefined;
       if (particles && atlasTile) {
         let particle = simParticles.get(sim.id);
         if (!particle) {
@@ -1187,24 +1599,23 @@ export async function createRenderer(
 
       let entry = simSprites.get(sim.id);
       if (!entry) {
-        const sprite = new Sprite(art.sim(kind, band, frame, outfit));
+        const sprite = new Sprite(art.sim(kind, band, frame, look));
         sprite.anchor.set(0.5, 1);
         simSpriteLayer.addChild(sprite);
-        entry = { node: sprite, simKey };
+        entry = { node: sprite, body: sprite, prop: null, propKind: null, simKey, mark: null, markKind: null };
         simSprites.set(sim.id, entry);
       } else if (entry.simKey !== simKey) {
-        entry.node.texture = art.sim(kind, band, frame, outfit);
+        entry.node.texture = art.sim(kind, band, frame, look);
         entry.simKey = simKey;
       }
-      entry.node.setSize(SIM_WIDTH_PX, SIM_HEIGHT_PX);
-      entry.node.position.set(drawX, drawY);
+      placePerson(art, propLayer, entry, kind, look, frame, drawX, drawY);
+      syncMark(entry, band, look, drawX, drawY);
     }
     drawnSims.length = 0; // hold no sim past the frame
 
     for (const [id, entry] of simSprites) {
       if (seenSims.has(id)) continue;
-      entry.node.destroy();
-      simSprites.delete(id);
+      dropSimEntry(id, entry);
       simMotion.forget(id);
       simSteps.delete(id);
     }
@@ -1640,6 +2051,33 @@ export async function createRenderer(
       dtMs: dt,
       reducedMotion,
     });
+    applyTier(zoomTier(camera.zoom));
+    sweepAge += dt;
+    if (sweepAge >= SWEEP_EVERY_MS && art.sweep) {
+      sweepAge = 0;
+      const live = new Set<Texture>();
+      for (const entry of simSprites.values()) live.add(entry.node.texture);
+      for (const v of venueSprites.values()) if (v.staff) live.add(v.staff.texture);
+      live.add(soloSprite.texture);
+      curb.textures(live);
+      art.sweep(live, PERSON_IDLE_MS);
+    }
+    if (plan.blocks) {
+      blocksAge += dt;
+      if (blocksDirty || blocksAge >= BLOCKS_REFRESH_MS) rebuildBlocks(lastWorld);
+    } else if (plan.windowVeil > 0 && veilDirty) rebuildVeil(lastWorld);
+    curb.update({
+      world: lastWorld,
+      view: weatherView,
+      doors: curbDoors,
+      lookOf: (sim) => lookOf(lastWorld, sim),
+      nowMs: performance.now(),
+      dtMs: dt,
+      reducedMotion,
+      people: plan.ambient,
+      viewLeft: camera.x - width / 2 / camera.zoom,
+      viewRight: camera.x + width / 2 / camera.zoom,
+    });
     const lightMinute = Math.floor(clock.minuteOfDay);
     const lightTint = weatherLightTint(lightTintAt(lightMinute), weatherView);
     if (lightMinute !== lastLightMinute || lightTint !== lightSprite.tint) {
@@ -1662,7 +2100,7 @@ export async function createRenderer(
       ambient.sync(lastWorld, reducedMotion);
       if (reducedMotion) buildFx.clear();
     }
-    ambient.update(dt, isNight(clock.minuteOfDay));
+    ambient.update(dt, isNight(clock.minuteOfDay), lastWorld.time.minute);
     buildFx.update(dt);
 
     if (fireGraphics.size > 0) {
@@ -1691,6 +2129,11 @@ export async function createRenderer(
       const clock = clockOf(w.time.minute);
       const night = isNight(clock.minuteOfDay);
       reconcileStaticTower(w, night, clock.minuteOfDay);
+      const bucket = Math.floor(w.time.minute / VENUE_CLOCK_MINUTES);
+      if (bucket !== venueClock) {
+        venueClock = bucket;
+        updateVenues(w, night);
+      }
       reconcileCars(w, alpha);
       reconcileSims(w, alpha);
       drawOverlay(w);
@@ -1708,6 +2151,7 @@ export async function createRenderer(
       carMotion.reset();
       simMotion.reset();
       simSteps.clear();
+      lookCodes.clear();
       buildFx.clear();
       // A replaced world is always reconciled in full on the next render.
       reconciledWorld = null;
@@ -1798,14 +2242,23 @@ export async function createRenderer(
       pickListeners.length = 0;
       sky.destroy();
       weatherFx.destroy();
+      curb.destroy();
       leaveParticleMode();
-      atlasTexture?.destroy(true);
-      atlasTexture = null;
-      particleAtlas = null;
+      crowdAtlas = null;
       app.destroy({ removeView: true }, { children: true });
     },
     thumbnail: createThumbnails({ art: () => art, extract: (t) => app.renderer.extract.canvas(t) as HTMLCanvasElement }),
   };
+
+  // The capture path, dev only like ?smoke: the capture scripts read the camera and the texture
+  // budget through this. Nothing is exposed in a production build.
+  if (import.meta.env.DEV && typeof window !== 'undefined') {
+    (window as unknown as { __hsRender?: unknown }).__hsRender = {
+      renderer,
+      stats: () => art.stats?.() ?? null,
+      drawn: () => ({ people: simSprites.size, commuters: curb.count(), venues: venueSprites.size }),
+    };
+  }
 
   return renderer;
 }

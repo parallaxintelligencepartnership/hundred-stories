@@ -99,6 +99,19 @@ describe('ambient emitters', () => {
     expect(strip.tint).toBe(first);
   });
 
+  it('keeps a closed shop dark: the strip blinks only while the shop is open (package 2)', () => {
+    const world = createWorld(3);
+    room(world, 'shop', 2, 10);
+    const layer = new Container();
+    const ambient = createAmbient(layer);
+    ambient.sync(world, false);
+    const strip = (layer.children[0] as Container).children[0] as Sprite;
+    ambient.update(10, true, 20 * 60); // 20:00, open until 21:00
+    expect(strip.visible).toBe(true);
+    ambient.update(10, true, 22 * 60); // 22:00, shuttered
+    expect(strip.visible).toBe(false);
+  });
+
   it('times the sign, the marquee and the steam on real time', () => {
     expect(SIGN_BLINK_MS).toBe(900);
     expect(signLit(0)).toBe(true);

@@ -28,6 +28,13 @@ function recorder(): { renderer: PixiRenderer; last: () => Baked } {
   return { renderer, last: () => last };
 }
 
+/** A canvas for the illustrated bakes: the right size, a context that draws nothing. */
+function fakeCanvas(width: number, height: number): HTMLCanvasElement {
+  const noop = (): void => {};
+  const ctx = new Proxy({}, { get: (_t, k) => (k === 'measureText' ? () => ({ width: 10 }) : k === 'createLinearGradient' || k === 'createRadialGradient' ? () => ({ addColorStop: noop }) : noop), set: () => true });
+  return { width, height, getContext: () => ctx } as unknown as HTMLCanvasElement;
+}
+
 describe('the base grid', () => {
   it('is 16 px tiles and 72 px floors', () => {
     expect(TILE_PX === 16 && FLOOR_PX === 72).toBe(true);
@@ -66,22 +73,21 @@ describe('every drawer bakes on the grid', () => {
     expect(last()).toMatchObject({ width: 9 * TILE_PX, height: SLAB_PX + SLAB_SHADOW_PX });
   });
 
-  it('bakes shafts, cars, sims and the ghost on the same grid', () => {
+  it('bakes shafts, cars, people and the ghost on the same grid', () => {
     for (const kind of Object.keys(SHAFTS) as ShaftKind[]) {
       const shaft = recorder();
       createArt(shaft.renderer).shaft(kind, 5);
       expect(shaft.last()).toMatchObject({ width: SHAFTS[kind].width * TILE_PX, height: 5 * FLOOR_PX });
       for (const open of DOOR_FRAMES) {
-        const car = recorder();
-        createArt(car.renderer).car(kind, open);
+        // The car is illustrated (package 2): drawn on a canvas, the same logical size.
+        const car = createArt(recorder().renderer, { createCanvas: fakeCanvas }).car(kind, open);
         // body SHAFTS width * TILE_PX - 8 by FLOOR_PX - 12, with the 4 px cast shadow on top
-        expect(car.last()).toMatchObject({ width: SHAFTS[kind].width * TILE_PX - 8, height: FLOOR_PX - 12 + 4 });
-        expect(car.last()).toMatchObject(TEXTURE_SIZE.car(kind));
+        expect({ width: car.width, height: car.height }).toEqual({ width: SHAFTS[kind].width * TILE_PX - 8, height: FLOOR_PX - 12 + 4 });
+        expect({ width: car.width, height: car.height }).toEqual(TEXTURE_SIZE.car(kind));
       }
     }
-    const sim = recorder();
-    createArt(sim.renderer).sim('worker', 'calm', 0);
-    expect(sim.last()).toMatchObject({ width: TILE_PX, height: 3 * TILE_PX });
+    const sim = createArt(recorder().renderer, { createCanvas: fakeCanvas }).sim('worker', 'calm', 0);
+    expect({ width: sim.width, height: sim.height }).toEqual({ width: TILE_PX, height: 3 * TILE_PX });
     const ghost = recorder();
     createArt(ghost.renderer).ghost(4, 2, true);
     expect(ghost.last()).toMatchObject({ width: 4 * TILE_PX, height: 2 * FLOOR_PX });
