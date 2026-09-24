@@ -9,6 +9,7 @@
 import { createRenderer, type Renderer } from '../render/renderer';
 import { animateDemo, buildDemoWorld } from '../render/smoke';
 import './challenge';
+import './platforms';
 import './stores';
 
 /** One demo day every forty seconds: slower than the smoke page, it is background. */
