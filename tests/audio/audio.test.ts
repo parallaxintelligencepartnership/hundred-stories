@@ -20,7 +20,10 @@ import {
 } from '../../src/audio/audio';
 import type { GameEvent, GameEventListener } from '../../src/game/api';
 import { isNight, chapterFor } from '../../src/audio/score';
+import { CHAPTER_SCALES, CHAPTER_VOICES, inChapterScale, scaleMidi, VOICES, type Chapter } from '../../src/audio/score';
+import { phraseFor, voicesFor } from '../../src/audio/phrase';
 import { vipRatingCue, cueDuration } from '../../src/audio/cues';
+import { weatherAt } from '../../src/game/weather';
 
 class StubParam {
   value = 0;
@@ -48,6 +51,9 @@ class StubParam {
 class StubNode {
   gain = new StubParam();
   frequency = new StubParam();
+  detune = new StubParam();
+  delayTime = new StubParam();
+  onended: (() => void) | null = null;
   type = '';
   buffer: unknown = null;
   loop = false;
@@ -69,6 +75,8 @@ class StubContext {
   oscillators: StubNode[] = [];
   sources: StubNode[] = [];
   gains: StubNode[] = [];
+  filters: StubNode[] = [];
+  delays: StubNode[] = [];
   constructor() {
     StubContext.constructed += 1;
   }
@@ -81,8 +89,9 @@ class StubContext {
     const n = new StubNode(); this.gains.push(n); return n;
   }
   createBiquadFilter(): StubNode {
-    return new StubNode();
+    const n = new StubNode(); this.filters.push(n); return n;
   }
+  createDelay(): StubNode { const n = new StubNode(); this.delays.push(n); return n; }
   createBufferSource(): StubNode {
     const n = new StubNode();
     this.sources.push(n);
@@ -124,8 +133,10 @@ function fakeTarget() {
 function fakeGame() {
   const events = new Set<GameEventListener>();
   const ticks = new Set<() => void>();
+  const state = { seed: 1, stars: 1, time: { minute: 12 * 60 } };
   return {
-    world: { seed: 1, stars: 1, time: { minute: 12 * 60 } } as never,
+    world: state as never,
+    state,
     subscribe(cb: () => void) {
       ticks.add(cb);
       return () => ticks.delete(cb);
@@ -223,6 +234,10 @@ describe('settings keys', () => {
     store.setItem(SOUND_AMBIENT_KEY, 'loud');
     store.setItem(SOUND_MUSIC_KEY, '250');
     expect(readSoundSettings(store)).toEqual({ on: false, effects: 100, ambient: DEFAULT_SOUND.ambient, music: 100 });
+    writeSoundSettings({ on: false, effects: 70, ambient: 50, music: -20 }, store);
+    expect(store.getItem(SOUND_MUSIC_KEY)).toBe('0');
+    writeSoundSettings({ on: false, effects: 70, ambient: 50, music: 150 }, store);
+    expect(store.getItem(SOUND_MUSIC_KEY)).toBe('100');
   });
 });
 
@@ -292,15 +307,16 @@ describe('the AudioContext and the master toggle', () => {
     sound.setAmbient(0);
     sound.setEnabled(true);
     expect(ctxs).toHaveLength(1);
+    const scoreVoices = ctxs[0]!.oscillators.length;
     game.emit({ kind: 'car.arrive', shaftId: 1, carId: 1 });
     game.emit({ kind: 'car.arrive', shaftId: 1, carId: 2 }); // same instant: dropped
-    expect(ctxs[0]!.oscillators.filter((o) => [587, 784].includes(o.frequency.value))).toHaveLength(2);
+    expect(ctxs[0]!.oscillators).toHaveLength(scoreVoices + 2);
     t = 399;
     game.emit({ kind: 'car.arrive', shaftId: 1, carId: 3 });
-    expect(ctxs[0]!.oscillators.filter((o) => [587, 784].includes(o.frequency.value))).toHaveLength(2);
+    expect(ctxs[0]!.oscillators).toHaveLength(scoreVoices + 2);
     t = 400;
     game.emit({ kind: 'car.arrive', shaftId: 1, carId: 3 });
-    expect(ctxs[0]!.oscillators.filter((o) => [587, 784].includes(o.frequency.value))).toHaveLength(4);
+    expect(ctxs[0]!.oscillators).toHaveLength(scoreVoices + 4);
     sound.setEnabled(false);
     expect(ctxs[0]!.gains[0]!.gain.value).toBe(0);
     sound.destroy();
@@ -339,7 +355,7 @@ describe('adaptive score', () => {
     game.emit({ kind: 'stars', from: 1, to: 3 }); expect(sound.chapter).toBe(3);
     game.emit({ kind: 'stars', from: 3, to: 2 }); expect(sound.chapter).toBe(3);
     expect(isNight(23 * 60 + 30)).toBe(true);
-    expect(chapterFor(4)).toBe(3);
+    expect(chapterFor(4)).toBe(4);
     expect(sound.tempo).toBe(76);
     sound.destroy();
   });
@@ -360,5 +376,107 @@ describe('cue definitions', () => {
     expect([0, 1, 2].map(vipRatingCue)).toEqual(['vip.poor', 'vip.fair', 'vip.good']);
     expect(cueDuration('tower')).toBeGreaterThanOrEqual(10);
     expect(cueDuration('tower')).toBeLessThanOrEqual(15);
+  });
+});
+
+describe('six chapter moods and seeded eight-bar phrases', () => {
+  it('maps each star directly and defines its own voice set', () => {
+    for (const star of [1, 2, 3, 4, 5, 6] as Chapter[]) {
+      expect(chapterFor(star)).toBe(star);
+      expect(CHAPTER_VOICES[star].length).toBeGreaterThan(0);
+      expect(CHAPTER_SCALES[star]).toHaveLength(7);
+    }
+    expect(CHAPTER_VOICES[2]).toContain('guitar');
+    expect(CHAPTER_VOICES[3]).toContain('brass');
+    expect(CHAPTER_VOICES[4]).toContain('horn');
+    expect(CHAPTER_VOICES[5]).toContain('vibes');
+    expect(CHAPTER_VOICES[5]).toContain('kinetic');
+    expect(CHAPTER_VOICES[6]).toContain('strings');
+    expect(VOICES.guitar.detune).toBeGreaterThan(0);
+    expect(VOICES.vibes.tremolo).toBeGreaterThan(0);
+  });
+  it('changes weekend voices and the daytime hat level without changing the mood', async () => {
+    const { hatVelocityMultiplier } = await import('../../src/audio/score');
+    expect(voicesFor(1, true)).toContain('guitar');
+    expect(voicesFor(3, true)).toContain('counter');
+    expect(voicesFor(6, true)).toContain('pluck');
+    expect(hatVelocityMultiplier(7 * 60)).toBeGreaterThan(hatVelocityMultiplier(18 * 60));
+  });
+  it('is deterministic and varies through 60 consecutive chapter-one phrases', () => {
+    const phrases = Array.from({ length: 60 }, (_, i) => phraseFor(4242, 1, i, 'piano'));
+    expect(phraseFor(4242, 1, 13, 'piano')).toEqual(phraseFor(4242, 1, 13, 'piano'));
+    const hashes = phrases.map(p => JSON.stringify(p));
+    expect(new Set(hashes).size).toBeGreaterThanOrEqual(40);
+    for (let i = 1; i < hashes.length; i += 1) expect(hashes[i]).not.toBe(hashes[i - 1]);
+    expect(phrases.every(p => p.length > 0 && p.every(n => n.beat >= 0 && n.beat < 32))).toBe(true);
+  });
+  it('keeps every voice in its chapter scale and bass on roots or perfect fifths', () => {
+    const roots = [0, 3, 4, 0, 5, 3, 4, 0];
+    for (const chapter of [1, 2, 3, 4, 5, 6] as Chapter[]) {
+      for (const voice of CHAPTER_VOICES[chapter]) {
+        for (const note of phraseFor(99, chapter, 7, voice)) expect(inChapterScale(chapter, note.freq)).toBe(true);
+      }
+      const bass = phraseFor(99, chapter, 7, 'bass');
+      expect(bass).toHaveLength(16);
+      for (let bar = 0; bar < 8; bar += 1) {
+        const root = bass[bar * 2]!;
+        const fifth = bass[bar * 2 + 1]!;
+        const candidate = roots[bar]!;
+        const degree = scaleMidi(chapter, candidate + 4) - scaleMidi(chapter, candidate) === 7 ? candidate : 0;
+        expect(root.freq).toBeCloseTo(440 * 2 ** ((scaleMidi(chapter, degree, -2) - 69) / 12));
+        expect(12 * Math.log2(fifth.freq / root.freq)).toBeCloseTo(7);
+      }
+    }
+    const hat = phraseFor(99, 5, 7, 'hat');
+    expect(new Set(hat.map(n => n.freq)).size).toBe(1);
+    const leadBars = new Set(phraseFor(99, 6, 7, 'lead').map(n => Math.floor(n.beat / 4)));
+    const counterBars = new Set(phraseFor(99, 6, 7, 'counter').map(n => Math.floor(n.beat / 4)));
+    expect([...leadBars].some(bar => counterBars.has(bar))).toBe(false);
+  });
+});
+
+describe('mixer and weather integration', () => {
+  it('keeps every bus silent after one off call and has a music-only feedback delay', () => {
+    const game = fakeGame(); const target = fakeTarget(); const ctx = new StubContext();
+    const sound = createSound(game, { target, store: memoryStore(), createContext: () => asCtx(ctx), setInterval: () => 1, clearInterval: () => {} });
+    target.fire('pointerdown'); sound.setEnabled(true);
+    expect(ctx.delays).toHaveLength(1);
+    expect(ctx.delays[0]!.delayTime.value).toBeCloseTo(0.31);
+    expect(ctx.gains.some(g => g.gain.value === 0.35)).toBe(true);
+    expect(ctx.filters.some(f => f.frequency.value === 3000)).toBe(true);
+    sound.setEnabled(false);
+    for (const bus of [ctx.gains[0], ctx.gains[1], ctx.gains[4], ctx.gains[5]]) expect(bus!.gain.value).toBe(0);
+    sound.destroy();
+  });
+  it('changes the active music filter at 23:30 without changing tempo', () => {
+    const game = fakeGame(); const target = fakeTarget(); const ctx = new StubContext();
+    const sound = createSound(game, { target, store: memoryStore(), createContext: () => asCtx(ctx), setInterval: () => 1, clearInterval: () => {} });
+    target.fire('pointerdown'); sound.setEnabled(true);
+    const tempo = sound.tempo;
+    game.state.time.minute = 23 * 60 + 30; game.tick();
+    expect(sound.filterHz).toBe(900);
+    expect(sound.tempo).toBe(tempo);
+    expect(ctx.filters.some(f => f.frequency.value === 900)).toBe(true);
+    sound.destroy();
+  });
+  it('selects weatherAt beds for every kind and skips thunder under reduced motion', () => {
+    const g = globalThis as Record<string, unknown>;
+    const oldMatchMedia = g['matchMedia'];
+    g['matchMedia'] = () => ({ matches: true });
+    try {
+      for (const kind of ['clear', 'overcast', 'rain', 'storm']) {
+        const seed = Array.from({ length: 100 }, (_, i) => i).find(i => weatherAt(i, 720).kind === kind);
+        expect(seed).toBeDefined();
+        const game = fakeGame(); game.state.seed = seed!; game.state.time.minute = 720;
+        const target = fakeTarget(); const ctx = new StubContext();
+        const sound = createSound(game, { target, store: memoryStore(), createContext: () => asCtx(ctx), now: () => 30000, setInterval: () => 1, clearInterval: () => {} });
+        target.fire('pointerdown'); sound.setEnabled(true);
+        expect(sound.weatherKind).toBe(kind);
+        if (kind === 'storm') expect(ctx.sources.filter(s => !s.loop)).toHaveLength(0);
+        sound.destroy();
+      }
+    } finally {
+      if (oldMatchMedia === undefined) delete g['matchMedia']; else g['matchMedia'] = oldMatchMedia;
+    }
   });
 });
