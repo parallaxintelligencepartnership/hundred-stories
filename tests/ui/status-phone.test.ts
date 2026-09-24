@@ -167,4 +167,21 @@ describe('status bar at phone width', () => {
     expect(room).toBe(126);
     expect(value.length * 16 * 0.54).toBeLessThanOrEqual(room);
   });
+
+  it('under 400 px shows the weather as two letters in the clock column, never wider than the time', () => {
+    const narrow = nestedBlock(phoneBlock(), '@media (max-width: 399px)');
+    expect(rule(narrow, '.hs-weather-word').display).toBe('none');
+    expect(rule(narrow, '.hs-weather-short').display).toBe('inline');
+    const wide = css.slice(0, css.indexOf('@media (max-width: 720px) {'));
+    expect(rule(wide, '.hs-weather-short').display).toBe('none');
+    expect(rule(wide, '.hs-weather')['font-family']).toBe('var(--font-readout)');
+    const root = mount(12 * 60 + 59);
+    const clock = find(root, 'hs-status-clock');
+    const text = find(clock, 'hs-clock-text');
+    // It stacks under the time in the clock's own column, so row two gains no width.
+    expect(text.children.some((n) => has(n, 'hs-weather'))).toBe(true);
+    expect(find(clock, 'hs-weather-short').textContent).toMatch(/^(CL|OV|RN|ST)$/);
+    // Two letters at the 12 px meta size are narrower than the 20 px "12:59".
+    expect(2 * 12 * 0.54).toBeLessThan(5 * 20 * 0.54);
+  });
 });

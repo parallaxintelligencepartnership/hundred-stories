@@ -18,6 +18,7 @@ import { MIN_FLOOR, TOWER_WIDTH } from '../sim/types';
 import { FLOOR_PX, LINE_PX, TILE_PX } from './art';
 import { DEFAULT_GROUND_LINE, floorBaseY } from './camera';
 import { lerpColor } from './light';
+import { CLOUD_DARK, cloudDarkening, extraCloudCover, EXTRA_CLOUDS, weatherSkyColor, type WeatherView } from './weather';
 
 export interface SkyColors {
   top: number;
@@ -139,6 +140,8 @@ export interface Sky {
     viewW: number,
     viewH: number,
     dtMs?: number,
+    /** The eased weather (render/weather.ts) and the tower's seed; none keeps the clear sky. */
+    weather?: { view: WeatherView; seed: number },
   ): void;
   destroy(): void;
 }
@@ -214,6 +217,27 @@ function buildClouds(parent: Container): Cloud[] {
   return clouds;
 }
 
+/** Rain and storm clouds: four more, larger and grayer, placed from the tower's seed. */
+function buildExtraClouds(parent: Container): Graphics[] {
+  const nodes: Graphics[] = [];
+  for (let i = 0; i < EXTRA_CLOUDS; i++) {
+    const node = new Graphics().ellipse(0, 0, 90 + 12 * i, 16 + 2 * i).fill({ color: 0xdde2e8, alpha: CLOUD_ALPHA });
+    node.visible = false;
+    node.alpha = 0;
+    parent.addChild(node);
+    nodes.push(node);
+  }
+  return nodes;
+}
+
+/** Where the extra clouds start and how high they sit, from the seed: never from world.rng. */
+export function extraCloudPlaces(seed: number): { x0: number; altitude: number }[] {
+  const rng = createRng((seed | 0) ^ 0x7a1c1);
+  const out: { x0: number; altitude: number }[] = [];
+  for (let i = 0; i < EXTRA_CLOUDS; i++) out.push({ x0: i * 540 + 180 + rng.int(0, 240), altitude: rng.int(120, 380) });
+  return out;
+}
+
 /** Wrap span for the clouds: at least the viewport plus a cloud either side, and the six spaced over it. */
 function cloudSpan(viewW: number): number {
   return Math.max(viewW + 320, CLOUD_COUNT * 360);
@@ -258,6 +282,11 @@ export function createSky(layers: SkyLayers): Sky {
   const hills = buildHills();
   layers.cityFar.addChild(cloudLayer, hills);
   const clouds = buildClouds(cloudLayer);
+  const extraClouds = buildExtraClouds(cloudLayer);
+  let extraSeed: number | null = null;
+  let extraPlaces: { x0: number; altitude: number }[] = [];
+  let lastCloudTint = NaN;
+  let cloudNightTint = 0xffffff;
   const roofs = buildRoofs();
   layers.cityNear.addChild(roofs);
   const ground = buildGround(layers.ground);
@@ -303,8 +332,12 @@ export function createSky(layers: SkyLayers): Sky {
   }
 
   return {
-    update(minuteOfDay, cam, viewW, viewH, dtMs = 0): void {
-      const colors = skyAt(minuteOfDay);
+    update(minuteOfDay, cam, viewW, viewH, dtMs = 0, weather): void {
+      const clear = skyAt(minuteOfDay);
+      // Clear weather at weight 1 grades by exactly nothing: today's colours, byte for byte.
+      const colors = weather
+        ? { top: weatherSkyColor(clear.top, weather.view), bottom: weatherSkyColor(clear.bottom, weather.view) }
+        : clear;
       if (colors.top !== lastTop || colors.bottom !== lastBottom || viewW !== lastW || viewH !== lastH) {
         redrawGradient(colors.top, colors.bottom, viewW, viewH);
         lastTop = colors.top;
@@ -319,8 +352,17 @@ export function createSky(layers: SkyLayers): Sky {
         const tint = lerpColor(0xffffff, HORIZON_NIGHT, night);
         hills.tint = tint;
         roofs.tint = tint;
-        cloudLayer.tint = lerpColor(0xffffff, HORIZON_NIGHT, night * 0.8);
+        cloudNightTint = lerpColor(0xffffff, HORIZON_NIGHT, night * 0.8);
         lastMinute = rounded;
+      }
+      const cloudTint = lerpColor(
+        cloudNightTint,
+        CLOUD_DARK,
+        weather ? cloudDarkening(weather.view) : 0,
+      );
+      if (cloudTint !== lastCloudTint) {
+        cloudLayer.tint = cloudTint;
+        lastCloudTint = cloudTint;
       }
 
       placeBand(hills, HILLS_PARALLAX, cam, viewW, viewH);
@@ -333,6 +375,23 @@ export function createSky(layers: SkyLayers): Sky {
         cloud.node.position.set(
           Math.round(cloudX(cloud.x0, drift, cam.x, cam.zoom, viewW)),
           Math.round(horizon - cloud.altitude),
+        );
+      }
+      const cover = weather ? extraCloudCover(weather.view) : 0;
+      if (weather && weather.seed !== extraSeed) {
+        extraSeed = weather.seed;
+        extraPlaces = extraCloudPlaces(weather.seed);
+      }
+      for (let i = 0; i < extraClouds.length; i++) {
+        const node = extraClouds[i] as Graphics;
+        const alpha = Math.max(0, Math.min(1, cover - i));
+        node.visible = alpha > 0;
+        if (!node.visible) continue;
+        node.alpha = alpha;
+        const place = extraPlaces[i] ?? { x0: i * 540, altitude: 200 };
+        node.position.set(
+          Math.round(cloudX(place.x0, drift, cam.x, cam.zoom, viewW)),
+          Math.round(horizon - place.altitude),
         );
       }
     },

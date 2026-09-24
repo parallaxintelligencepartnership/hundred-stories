@@ -352,6 +352,20 @@ button.hs-readout:hover .hs-readout-label {
   min-width: 0;
 }
 
+/* The weather under the time, in the readout face at the meta size (src/game/weather.ts). */
+.hs-weather {
+  font-family: var(--font-readout);
+  font-size: var(--status-meta);
+  line-height: 1.2;
+  letter-spacing: 0.04em;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
+.hs-weather-short {
+  display: none;
+}
+
 .hs-speed-mode {
   padding: 3px 8px;
   border: 1px solid var(--amber);
@@ -1467,6 +1481,15 @@ a.hs-btn {
     .hs-status-cash .hs-readout-meta,
     .hs-status-pop .hs-readout-meta {
       display: none;
+    }
+
+    /* The weather word becomes its two letters (CL, OV, RN, ST), never wider than the time. */
+    .hs-weather-word {
+      display: none;
+    }
+
+    .hs-weather-short {
+      display: inline;
     }
   }
 

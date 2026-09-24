@@ -82,7 +82,9 @@ import { createBuildFx } from './buildfx';
 import { Motion, TELEPORT_TILES } from './interpolate';
 import { floorsWithPeople, LIGHT_ALPHA, lightBand, lightTintAt, windowStateOf, windowStatesFor, type WindowState } from './light';
 import { createOverlayPass, type OverlayKind, type ViewRect } from './overlays';
-import { createSky, isNight, skyBackground, type Sky } from './sky';
+import { createSky, isNight, nightness, skyBackground, type Sky } from './sky';
+import { easeView, settledView, weatherLightTint, weatherNow, weatherSkyColor, type Rect as WeatherRect } from './weather';
+import { basementSpanOf, createWeatherFx, towerRectOf } from './weatherfx';
 import { createThumbnails, type ThumbnailKind } from './thumbnail';
 
 export interface PickHit {
@@ -717,6 +719,12 @@ export async function createRenderer(
   const camera = createCamera();
   camera.setViewport(app.screen.width, app.screen.height);
   const sky: Sky = createSky(layers);
+  // Weather, outside the tower: the sun and lightning in the sky layer, the distant rain sheet
+  // over the horizon bands (cityNear, still behind the world root), the wet street on the ground.
+  const weatherFx = createWeatherFx({ sky: layers.sky, sheet: layers.cityNear, ground: layers.ground });
+  let weatherView = settledView(weatherNow(world.seed, world.time.minute));
+  let weatherTower: WeatherRect | null = null;
+  let weatherBasement: { left: number; right: number } | null = null;
 
   let reducedMotion =
     typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -900,6 +908,8 @@ export async function createRenderer(
 
   function rebuildFloorStrips(w: World): void {
     const extents = builtFloorExtents(w);
+    weatherTower = towerRectOf(extents);
+    weatherBasement = basementSpanOf(extents);
     floorStrips.clear();
     for (const [floor, extent] of extents) {
       const x = extent.min * TILE_PX;
@@ -1613,14 +1623,31 @@ export async function createRenderer(
     overlayRoot.position.copyFrom(worldRoot.position);
 
     const clock = clockOf(lastWorld.time.minute);
-    sky.update(clock.minuteOfDay, camera, width, height, reducedMotion ? 0 : dt);
+    // One weather snapshot a frame, eased in real time: the fade runs under reduced motion too.
+    weatherView = easeView(weatherView, weatherNow(lastWorld.seed, lastWorld.time.minute), dt);
+    sky.update(clock.minuteOfDay, camera, width, height, reducedMotion ? 0 : dt, { view: weatherView, seed: lastWorld.seed });
+    weatherFx.update({
+      view: weatherView,
+      seed: lastWorld.seed,
+      night: nightness(clock.minuteOfDay),
+      viewW: width,
+      viewH: height,
+      originX: worldRoot.position.x,
+      originY: worldRoot.position.y,
+      zoom: camera.zoom,
+      tower: weatherTower,
+      basement: weatherBasement,
+      dtMs: dt,
+      reducedMotion,
+    });
     const lightMinute = Math.floor(clock.minuteOfDay);
-    if (lightMinute !== lastLightMinute) {
-      lightSprite.tint = lightTintAt(lightMinute);
+    const lightTint = weatherLightTint(lightTintAt(lightMinute), weatherView);
+    if (lightMinute !== lastLightMinute || lightTint !== lightSprite.tint) {
+      lightSprite.tint = lightTint;
       lastLightMinute = lightMinute;
     }
     if (lightSprite.width !== width || lightSprite.height !== height) lightSprite.setSize(width, height);
-    const background = skyBackground(clock.minuteOfDay);
+    const background = weatherSkyColor(skyBackground(clock.minuteOfDay), weatherView);
     if (background !== lastBackground) {
       app.renderer.background.color = background;
       lastBackground = background;
@@ -1770,6 +1797,7 @@ export async function createRenderer(
       app.ticker.remove(onFrame);
       pickListeners.length = 0;
       sky.destroy();
+      weatherFx.destroy();
       leaveParticleMode();
       atlasTexture?.destroy(true);
       atlasTexture = null;
