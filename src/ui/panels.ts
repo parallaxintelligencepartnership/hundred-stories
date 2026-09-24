@@ -8,7 +8,7 @@ import type { Renderer } from '../render/renderer';
 import { composeShareImage, shareMessage, shareStats, shareText, shareUrl } from '../share/share';
 import { applyTheme, cycleTheme, readTheme, themeLabel } from '../site/theme';
 import { officeQuarterRent } from '../sim/economy';
-import { ECONOMY, EVAL, LIMITS, RENT, ROOMS, SHAFTS, takesRent } from '../sim/rules';
+import { ECONOMY, EVAL, LIMITS, RENT, ROOMS, SHAFTS, takesRent, WASTE } from '../sim/rules';
 import {
   describeBeat,
   followSim,
@@ -19,8 +19,9 @@ import {
   unfollowSim,
   type StoryBeat,
 } from '../sim/story';
+import { centerSummary, producesWaste, recyclingCenters, wasteDayStart } from '../sim/recycling';
 import { coverageText } from '../sim/security';
-import { carRangeOf } from '../sim/types';
+import { carRangeOf, clockOf } from '../sim/types';
 import type {
   Car,
   Command,
@@ -33,6 +34,7 @@ import type {
   ShaftKind,
   Sim,
   SimKind,
+  World,
 } from '../sim/types';
 import {
   formatCount,
@@ -106,6 +108,7 @@ const SIM_KINDS: Record<SimKind, string> = {
   visitor: 'Visitor',
   vip: 'VIP guest',
   guard: 'Security guard',
+  collector: 'Collection worker',
   thief: 'Visitor', // the card never says thief before the encounter is resolved
 };
 
@@ -256,10 +259,14 @@ function roomPanel(roomId: Id, game: GameApi, ctx: PanelContext): PanelElement {
   // room lists who belongs here or is inside, each one a way into their story. A security
   // office's are its guards, each with where they are (in the office, patrolling floor 7,
   // responding to floor 12, off shift), under the floors their patrol covers.
+  // A recycling center's are its collection workers, under what they did today.
   const isSecurity = room.kind === 'security';
-  const occupants = section(isSecurity ? 'Guards' : 'Occupants');
+  const isRecycling = room.kind === 'recycling';
+  const occupants = section(isSecurity ? 'Guards' : isRecycling ? 'Workers' : 'Occupants');
   const coverage = isSecurity ? row('Patrol covers', coverageText(game.world, room)) : null;
   if (coverage) occupants.append(coverage);
+  const collection = isRecycling ? collectionRows(game, room) : null;
+  if (collection) occupants.append(...collection.nodes);
   const occupantList = el('div', 'hs-occupants');
   occupants.append(occupantList);
   body.append(occupants);
@@ -268,6 +275,10 @@ function roomPanel(roomId: Id, game: GameApi, ctx: PanelContext): PanelElement {
 
   const flags = el('div', 'hs-section');
   body.append(flags);
+
+  // One line of waste for a room that makes it, once the tower has a recycling center.
+  const wasteNote = producesWaste(room.kind) ? el('p', 'hs-note hs-waste', '') : null;
+  if (wasteNote) body.append(wasteNote);
 
   let rentValue: HTMLSpanElement | null = null;
   let rentMinus: HTMLButtonElement | null = null;
@@ -329,6 +340,12 @@ function roomPanel(roomId: Id, game: GameApi, ctx: PanelContext): PanelElement {
       flags.replaceChildren(...wanted.map(([label, alert]) => flag(label, alert)));
     }
     if (coverage) setRowValue(coverage, coverageText(game.world, room));
+    if (collection) collection.refresh();
+    if (wasteNote) {
+      const line = wasteLine(game.world, room);
+      wasteNote.hidden = line === null;
+      setText(wasteNote, line ?? '');
+    }
     const ids = occupantIds(game, room);
     const key = ids.join(',');
     if (key !== occupantKey) {
@@ -360,6 +377,55 @@ function roomPanel(roomId: Id, game: GameApi, ctx: PanelContext): PanelElement {
   refresh();
   panel.refresh = refresh;
   return panel;
+}
+
+function floorWord(floor: number): string {
+  return floor < 0 ? `B${-floor}` : String(floor);
+}
+
+/** The day a backlog began, in the calendar's words: "weekday 2", "the weekend", "this morning". */
+function backlogDayText(now: number, since: number): string {
+  if (since >= wasteDayStart(now)) return 'this morning';
+  const { dayOfQuarter } = clockOf(since);
+  return dayOfQuarter === 2 ? 'the weekend' : `weekday ${dayOfQuarter + 1}`;
+}
+
+/**
+ * A producing room's waste line, or null while the tower has no recycling center:
+ * "Waste: 4 of 9, collected today", "Waste: 7 of 9, backlog since weekday 2",
+ * "Waste: 2 of 9, waiting for collection".
+ */
+export function wasteLine(world: World, room: Room): string | null {
+  if (!producesWaste(room.kind) || recyclingCenters(world).length === 0) return null;
+  const head = `Waste: ${room.waste ?? 0} of ${WASTE.roomCap}`;
+  if (room.wasteBacklogSince != null) return `${head}, backlog since ${backlogDayText(world.time.minute, room.wasteBacklogSince)}`;
+  if (room.wasteCollectedAt !== undefined && room.wasteCollectedAt >= wasteDayStart(world.time.minute)) return `${head}, collected today`;
+  if ((room.waste ?? 0) > 0) return `${head}, waiting for collection`;
+  return head;
+}
+
+/** The recycling center's rows: units collected today, rooms in backlog, floors the workers cannot reach. */
+export function collectionLines(world: World, center: Room): [string, string][] {
+  const sum = centerSummary(world, center);
+  const units = sum.collectedToday === 1 ? '1 unit' : `${formatCount(sum.collectedToday)} units`;
+  const floors = sum.unreachableFloors;
+  return [
+    ['Collected today', units],
+    ['Rooms in backlog', formatCount(sum.backlogRooms)],
+    ['Cannot reach', floors.length === 0 ? 'None' : `${floors.length === 1 ? 'Floor' : 'Floors'} ${floors.map(floorWord).join(', ')}`],
+  ];
+}
+
+function collectionRows(game: GameApi, center: Room): { nodes: HTMLDivElement[]; refresh(): void } {
+  const nodes = collectionLines(game.world, center).map(([label, value]) => row(label, value));
+  return {
+    nodes,
+    refresh() {
+      const now = game.world.rooms.get(center.id);
+      if (!now) return;
+      collectionLines(game.world, now).forEach(([, value], i) => setRowValue(nodes[i] as HTMLDivElement, value));
+    },
+  };
 }
 
 /**

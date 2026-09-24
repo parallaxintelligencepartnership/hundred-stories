@@ -4,6 +4,7 @@
  */
 
 import { personIdentity, personName, personVoice, vipPreference } from './identity';
+import { collectorStatus } from './recycling';
 import { guardStatus } from './security';
 import { ROOMS, STARS } from './rules';
 import { clockOf } from './types';
@@ -27,12 +28,15 @@ export type BeatCode =
   | 'theft.started'
   | 'guard.dispatched'
   | 'theft.caught'
-  | 'theft.escaped';
+  | 'theft.escaped'
+  | 'waste.backlog'
+  | 'waste.cleared';
 
 /**
  * One recorded transition. value: wait.long = wait minutes; trip.arrived = trip minutes; vip.rated = 0 poor,
  * 1 fair, 2 good; star.* = the new star number; theft.escaped = dollars lost. theft.* carry the thief's
  * simId and the target's roomId; guard.dispatched carries the guard's simId and the incident's roomId.
+ * waste.backlog and waste.cleared carry the room's roomId.
  */
 export interface StoryBeat {
   code: BeatCode;
@@ -118,6 +122,8 @@ const BEAT_CODES: Record<BeatCode, true> = {
   'guard.dispatched': true,
   'theft.caught': true,
   'theft.escaped': true,
+  'waste.backlog': true,
+  'waste.cleared': true,
 };
 
 export function isFollowed(story: StoryState, simId: number): boolean {
@@ -343,6 +349,10 @@ function towerLine(beat: StoryBeat, room: Room | undefined): string {
       return room ? `A guard caught a thief at ${placeText(room)}.` : 'A guard caught a thief.';
     case 'theft.escaped':
       return room ? `A thief got away from ${placeText(room)}.` : 'A thief got away.';
+    case 'waste.backlog':
+      return room ? `Waste piled up in ${placeText(room)} with nobody to collect it.` : 'Waste piled up with nobody to collect it.';
+    case 'waste.cleared':
+      return room ? `The collectors cleared the waste from ${placeText(room)}.` : 'The collectors cleared a backlog of waste.';
     default:
       return '';
   }
@@ -376,6 +386,7 @@ export const ROLE_LABELS: Record<Sim['kind'], string> = {
   visitor: 'Visitor',
   vip: 'VIP guest',
   guard: 'Security guard',
+  collector: 'Collection worker',
   thief: 'Visitor', // never "thief" on the card: the player learns it from the encounter
 };
 
@@ -416,6 +427,7 @@ function belongsText(world: World, sim: Sim): string | null {
         return `Staying in ${place}`;
       case 'staff':
       case 'guard':
+      case 'collector':
         return `Works for ${place}`;
       default:
         return `Belongs to ${place}`;
@@ -469,6 +481,7 @@ function insideText(world: World, sim: Sim, room: Room): string {
  */
 export function goalLine(world: World, sim: Sim): string {
   if (sim.kind === 'guard' && sim.state !== 'leaving' && sim.state !== 'gone' && !sim.exiting) return guardStatus(world, sim);
+  if (sim.kind === 'collector' && sim.state !== 'leaving' && sim.state !== 'gone' && !sim.exiting) return collectorStatus(world, sim);
   if (sim.kind === 'thief' && !sim.exiting && sim.state !== 'leaving' && sim.state !== 'gone') {
     if (sim.state === 'waiting' || sim.state === 'riding') return goalLineByState(world, sim);
     return sim.route.length > 0 ? 'Heading to the shops' : 'Looking around the shop';

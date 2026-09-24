@@ -234,6 +234,32 @@ export const THEFT = {
   approachMaxMinutes: 180,
 };
 
+/**
+ * Waste and its collection (src/sim/recycling.ts). Only while a recycling center stands: at the
+ * 06:00 roll every room of a producing kind that anyone used since the last roll gains
+ * min(dailyCap, ceil(people / perLoad)) units, up to roomCap. A room at or above backlogAt for
+ * graceDays rolls in a row is in backlog: its dirty flag is held (EVAL.dirtyPenalty) until it is
+ * emptied, and clears at the next roll after. Each center staffs workersPerCenter collectors,
+ * on shift from shiftStart to shiftEnd (minute of day, end exclusive), who carry up to
+ * workerCapacity units, spend collectMinutes at a room and unloadMinutes at the center.
+ * recheckMinutes: how long a worker with nothing reachable waits before looking again.
+ */
+export const WASTE = {
+  roomCap: 9,
+  dailyCap: 3,
+  perLoad: 8,
+  backlogAt: 6,
+  graceDays: 2,
+  workersPerCenter: 2,
+  shiftStart: 9 * 60,
+  shiftEnd: 17 * 60,
+  workerCapacity: 12,
+  collectMinutes: 2,
+  unloadMinutes: 3,
+  recheckMinutes: 15,
+  producers: ['office', 'condo', 'hotelSingle', 'hotelTwin', 'hotelSuite', 'fastFood', 'restaurant', 'shop', 'cinema', 'partyHall', 'medical'] as readonly RoomKind[],
+};
+
 // ---------------------------------------------------------------------------
 // Edition and the demo cap (decision 2026-09-22: floors 1 to 20, basements to -2, 150 tiles of 375)
 // ---------------------------------------------------------------------------

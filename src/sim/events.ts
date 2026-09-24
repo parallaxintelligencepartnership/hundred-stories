@@ -9,6 +9,7 @@ import type { ActiveEvent, Command, CommandResult, GuardResponse, Id, Room, Room
 import { personName, vipArrivalHour, vipPreference } from './identity';
 import { roomMiddle, sendThiefOut, sendThiefTo, sendVipToSuite } from './people';
 import { ensureRouting, entrances, findRoute } from './routing';
+import { rollWaste } from './recycling';
 import { dispatchGuard, releaseGuard, routeMinutes } from './security';
 import { isFollowed, recordBeat, type StoryBeat } from './story';
 import { addSim, allocId, groundLobby, log, removeRoom, removeSim, roomsOfKind, setOccupancy, setOnFire } from './world';
@@ -881,6 +882,10 @@ export function tickEvents(world: World): void {
     rollDailyEvents(world);
     tickCockroaches(world);
     tidyAfterTheft(world);
+    // After the tidy, so a room still in backlog keeps its dirty flag.
+    const waste = rollWaste(world);
+    for (const roomId of waste.cleared) towerBeat(world, 'waste.cleared', { roomId });
+    for (const roomId of waste.backlog) towerBeat(world, 'waste.backlog', { roomId });
   }
   if (clock.isWeekend && clock.minuteOfDay === EVENTS.wedding.weekendMinuteOfDay) startWedding(world);
   if (isYearEndDay(world.time.minute) && clock.minuteOfDay === EVENTS.santa.minuteOfDay) startSanta(world);

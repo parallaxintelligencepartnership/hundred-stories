@@ -423,6 +423,13 @@ describe('hashWorld covers every field in types.ts', () => {
       lowEvalSinceMinute: (r: Room) => (r.lowEvalSinceMinute = 7),
       onFire: (r: Room) => (r.onFire = !r.onFire),
       rent: (r: Room) => (r.rent = 110),
+      waste: (r: Room) => (r.waste = 4),
+      wasteDays: (r: Room) => (r.wasteDays = 1),
+      wasteBacklogSince: (r: Room) => (r.wasteBacklogSince = 360),
+      wastePeak: (r: Room) => (r.wastePeak = 5),
+      wasteCollectedAt: (r: Room) => (r.wasteCollectedAt = 600),
+      wasteCollectedToday: (r: Room) => (r.wasteCollectedToday = 7),
+      wasteUnreachable: (r: Room) => (r.wasteUnreachable = [7]),
     } satisfies Record<keyof Room, (room: Room) => unknown>;
 
     for (const [field, change] of Object.entries(changes)) {

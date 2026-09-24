@@ -10,7 +10,7 @@
 // which we are not allowed to touch.
 
 import { createRng } from './rng';
-import { EVENTS, RENT, ROOMS, SHAFTS } from './rules';
+import { EVENTS, RENT, ROOMS, SHAFTS, WASTE } from './rules';
 import { VIP_PREFERENCES, vipPreference } from './identity';
 import { createStoryState, sanitizeStory } from './story';
 import { createWorld, rebuildFloorIndex } from './world';
@@ -29,6 +29,8 @@ export const SAVE_VERSION = 4;
  * A VIP visit from v4 or older has no phase: it loads as the notice or the stay (loadVipEvent).
  * Guards and the theft event need no migration: an older save has neither, loads with no theft,
  * and its security offices hire their guards on the first tick, in office id order.
+ * Waste needs none either: a room without it holds 0 (every reader treats absent as 0), and a
+ * recycling center in an older save hires its collectors on the first tick, as guards are hired.
  */
 const READABLE_VERSIONS = [1, 2, 3, 4];
 
@@ -177,6 +179,7 @@ const SIM_KINDS = {
   visitor: true,
   vip: true,
   guard: true,
+  collector: true,
   thief: true,
 } satisfies Record<SimKind, true>;
 
@@ -276,6 +279,15 @@ function firstInvalidField(d: SaveData): string | null {
       (!isInteger(room.rent) || room.rent < RENT.min || room.rent > RENT.max || (room.rent - RENT.min) % RENT.step !== 0)
     ) {
       return `${at}.rent`;
+    }
+    if (room.waste !== undefined && (!isInteger(room.waste) || room.waste < 0 || room.waste > WASTE.roomCap)) return `${at}.waste`;
+    if (room.wasteDays !== undefined && (!isInteger(room.wasteDays) || room.wasteDays < 0)) return `${at}.wasteDays`;
+    if (room.wasteBacklogSince !== undefined && room.wasteBacklogSince !== null && !isFiniteNumber(room.wasteBacklogSince)) return `${at}.wasteBacklogSince`;
+    for (const key of ['wastePeak', 'wasteCollectedAt', 'wasteCollectedToday'] as const) {
+      if (room[key] !== undefined && (!isFiniteNumber(room[key]) || (room[key] as number) < 0)) return `${at}.${key}`;
+    }
+    if (room.wasteUnreachable !== undefined && (!Array.isArray(room.wasteUnreachable) || !room.wasteUnreachable.every(isInteger))) {
+      return `${at}.wasteUnreachable`;
     }
   }
 
@@ -548,6 +560,15 @@ function roomForHash(room: Room) {
     lowEvalSinceMinute: room.lowEvalSinceMinute,
     onFire: room.onFire,
     rent: room.rent,
+    // Waste, all optional: 0, null and absent hash alike (undefined drops out of the JSON), so a
+    // tower that never had a recycling center hashes exactly as before.
+    waste: room.waste || undefined,
+    wasteDays: room.wasteDays || undefined,
+    wasteBacklogSince: room.wasteBacklogSince ?? undefined,
+    wastePeak: room.wastePeak || undefined,
+    wasteCollectedAt: room.wasteCollectedAt ?? undefined,
+    wasteCollectedToday: room.wasteCollectedToday || undefined,
+    wasteUnreachable: room.wasteUnreachable && room.wasteUnreachable.length > 0 ? [...room.wasteUnreachable] : undefined,
   } satisfies Record<keyof Room, unknown>;
 }
 
@@ -608,6 +629,8 @@ function simForHash(sim: Sim) {
     exiting: sim.exiting ?? false,
     // guards only; undefined drops out of the JSON, so every other sim hashes as before
     guard: sim.guard ? { ...sim.guard, respond: sim.guard.respond ? { ...sim.guard.respond } : null } : undefined,
+    // collectors only, likewise
+    collector: sim.collector ? { ...sim.collector } : undefined,
   } satisfies Record<Exclude<keyof Sim, UnhashedSimKey>, unknown>;
 }
 
