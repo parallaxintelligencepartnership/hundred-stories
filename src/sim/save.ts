@@ -27,6 +27,8 @@ export const SAVE_VERSION = 4;
  * v2 has no status bar baselines (quarterStartCash, dayStartPopulation): they load as null.
  * v1 to v3 have no story: they load with an empty one (identities need nothing stored).
  * A VIP visit from v4 or older has no phase: it loads as the notice or the stay (loadVipEvent).
+ * Guards and the theft event need no migration: an older save has neither, loads with no theft,
+ * and its security offices hire their guards on the first tick, in office id order.
  */
 const READABLE_VERSIONS = [1, 2, 3, 4];
 
@@ -174,6 +176,8 @@ const SIM_KINDS = {
   staff: true,
   visitor: true,
   vip: true,
+  guard: true,
+  thief: true,
 } satisfies Record<SimKind, true>;
 
 const SIM_STATES = {
@@ -602,6 +606,8 @@ function simForHash(sim: Sim) {
     leaveReason: sim.leaveReason,
     // optional in types.ts: normalize so an absent key and an explicit false hash alike
     exiting: sim.exiting ?? false,
+    // guards only; undefined drops out of the JSON, so every other sim hashes as before
+    guard: sim.guard ? { ...sim.guard, respond: sim.guard.respond ? { ...sim.guard.respond } : null } : undefined,
   } satisfies Record<Exclude<keyof Sim, UnhashedSimKey>, unknown>;
 }
 

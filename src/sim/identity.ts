@@ -8,6 +8,7 @@
  * feeds the look, so a later art pass can draw from a set per role.
  */
 
+import { EVENTS } from './rules';
 import type { Sim, VipPreference } from './types';
 
 /** The same 32-bit mix as src/game/weather.ts, copied so the sim never imports from the game. */
@@ -48,6 +49,8 @@ const KIND_SALT: Record<Sim['kind'], number> = {
   staff: 6,
   visitor: 7,
   vip: 8,
+  guard: 9,
+  thief: 10,
 };
 
 function pick<T>(list: readonly T[], u: number): T {
@@ -77,4 +80,15 @@ export const VIP_PREFERENCES: readonly VipPreference[] = ['quick elevators', 'a 
 /** A VIP's preference. Seed and id only, like the name, so it survives a save made before it. */
 export function vipPreference(seed: number, simId: number): VipPreference {
   return pick(VIP_PREFERENCES, mix((seed | 0) ^ 0x3c6ef372, simId * 16 + KIND_SALT.vip));
+}
+
+/**
+ * The hour a VIP walks in, on the hour between EVENTS.vip.arrivalHours.first and last inclusive.
+ * Seed and id only, like the preference.
+ */
+export function vipArrivalHour(seed: number, simId: number): number {
+  const { first, last } = EVENTS.vip.arrivalHours;
+  const hours: number[] = [];
+  for (let h = first; h <= last; h++) hours.push(h);
+  return pick(hours, mix((seed | 0) ^ 0x5bd1e995, simId * 16 + KIND_SALT.vip));
 }

@@ -4,6 +4,7 @@
  */
 
 import { personIdentity, personName, personVoice, vipPreference } from './identity';
+import { guardStatus } from './security';
 import { ROOMS, STARS } from './rules';
 import { clockOf } from './types';
 import type { Leg, Room, Sim, Star, World } from './types';
@@ -22,9 +23,17 @@ export type BeatCode =
   | 'vip.arrival'
   | 'vip.rated'
   | 'star.gained'
-  | 'star.lost';
+  | 'star.lost'
+  | 'theft.started'
+  | 'guard.dispatched'
+  | 'theft.caught'
+  | 'theft.escaped';
 
-/** One recorded transition. value: wait.long = wait minutes; trip.arrived = trip minutes; vip.rated = 0 poor, 1 fair, 2 good; star.* = the new star number. */
+/**
+ * One recorded transition. value: wait.long = wait minutes; trip.arrived = trip minutes; vip.rated = 0 poor,
+ * 1 fair, 2 good; star.* = the new star number; theft.escaped = dollars lost. theft.* carry the thief's
+ * simId and the target's roomId; guard.dispatched carries the guard's simId and the incident's roomId.
+ */
 export interface StoryBeat {
   code: BeatCode;
   minute: number;
@@ -105,6 +114,10 @@ const BEAT_CODES: Record<BeatCode, true> = {
   'vip.rated': true,
   'star.gained': true,
   'star.lost': true,
+  'theft.started': true,
+  'guard.dispatched': true,
+  'theft.caught': true,
+  'theft.escaped': true,
 };
 
 export function isFollowed(story: StoryState, simId: number): boolean {
@@ -321,6 +334,15 @@ function towerLine(beat: StoryBeat, room: Room | undefined): string {
       return `The tower reached ${starText(beat.value)}.`;
     case 'star.lost':
       return `The tower fell to ${starText(beat.value)}.`;
+    // theft.started never names a thief: the line stays true of a visitor until it is resolved.
+    case 'theft.started':
+      return room ? `Something went missing from ${placeText(room)}.` : 'Something went missing.';
+    case 'guard.dispatched':
+      return room ? `A guard was sent to ${floorText(room.floor)}.` : 'A guard was sent out.';
+    case 'theft.caught':
+      return room ? `A guard caught a thief at ${placeText(room)}.` : 'A guard caught a thief.';
+    case 'theft.escaped':
+      return room ? `A thief got away from ${placeText(room)}.` : 'A thief got away.';
     default:
       return '';
   }
@@ -353,6 +375,8 @@ export const ROLE_LABELS: Record<Sim['kind'], string> = {
   staff: 'Housekeeper',
   visitor: 'Visitor',
   vip: 'VIP guest',
+  guard: 'Security guard',
+  thief: 'Visitor', // never "thief" on the card: the player learns it from the encounter
 };
 
 /** The card's four headings, in the order the panel shows them. */
@@ -391,6 +415,7 @@ function belongsText(world: World, sim: Sim): string | null {
       case 'vip':
         return `Staying in ${place}`;
       case 'staff':
+      case 'guard':
         return `Works for ${place}`;
       default:
         return `Belongs to ${place}`;
@@ -443,6 +468,15 @@ function insideText(world: World, sim: Sim, room: Room): string {
  * Every live person gets a line, with or without any beats.
  */
 export function goalLine(world: World, sim: Sim): string {
+  if (sim.kind === 'guard' && sim.state !== 'leaving' && sim.state !== 'gone' && !sim.exiting) return guardStatus(world, sim);
+  if (sim.kind === 'thief' && !sim.exiting && sim.state !== 'leaving' && sim.state !== 'gone') {
+    if (sim.state === 'waiting' || sim.state === 'riding') return goalLineByState(world, sim);
+    return sim.route.length > 0 ? 'Heading to the shops' : 'Looking around the shop';
+  }
+  return goalLineByState(world, sim);
+}
+
+function goalLineByState(world: World, sim: Sim): string {
   switch (sim.state) {
     case 'waiting': {
       const where = sim.pos.floor === 1 ? 'at the lobby' : `on ${floorText(sim.pos.floor)}`;

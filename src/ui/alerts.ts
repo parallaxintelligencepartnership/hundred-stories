@@ -3,6 +3,7 @@
 // many rooms catch, and that card always carries the player's response. Every card closes, and
 // the stack shows at most three cards with the rest folded into one "and N more" line. A bomb
 // threat is one card that trades its ransom button for the outcome; an infestation is one card too.
+// A theft is one card that says whether a guard is on the way, then how it ended.
 //
 // The sim logs one line per burning room and has no incident id, so the incident is derived here
 // from the log lines (their text and roomId) and from the fire event in world.events.
@@ -83,6 +84,28 @@ export function roachHeadline(floors: readonly number[], rooms: number): string 
 }
 
 export const ROACHES_GONE = 'The cockroaches are gone';
+
+type TheftLine = 'start' | 'end';
+
+/**
+ * Which part of a theft a log line is, by the sim's wording in src/sim/events.ts, and the card's
+ * headline for it: the line up to its first full stop ("Theft on floor 7, a guard is on the way",
+ * "Thief caught on floor 7", "Thief escaped, $2,000 lost").
+ */
+export function theftLineOf(entry: LogEntry): { kind: TheftLine; headline: string } | null {
+  if (entry.level !== 'alert') return null;
+  const text = entry.text;
+  const headline = text.replace(/\.(\s.*)?$/, '');
+  if (text.startsWith('Theft on floor ')) return { kind: 'start', headline };
+  if (text.startsWith('Thief caught on ') || text.startsWith('Thief escaped, ')) return { kind: 'end', headline };
+  return null;
+}
+
+/** A theft under way, for a card opened on a loaded save. Never shown for anything else. */
+export function theftHeadline(floor: number, guardComing: boolean): string {
+  const where = floor < 0 ? `floor B${-floor}` : `floor ${floor}`;
+  return guardComing ? `Theft on ${where}, a guard is on the way` : `Theft on ${where}, no guard can reach it`;
+}
 export const BOMB_OVER = 'The bomb threat is over.';
 
 type BombLine = 'start' | 'end';
@@ -133,6 +156,8 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
   let incident: FireIncident | null = null;
   /** The bomb threat's card: the ransom line and its button, then the outcome. */
   let bomb: { card: Card | null; body: HTMLElement | null; closed: boolean } | null = null;
+  /** The theft's card: the response, then the outcome. */
+  let theft: { card: Card | null; body: HTMLElement | null; closed: boolean } | null = null;
   /** The infestation's card, drawn from the infested rooms in the world. */
   let roaches: { card: Card | null; body: HTMLElement | null; closed: boolean; shown: string } | null = null;
 
@@ -150,7 +175,7 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
     if (card.gone) return;
     card.gone = true;
     card.node.remove();
-    for (const held of [incident, bomb, roaches]) {
+    for (const held of [incident, bomb, roaches, theft]) {
       if (held?.card === card) {
         held.card = null;
         held.body = null;
@@ -268,6 +293,7 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
     }
     if (incident) render(incident);
     syncBomb(world);
+    syncTheft(world);
     syncRoaches(world, roachHeard);
     roachHeard = false;
   }
@@ -303,6 +329,31 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
     // A save loaded mid threat still gets its card and its button.
     if (live && (!bomb || bomb.closed)) startBomb('A bomb is hidden in the tower. Pay the ransom or let security search the tower.');
     else if (!live && bomb && !bomb.closed) endBomb(null);
+  }
+
+  // ---------------------------------------------------------------- theft
+
+  function startTheftCard(headline: string): void {
+    if (theft && !theft.closed) endTheftCard(null);
+    const { card, body } = open('hs-toast is-theft');
+    theft = { card, body, closed: false };
+    body.append(el('p', 'hs-toast-text', headline));
+  }
+
+  function endTheftCard(outcome: string | null): void {
+    if (!theft || theft.closed) return;
+    theft.closed = true;
+    if (outcome) theft.body?.replaceChildren(el('p', 'hs-toast-text', outcome));
+    const card = theft.card;
+    if (card) deps.later(() => close(card), ALERT_LINGER_MS);
+  }
+
+  function syncTheft(world: World): void {
+    // Only a theft that has begun (the thief at the target) is news; before that it is a visitor.
+    const live = (world.events ?? []).find((e) => e.kind === 'theft' && (e.phase === 'acting' || e.phase === 'leaving'));
+    if (live && live.kind === 'theft' && (!theft || theft.closed)) {
+      startTheftCard(theftHeadline(live.floor ?? 1, live.guardId !== null));
+    } else if (!live && theft && !theft.closed) endTheftCard(null);
   }
 
   // ---------------------------------------------------------------- cockroaches
@@ -356,6 +407,15 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
       roachHeard = true;
       return;
     }
+    const theftLine = theftLineOf(entry);
+    if (theftLine?.kind === 'start') {
+      startTheftCard(theftLine.headline);
+      return;
+    }
+    if (theftLine?.kind === 'end') {
+      endTheftCard(theftLine.headline);
+      return;
+    }
     const { card, body } = open('hs-toast');
     body.append(el('p', 'hs-toast-text', entry.text));
     deps.later(() => close(card), ALERT_LINGER_MS);
@@ -378,6 +438,7 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
     for (const card of [...cards]) close(card);
     incident = null;
     bomb = null;
+    theft = null;
     roaches = null;
     roachHeard = false;
   }

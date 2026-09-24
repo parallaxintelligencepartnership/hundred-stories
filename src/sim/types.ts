@@ -43,7 +43,9 @@ export type SimKind =
   | 'diner'
   | 'staff'
   | 'visitor'
-  | 'vip';
+  | 'vip'
+  | 'guard' // a security guard: one of a security office's staff, on shift or off
+  | 'thief'; // the shop thief: shown to the player as a visitor until the encounter is resolved
 
 /** Who a car may carry when it is dedicated. Hotel guests, office staff, or anyone else. */
 export type RiderClass = 'hotel' | 'office' | 'other';
@@ -160,6 +162,31 @@ export interface Sim {
    * Set for followed sims alone, never read by the tick, saved with the sim, left out of the hash.
    */
   storyTripStart?: number;
+  /** Guards only: shift, patrol and response state (src/sim/security.ts). Saved and hashed with the sim. */
+  guard?: GuardState;
+}
+
+/** A guard's response: the incident, the room it is in and where the guard is heading. */
+export interface GuardResponse {
+  kind: 'fire' | 'bomb' | 'theft';
+  roomId: Id;
+  floor: number;
+  x: number;
+}
+
+/**
+ * What a guard is doing. `office`: inside the security office. `return`: walking back to it.
+ * `patrol`: walking to or pausing on `floor`, one of the patrol loop. `respond`: sent to an
+ * incident, `routed` false until the guard has a route there (a guard dispatched mid ride
+ * plans once off the car).
+ */
+export interface GuardState {
+  shift: number; // index into SECURITY.shifts
+  task: 'office' | 'return' | 'patrol' | 'respond';
+  floor: number | null;
+  pauseUntil: number | null;
+  respond: GuardResponse | null;
+  routed: boolean;
 }
 
 export type Command =
@@ -232,10 +259,31 @@ export interface VipVisitRecord {
   reason: string | null; // why the visit ended early, null for a full stay
 }
 
+/**
+ * A shop theft. `notice`: rolled at 06:00, the thief walks in at `enterAt`. `approach`: on the
+ * way to the target. `acting`: at the target until `actUntil`, a guard (`guardId`) on the way or
+ * `noGuard` naming why none is. `leaving`: done at the target and heading for the lobby; caught
+ * while still on the target floor, escaped once off it.
+ */
+export type TheftPhase = 'notice' | 'approach' | 'acting' | 'leaving';
+
+export interface TheftEvent {
+  kind: 'theft';
+  phase: TheftPhase;
+  enterAt: number;
+  simId: Id | null;
+  targetId: Id | null;
+  floor: number | null; // the target's floor, kept in case the room goes mid encounter
+  actUntil: number | null;
+  guardId: Id | null;
+  noGuard: string | null;
+}
+
 export type ActiveEvent =
   | { kind: 'fire'; roomIds: Id[]; startedAt: number; spreadAt: number }
   | { kind: 'bomb'; roomId: Id; ransom: number; detonateAt: number; found: boolean }
   | VipEvent
+  | TheftEvent
   | { kind: 'santa'; startedAt: number; x: number }
   | { kind: 'wedding'; startedAt: number };
 
@@ -249,6 +297,7 @@ export interface Stats {
   tenantsLeftReasons: Record<string, number>;
   badQuarterStreak?: number; // consecutive quarters below the bankruptcy line; saved with the world
   lastVip?: VipVisitRecord; // absent until the first visit ends; saved with the world
+  lastTheftAt?: number; // minute the last theft was rolled, for the cooldown; absent until the first
 }
 
 export interface FloorIndex {

@@ -1,7 +1,7 @@
 // The VIP card: live preparation ticks, the breakdown after a rating, and the next chance.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EVENT_TEST_HOOKS, resetEventTestHooks, startFire } from '../../src/sim/events';
-import { personName } from '../../src/sim/identity';
+import { personName, vipArrivalHour } from '../../src/sim/identity';
 import { EVENTS } from '../../src/sim/rules';
 import { tick } from '../../src/sim/tick';
 import type { ActiveEvent, Room, VipVisitRecord, World } from '../../src/sim/types';
@@ -44,7 +44,9 @@ describe('VIP card', () => {
     const view = vipView(world);
     expect(view?.lines[0]).toBe(`${personName(world.seed, visit.simId)}, VIP guest`);
     expect(view?.lines[1]).toBe(`Cares most about ${visit.preference}`);
-    expect(view?.lines[2]).toBe('Arrives at the lobby weekday 2, quarter 1, year 1 at 6:00 AM');
+    // On the hour the VIP's identity picks, between 8:00 AM and 5:00 PM: 3:00 PM for this one.
+    expect(vipArrivalHour(world.seed, visit.simId)).toBe(15);
+    expect(view?.lines[2]).toBe('Arrives at the lobby weekday 2, quarter 1, year 1 at 3:00 PM');
   });
 
   it('ticks the checklist live from the tower', () => {

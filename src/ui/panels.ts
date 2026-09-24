@@ -19,6 +19,7 @@ import {
   unfollowSim,
   type StoryBeat,
 } from '../sim/story';
+import { coverageText } from '../sim/security';
 import { carRangeOf } from '../sim/types';
 import type {
   Car,
@@ -104,6 +105,8 @@ const SIM_KINDS: Record<SimKind, string> = {
   staff: 'Housekeeper',
   visitor: 'Visitor',
   vip: 'VIP guest',
+  guard: 'Security guard',
+  thief: 'Visitor', // the card never says thief before the encounter is resolved
 };
 
 const SIM_STATES: Record<Sim['state'], string> = {
@@ -250,8 +253,13 @@ function roomPanel(roomId: Id, game: GameApi, ctx: PanelContext): PanelElement {
   body.append(people);
 
   // Occupants: only one person in four is drawn, and a small figure is hard to tap, so the
-  // room lists who belongs here or is inside, each one a way into their story.
-  const occupants = section('Occupants');
+  // room lists who belongs here or is inside, each one a way into their story. A security
+  // office's are its guards, each with where they are (in the office, patrolling floor 7,
+  // responding to floor 12, off shift), under the floors their patrol covers.
+  const isSecurity = room.kind === 'security';
+  const occupants = section(isSecurity ? 'Guards' : 'Occupants');
+  const coverage = isSecurity ? row('Patrol covers', coverageText(game.world, room)) : null;
+  if (coverage) occupants.append(coverage);
   const occupantList = el('div', 'hs-occupants');
   occupants.append(occupantList);
   body.append(occupants);
@@ -320,6 +328,7 @@ function roomPanel(roomId: Id, game: GameApi, ctx: PanelContext): PanelElement {
       flags.dataset['flags'] = next;
       flags.replaceChildren(...wanted.map(([label, alert]) => flag(label, alert)));
     }
+    if (coverage) setRowValue(coverage, coverageText(game.world, room));
     const ids = occupantIds(game, room);
     const key = ids.join(',');
     if (key !== occupantKey) {

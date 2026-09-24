@@ -10,6 +10,7 @@ import { hallCallPending, requestHallCall } from './elevators';
 import { recordCondoSale, recordHotelNight, recordVisit } from './economy';
 import { ensureRouting, entrances, findRoute, isReachableFromLobby } from './routing';
 import { ECONOMY, ROOMS, SCHEDULES, STORY, STRESS } from './rules';
+import { guardLostRoute, runGuards } from './security';
 import { isFollowed, recordBeat, recordSimBeat, type StoryBeat, type StoryState } from './story';
 import { clockOf, riderClassOf } from './types';
 import type {
@@ -35,7 +36,7 @@ export const WALK_TILES_PER_MINUTE = 5;
  * so a trip is never planned on a car dedicated to somebody else.
  */
 function routeOpts(sim: Sim): { staff: boolean; riderClass: ReturnType<typeof riderClassOf> } {
-  return { staff: sim.kind === 'staff', riderClass: riderClassOf(sim.kind) };
+  return { staff: sim.kind === 'staff' || sim.kind === 'guard', riderClass: riderClassOf(sim.kind) };
 }
 
 // Local rules: rules.ts has no entry for these, so they live here and are marked as our call.
@@ -56,7 +57,15 @@ const COMMERCE_KINDS = new Set<RoomKind>(['shop', 'fastFood', 'restaurant', 'cin
 const HOTEL_KINDS = new Set<RoomKind>(['hotelSingle', 'hotelTwin', 'hotelSuite']);
 const DINING_KINDS = new Set<RoomKind>(['fastFood', 'restaurant']);
 /** Sims that go home to somewhere else: they are removed from the world when they reach an entrance. */
-const TRANSIENT_KINDS = new Set<SimKind>(['shopper', 'diner', 'visitor', 'guest', 'vip']);
+const TRANSIENT_KINDS = new Set<SimKind>(['shopper', 'diner', 'visitor', 'guest', 'vip', 'thief']);
+
+/**
+ * Guards and the thief are moved by their own plans (security.ts, events.ts): a route that ends
+ * leaves them standing where it ended, and waiting never makes them give up.
+ */
+function directedKind(sim: Sim): boolean {
+  return sim.kind === 'guard' || sim.kind === 'thief';
+}
 
 export function stressBand(stress: number): StressBand {
   if (stress >= STRESS.red) return 'red';
@@ -71,6 +80,7 @@ export function tickPeople(world: World): void {
   runIntake(world, clock);
   runSchedules(world, clock);
   runHousekeeping(world, clock);
+  runGuards(world);
   runLeaving(world);
   moveSims(world);
   retireOutsideSims(world);
@@ -281,6 +291,37 @@ export function sendVipToSuite(world: World, sim: Sim, suite: Room): boolean {
   return true;
 }
 
+/**
+ * The thief walks in from the ground lobby to the middle of the target room by the normal
+ * routing and elevator rules. No enter leg: the thief never becomes a customer. False when
+ * there is no way there.
+ */
+export function sendThiefTo(world: World, sim: Sim, target: Room): boolean {
+  ensureRouting(world);
+  const legs = findRoute(world, sim.pos, { floor: target.floor, x: roomCenter(target) }, routeOpts(sim));
+  if (!legs) return false;
+  sim.route = withoutStandingRides(legs);
+  sim.state = 'walking';
+  sim.waitStart = null;
+  return true;
+}
+
+/** The thief heads out through the ground lobby and is gone on reaching it. */
+export function sendThiefOut(world: World, sim: Sim): void {
+  ensureRouting(world);
+  sim.exiting = true;
+  sim.waitStart = null;
+  const door = entrances(world).find((p) => p.floor === 1);
+  const legs = door ? findRoute(world, sim.pos, door, routeOpts(sim)) : null;
+  sim.state = 'leaving';
+  sim.route = legs ? withoutStandingRides(legs) : [];
+}
+
+/** The tile a trip to this room aims for: its middle. */
+export function roomMiddle(room: Room): number {
+  return roomCenter(room);
+}
+
 function pickRoomOfKind(world: World, sim: Sim, kind: RoomKind): Room | undefined {
   const wanted = DINING_KINDS.has(kind) ? DINING_KINDS : new Set<RoomKind>([kind]);
   let best: Room | undefined;
@@ -354,7 +395,8 @@ function stepAlongRoute(world: World, sim: Sim): void {
     } else if (leg.kind === 'ride') {
       const shaft = world.shafts.get(leg.shaftId);
       if (!shaft) {
-        leaveTower(world, sim);
+        if (sim.kind === 'guard' && !sim.exiting) guardLostRoute(sim);
+        else leaveTower(world, sim);
         return;
       }
       if (leg.toFloor === sim.pos.floor) {
@@ -450,6 +492,7 @@ function arriveWithoutRoom(world: World, sim: Sim): void {
     return;
   }
   if (sim.state !== 'walking') return;
+  if (directedKind(sim)) return; // standing where the plan put them; the plan picks the next move
   finishTrip(world, sim, undefined);
   // The route already carried this sim to the door, so leave it standing where it stopped.
   sim.state = 'outside';
@@ -458,7 +501,8 @@ function arriveWithoutRoom(world: World, sim: Sim): void {
 
 function departRoom(world: World, sim: Sim): void {
   const room = sim.inRoomId !== null ? world.rooms.get(sim.inRoomId) : undefined;
-  if (room) {
+  // A guard in the office never counted toward its occupancy (security.ts).
+  if (room && sim.kind !== 'guard') {
     setOccupancy(world, room, Math.max(0, room.occupancy - 1));
     if (sim.kind === 'guest' && HOTEL_KINDS.has(room.kind) && room.tenants.includes(sim.id)) {
       checkOutOfHotel(world, sim, room);
@@ -501,7 +545,7 @@ function updateStress(world: World): void {
       // giving up, there is nothing left to abandon: giving up again would clear the
       // route every minute and ask routing for a new one on the next, so a sim already
       // headed for the door waits for its car however cross it is.
-      if (sim.stress >= STRESS.giveUp && !sim.exiting && sim.leaveReason === null) {
+      if (sim.stress >= STRESS.giveUp && !sim.exiting && sim.leaveReason === null && !directedKind(sim)) {
         giveUp(world, sim);
         continue;
       }

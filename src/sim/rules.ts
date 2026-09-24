@@ -188,12 +188,50 @@ export const EVENTS = {
    * the way in or out (good up to goodMaxWaitMinutes, fair up to fairMaxWaitMinutes, poor past
    * it), the suite (dirty at check in is poor, a room rating below the fair band is fair), and
    * safety (any fire or bomb while the VIP is in the tower is poor). A VIP who waits longer than
-   * giveUpWaitMinutes without boarding leaves.
+   * giveUpWaitMinutes without boarding leaves. The VIP walks in on the hour, between
+   * arrivalHours.first and arrivalHours.last inclusive, picked from their identity hash.
    */
-  vip: { minStar: 3 as Star, noticeDays: 1, quarterlyChance: 0.5, stayMinutes: 600, goodMaxWaitMinutes: 3, fairMaxWaitMinutes: 8, giveUpWaitMinutes: 30 },
+  vip: { minStar: 3 as Star, noticeDays: 1, quarterlyChance: 0.5, stayMinutes: 600, goodMaxWaitMinutes: 3, fairMaxWaitMinutes: 8, giveUpWaitMinutes: 30, arrivalHours: { first: 8, last: 17 } },
   cockroaches: { dirtyDaysBeforeInfested: 3, spreadDays: 2 },
   santa: { minuteOfDay: 20 * 60, tilesPerMinute: 6 },
   wedding: { weekendMinuteOfDay: 12 * 60, durationMinutes: 180 },
+};
+
+/**
+ * Security guards (src/sim/security.ts). Every security office staffs guardsPerOffice guards,
+ * the first half on shifts[0] and the rest on shifts[1] (minute of day, the end is exclusive
+ * and may wrap past midnight). On shift a guard walks a loop of the patrolFloors floors nearest
+ * the office, pausing patrolPauseMinutes on each; off shift the guard waits in the office.
+ */
+export const SECURITY = {
+  guardsPerOffice: 6,
+  shifts: [
+    { start: 6 * 60, end: 18 * 60 },
+    { start: 18 * 60, end: 6 * 60 },
+  ] as readonly { start: number; end: number }[],
+  patrolFloors: 5,
+  patrolPauseMinutes: 3,
+};
+
+/**
+ * The shop thief. Rolled at the 06:00 event roll once the tower has minStar stars, at most one
+ * at a time and not within cooldownDays of the last. The thief walks in between enterStart and
+ * enterEnd (minute of day), spends actMinutes at the nearest reachable shop (or restaurant),
+ * and is caught when a guard stands on that floor within detectTiles before the thief is off
+ * it. An escape costs lossCash and leaves the target dirty (EVAL.dirtyPenalty) for messDays.
+ * approachMaxMinutes: a thief who cannot get to the target in that long gives up quietly.
+ */
+export const THEFT = {
+  minStar: 3 as Star,
+  dailyChance: 0.08,
+  cooldownDays: 3,
+  enterStart: 10 * 60,
+  enterEnd: 20 * 60,
+  actMinutes: 5,
+  detectTiles: 12,
+  lossCash: 2_000,
+  messDays: 1,
+  approachMaxMinutes: 180,
 };
 
 // ---------------------------------------------------------------------------

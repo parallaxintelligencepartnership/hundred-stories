@@ -9,7 +9,7 @@ import {
   vipSuiteBand,
   vipWaitBand,
 } from '../../src/sim/events';
-import { personName, vipPreference } from '../../src/sim/identity';
+import { personName, vipArrivalHour, vipPreference } from '../../src/sim/identity';
 import { EVAL, EVENTS, ROOMS } from '../../src/sim/rules';
 import { deserialize, serialize } from '../../src/sim/save';
 import type { ActiveEvent, Room, RoomKind, Star, World } from '../../src/sim/types';
@@ -238,7 +238,11 @@ describe('VIP', () => {
     const suite = visitedTower();
     at(world, ROLL_MINUTE);
     const visit = eventOf(world, 'vip') as Extract<ActiveEvent, { kind: 'vip' }>;
-    expect(visit.arrivesAt).toBe(ROLL_MINUTE + EVENTS.vip.noticeDays * 1440);
+    // The day after the notice, on the hour the VIP's identity picks between 08:00 and 17:00.
+    const hour = vipArrivalHour(world.seed, visit.simId);
+    expect(hour).toBeGreaterThanOrEqual(EVENTS.vip.arrivalHours.first);
+    expect(hour).toBeLessThanOrEqual(EVENTS.vip.arrivalHours.last);
+    expect(visit.arrivesAt).toBe(EVENTS.vip.noticeDays * 1440 + hour * 60);
     at(world, visit.arrivesAt);
     expect(world.sims.has(visit.simId)).toBe(false);
     expect(suite.occupancy).toBe(0);

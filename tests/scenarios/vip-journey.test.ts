@@ -7,15 +7,15 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { applyCommand } from '../../src/sim/build';
 import { EVENT_TEST_HOOKS, resetEventTestHooks, startFire, startVip } from '../../src/sim/events';
-import { vipPreference, VIP_PREFERENCES } from '../../src/sim/identity';
+import { vipArrivalHour, vipPreference, VIP_PREFERENCES } from '../../src/sim/identity';
 import { EVENTS } from '../../src/sim/rules';
 import { deserialize, hashWorld, serialize } from '../../src/sim/save';
 import { personCard } from '../../src/sim/story';
 import { tick } from '../../src/sim/tick';
 import type { ActiveEvent, Room, Sim, VipPhase, World } from '../../src/sim/types';
-import { createWorld } from '../../src/sim/world';
+import { allocId, createWorld } from '../../src/sim/world';
 import { vipBreakdown } from '../../src/ui/vip';
-import { atOnDay, buildRow, buildTower, lobbyRun, onlyShaft, roomsMatching } from './helpers';
+import { atOnDay, buildRow, buildTower, lobbyRun, onlyShaft, roomsMatching, runMinutes } from './helpers';
 
 type Visit = Extract<ActiveEvent, { kind: 'vip' }>;
 
@@ -123,7 +123,7 @@ describe('the VIP journey', () => {
   it('the person card names the VIP guest, their preference and the current leg', () => {
     const world = tower({ cars: 2, top: 6 });
     const visit = announce(world);
-    atOnDay(world, 1, 6, 1);
+    runMinutes(world, visit.arrivesAt + 1 - world.time.minute);
     const sim = world.sims.get(visit.simId) as Sim;
     const card = personCard(world, sim);
     expect(card.who[1]).toBe('VIP guest');
@@ -135,11 +135,13 @@ describe('the VIP journey', () => {
     const floors = [2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
     const world = tower({ cars: 1, top: 15, officeFloors: floors });
     EVENT_TEST_HOOKS.chance.vip = 0;
-    // Book the visit at 8:20 so the VIP walks in at 8:20 tomorrow, into the office rush.
+    // The VIP walks in on the hour their identity picks. Book one whose hour is 08:00, so they
+    // walk in tomorrow into the office rush: skip ids until the next one's hash lands on it.
     atOnDay(world, 0, 8, 20);
+    while (vipArrivalHour(world.seed, world.nextId) !== EVENTS.vip.arrivalHours.first) allocId(world);
     startVip(world);
     const visit = visitOf(world) as Visit;
-    expect(visit.arrivesAt).toBe(1440 + 8 * 60 + 20);
+    expect(visit.arrivesAt).toBe(1440 + 8 * 60);
     runVisit(world);
     const record = world.stats.lastVip;
     expect(world.stats.vipRating).toBe('poor');

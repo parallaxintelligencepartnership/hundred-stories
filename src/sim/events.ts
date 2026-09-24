@@ -1,13 +1,15 @@
-// Events: fire, bomb, VIP visit, cockroaches, Santa and weddings.
+// Events: fire, bomb, VIP visit, shop theft, cockroaches, Santa and weddings.
 // Scheduling, progression and resolution. Numbers come from rules.ts, chance
 // comes from world.rng, and every start, step and end writes a log line.
 
-import { EVAL, EVENTS } from './rules';
+import { EVAL, EVENTS, THEFT } from './rules';
 import { ROOMS } from './rules';
 import { clockOf, TOWER_WIDTH } from './types';
-import type { ActiveEvent, Command, CommandResult, Id, Room, RoomKind, Sim, VipRating, World } from './types';
-import { personName, vipPreference } from './identity';
-import { sendVipToSuite } from './people';
+import type { ActiveEvent, Command, CommandResult, GuardResponse, Id, Room, RoomKind, Sim, TheftEvent, VipRating, World } from './types';
+import { personName, vipArrivalHour, vipPreference } from './identity';
+import { roomMiddle, sendThiefOut, sendThiefTo, sendVipToSuite } from './people';
+import { ensureRouting, entrances, findRoute } from './routing';
+import { dispatchGuard, releaseGuard, routeMinutes } from './security';
 import { isFollowed, recordBeat, type StoryBeat } from './story';
 import { addSim, allocId, groundLobby, log, removeRoom, removeSim, roomsOfKind, setOccupancy, setOnFire } from './world';
 
@@ -31,7 +33,7 @@ const HOTEL_SUITE: RoomKind = 'hotelSuite';
  * what a caller writes into them.
  */
 export const EVENT_TEST_HOOKS: {
-  chance: { fire: number | null; bomb: number | null; vip: number | null };
+  chance: { fire: number | null; bomb: number | null; vip: number | null; theft?: number | null };
   target: { fire: Id | null; bomb: Id | null };
 } = {
   chance: { fire: null, bomb: null, vip: null },
@@ -44,7 +46,7 @@ export function hooksActive(): boolean {
 }
 
 export function resetEventTestHooks(): void {
-  EVENT_TEST_HOOKS.chance = { fire: null, bomb: null, vip: null };
+  EVENT_TEST_HOOKS.chance = { fire: null, bomb: null, vip: null, theft: null };
   EVENT_TEST_HOOKS.target = { fire: null, bomb: null };
 }
 
@@ -98,9 +100,9 @@ function securityOnDuty(world: World): boolean {
   return roomsOfKind(world, 'security').some((r) => !r.onFire);
 }
 
-function chanceFor(key: 'fire' | 'bomb' | 'vip', fallback: number): number {
+function chanceFor(key: 'fire' | 'bomb' | 'vip' | 'theft', fallback: number): number {
   if (!hooksActive()) return fallback;
-  const forced = EVENT_TEST_HOOKS.chance[key];
+  const forced = EVENT_TEST_HOOKS.chance[key] ?? null;
   return forced === null ? fallback : forced;
 }
 
@@ -158,6 +160,19 @@ export function startFire(world: World): void {
   });
   log(world, `Fire broke out in the ${describe(room)}. Call a helicopter or wait for security.`, 'alert', { roomId: room.id });
   towerBeat(world, 'fire.started', { roomId: room.id });
+  sendGuard(world, { kind: 'fire', roomId: room.id, floor: room.floor, x: roomMiddle(room) });
+}
+
+/**
+ * The visible response: the nearest guard on shift heads for the incident floor and stays
+ * until it is over. The outcome of a fire or a bomb does not depend on it (a security office
+ * still puts the fire out or finds the bomb on its timer), so with no guard nothing changes.
+ */
+function sendGuard(world: World, respond: GuardResponse): Sim | null {
+  const sent = dispatchGuard(world, respond);
+  if (!sent.ok) return null;
+  towerBeat(world, 'guard.dispatched', { simId: sent.guard.id, roomId: respond.roomId });
+  return sent.guard;
 }
 
 function spreadFire(world: World, event: Extract<ActiveEvent, { kind: 'fire' }>): void {
@@ -232,6 +247,7 @@ export function startBomb(world: World): void {
     { roomId: room.id },
   );
   towerBeat(world, 'bomb.started', { roomId: room.id });
+  sendGuard(world, { kind: 'bomb', roomId: room.id, floor: room.floor, x: roomMiddle(room) });
 }
 
 function detonate(world: World, event: Extract<ActiveEvent, { kind: 'bomb' }>): void {
@@ -287,9 +303,12 @@ function entrancePos(world: World): { floor: number; x: number } {
 export function startVip(world: World): void {
   const suite = freeSuite(world);
   if (!suite) return;
-  const arrivesAt = world.time.minute + EVENTS.vip.noticeDays * MINUTES_PER_DAY;
+  const id = allocId(world);
+  // The day after the notice, on the hour the VIP's identity picks.
+  const dayStart = world.time.minute - clockOf(world.time.minute).minuteOfDay;
+  const arrivesAt = dayStart + EVENTS.vip.noticeDays * MINUTES_PER_DAY + vipArrivalHour(world.seed, id) * 60;
   const sim: Sim = {
-    id: allocId(world),
+    id,
     kind: 'vip',
     homeRoomId: suite.id,
     pos: entrancePos(world),
@@ -523,6 +542,224 @@ export function tickVip(world: World, event: VipEventState): void {
   }
 }
 
+// ---------------------------------------------------------------- shop theft
+
+/** The ground lobby door the thief walks in and out by. */
+function groundDoor(world: World): { floor: number; x: number } | null {
+  return entrances(world).find((p) => p.floor === 1) ?? null;
+}
+
+/** The nearest shop the thief can reach from the lobby door, by route length; a restaurant if no shop. */
+function theftTarget(world: World, door: { floor: number; x: number }): Room | undefined {
+  for (const kind of ['shop', 'restaurant'] as const) {
+    let best: Room | undefined;
+    let bestCost = Number.POSITIVE_INFINITY;
+    for (const room of roomsOfKind(world, kind).sort((a, b) => a.id - b.id)) {
+      if (room.onFire) continue;
+      const legs = findRoute(world, door, { floor: room.floor, x: roomMiddle(room) }, { riderClass: 'other' });
+      if (!legs) continue;
+      const cost = routeMinutes(world, door, legs);
+      if (cost < bestCost) {
+        best = room;
+        bestCost = cost;
+      }
+    }
+    if (best) return best;
+  }
+  return undefined;
+}
+
+/** Rolled at 06:00 from three stars: at most one at a time, never inside the cooldown. */
+function rollTheft(world: World): void {
+  if (eventOf(world, 'theft')) return;
+  const last = world.stats.lastTheftAt;
+  if (last !== undefined && world.time.minute - last < THEFT.cooldownDays * MINUTES_PER_DAY) return;
+  if (world.rng.next() >= chanceFor('theft', THEFT.dailyChance)) return;
+  startTheft(world, world.rng.int(THEFT.enterStart, THEFT.enterEnd));
+}
+
+/** Book a theft for today at `minuteOfDay`. Nothing shows until the thief is at the target. */
+export function startTheft(world: World, minuteOfDay: number): void {
+  const dayStart = world.time.minute - clockOf(world.time.minute).minuteOfDay;
+  world.stats.lastTheftAt = world.time.minute;
+  world.events.push({
+    kind: 'theft',
+    phase: 'notice',
+    enterAt: dayStart + minuteOfDay,
+    simId: null,
+    targetId: null,
+    floor: null,
+    actUntil: null,
+    guardId: null,
+    noGuard: null,
+  });
+}
+
+/** The theft never happened: the thief, if in, goes, and nobody hears of it. */
+function callOffTheft(world: World, event: TheftEvent, sim: Sim | undefined): void {
+  if (sim && sim.state !== 'gone' && !sim.exiting) sendThiefOut(world, sim);
+  endEvent(world, event);
+}
+
+function thiefWalksIn(world: World, event: TheftEvent): void {
+  ensureRouting(world);
+  const door = groundDoor(world);
+  const target = door ? theftTarget(world, door) : undefined;
+  if (!door || !target) {
+    endEvent(world, event);
+    return;
+  }
+  const sim: Sim = {
+    id: allocId(world),
+    kind: 'thief',
+    homeRoomId: null,
+    pos: { floor: door.floor, x: door.x },
+    inCarId: null,
+    inRoomId: null,
+    route: [],
+    state: 'walking',
+    stress: 0,
+    waitStart: null,
+    schedule: [],
+    nextScheduleIndex: 0,
+    stayUntil: null,
+    wallet: 0,
+    leaveReason: null,
+  };
+  addSim(world, sim);
+  if (!sendThiefTo(world, sim, target)) {
+    removeSim(world, sim.id);
+    endEvent(world, event);
+    return;
+  }
+  event.simId = sim.id;
+  event.targetId = target.id;
+  event.floor = target.floor;
+  event.phase = 'approach';
+}
+
+/** Why no guard is coming, naming the floor. */
+function noGuardText(floor: number, why: 'none' | 'busy' | 'noRoute'): string {
+  const where = floorWords(floor);
+  if (why === 'busy') return `No guard could reach ${where}: every guard on shift is busy.`;
+  if (why === 'noRoute') return `No guard could reach ${where}: no route from where the guards are.`;
+  return `No guard could reach ${where}: no guard is on shift.`;
+}
+
+/** The thief is at the target: the theft is real now, so it is announced and a guard sent. */
+function theftBegins(world: World, event: TheftEvent, sim: Sim, target: Room): void {
+  event.phase = 'acting';
+  event.actUntil = world.time.minute + THEFT.actMinutes;
+  towerBeat(world, 'theft.started', { simId: sim.id, roomId: target.id });
+  const where = floorWords(target.floor);
+  const sent = dispatchGuard(world, { kind: 'theft', roomId: target.id, floor: target.floor, x: sim.pos.x });
+  if (sent.ok) {
+    event.guardId = sent.guard.id;
+    towerBeat(world, 'guard.dispatched', { simId: sent.guard.id, roomId: target.id });
+    const name = personName(world.seed, sent.guard.id);
+    log(world, `Theft on ${where}, a guard is on the way. ${name} is heading to the ${label(target.kind)}.`, 'alert', {
+      roomId: target.id,
+      simId: sim.id,
+    });
+    return;
+  }
+  event.noGuard = noGuardText(target.floor, sent.why);
+  log(world, `Theft on ${where}, no guard can reach it.`, 'alert', { roomId: target.id, simId: sim.id });
+  log(world, event.noGuard, 'warn', { roomId: target.id });
+}
+
+/** The guard sent is on the thief's floor, off the car, within THEFT.detectTiles of the thief. */
+function guardHasThief(world: World, event: TheftEvent, sim: Sim): boolean {
+  if (event.guardId === null || event.floor === null) return false;
+  const guard = world.sims.get(event.guardId);
+  if (!guard || guard.inCarId !== null || guard.state === 'riding' || guard.state === 'gone') return false;
+  if (sim.inCarId !== null || sim.state === 'riding') return false;
+  if (guard.pos.floor !== event.floor || sim.pos.floor !== event.floor) return false;
+  return Math.abs(guard.pos.x - sim.pos.x) <= THEFT.detectTiles;
+}
+
+function theftCaught(world: World, event: TheftEvent, sim: Sim): void {
+  const target = event.targetId === null ? undefined : world.rooms.get(event.targetId);
+  const where = floorWords(event.floor ?? sim.pos.floor);
+  const guardName = event.guardId === null ? 'A guard' : personName(world.seed, event.guardId);
+  sim.state = 'gone';
+  removeSim(world, sim.id);
+  releaseGuard(world, event.guardId);
+  endEvent(world, event);
+  const facts: Omit<StoryBeat, 'code' | 'minute'> = { simId: sim.id };
+  if (target) facts.roomId = target.id;
+  towerBeat(world, 'theft.caught', facts);
+  const at = target ? ` at the ${label(target.kind)}` : '';
+  log(world, `Thief caught on ${where}. ${guardName} stopped them${at} and nothing was lost.`, 'alert', target ? { roomId: target.id } : {});
+}
+
+/**
+ * The thief got away. The tower loses THEFT.lossCash and the target is left a mess: the room's
+ * dirty flag, the same EVAL.dirtyPenalty an uncleaned hotel room takes, until THEFT.messDays pass.
+ */
+function theftEscaped(world: World, event: TheftEvent, simId: Id): void {
+  const target = event.targetId === null ? undefined : world.rooms.get(event.targetId);
+  world.cash -= THEFT.lossCash;
+  if (target) {
+    target.dirty = true;
+    target.dirtySinceMinute = world.time.minute;
+  }
+  releaseGuard(world, event.guardId);
+  endEvent(world, event);
+  const facts: Omit<StoryBeat, 'code' | 'minute'> = { simId, value: THEFT.lossCash };
+  if (target) facts.roomId = target.id;
+  towerBeat(world, 'theft.escaped', facts);
+  const from = target ? ` The thief got away from the ${describe(target)}.` : '';
+  log(world, `Thief escaped, ${formatDollars(THEFT.lossCash)} lost.${from}`, 'alert', target ? { roomId: target.id } : {});
+}
+
+export function tickTheft(world: World, event: TheftEvent): void {
+  const minute = world.time.minute;
+  if (event.phase === 'notice') {
+    if (minute >= event.enterAt) thiefWalksIn(world, event);
+    return;
+  }
+  const sim = event.simId === null ? undefined : world.sims.get(event.simId);
+  const target = event.targetId === null ? undefined : world.rooms.get(event.targetId);
+
+  if (event.phase === 'approach') {
+    if (!sim || sim.state === 'gone' || sim.exiting || !target || minute - event.enterAt > THEFT.approachMaxMinutes) {
+      callOffTheft(world, event, sim);
+      return;
+    }
+    if (sim.state !== 'walking' || sim.route.length > 0 || sim.pos.floor !== target.floor) return;
+    theftBegins(world, event, sim, target);
+  }
+
+  // Acting, then leaving: the guard sent can catch the thief until the thief is off the floor.
+  if (!sim || sim.state === 'gone') {
+    theftEscaped(world, event, event.simId ?? 0);
+    return;
+  }
+  if (guardHasThief(world, event, sim)) {
+    theftCaught(world, event, sim);
+    return;
+  }
+  if (event.phase === 'acting') {
+    if (event.actUntil !== null && minute < event.actUntil && target) return;
+    event.phase = 'leaving';
+    sendThiefOut(world, sim);
+    return;
+  }
+  if (sim.state === 'riding' || sim.inCarId !== null || sim.pos.floor !== event.floor) theftEscaped(world, event, sim.id);
+}
+
+/** A room a thief left dirty is tidied after THEFT.messDays. Hotel rooms wait for housekeeping. */
+function tidyAfterTheft(world: World): void {
+  for (const room of sortedRooms(world)) {
+    if (!room.dirty || isHotelRoom(room.kind) || room.dirtySinceMinute == null) continue;
+    if (world.time.minute - room.dirtySinceMinute < THEFT.messDays * MINUTES_PER_DAY) continue;
+    room.dirty = false;
+    room.dirtySinceMinute = null;
+    log(world, `The ${describe(room)} is tidy again.`, 'info', { roomId: room.id });
+  }
+}
+
 // ---------------------------------------------------------------- cockroaches
 
 function isHotelRoom(kind: RoomKind): boolean {
@@ -632,6 +869,8 @@ export function rollDailyEvents(world: World): void {
   if (clock.dayOfQuarter === 0 && world.stars >= EVENTS.vip.minStar && !eventOf(world, 'vip')) {
     if (world.rng.next() < chanceFor('vip', EVENTS.vip.quarterlyChance)) startVip(world);
   }
+  // Below three stars no roll at all: a smaller tower draws from the rng exactly as before.
+  if (world.stars >= THEFT.minStar) rollTheft(world);
 }
 
 export function tickEvents(world: World): void {
@@ -641,6 +880,7 @@ export function tickEvents(world: World): void {
   if (clock.minuteOfDay === EVENT_ROLL_MINUTE_OF_DAY) {
     rollDailyEvents(world);
     tickCockroaches(world);
+    tidyAfterTheft(world);
   }
   if (clock.isWeekend && clock.minuteOfDay === EVENTS.wedding.weekendMinuteOfDay) startWedding(world);
   if (isYearEndDay(world.time.minute) && clock.minuteOfDay === EVENTS.santa.minuteOfDay) startSanta(world);
@@ -655,6 +895,9 @@ export function tickEvents(world: World): void {
         break;
       case 'vip':
         tickVip(world, event);
+        break;
+      case 'theft':
+        tickTheft(world, event);
         break;
       case 'santa':
         tickSanta(world, event);
