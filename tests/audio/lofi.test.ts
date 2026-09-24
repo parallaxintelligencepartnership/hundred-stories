@@ -220,16 +220,50 @@ describe('music master chain', () => {
     expect(limiter!.connections).toContain(ctx.destination);
     expect([limiter!.threshold.value, limiter!.ratio.value]).toEqual([LIMITER.threshold, LIMITER.ratio]);
   });
-  it('adds hiss and crackle at -36 dBFS after the compressor, and a 4 cent tape wobble', () => {
-    expect(TEXTURE_DB).toBe(-36);
+  it('adds sparse crackle only, at -48 dBFS before the music slider, and a 4 cent tape wobble', () => {
+    expect(TEXTURE_DB).toBe(-48);
     expect(TAPE_WOBBLE_CENTS).toBe(4);
-    const { ctx } = listen('rainy-tuesday-5star', 202);
+    const { ctx } = listen('sunny-morning-1star', 101);
     const lowpass = ctx.of('filter').find(f => f.type === 'lowpass' && f.frequency.value === 7000)!;
     const makeup = ctx.of('compressor')[0]!.connections[0];
     const texture = ctx.of('gain').find(g => g !== makeup && g.connections.includes(lowpass))!;
-    // -36 dBFS at the output with the music slider at its default of 60.
-    expect(20 * Math.log10(texture.gain.value * 0.6)).toBeCloseTo(-36, 5);
+    // No lift: the texture gain is the level itself, and the music slider after it scales it.
+    expect(texture.gain.value).toBeCloseTo(dbToGain(-48), 8);
+    const shelf = lowpass.connections[0] as Node;
+    const slider = shelf.connections[0] as Node;
+    expect(slider.gain.value).toBeCloseTo(0.6);
+    // The crackle source goes through a 4 kHz low-pass into the texture gain.
+    const crackleLow = ctx.of('filter').find(f => f.connections.includes(texture))!;
+    expect([crackleLow.type, crackleLow.frequency.value]).toEqual(['lowpass', 4000]);
+    const source = ctx.of('source').find(s => s.connections.includes(crackleLow))!;
+    const data = (source.buffer as unknown as { getChannelData(): Float32Array }).getChannelData();
+    // No hiss: silence between pops. Pops: at most 6 in any second, each under 15 ms.
+    const pops: Array<[number, number]> = [];
+    for (let i = 0; i < data.length; i += 1) {
+      if (data[i] === 0) continue;
+      const last = pops[pops.length - 1];
+      if (last && i - last[1] < ctx.sampleRate * 0.02) last[1] = i; else pops.push([i, i]);
+    }
+    expect(data.filter(v => v !== 0).length / data.length).toBeLessThan(0.05);
+    expect(pops.length).toBeGreaterThan(0);
+    for (const [from, to] of pops) expect((to - from + 1) / ctx.sampleRate).toBeLessThan(0.015);
+    const looped = [...pops.map(p => p[0]), ...pops.map(p => p[0] + data.length)];
+    for (const at of looped) expect(looped.filter(t => t >= at && t <= at + ctx.sampleRate).length).toBeLessThanOrEqual(6);
     expect(ctx.of('gain').some(g => g.gain.value === TAPE_WOBBLE_CENTS)).toBe(true);
+  });
+  it('mutes the crackle while rain or a storm plays and brings it back when the weather clears', () => {
+    for (const [name, seed] of [['rainy-tuesday-5star', 202], ['storm-night-tower', 404]] as const) {
+      const { ctx, sound, run } = listen(name, seed);
+      const lowpass = ctx.of('filter').find(f => f.type === 'lowpass' && f.frequency.value === 7000)!;
+      const makeup = ctx.of('compressor')[0]!.connections[0];
+      const texture = ctx.of('gain').find(g => g !== makeup && g.connections.includes(lowpass))!;
+      expect(sound.weatherKind).toBe(name === 'rainy-tuesday-5star' ? 'rain' : 'storm');
+      expect(texture.gain.value).toBe(0);
+      run(2);
+      sound.pin!(elapsed => presetInputs('sunny-morning-1star', elapsed));
+      expect(sound.weatherKind).toBe('clear');
+      expect(texture.gain.value).toBeCloseTo(dbToGain(TEXTURE_DB), 8);
+    }
   });
   it('schedules only a short way ahead so a changed mood is heard within a bar or so', () => {
     expect(LOOKAHEAD_SECONDS).toBeGreaterThan(0.5);

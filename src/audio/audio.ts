@@ -330,8 +330,13 @@ export const REVERB_DELAY_SECONDS = 0.31;
 export const REVERB_FEEDBACK = 0.35;
 export const REVERB_CUTOFF_HZ = 3000;
 export const REVERB_WET_DB = -12;
-/** Hiss and crackle, dBFS RMS at the output with the music slider at its default. */
-export const TEXTURE_DB = -36;
+/**
+ * Vinyl crackle, dBFS RMS before the music slider, which scales it like every other music voice.
+ * No hiss: sparse pops only, and none while rain or a storm gives the bed its own texture.
+ */
+export const TEXTURE_DB = -48;
+/** The crackle: at most this many pops in any second, each shorter than `popSeconds`, under a low-pass. */
+export const CRACKLE = { maxPerSecond: 6, popSeconds: 0.015, lowpassHz: 4000, muteSeconds: 1 } as const;
 /** Kept for older callers: the texture never exceeds this. */
 export const VINYL_MAX_DB = -30;
 /** Tape wobble depth in cents, on every pitched voice. */
@@ -544,6 +549,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
   let drumsBus: GainNode | null = null;
   let vinylGain: GainNode | null = null;
   let vinylSource: AudioBufferSourceNode | null = null;
+  let vinylLowpass: BiquadFilterNode | null = null;
   let tapeLfo: OscillatorNode | null = null;
   let tapeDepth: GainNode | null = null;
   let effectsBus: GainNode | null = null;
@@ -655,9 +661,11 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
       ambientBus.connect(master);
       hatBus = ctx.createGain(); hatBus.gain.value = 1; hatBus.connect(musicCompressor);
       drumsBus = ctx.createGain(); drumsBus.gain.value = 1; drumsBus.connect(musicCompressor);
-      // Hiss and crackle join after the compressor so the kit never pumps them.
-      vinylGain = ctx.createGain(); vinylGain.gain.value = dbToGain(TEXTURE_DB) / (DEFAULT_SOUND.music! / 100);
+      // The crackle joins after the compressor so the kit never pumps it, and before the slider.
+      vinylGain = ctx.createGain(); vinylGain.gain.value = dbToGain(TEXTURE_DB);
       vinylGain.connect(musicDust);
+      vinylLowpass = ctx.createBiquadFilter(); vinylLowpass.type = 'lowpass'; vinylLowpass.frequency.value = CRACKLE.lowpassHz;
+      vinylLowpass.connect(vinylGain);
       tapeDepth = ctx.createGain(); tapeDepth.gain.value = TAPE_WOBBLE_CENTS;
     }
     if (ctx.state === 'suspended') void ctx.resume().catch(() => {});
@@ -677,30 +685,32 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
   }
 
   function startTexture(): void {
-    if (!ctx || !vinylGain || !tapeDepth) return;
+    if (!ctx || !vinylLowpass || !tapeDepth) return;
     if (!vinylSource) {
-      // Four seconds of seeded tape hiss (band-limited, 300 Hz to 5 kHz) and sparse vinyl
-      // crackle, normalised to unit RMS so vinylGain alone sets the level.
-      const length = ctx.sampleRate * 4;
-      const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+      // Four seconds of seeded vinyl crackle and silence between: pops spaced more than a sixth
+      // of a second apart (so at most six in any second, across the loop too), each a click that
+      // dies within 8 ms. Normalised to unit RMS so vinylGain alone sets the level.
+      const rate = ctx.sampleRate;
+      const length = rate * 4;
+      const buffer = ctx.createBuffer(1, length, rate);
       const data = buffer.getChannelData(0);
       let state = (game.world.seed ^ 0x35a1b2c3) >>> 0;
       const rand = (): number => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
-      const lowK = 1 - Math.exp(-2 * Math.PI * 5000 / ctx.sampleRate);
-      const highK = 1 - Math.exp(-2 * Math.PI * 300 / ctx.sampleRate);
-      let lowState = 0; let highState = 0; let crackle = 0; let sum = 0;
-      for (let i = 0; i < length; i += 1) {
-        lowState += lowK * (rand() * 2 - 1 - lowState);
-        highState += highK * (lowState - highState);
-        if (rand() < 7 / ctx.sampleRate) crackle = (rand() < 0.5 ? -1 : 1) * (2 + 6 * rand());
-        crackle *= 0.55;
-        data[i] = lowState - highState + crackle;
-        sum += data[i]! * data[i]!;
+      const minGap = Math.ceil(rate / CRACKLE.maxPerSecond) + 1;
+      const popLength = Math.floor(rate * 0.008);
+      const decay = rate * 0.0012;
+      let sum = 0;
+      for (let at = Math.ceil(minGap / 2); at + popLength < length - minGap / 2; at += minGap + Math.floor(rand() * rate * 0.5)) {
+        const amp = (rand() < 0.5 ? -1 : 1) * (0.3 + 0.7 * rand());
+        for (let i = 0; i < popLength; i += 1) {
+          data[at + i] = amp * Math.exp(-i / decay) * (0.5 + rand());
+          sum += data[at + i]! * data[at + i]!;
+        }
       }
       const norm = sum > 0 ? 1 / Math.sqrt(sum / length) : 0;
       for (let i = 0; i < length; i += 1) data[i] = data[i]! * norm;
       const src = ctx.createBufferSource(); src.buffer = buffer; src.loop = true;
-      src.connect(vinylGain); src.start(); vinylSource = src;
+      src.connect(vinylLowpass); src.start(); vinylSource = src;
     }
     if (!tapeLfo) {
       tapeLfo = ctx.createOscillator(); tapeLfo.type = 'sine'; tapeLfo.frequency.value = TAPE_WOBBLE_HZ;
@@ -1060,6 +1070,14 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
     const snapshot = inputs().mood.weather;
     if (snapshot.kind !== weatherKind) {
       weatherKind = snapshot.kind;
+      if (vinylGain) {
+        // Rain and storms carry their own texture: the crackle steps aside over a second.
+        const t = ctx.currentTime;
+        const to = weatherKind === 'rain' || weatherKind === 'storm' ? 0 : dbToGain(TEXTURE_DB);
+        vinylGain.gain.cancelScheduledValues(t);
+        vinylGain.gain.setValueAtTime(vinylGain.gain.value, t);
+        vinylGain.gain.linearRampToValueAtTime(to, t + CRACKLE.muteSeconds);
+      }
       if (weatherGain) weatherGain.gain.setTargetAtTime(0, ctx.currentTime, 1);
       if (weatherSource) { try { weatherSource.stop(ctx.currentTime + 4); } catch { /* stopped */ } }
       if (weatherLfo) { try { weatherLfo.stop(ctx.currentTime + 4); } catch { /* stopped */ } }
