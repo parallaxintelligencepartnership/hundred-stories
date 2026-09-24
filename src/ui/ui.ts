@@ -9,6 +9,7 @@ import type { GameApi, Placement, Speed, Tool } from '../game/api';
 import type { Renderer } from '../render/renderer';
 import type { Command, LogEntry, World } from '../sim/types';
 import { createIntroPanel, createSideCard, createTipToast } from './cards';
+import { createAlertStack } from './alerts';
 import { createDemoCapCard, isDemoCapEntry } from './demo';
 import { formatFloorShort, formatMoney, formatTimestamp } from './format';
 import {
@@ -320,6 +321,18 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   const toasts = el('div', 'hs-toasts');
   toasts.setAttribute('role', 'status');
   toasts.setAttribute('aria-live', 'polite');
+  const alerts = createAlertStack({
+    host: toasts,
+    getWorld: () => game.world,
+    apply: (cmd) => ctx.apply(cmd),
+    later(fn, ms) {
+      const timer = setTimeout(() => {
+        timers.delete(timer);
+        fn();
+      }, ms);
+      timers.add(timer);
+    },
+  });
 
   // The card follows the palette in the tree: on a phone the open sheet hides it by selector.
   // The minimap reads the camera the renderer already exposes; a renderer without one (tests,
@@ -813,69 +826,22 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     if (total < lastLogTotal) {
       // A different world was loaded: its old alerts are history, not news.
       lastLogTotal = total;
+      alerts.reset();
+      alerts.sync();
       return;
     }
     const fresh = Math.min(total - lastLogTotal, log.length);
     for (let i = log.length - fresh; i < log.length; i += 1) {
       const entry = log[i];
-      if (entry && entry.level === 'alert') showAlert(entry);
+      if (entry && entry.level === 'alert') alerts.onAlert(entry);
       if (entry && !demoCap.offered && isDemoCapEntry(entry)) demoCap.offer();
     }
     lastLogTotal = total;
-  }
-
-  function showAlert(entry: LogEntry): void {
-    const toast = el('div', 'hs-toast');
-    toast.append(el('p', 'hs-toast-text', entry.text));
-    const row = el('div', 'hs-actions');
-    const command = commandFor(entry);
-    if (command) {
-      row.append(
-        button(command.label, 'hs-btn', () => {
-          const result = ctx.apply(command.cmd);
-          if (result.ok) toast.remove();
-        }),
-      );
-    }
-    row.append(button('Dismiss', 'hs-btn', () => toast.remove()));
-    toast.append(row);
-    toasts.append(toast);
-    if (!command) dismissLater(toast, 8000);
-  }
-
-  /** Alerts that need a decision: the bomb ransom and the fire helicopter. */
-  function commandFor(entry: LogEntry): { label: string; cmd: Command } | null {
-    const text = entry.text.toLowerCase();
-    const events = game.world.events;
-    const hasBomb = events.some((event) => event.kind === 'bomb' && !event.found);
-    const hasFire = events.some((event) => event.kind === 'fire');
-    if (hasBomb && (text.includes('bomb') || text.includes('ransom'))) {
-      return { label: 'Pay ransom', cmd: { kind: 'bomb.pay' } };
-    }
-    if (hasFire && (text.includes('fire') || text.includes('helicopter'))) {
-      return { label: 'Call helicopter', cmd: { kind: 'fire.callHelicopter' } };
-    }
-    if (hasBomb) return { label: 'Pay ransom', cmd: { kind: 'bomb.pay' } };
-    if (hasFire) return { label: 'Call helicopter', cmd: { kind: 'fire.callHelicopter' } };
-    return null;
+    alerts.sync();
   }
 
   function notice(text: string): void {
-    const toast = el('div', 'hs-toast is-notice');
-    toast.append(el('p', 'hs-toast-text', text));
-    const row = el('div', 'hs-actions');
-    row.append(button('Dismiss', 'hs-btn', () => toast.remove()));
-    toast.append(row);
-    toasts.append(toast);
-    dismissLater(toast, 6000);
-  }
-
-  function dismissLater(toast: HTMLElement, ms: number): void {
-    const timer = setTimeout(() => {
-      timers.delete(timer);
-      toast.remove();
-    }, ms);
-    timers.add(timer);
+    alerts.notice(text);
   }
 
   function setPanel(kind: PanelKind): void {
@@ -962,6 +928,11 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
         update();
         return;
       case 'clear':
+        // An alert on screen takes the first Escape; the next one drops the tool.
+        if (alerts.dismissNewest()) {
+          event.preventDefault();
+          return;
+        }
         game.setTool({ kind: 'none' });
         update();
         return;
