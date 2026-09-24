@@ -961,6 +961,74 @@ button.hs-readout:hover .hs-readout-label {
   color: var(--alert);
 }
 
+/* Stories: the person card, room occupants and the stories list ---------- */
+
+.hs-story-line {
+  margin: 0 0 4px;
+  font-size: var(--size-12);
+}
+
+.hs-story-chapter {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hs-story-item {
+  padding: 3px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--size-12);
+}
+
+.hs-occupants {
+  display: flex;
+  flex-direction: column;
+}
+
+.hs-occupant {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  min-width: 0;
+  padding: 4px 0;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hs-occupant:disabled {
+  cursor: default;
+}
+
+.hs-occupant-name {
+  font-size: var(--size-12);
+  font-weight: 600;
+}
+
+.hs-occupant-goal {
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: var(--size-12);
+  color: var(--ink-dim);
+}
+
+.hs-occupant-gone {
+  display: flex;
+  align-items: center;
+  gap: var(--pad);
+}
+
+.hs-occupant-gone .hs-occupant {
+  flex: 1 1 auto;
+}
+
 /* Event ticker --------------------------------------------------------- */
 
 .hs-ticker {
@@ -997,6 +1065,10 @@ button.hs-readout:hover .hs-readout-label {
 
 .hs-ticker.is-alert .hs-ticker-text {
   color: var(--alert);
+}
+
+.hs-ticker.is-story .hs-ticker-text {
+  font-style: italic;
 }
 
 /* Controls hint -------------------------------------------------------- */

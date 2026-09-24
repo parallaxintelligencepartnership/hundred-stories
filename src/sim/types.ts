@@ -3,6 +3,7 @@
 // The sim is pure: nothing in src/sim may touch the DOM, Date, Math.random, or pixi.js.
 
 import type { Rng } from './rng';
+import type { StoryState } from './story';
 
 export const TOWER_WIDTH = 375;
 export const MAX_FLOOR = 100;
@@ -154,6 +155,11 @@ export interface Sim {
   wallet: number; // cents the sim will spend this visit
   leaveReason: string | null;
   exiting?: boolean; // durable flag: this sim is on its way out of the tower, whatever its transit state
+  /**
+   * Story only: the minute a followed sim's current trip began, for its trip.arrived beat.
+   * Set for followed sims alone, never read by the tick, saved with the sim, left out of the hash.
+   */
+  storyTripStart?: number;
 }
 
 export type Command =
@@ -251,6 +257,11 @@ export interface World {
    * A display counter like structureVersion: never saved, never hashed.
    */
   longWaits: { hour: number[]; count: number[] };
+  /**
+   * Story beats and the followed cast (src/sim/story.ts). Presentation only: the tick writes
+   * beats beside what it already does and never reads them back. Saved from v4, never hashed.
+   */
+  story: StoryState;
   gameOver: null | { at: number; reason: string };
 }
 

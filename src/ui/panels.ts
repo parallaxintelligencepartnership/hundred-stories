@@ -9,6 +9,16 @@ import { composeShareImage, shareMessage, shareStats, shareText, shareUrl } from
 import { applyTheme, cycleTheme, readTheme, themeLabel } from '../site/theme';
 import { officeQuarterRent } from '../sim/economy';
 import { ECONOMY, EVAL, LIMITS, RENT, ROOMS, SHAFTS, takesRent } from '../sim/rules';
+import {
+  describeBeat,
+  followSim,
+  goalLine,
+  isFollowed,
+  personCard,
+  storyName,
+  unfollowSim,
+  type StoryBeat,
+} from '../sim/story';
 import { carRangeOf } from '../sim/types';
 import type {
   Car,
@@ -55,7 +65,19 @@ export interface PanelContext {
   sound?: Sound;
   /** Show the intro again, from Help in the settings panel. */
   openIntro?: () => void;
+  /** Open the stories panel, from its button beside Save and Export. */
+  openStories?: () => void;
+  /** Put another person or room in the query panel, closing whichever panel asked. */
+  select?: (sel: Selection) => void;
 }
+
+/** The refusal when the cast is full, in the player's words. */
+export const FOLLOW_LIMIT_TEXT = 'You can follow eight people at a time.';
+
+/** How many names the room panel lists. */
+export const OCCUPANTS_SHOWN = 8;
+/** How many tower beats the stories panel lists. */
+export const STORIES_TOWER_LINES = 12;
 
 /** The long form of the rules, one page away. */
 export const HOW_TO_PLAY_HREF = '/how-to-play/';
@@ -226,6 +248,15 @@ function roomPanel(roomId: Id, game: GameApi, ctx: PanelContext): PanelElement {
   people.append(tenants, occupancy);
   body.append(people);
 
+  // Occupants: only one person in four is drawn, and a small figure is hard to tap, so the
+  // room lists who belongs here or is inside, each one a way into their story.
+  const occupants = section('Occupants');
+  const occupantList = el('div', 'hs-occupants');
+  occupants.append(occupantList);
+  body.append(occupants);
+  let occupantKey = '-'; // no list yet: the first refresh always builds one
+  let occupantGoals: { id: Id; goal: HTMLSpanElement }[] = [];
+
   const flags = el('div', 'hs-section');
   body.append(flags);
 
@@ -288,6 +319,29 @@ function roomPanel(roomId: Id, game: GameApi, ctx: PanelContext): PanelElement {
       flags.dataset['flags'] = next;
       flags.replaceChildren(...wanted.map(([label, alert]) => flag(label, alert)));
     }
+    const ids = occupantIds(game, room);
+    const key = ids.join(',');
+    if (key !== occupantKey) {
+      occupantKey = key;
+      occupantGoals = [];
+      if (ids.length === 0) {
+        occupantList.replaceChildren(el('p', 'hs-note', 'Nobody here right now.'));
+      } else {
+        occupantList.replaceChildren(
+          ...ids.map((id) => {
+            const item = button('', 'hs-occupant', () => ctx.select?.({ simId: id }));
+            const goal = el('span', 'hs-occupant-goal');
+            item.replaceChildren(el('span', 'hs-occupant-name', storyName(game.world, id)), goal);
+            occupantGoals.push({ id, goal });
+            return item;
+          }),
+        );
+      }
+    }
+    for (const { id, goal } of occupantGoals) {
+      const sim = game.world.sims.get(id);
+      if (sim) setText(goal, goalLine(game.world, sim));
+    }
     if (rentValue) setText(rentValue, rentText(room));
     if (rentMinus) rentMinus.disabled = room.rent <= RENT.min;
     if (rentPlus) rentPlus.disabled = room.rent >= RENT.max;
@@ -298,9 +352,71 @@ function roomPanel(roomId: Id, game: GameApi, ctx: PanelContext): PanelElement {
   return panel;
 }
 
+/**
+ * Rewrite a list of lines only when the words changed, so a refresh that changes nothing
+ * builds nothing.
+ */
+function setLines(list: HTMLElement, lines: readonly string[], tag: 'p' | 'li', className: string): void {
+  const key = lines.join('\n');
+  if (list.dataset['lines'] === key) return;
+  list.dataset['lines'] = key;
+  list.replaceChildren(...lines.map((line) => el(tag, className, line)));
+}
+
+/**
+ * Up to OCCUPANTS_SHOWN people for the room panel: its tenants first, then anyone inside.
+ * The tower-wide look for visitors runs only when the tenants leave room on the list and
+ * someone is inside who is not a tenant.
+ */
+function occupantIds(game: GameApi, room: Room): Id[] {
+  const sims = game.world.sims;
+  const out: Id[] = [];
+  let tenantsInside = 0;
+  for (const id of room.tenants) {
+    const sim = sims.get(id);
+    if (!sim) continue;
+    if (sim.inRoomId === room.id) tenantsInside += 1;
+    if (out.length < OCCUPANTS_SHOWN) out.push(id);
+  }
+  if (out.length >= OCCUPANTS_SHOWN || room.occupancy <= tenantsInside) return out;
+  for (const sim of sims.values()) {
+    if (out.length >= OCCUPANTS_SHOWN) break;
+    if (sim.inRoomId === room.id && !out.includes(sim.id)) out.push(sim.id);
+  }
+  return out;
+}
+
 function simPanel(simId: Id, game: GameApi, ctx: PanelContext): PanelElement {
   const sim = game.world.sims.get(simId) as Sim;
   const { panel, body } = panelShell(SIM_KINDS[sim.kind], 'population', ctx);
+
+  // The story card: who, what they are doing about their day, what the tower recorded, and
+  // what helps. Words are built here, when the panel opens or refreshes, never in the tick.
+  const who = section('Who');
+  const whoLines = el('div', 'hs-story-who');
+  who.append(whoLines);
+  const mind = section('On their mind');
+  const mindLine = el('p', 'hs-story-line');
+  mind.append(mindLine);
+  const chapter = section('Recent chapter');
+  const chapterLines = el('ul', 'hs-story-chapter');
+  chapter.append(chapterLines);
+  const helps = section('What helps');
+  const helpsLine = el('p', 'hs-story-line');
+  helps.append(helpsLine);
+  const follow = button('Follow', 'hs-btn', () => {
+    const story = game.world.story;
+    if (isFollowed(story, simId)) unfollowSim(story, simId);
+    else if (!followSim(story, simId)) {
+      ctx.notice(FOLLOW_LIMIT_TEXT);
+      return;
+    }
+    refresh();
+  });
+  const followRow = el('div', 'hs-actions');
+  followRow.append(follow);
+  body.append(who, mind, chapter, helps, followRow);
+
   const where = row('Position', formatFloor(sim.pos.floor));
   const state = row('Doing', SIM_STATES[sim.state]);
   const stress = row('Stress', stressBandLabel(stressBandOf(sim.stress)));
@@ -315,6 +431,14 @@ function simPanel(simId: Id, game: GameApi, ctx: PanelContext): PanelElement {
   const refresh = (): void => {
     const sim = game.world.sims.get(simId);
     if (!sim) return;
+    const card = personCard(game.world, sim);
+    setLines(whoLines, card.who, 'p', 'hs-story-line');
+    setText(mindLine, `${card.mind}.`);
+    setLines(chapterLines, card.chapter, 'li', 'hs-story-item');
+    setText(helpsLine, card.helps);
+    const followed = isFollowed(game.world.story, simId);
+    setText(follow, followed ? 'Unfollow' : 'Follow');
+    follow.setAttribute('aria-pressed', followed ? 'true' : 'false');
     setRowValue(where, formatFloor(sim.pos.floor));
     setRowValue(state, SIM_STATES[sim.state]);
     setRowValue(stress, `${stressBandLabel(stressBandOf(sim.stress))} ${formatPercent(sim.stress)}`);
@@ -720,6 +844,75 @@ export function createLogPanel(game: GameApi, ctx: PanelContext): PanelElement {
   return panel;
 }
 
+// ---------------------------------------------------------- stories panel
+
+/** A beat as the tower list shows it: a person's line carries their name. */
+function towerBeatText(game: GameApi, beat: StoryBeat): string {
+  const line = describeBeat(beat, game.world);
+  const personal = beat.code === 'wait.long' || beat.code === 'trip.arrived' || beat.code === 'trip.gaveUp' || beat.code === 'room.vacated';
+  return personal && beat.simId !== undefined ? `${storyName(game.world, beat.simId)}: ${line}` : line;
+}
+
+/**
+ * The people being followed, each with their latest line, and the last few beats from around
+ * the tower. Built from the recorded beats when the panel opens and when they change.
+ */
+export function createStoriesPanel(game: GameApi, ctx: PanelContext): PanelElement {
+  const { panel, body } = panelShell('Stories', 'population', ctx);
+  const following = section('Following');
+  const followList = el('div', 'hs-occupants');
+  following.append(followList);
+  const tower = section('Around the tower');
+  const towerList = el('ul', 'hs-story-chapter');
+  tower.append(towerList);
+  body.append(following, tower);
+
+  let followKey = '';
+  const refresh = (): void => {
+    const world = game.world;
+    const story = world.story;
+    const rows = story.followed.map((id) => {
+      const sim = world.sims.get(id);
+      const thread = story.threads[id] ?? [];
+      const last = thread[thread.length - 1];
+      const line = last ? describeBeat(last, world) : sim ? `${goalLine(world, sim)}.` : 'Left the tower.';
+      return { id, name: storyName(world, id), line, here: sim !== undefined };
+    });
+    const key = rows.map((r) => `${r.id}:${r.line}:${r.here ? 1 : 0}`).join('|');
+    if (key !== followKey) {
+      followKey = key;
+      if (rows.length === 0) {
+        followList.replaceChildren(el('p', 'hs-note', 'Nobody yet. Open a person and choose Follow.'));
+      } else {
+        followList.replaceChildren(
+          ...rows.map((r) => {
+            const item = button('', 'hs-occupant', () => {
+              if (r.here) ctx.select?.({ simId: r.id });
+            });
+            item.disabled = !r.here;
+            item.replaceChildren(el('span', 'hs-occupant-name', r.name), el('span', 'hs-occupant-goal', r.line));
+            if (r.here) return item;
+            // Someone who left keeps their place until the player lets it go.
+            const wrap = el('div', 'hs-occupant-gone');
+            const release = button('Unfollow', 'hs-btn', () => {
+              unfollowSim(game.world.story, r.id);
+              refresh();
+            });
+            release.setAttribute('aria-label', `Unfollow ${r.name}`);
+            wrap.append(item, release);
+            return wrap;
+          }),
+        );
+      }
+    }
+    const lines = story.recent.slice(-STORIES_TOWER_LINES).map((beat) => towerBeatText(game, beat));
+    setLines(towerList, lines.length > 0 ? lines : ['Nothing recorded yet.'], 'li', 'hs-story-item');
+  };
+  refresh();
+  panel.refresh = refresh;
+  return panel;
+}
+
 // --------------------------------------------------------- settings panel
 
 export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElement {
@@ -763,6 +956,12 @@ export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElem
       exportSave(game.exportSave(), ctx);
     }),
   );
+  const openStories = ctx.openStories;
+  if (openStories) {
+    const stories = button('Stories', 'hs-btn', () => openStories());
+    stories.title = 'The people you follow and the latest from around the tower';
+    saves.append(stories);
+  }
   body.append(section('Saved games'), saves);
 
   const importField = el('div', 'hs-field');

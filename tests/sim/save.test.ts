@@ -465,13 +465,13 @@ describe('hashWorld covers every field in types.ts', () => {
 });
 
 describe('status bar baselines (save v3)', () => {
-  it('writes version 3 and round trips both baselines, set or not yet known', () => {
-    expect(SAVE_VERSION).toBe(3);
+  it('writes the current version and round trips both baselines, set or not yet known', () => {
+    expect(SAVE_VERSION).toBe(4);
     const world = richWorld();
     world.quarterStartCash = 100_000;
     world.dayStartPopulation = 42;
     const text = serialize(world);
-    expect(JSON.parse(text).version).toBe(3);
+    expect(JSON.parse(text).version).toBe(4);
     const result = deserialize(text);
     expect(result.ok).toBe(true);
     if (!result.ok) return;

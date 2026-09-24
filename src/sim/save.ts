@@ -11,6 +11,7 @@
 
 import { createRng } from './rng';
 import { RENT, ROOMS, SHAFTS } from './rules';
+import { createStoryState, sanitizeStory } from './story';
 import { createWorld, rebuildFloorIndex } from './world';
 import { MAX_FLOOR, MIN_FLOOR, TOWER_WIDTH } from './types';
 import type { Car, LogEntry, RiderClass, Room, Shaft, Sim, SimKind, World } from './types';
@@ -18,17 +19,19 @@ import type { Car, LogEntry, RiderClass, Room, Shaft, Sim, SimKind, World } from
 /** v1 and pre-rent v2 saves have no `rent`; it is normalized to RENT.default on load. */
 type SaveRoom = Omit<Room, 'rent'> & { rent?: number };
 
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 
 /**
  * Versions this loader understands. v1 has no per car settings and boolean hall calls.
  * v2 has no status bar baselines (quarterStartCash, dayStartPopulation): they load as null.
+ * v1 to v3 have no story: they load with an empty one (identities need nothing stored).
  */
-const READABLE_VERSIONS = [1, 2, 3];
+const READABLE_VERSIONS = [1, 2, 3, 4];
 
 /**
  * The version the hash projection names. It stays at 2 because v3 only added the two display
- * baselines, which the hash leaves out, so a v3 world hashes exactly as it did under v2.
+ * baselines and v4 only the story, which the hash leaves out, so a v4 world hashes exactly as
+ * it did under v2.
  */
 const HASH_VERSION = 2;
 
@@ -88,6 +91,7 @@ interface SaveData {
   logTotal?: number;
   quarterStartCash?: number | null; // absent before v3
   dayStartPopulation?: number | null; // absent before v3
+  story?: unknown; // absent before v4; checked by sanitizeStory, never a reason to refuse
 }
 
 function shaftToSave(shaft: Shaft): SaveShaft {
@@ -145,6 +149,7 @@ function buildSaveData(world: World): SaveData {
     logTotal: world.logTotal,
     quarterStartCash: world.quarterStartCash,
     dayStartPopulation: world.dayStartPopulation,
+    story: world.story,
   };
 }
 
@@ -418,7 +423,14 @@ export function deserialize(text: string): { ok: true; world: World } | { ok: fa
       })
     );
 
-    world.sims = new Map(parsed.sims.map((sim) => [sim.id, sim]));
+    world.sims = new Map(
+      parsed.sims.map((sim) => {
+        // Story only: a start minute that is not a number is dropped, never a refusal.
+        if (sim.storyTripStart !== undefined && !isFiniteNumber(sim.storyTripStart)) delete sim.storyTripStart;
+        return [sim.id, sim];
+      }),
+    );
+    world.story = parsed.version >= 4 ? sanitizeStory(parsed.story) : createStoryState();
     world.events = parsed.events;
     world.stats = parsed.stats;
     world.gameOver = parsed.gameOver;
@@ -522,6 +534,9 @@ function shaftForHash(shaft: Shaft) {
   } satisfies Record<keyof Shaft, unknown>;
 }
 
+/** Sim keys the hash leaves out on purpose: storyTripStart is story state, never read by the tick. */
+type UnhashedSimKey = 'storyTripStart';
+
 function simForHash(sim: Sim) {
   return {
     id: sim.id,
@@ -541,7 +556,7 @@ function simForHash(sim: Sim) {
     leaveReason: sim.leaveReason,
     // optional in types.ts: normalize so an absent key and an explicit false hash alike
     exiting: sim.exiting ?? false,
-  } satisfies Record<keyof Sim, unknown>;
+  } satisfies Record<Exclude<keyof Sim, UnhashedSimKey>, unknown>;
 }
 
 // World keys the hash leaves out on purpose: the log is chatter, rng is hashed as its
@@ -550,6 +565,7 @@ function simForHash(sim: Sim) {
 // counter of long hall waits, and time is hashed as `minute`.
 // quarterStartCash and dayStartPopulation are the status bar's display baselines: nothing in
 // the sim reads them, so they are saved but not hashed, and the bench hashes stay put.
+// story is presentation state (src/sim/story.ts): saved from v4, never read by the tick.
 type UnhashedWorldKey =
   | 'log'
   | 'logTotal'
@@ -560,7 +576,8 @@ type UnhashedWorldKey =
   | 'longWaits'
   | 'time'
   | 'quarterStartCash'
-  | 'dayStartPopulation';
+  | 'dayStartPopulation'
+  | 'story';
 type HashedWorldKey = Exclude<keyof World, UnhashedWorldKey> | 'minute' | 'rngState';
 
 function byId<T extends { id: number }>(items: Iterable<T>): T[] {

@@ -10,6 +10,7 @@ vi.mock('../../src/game/storage', () => ({
 import { createGame } from '../../src/game/game';
 import { createTap, drainTap, type GameEvent } from '../../src/game/events';
 import { createWorld } from '../../src/sim/world';
+import { recordBeat, STORY_RECENT_CAP } from '../../src/sim/story';
 import type { Car, Shaft, World } from '../../src/sim/types';
 
 function carIn(world: World, state: Car['state']): Car {
@@ -51,6 +52,39 @@ describe('event tap', () => {
     seen.length = 0;
     drainTap(tap, world, emit);
     expect(seen).toEqual([]); // nothing twice
+  });
+});
+
+describe('story beats on the event stream', () => {
+  it('emits each new beat once, in order, and a primed tap treats old beats as history', () => {
+    const world = createWorld(3);
+    recordBeat(world.story, { code: 'star.gained', minute: 1, value: 2 });
+    const tap = createTap(world);
+    const seen: GameEvent[] = [];
+    const emit = (e: GameEvent) => seen.push(e);
+    drainTap(tap, world, emit);
+    expect(seen).toEqual([]);
+
+    recordBeat(world.story, { code: 'wait.long', minute: 2, simId: 5, value: 6 });
+    recordBeat(world.story, { code: 'trip.arrived', minute: 3, simId: 5, value: 4 });
+    drainTap(tap, world, emit);
+    drainTap(tap, world, emit);
+    expect(seen.map((e) => (e.kind === 'beat' ? e.beat.code : e.kind))).toEqual(['wait.long', 'trip.arrived']);
+  });
+
+  it('tracks beats by count, not position: a batch longer than the list emits what the list holds', () => {
+    const world = createWorld(3);
+    const tap = createTap(world);
+    for (let i = 0; i < STORY_RECENT_CAP + 44; i++) recordBeat(world.story, { code: 'wait.long', minute: i, simId: 1, value: 6 });
+    const seen: GameEvent[] = [];
+    drainTap(tap, world, (e) => seen.push(e));
+    const beats = seen.filter((e) => e.kind === 'beat');
+    expect(beats).toHaveLength(STORY_RECENT_CAP);
+    expect(beats[0]?.kind === 'beat' && beats[0].beat.minute).toBe(44);
+    recordBeat(world.story, { code: 'trip.arrived', minute: 999, simId: 1, value: 3 });
+    const next: GameEvent[] = [];
+    drainTap(tap, world, (e) => next.push(e));
+    expect(next).toEqual([{ kind: 'beat', beat: { code: 'trip.arrived', minute: 999, simId: 1, value: 3 } }]);
   });
 });
 

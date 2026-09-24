@@ -3,6 +3,7 @@
 
 import { spend } from './economy';
 import { handleEventCommand } from './events';
+import { isFollowed, recordBeat } from './story';
 import { DEMO_CAP_REASON, EDITION, insideDemoCap, LIMITS, RENT, ROOMS, SHAFTS, takesRent } from './rules';
 import { MAX_FLOOR, MIN_FLOOR, TOWER_WIDTH } from './types';
 import type {
@@ -363,9 +364,16 @@ function doDemolish(world: World, roomId: number): CommandResult {
   if (!room) return no('There is nothing to demolish.');
   if (room.occupancy > 0) return no('People are inside.');
 
+  // Story: every followed tenant gets their closing beat; the rest of the room shares one.
+  let roomBeat = false;
   for (const simId of room.tenants) {
     const sim = world.sims.get(simId);
     if (!sim) continue;
+    const followed = isFollowed(world.story, simId);
+    if (followed || !roomBeat) {
+      recordBeat(world.story, { code: 'room.vacated', minute: world.time.minute, simId, roomId: room.id, value: 0 });
+      if (!followed) roomBeat = true;
+    }
     sim.state = 'gone';
     sim.inRoomId = null;
     sim.homeRoomId = null;

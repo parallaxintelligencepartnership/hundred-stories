@@ -7,12 +7,14 @@ import './ui.css';
 import { createSound } from '../audio/audio';
 import type { GameApi, Placement, Speed, Tool } from '../game/api';
 import type { Renderer } from '../render/renderer';
+import { describeBeat, followSim, isFollowed, storyName, type StoryBeat } from '../sim/story';
 import type { Command, LogEntry, World } from '../sim/types';
 import { createIntroPanel, createSideCard, createTipToast } from './cards';
 import { createDemoCapCard, isDemoCapEntry } from './demo';
 import { formatFloorShort, formatMoney, formatTimestamp } from './format';
 import {
   GUIDE_DONE,
+  TIP_OVER_GUIDE,
   TIP_TEXT,
   TipQueue,
   goalsFor,
@@ -39,6 +41,7 @@ import {
   createQueryPanel,
   createSettingsPanel,
   createSharePanel,
+  createStoriesPanel,
   el,
 } from './panels';
 import type { PanelContext, PanelElement } from './panels';
@@ -56,7 +59,10 @@ export interface Ui {
   update(): void;
 }
 
-type PanelKind = 'none' | 'finances' | 'log' | 'settings' | 'share' | 'intro';
+type PanelKind = 'none' | 'finances' | 'log' | 'settings' | 'share' | 'intro' | 'stories';
+
+/** A followed person's story line takes the ticker at most this often, in real time. */
+export const STORY_TICKER_GAP_MS = 30_000;
 
 /** The live measurement of the chrome: stop it, or ask it to measure again. */
 interface ChromeWatch {
@@ -168,6 +174,13 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   let hintKey = '';
   /** The hover tile the readout and the chip last showed, so a move within one tile does nothing. */
   let hoverKey = '';
+  // The ticker: log lines first, a followed person's story line only in a quiet moment.
+  let tickerLogSeen = -1;
+  let tickerStorySeq = 0;
+  let tickerShowsAlert = false;
+  let storyShownAt = Number.NEGATIVE_INFINITY;
+  /** The guided first tower follows its first worker once, then leaves the cast to the player. */
+  let metFirstWorker = false;
 
   const shell = el('div', 'hs-ui');
   // The icon symbols, once for the whole chrome; every icon() refers to them by id.
@@ -365,6 +378,15 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     openIntro() {
       setPanel('intro');
     },
+    openStories() {
+      setPanel('stories');
+    },
+    select(sel) {
+      // A name in a list is a way into that person: the list's panel steps aside for theirs.
+      if (panelKind !== 'none') panelKind = 'none';
+      game.select(sel);
+      update();
+    },
   };
 
   applyReducedMotion(reducedMotion);
@@ -460,6 +482,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     leaveTotal = sumCounts(leaveCounts);
     lastQuarterSeen = world.stats?.lastQuarter ?? null;
     populationWatch = { population: world.population, since: world.time.minute };
+    tickerStorySeq = world.story?.seq ?? 0; // beats already recorded are history, not news
     const empty = world.rooms.size === 0 && world.shafts.size === 0;
     if (empty && !introSeen) {
       introShownThisSession = true;
@@ -495,6 +518,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
         guideOffered = false;
         setFlag(PREF_KEYS.guideDone, true);
       } else {
+        watchFirstWorker(world);
         const copy = guideCopy(world, step);
         card.showGuide(step, copy);
         setHintedTool(copy.tool);
@@ -515,6 +539,23 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     const counts = nudgeCounts(world);
     const nudge = goalsNudge({ ...counts, populationStillFor: world.time.minute - populationWatch.since });
     card.showGoals(goalsFor(world), nudge, goalsCollapsed);
+  }
+
+  /**
+   * The guided first tower's first office takes its first worker: follow them, and one tip
+   * card introduces them and points at the person panel. Once per player, like every tip.
+   */
+  function watchFirstWorker(world: World): void {
+    if (metFirstWorker || tips.has('meetPerson') || !world.story) return;
+    let first: { id: number; tenants: number[] } | null = null;
+    for (const room of world.rooms.values()) {
+      if (room.kind === 'office' && (first === null || room.id < first.id)) first = room;
+    }
+    const workerId = first?.tenants?.[0];
+    if (workerId === undefined || !world.sims.has(workerId)) return;
+    metFirstWorker = true;
+    if (!followSim(world.story, workerId)) return;
+    offerTip({ id: 'meetPerson', text: TIP_TEXT.meetPerson(storyName(world, workerId)) });
   }
 
   function setHintedTool(tool: Tool | null): void {
@@ -566,7 +607,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   /** One tip at a time, and none over the intro or a guide step: they wait their turn. */
   function showNextTip(): void {
     if (tipToast) return;
-    const tip = tips.next(panelKind === 'intro' || guideActive());
+    const tip = tips.next(panelKind === 'intro' || guideActive(), panelKind === 'intro' ? undefined : TIP_OVER_GUIDE);
     if (!tip) return;
     const node = createTipToast(tip, () => {
       tips.done(tip.id);
@@ -777,7 +818,9 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
             ? createSettingsPanel(game, ctx)
             : panelKind === 'share'
               ? createSharePanel(game, renderer, ctx)
-              : createQueryPanel(game, selection ?? {}, ctx);
+              : panelKind === 'stories'
+                ? createStoriesPanel(game, ctx)
+                : createQueryPanel(game, selection ?? {}, ctx);
 
     mountedPanel = panel;
     panelSlot.append(panel);
@@ -796,13 +839,47 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     return false;
   }
 
+  /**
+   * The ticker shows the newest log line. A followed person's new beat takes it only when no
+   * log line (an alert, a build, anything) arrived in the same batch, no alert is showing, and
+   * the last story line is at least STORY_TICKER_GAP_MS old: alerts and build feedback win.
+   */
   function refreshTicker(): void {
-    const log = game.world.log;
+    const world = game.world;
+    const log = world.log;
     const newest = log.length > 0 ? log[log.length - 1] : undefined;
-    if (!newest) return;
-    setText(tickerTime, formatTimestamp(newest.minute));
-    setText(tickerText, newest.text);
-    ticker.classList.toggle('is-alert', newest.level === 'alert');
+    const logMoved = world.logTotal !== tickerLogSeen;
+    tickerLogSeen = world.logTotal;
+    const beat = newFollowedBeat(world);
+    if (logMoved && newest) {
+      setText(tickerTime, formatTimestamp(newest.minute));
+      setText(tickerText, newest.text);
+      tickerShowsAlert = newest.level === 'alert';
+      ticker.classList.toggle('is-alert', tickerShowsAlert);
+      ticker.classList.remove('is-story');
+      return;
+    }
+    if (!beat || tickerShowsAlert || beat.simId === undefined) return;
+    const now = performance.now();
+    if (now - storyShownAt < STORY_TICKER_GAP_MS) return;
+    storyShownAt = now;
+    setText(tickerTime, formatTimestamp(beat.minute));
+    setText(tickerText, `${storyName(world, beat.simId)}: ${describeBeat(beat, world)}`);
+    ticker.classList.remove('is-alert');
+    ticker.classList.add('is-story');
+  }
+
+  /** The newest beat about a followed person since the ticker last looked, or null. */
+  function newFollowedBeat(world: World): StoryBeat | null {
+    const story = world.story;
+    if (!story) return null;
+    const fresh = Math.max(0, Math.min(story.seq - tickerStorySeq, story.recent.length));
+    tickerStorySeq = story.seq;
+    for (let i = story.recent.length - 1; i >= story.recent.length - fresh; i -= 1) {
+      const beat = story.recent[i];
+      if (beat && beat.simId !== undefined && isFollowed(story, beat.simId)) return beat;
+    }
+    return null;
   }
 
   /** Every unseen alert line becomes a toast, with the command button that alert needs. */
