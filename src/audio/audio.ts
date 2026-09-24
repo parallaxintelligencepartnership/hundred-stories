@@ -101,7 +101,7 @@ export const EFFECT_OSCILLATORS: Readonly<Record<Effect, number>> = {
   chime: 2, // 660 then 880 Hz
   door: 0, // filtered noise only
   build: 1, // 40 Hz thump, plus a noise click
-  register: 1, // the 1320 Hz bell, after three noise clicks
+  register: 1, // a short 880 Hz bell, after three noise clicks
   alert: 2, // a 220 Hz triangle, twice
   star: 3, // C E G
 };
@@ -181,7 +181,7 @@ export function playEffect(ctx: AudioContextLike, out: AudioNode, effect: Effect
       return;
     case 'register':
       for (let i = 0; i < 3; i += 1) noise(ctx, out, 'highpass', 3000, at + i * 0.05, 0.012, 0.45);
-      tone(ctx, out, 'sine', 1320, at + 0.17, 0.4, 0.4);
+      tone(ctx, out, 'sine', 880, at + 0.17, 0.15, 0.2);
       return;
     case 'alert':
       tone(ctx, out, 'triangle', 220, at, 0.15, 0.45);

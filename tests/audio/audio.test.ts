@@ -40,7 +40,7 @@ class StubParam {
     this.value = v;
     return this;
   }
-  exponentialRampToValueAtTime(v: number): this {
+  exponentialRampToValueAtTime(v: number, _at?: number): this {
     this.value = v;
     return this;
   }
@@ -173,7 +173,7 @@ describe('synth', () => {
   });
 
   it('uses the spec pitches', () => {
-    const count = { chime: [660, 880], alert: [220, 220], register: [1320], build: [40] } as const;
+    const count = { chime: [660, 880], alert: [220, 220], register: [880], build: [40] } as const;
     for (const [effect, pitches] of Object.entries(count)) {
       const ctx = new StubContext();
       playEffect(asCtx(ctx), ctx.destination as never, effect as Effect, 0);
@@ -182,6 +182,21 @@ describe('synth', () => {
     const star = new StubContext();
     playEffect(asCtx(star), star.destination as never, 'star', 0);
     expect(star.oscillators.map((o) => Math.round(o.frequency.value))).toEqual([523, 659, 784]);
+  });
+
+  it('rings the register bell at 880 Hz for 0.15 s, peaking at 0.2', () => {
+    const ctx = new StubContext();
+    const peaks: number[] = []; const ends: number[] = [];
+    const lin = StubParam.prototype.linearRampToValueAtTime; const exp = StubParam.prototype.exponentialRampToValueAtTime;
+    StubParam.prototype.linearRampToValueAtTime = function (this: StubParam, v: number) { peaks.push(v); return lin.call(this, v); };
+    StubParam.prototype.exponentialRampToValueAtTime = function (this: StubParam, v: number, t: number) { ends.push(t); return exp.call(this, v); };
+    try { playEffect(asCtx(ctx), ctx.destination as never, 'register', 0); } finally {
+      StubParam.prototype.linearRampToValueAtTime = lin; StubParam.prototype.exponentialRampToValueAtTime = exp;
+    }
+    expect(ctx.oscillators.map(o => o.frequency.value)).toEqual([880]);
+    expect(peaks).toEqual([0.2]);
+    // Three 12 ms clicks, then the bell from 0.17 s to 0.32 s.
+    expect(Math.max(...ends)).toBeCloseTo(0.17 + 0.15, 6);
   });
 
   it('noise parts: one burst for the door and the build click, three clicks on rent day', () => {
