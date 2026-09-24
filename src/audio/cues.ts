@@ -1,0 +1,5 @@
+import type { BeatCode } from '../sim/story';
+export type Cue = 'bell0' | 'bell1' | 'bell2' | 'bell3' | 'door' | 'build' | 'register' | 'star2' | 'star3' | 'star4' | 'star5' | 'tower' | 'fire.start' | 'bomb.start' | 'release.up' | 'release.down' | 'vip.notice' | 'vip.arrival' | 'vip.poor' | 'vip.fair' | 'vip.good';
+export function vipRatingCue(value: number | undefined): Cue { return value === 0 ? 'vip.poor' : value === 1 ? 'vip.fair' : 'vip.good'; }
+export function beatCue(code: BeatCode, value?: number): Cue | null { switch (code) { case 'fire.started': return 'fire.start'; case 'bomb.started': return 'bomb.start'; case 'fire.resolved': case 'bomb.resolved': return 'release.up'; case 'bomb.failed': return 'release.down'; case 'vip.notice': return 'vip.notice'; case 'vip.arrival': return 'vip.arrival'; case 'vip.rated': return vipRatingCue(value); default: return null; } }
+export function cueDuration(cue: Cue): number { return cue === 'tower' ? 12 : cue.startsWith('star') ? 1.6 : 0.8; }

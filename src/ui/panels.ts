@@ -841,7 +841,7 @@ export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElem
   return panel;
 }
 
-/** The sound switch and its two levels. Off by default; nothing plays until it is on. */
+/** The sound switch and its levels. Off by default; nothing plays until it is on. */
 function soundSection(sound: Sound): HTMLDivElement {
   const node = section('Sound');
   const field = el('div', 'hs-field');
@@ -877,9 +877,10 @@ function soundSection(sound: Sound): HTMLDivElement {
     return row;
   };
   node.append(
+    level('hs-sound-music', 'Music', sound.settings.music ?? 60, (n) => sound.setMusic?.(n)),
     level('hs-sound-effects', 'Effects', sound.settings.effects, (n) => sound.setEffects(n)),
     level('hs-sound-ambient', 'Ambient', sound.settings.ambient, (n) => sound.setAmbient(n)),
-    el('p', 'hs-note', 'Effects mark elevators, builds, rent day, events and stars. Ambient follows the hour: traffic by day, crickets at night.'),
+    el('p', 'hs-note', 'Music grows with the tower. Effects mark events and stars. Ambient follows the hour and weather.'),
   );
 
   box.addEventListener('change', () => {

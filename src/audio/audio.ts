@@ -2,18 +2,24 @@
 // stream; an ambient bed follows the clock. Off by default, and while it is off nothing is
 // created: no AudioContext, no listeners on the game.
 import type { GameApi, GameEvent } from '../game/api';
+import { clockOf } from '../sim/types';
+import { weatherAt } from '../game/weather';
+import { ASCENT, LIVES_INSIDE, BAR_SECONDS, chapterFor, isNight, type Chapter } from './score';
+import { beatCue, cueDuration, type Cue } from './cues';
 
 export const SOUND_KEY = 'hs.sound';
 export const SOUND_EFFECTS_KEY = 'hs.sound.effects';
 export const SOUND_AMBIENT_KEY = 'hs.sound.ambient';
+export const SOUND_MUSIC_KEY = 'hs.sound.music';
 
 export interface SoundSettings {
   on: boolean;
   effects: number; // 0..100
   ambient: number; // 0..100
+  music?: number; // 0..100; optional for older Sound test doubles
 }
 
-export const DEFAULT_SOUND: Readonly<SoundSettings> = { on: false, effects: 70, ambient: 50 };
+export const DEFAULT_SOUND: Readonly<SoundSettings> = { on: false, effects: 70, ambient: 50, music: 60 };
 
 export interface SoundStore {
   getItem(key: string): string | null;
@@ -45,6 +51,7 @@ export function readSoundSettings(store: SoundStore | null = browserStore()): So
       on: store.getItem(SOUND_KEY) === 'true',
       effects: readLevel(store.getItem(SOUND_EFFECTS_KEY), DEFAULT_SOUND.effects),
       ambient: readLevel(store.getItem(SOUND_AMBIENT_KEY), DEFAULT_SOUND.ambient),
+      music: readLevel(store.getItem(SOUND_MUSIC_KEY), DEFAULT_SOUND.music!),
     };
   } catch {
     return { ...DEFAULT_SOUND };
@@ -57,6 +64,7 @@ export function writeSoundSettings(settings: SoundSettings, store: SoundStore | 
     store.setItem(SOUND_KEY, settings.on ? 'true' : 'false');
     store.setItem(SOUND_EFFECTS_KEY, String(clampLevel(settings.effects)));
     store.setItem(SOUND_AMBIENT_KEY, String(clampLevel(settings.ambient)));
+    store.setItem(SOUND_MUSIC_KEY, String(clampLevel(settings.music ?? DEFAULT_SOUND.music!)));
   } catch {
     // Nothing to do: the settings last for this session only.
   }
@@ -162,7 +170,7 @@ export function playEffect(ctx: AudioContextLike, out: AudioNode, effect: Effect
       noise(ctx, out, 'bandpass', 900, at, 0.06, 0.35);
       return;
     case 'build':
-      tone(ctx, out, 'sine', 40, at, 0.18, 0.9);
+      tone(ctx, out, 'sine', 40, at, 0.18, 0.5);
       noise(ctx, out, 'highpass', 2500, at, 0.015, 0.4);
       return;
     case 'register':
@@ -325,6 +333,12 @@ export interface Sound {
   setEnabled(on: boolean): void;
   setEffects(level: number): void;
   setAmbient(level: number): void;
+  setMusic?(level: number): void;
+  readonly chapter?: Chapter;
+  readonly tension?: boolean;
+  readonly weatherKind?: string;
+  readonly tempo?: number;
+  readonly filterHz?: number;
   destroy(): void;
 }
 
@@ -348,6 +362,8 @@ export function createSound(game: SoundGame, deps: SoundDeps = {}): Sound {
 
   let gestured = false;
   let ctx: AudioContextLike | null = null;
+  let master: GainNode | null = null;
+  let musicBus: GainNode | null = null;
   let effectsBus: GainNode | null = null;
   let ambientBus: GainNode | null = null;
   let bed: AmbientBed | null = null;
@@ -356,6 +372,22 @@ export function createSound(game: SoundGame, deps: SoundDeps = {}): Sound {
   let unsubClock: (() => void) | null = null;
   let lastMinuteOfDay = -1;
   const lastPlayed = new Map<Effect, number>();
+  let highest: number = game.world.stars;
+  let chapter = chapterFor(highest);
+  let previousChapter: Chapter | null = null;
+  let transitionAt = 0;
+  let tension = false;
+  let weatherKind = 'clear';
+  let filterHz = 3200;
+  let musicTimer = 0;
+  let nextBar = 0;
+  let lastBell = -Infinity;
+  let lastThunder = -Infinity;
+  let tensionOsc: OscillatorNode | null = null;
+  let tensionGain: GainNode | null = null;
+  let weatherLfo: OscillatorNode | null = null;
+  let weatherGain: GainNode | null = null;
+  let weatherSource: AudioBufferSourceNode | null = null;
 
   const onGesture = (): void => {
     gestured = true;
@@ -372,17 +404,21 @@ export function createSound(game: SoundGame, deps: SoundDeps = {}): Sound {
       } catch {
         return; // no Web Audio in this browser: stay silent
       }
+      master = ctx.createGain(); master.gain.value = 1; master.connect(ctx.destination);
+      musicBus = ctx.createGain(); musicBus.gain.value = (settings.music ?? 60) / 100; musicBus.connect(master);
       effectsBus = ctx.createGain();
       effectsBus.gain.value = settings.effects / 100;
-      effectsBus.connect(ctx.destination);
+      effectsBus.connect(master);
       ambientBus = ctx.createGain();
       ambientBus.gain.value = settings.ambient / 100;
-      ambientBus.connect(ctx.destination);
+      ambientBus.connect(master);
     }
     if (ctx.state === 'suspended') void ctx.resume().catch(() => {});
     if (!unsubEvents) unsubEvents = game.subscribeEvents(onEvent);
     if (!unsubClock) unsubClock = game.subscribe(onClock);
     syncBed();
+    syncWeather();
+    syncMusic();
   }
 
   function sleep(): void {
@@ -391,11 +427,56 @@ export function createSound(game: SoundGame, deps: SoundDeps = {}): Sound {
     unsubClock?.();
     unsubClock = null;
     stopBed();
+    if (musicTimer) stopEvery(musicTimer);
+    musicTimer = 0;
+    if (weatherSource) { try { weatherSource.stop(); } catch { /* already stopped */ } }
+    if (weatherLfo) { try { weatherLfo.stop(); } catch { /* already stopped */ } }
+    if (tensionOsc) { try { tensionOsc.stop(); } catch { /* already stopped */ } }
+    weatherLfo = null; tensionOsc = null; tensionGain = null;
+    weatherSource = null; weatherGain = null;
+    if (ctx && master) { master.gain.cancelScheduledValues(ctx.currentTime); master.gain.setValueAtTime(0, ctx.currentTime); }
     if (ctx && ctx.state === 'running') void ctx.suspend().catch(() => {});
   }
 
   function onEvent(event: GameEvent): void {
-    if (!ctx || !effectsBus || settings.effects <= 0) return;
+    if (!ctx || !effectsBus) return;
+    if (event.kind === 'stars') {
+      if (event.to > event.from) {
+        highest = Math.max(highest, event.to);
+        const next = chapterFor(highest);
+        const stinger: Cue = event.to >= 6 ? 'tower' : (`star${Math.max(2, Math.min(5, event.to))}` as Cue);
+        playNamedCue(stinger);
+        if (next !== chapter) {
+          previousChapter = chapter; chapter = next;
+          transitionAt = Math.ceil((ctx.currentTime + (next === 6 ? cueDuration(stinger) : 0)) / BAR_SECONDS) * BAR_SECONDS;
+        }
+      }
+      return;
+    }
+    if (event.kind === 'beat') {
+      const name = beatCue(event.beat.code, event.beat.value);
+      if (name === 'fire.start' || name === 'bomb.start') {
+        tension = true; musicBus?.gain.setTargetAtTime((settings.music ?? 60) / 200, ctx.currentTime, 0.1); playNamedCue(name);
+        if (!tensionOsc && musicBus) { tensionOsc = ctx.createOscillator(); tensionOsc.type = 'sine'; tensionOsc.frequency.value = name === 'fire.start' ? 110 : 55; tensionGain = ctx.createGain(); tensionGain.gain.value = 0.025; tensionOsc.connect(tensionGain); tensionGain.connect(musicBus); tensionOsc.start(); }
+        return;
+      }
+      if (name === 'release.up' || name === 'release.down') {
+        tension = false; playNamedCue(name); musicBus?.gain.setTargetAtTime((settings.music ?? 60) / 100, ctx.currentTime, 2);
+        if (tensionGain) tensionGain.gain.setTargetAtTime(0, ctx.currentTime, 0.15);
+        if (tensionOsc) { tensionOsc.stop(ctx.currentTime + 1); tensionOsc = null; tensionGain = null; }
+        return;
+      }
+      if (!tension && name) playNamedCue(name);
+      return;
+    }
+    if (tension) return;
+    if (event.kind === 'car.arrive' || event.kind === 'car.doors') {
+      if (now() - lastBell < 400) return;
+      lastBell = now();
+      playNamedCue(event.kind === 'car.arrive' ? (`bell${Math.abs(event.shaftId) % 4}` as Cue) : 'door');
+      return;
+    }
+    if (settings.effects <= 0) return;
     const effect = effectFor(event);
     if (!effect) return;
     const t = now();
@@ -405,11 +486,88 @@ export function createSound(game: SoundGame, deps: SoundDeps = {}): Sound {
     playEffect(ctx, effectsBus, effect);
   }
 
+  function playNamedCue(name: Cue): void {
+    if (!ctx || !effectsBus || settings.effects <= 0) return;
+    const bells = [[660, 880], [587, 784], [698, 932], [523, 698]];
+    const notes: Record<string, number[]> = {
+      'fire.start': [220, 262], 'bomb.start': [82, 82, 82], 'release.up': [330, 440], 'release.down': [330, 247],
+      'vip.notice': [392, 523], 'vip.arrival': [392, 523, 659], 'vip.poor': [440, 330], 'vip.fair': [392, 392], 'vip.good': [330, 440],
+      star2: [523, 659], star3: [523, 659, 784], star4: [523, 659, 784, 1047], star5: [523, 659, 784, 1047, 1318],
+      tower: [261, 329, 392, 440, 523, 659, 784, 1047, 784, 1047, 1318, 1047],
+    };
+    if (name === 'door' || name === 'build' || name === 'register') { playEffect(ctx, effectsBus, name); return; }
+    const line = name.startsWith('bell') ? bells[Number(name.slice(-1))]! : notes[name] ?? [];
+    const duration = cueDuration(name);
+    line.forEach((hz, i) => tone(ctx!, effectsBus!, name === 'fire.start' ? 'triangle' : 'sine', hz, ctx!.currentTime + i * duration / line.length, Math.min(0.45, duration / line.length), 0.32));
+  }
+
   function onClock(): void {
     const m = game.world.time.minute % 1440;
     if (m === lastMinuteOfDay) return;
     lastMinuteOfDay = m;
     applyMix(m);
+    filterHz = isNight(m) ? 900 : 3200;
+    syncWeather();
+  }
+
+  function syncMusic(): void {
+    if (!ctx || !musicBus || musicTimer) return;
+    nextBar = Math.ceil(ctx.currentTime / BAR_SECONDS) * BAR_SECONDS;
+    const schedule = () => {
+      if (!ctx || !musicBus || !settings.on) return;
+      while (nextBar < ctx.currentTime + 4) {
+        const at = nextBar; nextBar += BAR_SECONDS;
+        const night = isNight(game.world.time.minute);
+        const weekend = clockOf(game.world.time.minute).isWeekend;
+        filterHz = night ? 900 : 3200;
+        const chapters = previousChapter && at >= transitionAt && at < transitionAt + 3 ? [previousChapter, chapter] : [at < transitionAt && previousChapter ? previousChapter : chapter];
+        for (const playing of chapters) {
+        const voices = playing === 1 ? ['piano', 'bass', 'hat'] : playing === 3 ? ['piano', 'bass', 'hat', 'pulse', 'brass'] : ['pad', 'bass', 'lead', 'counter', 'hat'];
+        for (const kind of voices) {
+          if (kind === 'hat' && night || kind === 'counter' && !weekend) continue;
+          const line = kind === 'counter' ? LIVES_INSIDE : kind === 'bass' ? [130.81, 146.83, 164.81, 146.83] : kind === 'pad' ? [130.81, 164.81, 196] : kind === 'hat' ? [3000, 3200, 3000, 3200] : ASCENT;
+          line.forEach((hz, i) => {
+            const when = at + i * BAR_SECONDS / line.length;
+            const osc = ctx!.createOscillator(); osc.type = kind === 'brass' ? 'sawtooth' : kind === 'bass' || kind === 'pad' ? 'sine' : 'triangle'; osc.frequency.setValueAtTime(hz, when);
+            const filter = ctx!.createBiquadFilter(); filter.type = 'lowpass'; filter.frequency.setValueAtTime(filterHz, when);
+            const env = ctx!.createGain(); const dur = kind === 'pad' ? 1.5 : kind === 'hat' ? 0.04 : 0.42;
+            const fade = previousChapter && when >= transitionAt && when < transitionAt + 3 ? (playing === chapter ? (when - transitionAt) / 3 : 1 - (when - transitionAt) / 3) : 1;
+            env.gain.setValueAtTime(0.0001, when); env.gain.linearRampToValueAtTime(Math.max(0.0002, (kind === 'hat' ? 0.004 : kind === 'brass' ? 0.018 : 0.035) * fade), when + (kind === 'brass' ? 0.17 : 0.02)); env.gain.exponentialRampToValueAtTime(0.0001, when + dur);
+            osc.connect(filter); filter.connect(env); env.connect(musicBus!); osc.start(when); osc.stop(when + dur + 0.02);
+          });
+        }
+        }
+        if (previousChapter && at >= transitionAt + 3) previousChapter = null;
+      }
+    };
+    schedule(); musicTimer = every(schedule, 500);
+  }
+
+  function syncWeather(): void {
+    if (!ctx || !ambientBus) return;
+    const snapshot = weatherAt(game.world.seed, game.world.time.minute);
+    if (snapshot.kind !== weatherKind) {
+      weatherKind = snapshot.kind;
+      if (weatherGain) weatherGain.gain.setTargetAtTime(0, ctx.currentTime, 1);
+      if (weatherSource) { try { weatherSource.stop(ctx.currentTime + 4); } catch { /* stopped */ } }
+      if (weatherLfo) { try { weatherLfo.stop(ctx.currentTime + 4); } catch { /* stopped */ } }
+      weatherLfo = null;
+      weatherGain = null; weatherSource = null;
+      if (weatherKind !== 'clear') {
+        const src = ctx.createBufferSource(); src.buffer = whiteNoise(ctx); src.loop = true;
+        const filter = ctx.createBiquadFilter(); filter.type = 'lowpass'; filter.frequency.value = weatherKind === 'overcast' ? 280 : 1800;
+        const gain = ctx.createGain(); gain.gain.setValueAtTime(0, ctx.currentTime); gain.gain.linearRampToValueAtTime(dbToGain(weatherKind === 'overcast' ? -30 : -22) * snapshot.intensity, ctx.currentTime + 4);
+        src.connect(filter); filter.connect(gain); gain.connect(ambientBus); src.start(); weatherSource = src; weatherGain = gain;
+        if (weatherKind === 'rain' || weatherKind === 'storm') {
+          const lfo = ctx.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 0.15;
+          const depth = ctx.createGain(); depth.gain.value = dbToGain(-30) * snapshot.intensity;
+          lfo.connect(depth); depth.connect(gain.gain); lfo.start(); weatherLfo = lfo;
+        }
+      }
+    }
+    if (weatherKind === 'storm' && !(typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches) && now() - lastThunder >= 20000) {
+      lastThunder = now(); noise(ctx, ambientBus, 'lowpass', 80, ctx.currentTime, 1.3, dbToGain(-24));
+    }
   }
 
   function applyMix(minuteOfDay: number): void {
@@ -454,7 +612,7 @@ export function createSound(game: SoundGame, deps: SoundDeps = {}): Sound {
     setEnabled(on) {
       settings.on = on;
       writeSoundSettings(settings, store);
-      if (on) wake();
+      if (on) { if (ctx && master) master.gain.setValueAtTime(1, ctx.currentTime); wake(); }
       else sleep();
     },
     setEffects(level) {
@@ -462,6 +620,16 @@ export function createSound(game: SoundGame, deps: SoundDeps = {}): Sound {
       writeSoundSettings(settings, store);
       if (ctx && effectsBus) effectsBus.gain.setTargetAtTime(settings.effects / 100, ctx.currentTime, 0.02);
     },
+    setMusic(level) {
+      settings.music = clampLevel(level);
+      writeSoundSettings(settings, store);
+      if (ctx && musicBus) musicBus.gain.setTargetAtTime((settings.music ?? 60) / 100 * (tension ? 0.5 : 1), ctx.currentTime, 0.05);
+    },
+    get chapter() { return chapter; },
+    get tension() { return tension; },
+    get weatherKind() { return weatherKind; },
+    get tempo() { return 76; },
+    get filterHz() { return filterHz; },
     setAmbient(level) {
       settings.ambient = clampLevel(level);
       writeSoundSettings(settings, store);

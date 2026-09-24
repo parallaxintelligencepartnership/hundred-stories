@@ -12,12 +12,15 @@ import {
   SOUND_AMBIENT_KEY,
   SOUND_EFFECTS_KEY,
   SOUND_KEY,
+  SOUND_MUSIC_KEY,
   writeSoundSettings,
   type AudioContextLike,
   type Effect,
   type SoundStore,
 } from '../../src/audio/audio';
 import type { GameEvent, GameEventListener } from '../../src/game/api';
+import { isNight, chapterFor } from '../../src/audio/score';
+import { vipRatingCue, cueDuration } from '../../src/audio/cues';
 
 class StubParam {
   value = 0;
@@ -35,6 +38,7 @@ class StubParam {
     this.value = v;
     return this;
   }
+  cancelScheduledValues(): this { return this; }
   setTargetAtTime(v: number): this {
     this.value = v;
     return this;
@@ -64,6 +68,7 @@ class StubContext {
   state: AudioContextState = 'suspended';
   oscillators: StubNode[] = [];
   sources: StubNode[] = [];
+  gains: StubNode[] = [];
   constructor() {
     StubContext.constructed += 1;
   }
@@ -73,7 +78,7 @@ class StubContext {
     return n;
   }
   createGain(): StubNode {
-    return new StubNode();
+    const n = new StubNode(); this.gains.push(n); return n;
   }
   createBiquadFilter(): StubNode {
     return new StubNode();
@@ -120,7 +125,7 @@ function fakeGame() {
   const events = new Set<GameEventListener>();
   const ticks = new Set<() => void>();
   return {
-    world: { time: { minute: 12 * 60 } } as never,
+    world: { seed: 1, stars: 1, time: { minute: 12 * 60 } } as never,
     subscribe(cb: () => void) {
       ticks.add(cb);
       return () => ticks.delete(cb);
@@ -134,6 +139,7 @@ function fakeGame() {
     emit(e: GameEvent) {
       for (const fn of events) fn(e);
     },
+    tick() { for (const fn of ticks) fn(); },
     listeners: () => events.size + ticks.size,
   };
 }
@@ -204,18 +210,19 @@ describe('settings keys', () => {
   });
   it('round trips under hs.sound, hs.sound.effects and hs.sound.ambient', () => {
     const store = memoryStore();
-    writeSoundSettings({ on: true, effects: 35, ambient: 80 }, store);
-    expect(Object.fromEntries(store.map)).toEqual({ [SOUND_KEY]: 'true', [SOUND_EFFECTS_KEY]: '35', [SOUND_AMBIENT_KEY]: '80' });
+    writeSoundSettings({ on: true, effects: 35, ambient: 80, music: 60 }, store);
+    expect(Object.fromEntries(store.map)).toEqual({ [SOUND_KEY]: 'true', [SOUND_EFFECTS_KEY]: '35', [SOUND_AMBIENT_KEY]: '80', [SOUND_MUSIC_KEY]: '60' });
     expect(SOUND_KEY).toBe('hs.sound');
     expect(SOUND_EFFECTS_KEY).toBe('hs.sound.effects');
     expect(SOUND_AMBIENT_KEY).toBe('hs.sound.ambient');
-    expect(readSoundSettings(store)).toEqual({ on: true, effects: 35, ambient: 80 });
+    expect(readSoundSettings(store)).toEqual({ on: true, effects: 35, ambient: 80, music: 60 });
   });
   it('clamps junk levels', () => {
     const store = memoryStore();
     store.setItem(SOUND_EFFECTS_KEY, '250');
     store.setItem(SOUND_AMBIENT_KEY, 'loud');
-    expect(readSoundSettings(store)).toEqual({ on: false, effects: 100, ambient: DEFAULT_SOUND.ambient });
+    store.setItem(SOUND_MUSIC_KEY, '250');
+    expect(readSoundSettings(store)).toEqual({ on: false, effects: 100, ambient: DEFAULT_SOUND.ambient, music: 100 });
   });
 });
 
@@ -249,7 +256,7 @@ describe('the AudioContext and the master toggle', () => {
     StubContext.constructed = 0;
     g['AudioContext'] = StubContext;
     const store = memoryStore();
-    writeSoundSettings({ on: true, effects: 70, ambient: 0 }, store);
+    writeSoundSettings({ on: true, effects: 70, ambient: 0, music: 60 }, store);
     const target = fakeTarget();
     const game = fakeGame();
     const sound = createSound(game, { target, store, now: () => 0, setInterval: () => 1, clearInterval: () => {} });
@@ -287,17 +294,22 @@ describe('the AudioContext and the master toggle', () => {
     expect(ctxs).toHaveLength(1);
     game.emit({ kind: 'car.arrive', shaftId: 1, carId: 1 });
     game.emit({ kind: 'car.arrive', shaftId: 1, carId: 2 }); // same instant: dropped
-    expect(ctxs[0]!.oscillators).toHaveLength(2);
-    t = 5000;
+    expect(ctxs[0]!.oscillators.filter((o) => [587, 784].includes(o.frequency.value))).toHaveLength(2);
+    t = 399;
     game.emit({ kind: 'car.arrive', shaftId: 1, carId: 3 });
-    expect(ctxs[0]!.oscillators).toHaveLength(4);
+    expect(ctxs[0]!.oscillators.filter((o) => [587, 784].includes(o.frequency.value))).toHaveLength(2);
+    t = 400;
+    game.emit({ kind: 'car.arrive', shaftId: 1, carId: 3 });
+    expect(ctxs[0]!.oscillators.filter((o) => [587, 784].includes(o.frequency.value))).toHaveLength(4);
+    sound.setEnabled(false);
+    expect(ctxs[0]!.gains[0]!.gain.value).toBe(0);
     sound.destroy();
   });
 
   it('builds the ambient bed only with sound on and ambient above zero', () => {
     const ctxs: StubContext[] = [];
     const store = memoryStore();
-    writeSoundSettings({ on: true, effects: 0, ambient: 50 }, store);
+    writeSoundSettings({ on: true, effects: 0, ambient: 50, music: 60 }, store);
     const target = fakeTarget();
     const sound = createSound(fakeGame(), {
       target,
@@ -312,8 +324,41 @@ describe('the AudioContext and the master toggle', () => {
     });
     target.fire('pointerdown');
     // The bed: the 4 kHz chirp and its 12 Hz pulse, and one looping brown noise source.
-    expect(ctxs[0]!.oscillators.map((o) => o.frequency.value)).toEqual([4000, 12]);
+    expect(ctxs[0]!.oscillators.slice(0, 2).map((o) => o.frequency.value)).toEqual([4000, 12]);
     expect(ctxs[0]!.sources.filter((s) => s.loop)).toHaveLength(1);
     sound.destroy();
+  });
+});
+
+describe('adaptive score', () => {
+  it('keeps the highest chapter and changes night colour without changing tempo', () => {
+    const game = fakeGame(); const target = fakeTarget(); const ctx = new StubContext();
+    const sound = createSound(game, { target, store: memoryStore(), createContext: () => asCtx(ctx), setInterval: () => 1, clearInterval: () => {} });
+    target.fire('pointerdown'); sound.setEnabled(true);
+    expect(sound.chapter).toBe(1);
+    game.emit({ kind: 'stars', from: 1, to: 3 }); expect(sound.chapter).toBe(3);
+    game.emit({ kind: 'stars', from: 3, to: 2 }); expect(sound.chapter).toBe(3);
+    expect(isNight(23 * 60 + 30)).toBe(true);
+    expect(chapterFor(4)).toBe(3);
+    expect(sound.tempo).toBe(76);
+    sound.destroy();
+  });
+  it('suppresses ordinary bells during an emergency', () => {
+    const game = fakeGame(); const target = fakeTarget(); const ctx = new StubContext();
+    const sound = createSound(game, { target, store: memoryStore(), createContext: () => asCtx(ctx), now: () => 1000, setInterval: () => 1, clearInterval: () => {} });
+    target.fire('pointerdown'); sound.setEnabled(true);
+    game.emit({ kind: 'beat', beat: { code: 'fire.started', minute: 0 } });
+    const count = ctx.oscillators.length;
+    game.emit({ kind: 'car.arrive', shaftId: 0, carId: 1 }); expect(ctx.oscillators).toHaveLength(count);
+    game.emit({ kind: 'beat', beat: { code: 'fire.resolved', minute: 1 } }); expect(sound.tension).toBe(false);
+    sound.destroy();
+  });
+});
+
+describe('cue definitions', () => {
+  it('rates the VIP in three different directions and gives Tower a full fanfare', () => {
+    expect([0, 1, 2].map(vipRatingCue)).toEqual(['vip.poor', 'vip.fair', 'vip.good']);
+    expect(cueDuration('tower')).toBeGreaterThanOrEqual(10);
+    expect(cueDuration('tower')).toBeLessThanOrEqual(15);
   });
 });
