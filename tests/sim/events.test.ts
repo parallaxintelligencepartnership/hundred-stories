@@ -3,6 +3,7 @@ import {
   EVENT_TEST_HOOKS,
   handleEventCommand,
   hooksActive,
+  startFire,
   resetEventTestHooks,
   tickEvents,
   vipRatingOf,
@@ -13,7 +14,9 @@ import { personName, vipArrivalHour, vipPreference } from '../../src/sim/identit
 import { EVAL, EVENTS, ROOMS } from '../../src/sim/rules';
 import { deserialize, serialize } from '../../src/sim/save';
 import type { ActiveEvent, Room, RoomKind, Star, World } from '../../src/sim/types';
+import { tick, tickMany } from '../../src/sim/tick';
 import { addRoom, allocId, createWorld } from '../../src/sim/world';
+import { buildTower, lobbyRun } from '../scenarios/helpers';
 
 // Rooms are built by hand per the brief: build.ts belongs to another agent.
 function place(world: World, kind: RoomKind, floor: number, x: number, extra: Partial<Room> = {}): Room {
@@ -84,9 +87,10 @@ describe('fire', () => {
     at(world, ROLL_MINUTE);
     expect(office.onFire).toBe(true);
     expect(eventOf(world, 'fire')?.roomIds).toEqual([office.id]);
-    const entry = world.log.at(-1);
+    const entry = world.log.at(-2);
     expect(entry?.level).toBe('alert');
     expect(entry?.text).toBe('Fire broke out in the office on floor 2. Call a helicopter or wait for security.');
+    expect(world.log.at(-1)?.text).toBe('People are waiting outside until the fire is out.');
   });
 
   it('does not spread before the spread interval', () => {
@@ -133,6 +137,72 @@ describe('fire', () => {
   it('calling a helicopter with nothing burning is refused in plain English', () => {
     const result = handleEventCommand(world, { kind: 'fire.callHelicopter' });
     expect(result).toEqual({ ok: false, reason: 'There is no fire right now.' });
+  });
+});
+
+describe('fire: nobody walks into a burning building', () => {
+  const WAITING = 'People are waiting outside until the fire is out.';
+  const HELD = new Set(['worker', 'resident', 'guest', 'shopper', 'diner', 'visitor']);
+
+  /** A lobby, one shaft to floor 3, a vacant office on floor 2, a fast food on floor 1, and a condo to burn. */
+  function tower(): { office: Room; condo: Room } {
+    world.stars = 2;
+    world.cash = 10_000_000;
+    buildTower(world, [
+      ...lobbyRun(101, 140),
+      { kind: 'shaft.build', shaft: 'standard', x: 120, floorMin: 1, floorMax: 3 },
+      { kind: 'build', room: 'office', floor: 2, x: 100 },
+    ]);
+    const office = [...world.rooms.values()].find((r) => r.kind === 'office') as Room;
+    place(world, 'fastFood', 3, 124);
+    const condo = place(world, 'condo', 3, 300);
+    return { office, condo };
+  }
+
+  function entered(): number {
+    let count = 0;
+    for (const sim of world.sims.values()) if (HELD.has(sim.kind) && sim.state !== 'outside') count += 1;
+    return count;
+  }
+
+  it('holds every arrival outside while the fire burns, says so once, and lets them in after', () => {
+    const { office, condo } = tower();
+    EVENT_TEST_HOOKS.chance.fire = 1;
+    EVENT_TEST_HOOKS.target.fire = condo.id;
+    tick(world); // 06:00, the daily roll: the condo catches fire
+    EVENT_TEST_HOOKS.chance.fire = 0;
+    expect(condo.onFire).toBe(true);
+    expect(world.log.filter((e) => e.text === WAITING)).toHaveLength(1);
+
+    tickMany(world, 6 * 60); // to 12:00: the office leases, the lunch crowd would be arriving
+    expect(eventOf(world, 'fire')).toBeDefined();
+    expect(office.vacant).toBe(false);
+    expect(office.tenants.length).toBeGreaterThan(0);
+    expect(entered()).toBe(0);
+    expect(office.occupancy).toBe(0);
+    expect(world.log.filter((e) => e.text === WAITING)).toHaveLength(1);
+
+    expect(handleEventCommand(world, { kind: 'fire.callHelicopter' }).ok).toBe(true);
+    expect(eventOf(world, 'fire')).toBeUndefined();
+    tickMany(world, 30);
+    expect(entered()).toBeGreaterThan(0);
+    expect(office.occupancy).toBeGreaterThan(0);
+  });
+
+  it('sends the people in a room that catches fire out toward the street', () => {
+    const { office } = tower();
+    tickMany(world, 4 * 60); // to 10:00, the workers are at their desks
+    expect(office.occupancy).toBeGreaterThan(0);
+    EVENT_TEST_HOOKS.target.fire = office.id;
+    startFire(world);
+    tick(world);
+    expect(office.occupancy).toBe(0);
+    for (const id of office.tenants) {
+      const sim = world.sims.get(id);
+      expect(sim?.inRoomId).toBeNull();
+    }
+    tickMany(world, 20);
+    expect(office.occupancy).toBe(0);
   });
 });
 

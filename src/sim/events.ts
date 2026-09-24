@@ -160,6 +160,8 @@ export function startFire(world: World): void {
     spreadAt: world.time.minute + EVENTS.fire.spreadMinutes,
   });
   log(world, `Fire broke out in the ${describe(room)}. Call a helicopter or wait for security.`, 'alert', { roomId: room.id });
+  // Only one fire burns at a time, so this is once per fire: people.ts holds arrivals until it is out.
+  log(world, 'People are waiting outside until the fire is out.');
   towerBeat(world, 'fire.started', { roomId: room.id });
   sendGuard(world, { kind: 'fire', roomId: room.id, floor: room.floor, x: roomMiddle(room) });
 }

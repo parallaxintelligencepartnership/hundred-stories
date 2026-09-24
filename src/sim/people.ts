@@ -69,6 +69,17 @@ function directedKind(sim: Sim): boolean {
   return sim.kind === 'guard' || sim.kind === 'collector' || sim.kind === 'thief';
 }
 
+/**
+ * The people a fire keeps out of the tower and moves out of a burning room. Guards, staff,
+ * collectors, the VIP and the thief run on their own plans and are left to them.
+ */
+const FIRE_HELD_KINDS = new Set<SimKind>(['worker', 'resident', 'guest', 'shopper', 'diner', 'visitor']);
+
+/** While any fire burns, nobody new comes in from the street. */
+export function fireBurning(world: World): boolean {
+  return world.events.some((e) => e.kind === 'fire');
+}
+
 export function stressBand(stress: number): StressBand {
   if (stress >= STRESS.red) return 'red';
   if (stress >= STRESS.pink) return 'pink';
@@ -95,9 +106,14 @@ export function tickPeople(world: World): void {
 // ---------------------------------------------------------------------------
 
 function runIntake(world: World, clock: Clock): void {
+  // Workers and hotel guests are created outside and wait there (runSchedules holds them), so
+  // their leases and bookings still happen. Owners who would move straight in and walk-in
+  // crowds are simply not created while a fire burns.
+  const burning = fireBurning(world);
   fillVacantOffices(world, clock);
-  sellVacantCondos(world, clock);
+  if (!burning) sellVacantCondos(world, clock);
   spawnHotelGuests(world, clock);
+  if (burning) return;
   spawnCommerceVisitors(world, clock);
   spawnShowAudiences(world, clock);
 }
@@ -217,11 +233,20 @@ function visitorRatePerMinute(room: Room, clock: Clock): number {
 // ---------------------------------------------------------------------------
 
 function runSchedules(world: World, clock: Clock): void {
+  const burning = fireBurning(world);
   for (const sim of [...world.sims.values()]) {
     if (sim.state === 'gone' || sim.state === 'leaving') continue;
     if (clock.minuteOfDay === 0 && sim.homeRoomId !== null) {
       sim.nextScheduleIndex = 0;
       sim.leaveReason = null; // a new day, and stress starts fading again
+    }
+    if (burning && FIRE_HELD_KINDS.has(sim.kind)) {
+      // Out of a burning room, toward the street; and nobody out there comes in until it is out.
+      if (sim.state === 'inRoom' && sim.inRoomId !== null && world.rooms.get(sim.inRoomId)?.onFire) {
+        leaveTower(world, sim);
+        continue;
+      }
+      if (sim.state === 'outside') continue;
     }
     if (sim.state === 'inRoom' && sim.stayUntil !== null && world.time.minute >= sim.stayUntil) {
       onStayEnded(world, sim, clock);
@@ -264,7 +289,7 @@ function startTrip(world: World, sim: Sim, goal: ScheduleEntry['goal']): boolean
     return true;
   }
   const room = goal.kind === 'room' ? world.rooms.get(goal.roomId) : pickRoomOfKind(world, sim, goal.roomKind);
-  if (!room) return false;
+  if (!room || room.onFire) return false;
   if (sim.inRoomId === room.id) return true;
   const target = { floor: room.floor, x: roomCenter(room) };
   const legs = findRoute(world, sim.pos, target, routeOpts(sim));
@@ -467,6 +492,11 @@ function enterRoom(world: World, sim: Sim, room: Room): void {
     return;
   }
   if (COMMERCE_KINDS.has(room.kind) && room.occupancy >= ROOMS[room.kind].capacity) {
+    leaveTower(world, sim);
+    return;
+  }
+  // The room caught fire while they were on the way: turn round for the street.
+  if (room.onFire && FIRE_HELD_KINDS.has(sim.kind)) {
     leaveTower(world, sim);
     return;
   }

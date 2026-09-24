@@ -123,7 +123,7 @@ describe('recording', () => {
     const world = createWorld(1);
     const office = room(world, 'office', 2, 100);
     startFire(world);
-    expect(world.log[world.log.length - 1]?.text).toBe('Fire broke out in the office on floor 2. Call a helicopter or wait for security.');
+    expect(world.log[world.log.length - 2]?.text).toBe('Fire broke out in the office on floor 2. Call a helicopter or wait for security.');
     expect(world.story.recent).toEqual([{ code: 'fire.started', minute: world.time.minute, roomId: office.id }]);
   });
 
