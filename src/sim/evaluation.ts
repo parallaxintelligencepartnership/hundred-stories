@@ -178,6 +178,9 @@ export function tickEvaluation(world: World): void {
     }
     if (world.time.minute - room.lowEvalSinceMinute < EVAL.leaveAfterMinutes) continue;
     if (room.tenants.length === 0) continue;
+    // A booked VIP is not a tenant who can move out: their visit rates the suite instead
+    // (events.ts caps the rating at fair for a suite in this band), so the booking stands.
+    if (room.tenants.every((id) => world.sims.get(id)?.kind === 'vip')) continue;
     moveOut(world, room);
   }
 }

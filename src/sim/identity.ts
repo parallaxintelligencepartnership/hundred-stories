@@ -8,7 +8,7 @@
  * feeds the look, so a later art pass can draw from a set per role.
  */
 
-import type { Sim } from './types';
+import type { Sim, VipPreference } from './types';
 
 /** The same 32-bit mix as src/game/weather.ts, copied so the sim never imports from the game. */
 function mix(a: number, b: number): number {
@@ -69,4 +69,12 @@ export function personVoice(seed: number, simId: number): number {
 export function personIdentity(seed: number, simId: number, kind: Sim['kind']): { name: string; lookKey: number; voiceKey: number } {
   const lookKey = Math.floor(mix((seed | 0) ^ 0x61c88647, simId * 16 + KIND_SALT[kind]) * LOOK_KEYS) % LOOK_KEYS;
   return { name: personName(seed, simId), lookKey, voiceKey: personVoice(seed, simId) };
+}
+
+/** What a VIP cares most about, in the order the hash picks from. */
+export const VIP_PREFERENCES: readonly VipPreference[] = ['quick elevators', 'a clean suite', 'a quiet floor'];
+
+/** A VIP's preference. Seed and id only, like the name, so it survives a save made before it. */
+export function vipPreference(seed: number, simId: number): VipPreference {
+  return pick(VIP_PREFERENCES, mix((seed | 0) ^ 0x3c6ef372, simId * 16 + KIND_SALT.vip));
 }

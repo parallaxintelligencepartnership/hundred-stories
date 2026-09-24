@@ -2,10 +2,12 @@
 // Scheduling, progression and resolution. Numbers come from rules.ts, chance
 // comes from world.rng, and every start, step and end writes a log line.
 
-import { EVENTS, STRESS } from './rules';
+import { EVAL, EVENTS } from './rules';
 import { ROOMS } from './rules';
 import { clockOf, TOWER_WIDTH } from './types';
-import type { ActiveEvent, Command, CommandResult, Id, Room, RoomKind, Sim, World } from './types';
+import type { ActiveEvent, Command, CommandResult, Id, Room, RoomKind, Sim, VipRating, World } from './types';
+import { personName, vipPreference } from './identity';
+import { sendVipToSuite } from './people';
 import { isFollowed, recordBeat, type StoryBeat } from './story';
 import { addSim, allocId, groundLobby, log, removeRoom, removeSim, roomsOfKind, setOccupancy, setOnFire } from './world';
 
@@ -269,6 +271,8 @@ export function tickBomb(world: World, event: Extract<ActiveEvent, { kind: 'bomb
 
 // ---------------------------------------------------------------- VIP
 
+type VipEventState = Extract<ActiveEvent, { kind: 'vip' }>;
+
 function freeSuite(world: World): Room | undefined {
   return roomsOfKind(world, HOTEL_SUITE)
     .sort((a, b) => a.id - b.id)
@@ -302,7 +306,9 @@ export function startVip(world: World): void {
     leaveReason: null,
   };
   addSim(world, sim);
+  // The booking holds the suite: a tenant in it keeps hotel guests from taking it tonight.
   suite.tenants.push(sim.id);
+  const preference = vipPreference(world.seed, sim.id);
   world.events.push({
     kind: 'vip',
     simId: sim.id,
@@ -310,52 +316,211 @@ export function startVip(world: World): void {
     leavesAt: arrivesAt + EVENTS.vip.stayMinutes,
     score: 0,
     suiteId: suite.id,
+    phase: 'notice',
+    preference,
+    longestWait: 0,
+    waitingSince: null,
+    checkInClean: null,
+    checkInEval: null,
+    incident: false,
   });
-  log(world, `A VIP is coming to the ${describe(suite)} tomorrow. Keep the elevators quick.`, 'alert', { roomId: suite.id });
+  const name = personName(world.seed, sim.id);
+  log(
+    world,
+    `A VIP, ${name}, is coming to the ${describe(suite)} tomorrow. They care most about ${preference}.`,
+    'alert',
+    { roomId: suite.id, simId: sim.id },
+  );
   towerBeat(world, 'vip.notice', { simId: sim.id, roomId: suite.id });
 }
 
-/** calm is good, pink is fair, red is poor. Thresholds come from STRESS. */
-export function vipRatingFor(stress: number): 'good' | 'fair' | 'poor' {
-  if (stress < STRESS.pink) return 'good';
-  if (stress < STRESS.red) return 'fair';
+/** The wait band: the longest single wait for a car on the way in or out. */
+export function vipWaitBand(minutes: number): VipRating {
+  if (minutes <= EVENTS.vip.goodMaxWaitMinutes) return 'good';
+  if (minutes <= EVENTS.vip.fairMaxWaitMinutes) return 'fair';
   return 'poor';
 }
 
-export function tickVip(world: World, event: Extract<ActiveEvent, { kind: 'vip' }>): void {
+/**
+ * The suite band: a dirty or infested suite at check in is poor, a suite rated below the
+ * fair band (the red zone where tenants start to leave) is fair. Null means never checked in.
+ */
+export function vipSuiteBand(clean: boolean | null, evaluation: number | null): VipRating {
+  if (clean === false) return 'poor';
+  if (evaluation !== null && evaluation < EVAL.leaveThreshold) return 'fair';
+  return 'good';
+}
+
+/** The safety band: any fire or bomb while the VIP was in the tower is poor. */
+export function vipSafetyBand(incident: boolean): VipRating {
+  return incident ? 'poor' : 'good';
+}
+
+const VIP_ORDER: Record<VipRating, number> = { poor: 0, fair: 1, good: 2 };
+
+/** The rating is the lowest of the wait band, the suite band and the safety band. */
+export function vipRatingOf(visit: Pick<VipEventState, 'longestWait' | 'checkInClean' | 'checkInEval' | 'incident'>): VipRating {
+  const bands = [vipWaitBand(visit.longestWait), vipSuiteBand(visit.checkInClean, visit.checkInEval), vipSafetyBand(visit.incident)];
+  return bands.reduce((low, band) => (VIP_ORDER[band] < VIP_ORDER[low] ? band : low));
+}
+
+function floorWords(floor: number): string {
+  return floor < 0 ? `floor B${-floor}` : `floor ${floor}`;
+}
+
+function incidentActive(world: World): boolean {
+  return world.events.some((e) => e.kind === 'fire' || e.kind === 'bomb');
+}
+
+/** Take the VIP's booking off the suite. */
+function releaseSuite(world: World, event: VipEventState): void {
+  const suite = event.suiteId === null ? undefined : world.rooms.get(event.suiteId);
+  if (suite) suite.tenants = suite.tenants.filter((id) => id !== event.simId);
+}
+
+/** Record the result, write the log line and the beat, and clear the event. */
+function closeVisit(world: World, event: VipEventState, rating: VipRating, reason: string | null): void {
+  const value = VIP_ORDER[rating];
+  event.score = value / 2;
+  world.stats.vipRating = rating;
+  world.stats.lastVip = {
+    simId: event.simId,
+    minute: world.time.minute,
+    rating,
+    preference: event.preference,
+    longestWait: event.longestWait,
+    waitBand: vipWaitBand(event.longestWait),
+    suiteClean: event.checkInClean,
+    suiteBand: vipSuiteBand(event.checkInClean, event.checkInEval),
+    incident: event.incident,
+    reason,
+  };
+  endEvent(world, event);
+  const beat: Omit<StoryBeat, 'code' | 'minute'> = { simId: event.simId, value };
+  if (event.suiteId !== null && world.rooms.has(event.suiteId)) beat.roomId = event.suiteId;
+  if (reason) log(world, `${reason}.`, 'alert', { simId: event.simId });
+  else log(world, `The VIP checked out and rated the tower ${rating}.`, 'alert', { simId: event.simId });
+  towerBeat(world, 'vip.rated', beat);
+}
+
+/**
+ * The visit ends before the stay: the VIP turns round. One who never came in is simply gone;
+ * one already inside heads for the door like anyone leaving. Rated poor, value 0.
+ */
+function failVisit(world: World, event: VipEventState, reason: string): void {
   const sim = world.sims.get(event.simId);
-  if (!sim) {
-    endEvent(world, event);
+  releaseSuite(world, event);
+  if (sim) {
+    sim.homeRoomId = null;
+    if (sim.state === 'outside') {
+      sim.state = 'gone';
+      removeSim(world, sim.id);
+    } else if (sim.state !== 'gone') {
+      sim.exiting = true;
+      sim.state = 'leaving';
+      sim.leaveReason = `${reason}.`;
+      sim.route = [];
+      sim.waitStart = null;
+      if (sim.inRoomId !== null) {
+        const room = world.rooms.get(sim.inRoomId);
+        if (room) setOccupancy(world, room, Math.max(0, room.occupancy - 1));
+        sim.inRoomId = null;
+      }
+    }
+  }
+  closeVisit(world, event, 'poor', reason);
+}
+
+/** Keep the longest wait up to date. A wait runs from the first minute at the doors to boarding. */
+function trackWait(world: World, event: VipEventState, sim: Sim): number {
+  if (sim.state === 'waiting') {
+    if (event.waitingSince === null) event.waitingSince = sim.waitStart ?? world.time.minute;
+    const waited = world.time.minute - event.waitingSince;
+    if (waited > event.longestWait) event.longestWait = waited;
+    return waited;
+  }
+  // A reroute walks the VIP a few steps between waits: that is still one wait. Boarding or a
+  // room ends it.
+  if (sim.state === 'riding' || sim.state === 'inRoom' || sim.state === 'outside') event.waitingSince = null;
+  return 0;
+}
+
+function waitedTooLong(waited: number): boolean {
+  return waited > EVENTS.vip.giveUpWaitMinutes;
+}
+
+export function tickVip(world: World, event: VipEventState): void {
+  const minute = world.time.minute;
+  const sim = world.sims.get(event.simId);
+  const suite = event.suiteId === null ? undefined : world.rooms.get(event.suiteId);
+
+  if (event.phase === 'notice') {
+    if (minute < event.arrivesAt) return;
+    if (!suite || !sim) {
+      failVisit(world, event, 'The VIP left: no suite was ready');
+      return;
+    }
+    if (incidentActive(world)) event.incident = true;
+    if (!sendVipToSuite(world, sim, suite)) {
+      failVisit(world, event, `The VIP left: no way up to ${floorWords(suite.floor)}`);
+      return;
+    }
+    event.phase = 'route';
+    const name = personName(world.seed, sim.id);
+    log(world, `The VIP, ${name}, walked into the lobby and is heading up to the ${describe(suite)}.`, 'info', {
+      roomId: suite.id,
+      simId: sim.id,
+    });
     return;
   }
-  const suite = event.suiteId === null ? undefined : world.rooms.get(event.suiteId);
-  if (world.time.minute >= event.arrivesAt && sim.state === 'outside') {
-    if (suite) {
-      sim.pos = { floor: suite.floor, x: suite.x };
-      sim.inRoomId = suite.id;
-      setOccupancy(world, suite, suite.occupancy + 1);
-      log(world, `The VIP checked into the ${describe(suite)}.`, 'info', { roomId: suite.id, simId: sim.id });
-      towerBeat(world, 'vip.arrival', { simId: sim.id, roomId: suite.id });
-    } else {
-      log(world, 'The VIP arrived but the suite was gone.', 'alert', { simId: sim.id });
-      towerBeat(world, 'vip.arrival', { simId: sim.id });
-    }
-    sim.state = 'inRoom';
-    sim.stayUntil = event.leavesAt;
-  }
-  if (world.time.minute < event.leavesAt) return;
 
-  const rating = vipRatingFor(sim.stress);
-  event.score = Math.max(0, 1 - sim.stress);
-  world.stats.vipRating = rating;
-  if (suite) {
-    suite.tenants = suite.tenants.filter((id) => id !== sim.id);
-    setOccupancy(world, suite, Math.max(0, suite.occupancy - 1));
+  if (incidentActive(world)) event.incident = true;
+
+  if (event.phase === 'route') {
+    if (!suite) {
+      failVisit(world, event, 'The VIP left: no suite was ready');
+      return;
+    }
+    if (!sim || sim.exiting || sim.state === 'leaving' || sim.state === 'gone') {
+      failVisit(world, event, `The VIP left: no way up to ${floorWords(suite.floor)}`);
+      return;
+    }
+    const waited = trackWait(world, event, sim);
+    if (waitedTooLong(waited)) {
+      const limit = EVENTS.vip.giveUpWaitMinutes;
+      failVisit(world, event, `The VIP left: no elevator came for ${limit} minutes on ${floorWords(sim.pos.floor)}`);
+      return;
+    }
+    if (sim.state !== 'inRoom' || sim.inRoomId !== suite.id) return;
+    event.phase = 'stay';
+    event.waitingSince = null;
+    event.checkInClean = !suite.dirty && !suite.infested;
+    event.checkInEval = suite.eval;
+    event.leavesAt = minute + EVENTS.vip.stayMinutes;
+    sim.stayUntil = event.leavesAt;
+    log(world, `The VIP checked into the ${describe(suite)}.`, 'info', { roomId: suite.id, simId: sim.id });
+    towerBeat(world, 'vip.arrival', { simId: sim.id, roomId: suite.id });
+    return;
   }
-  removeSim(world, sim.id);
-  endEvent(world, event);
-  log(world, `The VIP checked out and rated the tower ${rating}.`, 'alert');
-  towerBeat(world, 'vip.rated', { simId: sim.id, value: rating === 'good' ? 2 : rating === 'fair' ? 1 : 0 });
+
+  if (event.phase === 'stay') {
+    if (sim && suite && sim.state === 'inRoom' && sim.inRoomId === suite.id) return;
+    // The stay is over, or a fire moved the VIP out early: either way they are leaving.
+    event.phase = 'checkout';
+  }
+
+  // Checkout: the rating lands when the VIP is out of the tower.
+  if (!sim || sim.state === 'gone') {
+    releaseSuite(world, event);
+    closeVisit(world, event, vipRatingOf(event), null);
+    return;
+  }
+  const waited = trackWait(world, event, sim);
+  if (waitedTooLong(waited)) {
+    // They are leaving anyway; a car that never comes still ends the visit, so it cannot stall.
+    releaseSuite(world, event);
+    closeVisit(world, event, vipRatingOf(event), null);
+  }
 }
 
 // ---------------------------------------------------------------- cockroaches

@@ -10,11 +10,12 @@
 // which we are not allowed to touch.
 
 import { createRng } from './rng';
-import { RENT, ROOMS, SHAFTS } from './rules';
+import { EVENTS, RENT, ROOMS, SHAFTS } from './rules';
+import { VIP_PREFERENCES, vipPreference } from './identity';
 import { createStoryState, sanitizeStory } from './story';
 import { createWorld, rebuildFloorIndex } from './world';
 import { MAX_FLOOR, MIN_FLOOR, TOWER_WIDTH } from './types';
-import type { Car, LogEntry, RiderClass, Room, Shaft, Sim, SimKind, World } from './types';
+import type { ActiveEvent, Car, LogEntry, RiderClass, Room, Shaft, Sim, SimKind, VipPhase, VipPreference, World } from './types';
 
 /** v1 and pre-rent v2 saves have no `rent`; it is normalized to RENT.default on load. */
 type SaveRoom = Omit<Room, 'rent'> & { rent?: number };
@@ -25,6 +26,7 @@ export const SAVE_VERSION = 4;
  * Versions this loader understands. v1 has no per car settings and boolean hall calls.
  * v2 has no status bar baselines (quarterStartCash, dayStartPopulation): they load as null.
  * v1 to v3 have no story: they load with an empty one (identities need nothing stored).
+ * A VIP visit from v4 or older has no phase: it loads as the notice or the stay (loadVipEvent).
  */
 const READABLE_VERSIONS = [1, 2, 3, 4];
 
@@ -346,6 +348,50 @@ function firstInvalidField(d: SaveData): string | null {
   return null;
 }
 
+const VIP_PHASES = { notice: true, route: true, stay: true, checkout: true } satisfies Record<VipPhase, true>;
+
+function numberOr<T>(value: unknown, fallback: T): number | T {
+  return isFiniteNumber(value) ? value : fallback;
+}
+
+/**
+ * A VIP visit as saved. v4 and older wrote only the booking (sim, suite, arrival, departure):
+ * before arrival that is the notice, after it the VIP was already in the suite, so the stay.
+ * The preference comes from the identity hash, like the name. Anything missing gets its start
+ * value, so an old visit carries on and is rated from here.
+ */
+function loadVipEvent(world: World, raw: Extract<ActiveEvent, { kind: 'vip' }>): Extract<ActiveEvent, { kind: 'vip' }> {
+  const r = raw as unknown as Record<string, unknown>;
+  const simId = raw.simId;
+  const suiteId = isFiniteNumber(r.suiteId) ? r.suiteId : null;
+  const arrivesAt = numberOr(r.arrivesAt, world.time.minute);
+  const leavesAt = numberOr(r.leavesAt, arrivesAt + EVENTS.vip.stayMinutes);
+  const savedPhase = typeof r.phase === 'string' && Object.hasOwn(VIP_PHASES, r.phase) ? (r.phase as VipPhase) : null;
+  const phase: VipPhase = savedPhase ?? (world.time.minute < arrivesAt ? 'notice' : 'stay');
+  const suite = suiteId === null ? undefined : world.rooms.get(suiteId);
+  const inStay = phase === 'stay' || phase === 'checkout';
+  const preference =
+    typeof r.preference === 'string' && (VIP_PREFERENCES as readonly string[]).includes(r.preference)
+      ? (r.preference as VipPreference)
+      : vipPreference(world.seed, simId);
+  return {
+    kind: 'vip',
+    simId,
+    arrivesAt,
+    leavesAt,
+    score: numberOr(r.score, 0),
+    suiteId,
+    phase,
+    preference,
+    longestWait: numberOr(r.longestWait, 0),
+    waitingSince: numberOr(r.waitingSince, null),
+    checkInClean:
+      typeof r.checkInClean === 'boolean' ? r.checkInClean : inStay && savedPhase === null ? (suite ? !suite.dirty && !suite.infested : true) : null,
+    checkInEval: numberOr(r.checkInEval, inStay && savedPhase === null ? (suite ? suite.eval : 1) : null),
+    incident: r.incident === true,
+  };
+}
+
 /** A v1 direction bit means every class was waiting; v2 names them. */
 function loadClasses(side: boolean | RiderClass[]): Set<RiderClass> {
   if (typeof side === 'boolean') return new Set(side ? ALL_CLASSES : []);
@@ -431,7 +477,7 @@ export function deserialize(text: string): { ok: true; world: World } | { ok: fa
       }),
     );
     world.story = parsed.version >= 4 ? sanitizeStory(parsed.story) : createStoryState();
-    world.events = parsed.events;
+    world.events = parsed.events.map((event) => (event.kind === 'vip' ? loadVipEvent(world, event) : event));
     world.stats = parsed.stats;
     world.gameOver = parsed.gameOver;
     world.log = parsed.log.slice(-LOG_LIMIT);
