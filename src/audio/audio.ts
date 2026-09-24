@@ -195,6 +195,8 @@ export function effectFor(event: GameEvent): Effect | null {
       return event.to > event.from ? 'star' : 'alert';
     case 'log':
       return event.entry.level === 'alert' ? 'alert' : null;
+    case 'beat':
+      return null;
   }
 }
 

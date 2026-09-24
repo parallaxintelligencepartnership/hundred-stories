@@ -2,6 +2,7 @@
 // state (the sound module). Fed from the tick batches and command results the shell already
 // runs; it only reads the world, and only while someone is listening.
 import { clockOf, type Command, type Id, type LogEntry, type World } from '../sim/types';
+import type { StoryBeat } from '../sim/story';
 
 export type GameEvent =
   /** A new line in the world log, as the ticker and the toasts see it. */
@@ -15,7 +16,9 @@ export type GameEvent =
   /** A car stopped and opened its doors. */
   | { kind: 'car.arrive'; shaftId: Id; carId: Id }
   /** A car closed its doors. */
-  | { kind: 'car.doors'; shaftId: Id; carId: Id };
+  | { kind: 'car.doors'; shaftId: Id; carId: Id }
+  /** A story beat, as recorded for presentation. */
+  | { kind: 'beat'; beat: StoryBeat };
 
 export type GameEventListener = (event: GameEvent) => void;
 
