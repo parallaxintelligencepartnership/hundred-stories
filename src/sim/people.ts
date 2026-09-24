@@ -10,6 +10,7 @@ import { hallCallPending, requestHallCall } from './elevators';
 import { recordCondoSale, recordHotelNight, recordVisit } from './economy';
 import { ensureRouting, entrances, findRoute, isReachableFromLobby } from './routing';
 import { ECONOMY, ROOMS, SCHEDULES, STORY, STRESS } from './rules';
+import { collectorLostRoute, inWasteBacklog, runCollectors } from './recycling';
 import { guardLostRoute, runGuards } from './security';
 import { isFollowed, recordBeat, recordSimBeat, type StoryBeat, type StoryState } from './story';
 import { clockOf, riderClassOf } from './types';
@@ -36,7 +37,7 @@ export const WALK_TILES_PER_MINUTE = 5;
  * so a trip is never planned on a car dedicated to somebody else.
  */
 function routeOpts(sim: Sim): { staff: boolean; riderClass: ReturnType<typeof riderClassOf> } {
-  return { staff: sim.kind === 'staff' || sim.kind === 'guard', riderClass: riderClassOf(sim.kind) };
+  return { staff: sim.kind === 'staff' || sim.kind === 'guard' || sim.kind === 'collector', riderClass: riderClassOf(sim.kind) };
 }
 
 // Local rules: rules.ts has no entry for these, so they live here and are marked as our call.
@@ -60,11 +61,12 @@ const DINING_KINDS = new Set<RoomKind>(['fastFood', 'restaurant']);
 const TRANSIENT_KINDS = new Set<SimKind>(['shopper', 'diner', 'visitor', 'guest', 'vip', 'thief']);
 
 /**
- * Guards and the thief are moved by their own plans (security.ts, events.ts): a route that ends
- * leaves them standing where it ended, and waiting never makes them give up.
+ * Guards, collectors and the thief are moved by their own plans (security.ts, recycling.ts,
+ * events.ts): a route that ends leaves them standing where it ended, and waiting never makes
+ * them give up.
  */
 function directedKind(sim: Sim): boolean {
-  return sim.kind === 'guard' || sim.kind === 'thief';
+  return sim.kind === 'guard' || sim.kind === 'collector' || sim.kind === 'thief';
 }
 
 export function stressBand(stress: number): StressBand {
@@ -81,6 +83,7 @@ export function tickPeople(world: World): void {
   runSchedules(world, clock);
   runHousekeeping(world, clock);
   runGuards(world);
+  runCollectors(world);
   runLeaving(world);
   moveSims(world);
   retireOutsideSims(world);
@@ -396,6 +399,7 @@ function stepAlongRoute(world: World, sim: Sim): void {
       const shaft = world.shafts.get(leg.shaftId);
       if (!shaft) {
         if (sim.kind === 'guard' && !sim.exiting) guardLostRoute(sim);
+        else if (sim.kind === 'collector' && !sim.exiting) collectorLostRoute(sim);
         else leaveTower(world, sim);
         return;
       }
@@ -501,8 +505,8 @@ function arriveWithoutRoom(world: World, sim: Sim): void {
 
 function departRoom(world: World, sim: Sim): void {
   const room = sim.inRoomId !== null ? world.rooms.get(sim.inRoomId) : undefined;
-  // A guard in the office never counted toward its occupancy (security.ts).
-  if (room && sim.kind !== 'guard') {
+  // A guard in the office or a collector in the center never counted toward its occupancy.
+  if (room && sim.kind !== 'guard' && sim.kind !== 'collector') {
     setOccupancy(world, room, Math.max(0, room.occupancy - 1));
     if (sim.kind === 'guest' && HOTEL_KINDS.has(room.kind) && room.tenants.includes(sim.id)) {
       checkOutOfHotel(world, sim, room);
@@ -742,7 +746,8 @@ function staffUpOffice(world: World, office: Room): void {
 function dirtyHotelRooms(world: World): Room[] {
   const out: Room[] = [];
   for (const room of world.rooms.values()) {
-    if (HOTEL_KINDS.has(room.kind) && room.dirty && !room.onFire) out.push(room);
+    // A room held dirty by uncollected waste waits for the collectors, not housekeeping.
+    if (HOTEL_KINDS.has(room.kind) && room.dirty && !room.onFire && !inWasteBacklog(room)) out.push(room);
   }
   return out;
 }

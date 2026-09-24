@@ -45,6 +45,7 @@ export type SimKind =
   | 'visitor'
   | 'vip'
   | 'guard' // a security guard: one of a security office's staff, on shift or off
+  | 'collector' // a waste collector: one of a recycling center's two workers
   | 'thief'; // the shop thief: shown to the player as a visitor until the encounter is resolved
 
 /** Who a car may carry when it is dedicated. Hotel guests, office staff, or anyone else. */
@@ -81,6 +82,22 @@ export interface Room {
   lowEvalSinceMinute: number | null; // when eval first dropped below the leave threshold
   onFire: boolean;
   rent: number; // percent of the standard rate; a discount lifts the tenants' evaluation, a premium lowers it
+  /**
+   * Waste (src/sim/recycling.ts). All optional and absent on a room that never held any, so a
+   * tower without a recycling center saves and hashes as before. `waste`: units waiting, 0 to
+   * WASTE.roomCap. `wasteDays`: consecutive 06:00 rolls at or above WASTE.backlogAt.
+   * `wasteBacklogSince`: the minute the room entered backlog (its dirty flag is held set).
+   * `wastePeak`: the most people inside since the last roll, which sizes the next load.
+   * `wasteCollectedAt`: the minute a collector last emptied it.
+   */
+  waste?: number;
+  wasteDays?: number;
+  wasteBacklogSince?: number | null;
+  wastePeak?: number;
+  wasteCollectedAt?: number;
+  /** Recycling centers only: units brought in since the last 06:00 roll, and floors a worker could not reach today. */
+  wasteCollectedToday?: number;
+  wasteUnreachable?: number[];
 }
 
 export interface Car {
@@ -164,6 +181,20 @@ export interface Sim {
   storyTripStart?: number;
   /** Guards only: shift, patrol and response state (src/sim/security.ts). Saved and hashed with the sim. */
   guard?: GuardState;
+  /** Collectors only: the round in hand (src/sim/recycling.ts). Saved and hashed with the sim. */
+  collector?: CollectorState;
+}
+
+/**
+ * What a collector is doing. `center`: in the recycling center. `toRoom`: walking to `roomId`
+ * to collect. `collecting`: at `roomId` until `until`. `toCenter`: walking back with `load`.
+ * `unloading`: in the center until `until`. `until` also paces a worker with nothing reachable.
+ */
+export interface CollectorState {
+  task: 'center' | 'toRoom' | 'collecting' | 'toCenter' | 'unloading';
+  roomId: Id | null;
+  load: number;
+  until: number | null;
 }
 
 /** A guard's response: the incident, the room it is in and where the guard is heading. */

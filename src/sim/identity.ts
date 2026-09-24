@@ -51,6 +51,7 @@ const KIND_SALT: Record<Sim['kind'], number> = {
   vip: 8,
   guard: 9,
   thief: 10,
+  collector: 11,
 };
 
 function pick<T>(list: readonly T[], u: number): T {

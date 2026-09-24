@@ -108,7 +108,14 @@ export function leaveReasonFor(world: World, room: Room): string {
   const noisy = ROOMS[room.kind].quiet ? noisyNeighborsOf(world, room) : [];
   const penalties = [
     { weight: room.infested ? EVAL.infestedPenalty : 0, text: `Cockroaches in the ${label(room.kind)} on floor ${room.floor}.` },
-    { weight: room.dirty ? EVAL.dirtyPenalty : 0, text: `Nobody cleaned the ${label(room.kind)} on floor ${room.floor}.` },
+    {
+      weight: room.dirty ? EVAL.dirtyPenalty : 0,
+      // A room held dirty by uncollected waste (recycling.ts) says so.
+      text:
+        room.wasteBacklogSince != null
+          ? `Nobody collected the waste from the ${label(room.kind)} on floor ${room.floor}.`
+          : `Nobody cleaned the ${label(room.kind)} on floor ${room.floor}.`,
+    },
     {
       weight: EVAL.noisePenaltyPerNeighbor * noisy.length,
       text: noisy.length > 0 ? `Too noisy next to the ${label((noisy[0] as Room).kind)} on floor ${room.floor}.` : '',
