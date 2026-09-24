@@ -24,7 +24,7 @@ import type { GameEvent, GameEventListener } from '../../src/game/api';
 import { isNight, chapterFor } from '../../src/audio/score';
 import { CHAPTER_SCALES, CHAPTER_VOICES, inChapterScale, scaleMidi, VOICES, type Chapter } from '../../src/audio/score';
 import { phraseFor, voicesFor } from '../../src/audio/phrase';
-import { vipRatingCue, cueDuration } from '../../src/audio/cues';
+import { vipRatingCue, cueDuration, beatCue } from '../../src/audio/cues';
 import { weatherAt } from '../../src/game/weather';
 
 class StubParam {
@@ -60,7 +60,8 @@ class StubNode {
   buffer: unknown = null;
   loop = false;
   started = 0;
-  connect(): void {}
+  connections: unknown[] = [];
+  connect(target: unknown): void { this.connections.push(target); }
   disconnect(): void {}
   start(): void {
     this.started += 1;
@@ -510,5 +511,79 @@ describe('mixer and weather integration', () => {
     } finally {
       if (oldMatchMedia === undefined) delete g['matchMedia']; else g['matchMedia'] = oldMatchMedia;
     }
+  });
+});
+
+describe('hostile encounter cues and priority', () => {
+  function setup() {
+    const game = fakeGame(); const target = fakeTarget(); const ctx = new StubContext();
+    const sound = createSound(game, { target, store: memoryStore(), createContext: () => asCtx(ctx),
+      setInterval: () => 1, clearInterval: () => {} });
+    target.fire('pointerdown'); sound.setEnabled(true);
+    return { game, target, ctx, sound };
+  }
+  const beat = (code: 'theft.started' | 'guard.dispatched' | 'theft.caught' | 'theft.escaped' | 'fire.started' | 'fire.resolved'): GameEvent =>
+    ({ kind: 'beat', beat: { code, minute: 0 } });
+
+  it('uses a distinct sub-1.2-second cue and half tension for theft', () => {
+    expect(new Set([beatCue('theft.started'), beatCue('fire.started'), beatCue('bomb.started')]).size).toBe(3);
+    expect(cueDuration('theft.start')).toBeLessThan(1.2);
+    const { game, ctx, sound } = setup();
+    const before = ctx.oscillators.length;
+    game.emit(beat('theft.started'));
+    expect(sound.tensionLevel).toBe(0.5);
+    expect(ctx.oscillators.slice(before, before + 3).map(o => o.frequency.value)).toEqual([146.83, 123.47, 185]);
+    expect(ctx.gains[6]!.gain.value).toBeGreaterThan(0);
+    expect(ctx.gains[7]!.gain.value).toBeGreaterThan(0);
+    expect(ctx.gains[7]!.gain.value).toBeLessThan(1);
+    sound.destroy();
+  });
+
+  it('routes guard dispatch to effects without changing tension', () => {
+    const { game, ctx, sound } = setup();
+    game.emit(beat('theft.started'));
+    const before = ctx.oscillators.length;
+    game.emit(beat('guard.dispatched'));
+    expect(sound.tensionLevel).toBe(0.5);
+    const ticks = ctx.oscillators.slice(before);
+    expect(ticks.map(o => o.frequency.value)).toEqual([784, 988]);
+    for (const tick of ticks) expect((tick.connections[0] as StubNode).connections).toContain(ctx.gains[4]);
+    sound.destroy();
+  });
+
+  it('uses different releases for caught and escaped theft', () => {
+    const { game, ctx, sound } = setup();
+    game.emit(beat('theft.started'));
+    let before = ctx.oscillators.length;
+    game.emit(beat('theft.caught'));
+    expect(ctx.oscillators.slice(before).map(o => o.frequency.value)).toEqual([330, 440]);
+    expect(sound.tensionLevel).toBe(0);
+    game.emit(beat('theft.started'));
+    before = ctx.oscillators.length;
+    game.emit(beat('theft.escaped'));
+    expect(ctx.oscillators.slice(before).map(o => o.frequency.value)).toEqual([330, 247]);
+    expect(sound.tensionLevel).toBe(0);
+    sound.destroy();
+  });
+
+  it('suppresses theft during fire and raises theft to full tension when fire starts', () => {
+    const first = setup();
+    first.game.emit(beat('fire.started'));
+    const count = first.ctx.oscillators.length;
+    first.game.emit(beat('theft.started'));
+    expect(first.ctx.oscillators).toHaveLength(count);
+    expect(first.sound.tensionLevel).toBe(1);
+    first.sound.destroy();
+
+    const second = setup();
+    second.game.emit(beat('theft.started'));
+    expect(second.sound.tensionLevel).toBe(0.5);
+    second.game.emit(beat('fire.started'));
+    expect(second.sound.tensionLevel).toBe(1);
+    expect(second.ctx.gains[6]!.gain.value).toBe(0);
+    expect(second.ctx.gains[7]!.gain.value).toBe(0);
+    second.game.emit(beat('theft.caught'));
+    expect(second.sound.tensionLevel).toBe(1); // theft's late outcome cannot clear the fire
+    second.sound.destroy();
   });
 });

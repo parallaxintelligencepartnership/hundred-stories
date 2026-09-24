@@ -44,6 +44,8 @@ describe('pure live mood', () => {
     expect(activeLayers(5, 1, 1)).not.toContain('hat');
     expect(activeLayers(5, 1, 1)).not.toContain('kinetic');
     expect(activeLayers(5, 1, 1)).not.toContain('drums');
+    expect(activeLayers(1, 1, 0.5)).toContain('drums');
+    expect(activeLayers(1, 1, 0.5)).toContain('hat');
   });
   it('chooses warm, middle and dark chord colours', () => {
     expect(chordColourFor(0.8)).toBe('major9');

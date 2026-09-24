@@ -347,6 +347,7 @@ export interface Sound {
   setMusic?(level: number): void;
   readonly chapter?: Chapter;
   readonly tension?: boolean;
+  readonly tensionLevel?: number;
   readonly weatherKind?: string;
   readonly tempo?: number;
   readonly filterHz?: number;
@@ -386,6 +387,9 @@ function browserContext(): AudioContextLike {
 }
 
 type SoundGame = Pick<GameApi, 'world' | 'subscribe' | 'subscribeEvents'>;
+type Threat = 'none' | 'theft' | 'fire' | 'bomb';
+const threatLevel = (threat: Threat): number => threat === 'none' ? 0 : threat === 'theft' ? 0.5 : 1;
+const urgent = (threat: Threat): boolean => threat === 'fire' || threat === 'bomb';
 
 export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
   const deps: SoundDeps = devHook?.deps ? { ...devHook.deps, ...depsIn } : depsIn;
@@ -432,6 +436,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
   let previousChapter: Chapter | null = null;
   let transitionAt = 0;
   let tension = false;
+  let threat: Threat = 'none';
   let weatherKind = 'clear';
   let filterHz = 3200;
   let musicTimer = 0;
@@ -460,7 +465,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
     const clock = clockOf(game.world.time.minute);
     return {
       mood: { minuteOfDay: clock.minuteOfDay, isWeekend: clock.isWeekend, venueFill: venueFillFor(game.world.rooms?.values() ?? []),
-        weather: weatherAt(game.world.seed, game.world.time.minute), tension: tension ? 1 : 0 },
+        weather: weatherAt(game.world.seed, game.world.time.minute), tension: threatLevel(threat) },
       minute: game.world.time.minute,
     };
   }
@@ -589,16 +594,23 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
     if (event.kind === 'beat') {
       const name = beatCue(event.beat.code, event.beat.value);
       if (name === 'fire.start' || name === 'bomb.start') {
-        tension = true; targetMood = { ...targetMood, tension: 1 }; playNamedCue(name);
-        hatBus?.gain.setValueAtTime(0, ctx.currentTime); drumsBus?.gain.setValueAtTime(0, ctx.currentTime);
-        musicBus?.gain.setTargetAtTime((settings.music ?? 60) / 100 * dbToGain(-6), ctx.currentTime, 0.1);
-        if (!tensionOsc && musicBus) { tensionOsc = ctx.createOscillator(); tensionOsc.type = 'sine'; tensionOsc.frequency.value = name === 'fire.start' ? 110 : 55; tensionGain = ctx.createGain(); tensionGain.gain.value = 0.025; tensionOsc.connect(tensionGain); tensionGain.connect(musicBus); tensionOsc.start(); }
+        startThreat(name === 'fire.start' ? 'fire' : 'bomb', name);
+        return;
+      }
+      if (name === 'theft.start') {
+        if (!urgent(threat)) startThreat('theft', name);
+        return;
+      }
+      if (name === 'guard.dispatch') {
+        if (!urgent(threat)) playNamedCue(name);
         return;
       }
       if (name === 'release.up' || name === 'release.down') {
-        tension = false; targetMood = { ...targetMood, tension: 0 }; playNamedCue(name);
-        if (tensionGain) tensionGain.gain.setTargetAtTime(0, ctx.currentTime, 0.15);
-        if (tensionOsc) { tensionOsc.stop(ctx.currentTime + 1); tensionOsc = null; tensionGain = null; }
+        const code = event.beat.code;
+        if ((code === 'theft.caught' || code === 'theft.escaped') && threat !== 'theft') return;
+        if (code === 'fire.resolved' && threat !== 'fire') return;
+        if ((code === 'bomb.resolved' || code === 'bomb.failed') && threat !== 'bomb') return;
+        endThreat(name);
         return;
       }
       if (!tension && name) playNamedCue(name);
@@ -621,8 +633,49 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
     playEffect(ctx, effectsBus, effect);
   }
 
+  function startThreat(next: Threat, cue: Cue): void {
+    if (!ctx) return;
+    if (threat === next) return;
+    const level = threatLevel(next);
+    threat = next; tension = true; targetMood = { ...targetMood, tension: level };
+    playNamedCue(cue);
+    const kitLevel = urgent(next) ? 0 : 0.7;
+    hatBus?.gain.setValueAtTime(kitLevel, ctx.currentTime);
+    drumsBus?.gain.setValueAtTime(urgent(next) ? 0 : 0.775, ctx.currentTime);
+    musicBus?.gain.setTargetAtTime((settings.music ?? 60) / 100 * dbToGain(-6 * level), ctx.currentTime, 0.1);
+    if (tensionOsc) { try { tensionOsc.stop(); } catch { /* already stopped */ } tensionOsc = null; }
+    if (musicBus) {
+      tensionOsc = ctx.createOscillator(); tensionOsc.type = 'sine';
+      tensionOsc.frequency.value = next === 'fire' ? 110 : next === 'bomb' ? 55 : 93;
+      tensionGain = ctx.createGain(); tensionGain.gain.value = next === 'theft' ? 0.014 : 0.025;
+      tensionOsc.connect(tensionGain); tensionGain.connect(musicBus); tensionOsc.start();
+    }
+  }
+
+  function endThreat(cue: Cue): void {
+    if (!ctx) return;
+    threat = 'none'; tension = false; targetMood = { ...targetMood, tension: 0 };
+    playNamedCue(cue);
+    if (tensionGain) tensionGain.gain.setTargetAtTime(0, ctx.currentTime, 0.15);
+    if (tensionOsc) { tensionOsc.stop(ctx.currentTime + 1); tensionOsc = null; tensionGain = null; }
+  }
+
   function playNamedCue(name: Cue): void {
     if (!ctx || !effectsBus || settings.effects <= 0) return;
+    if (name === 'theft.start') {
+      // Three off-beat low notes, the last a short muted stab; no siren rise or bomb pulse.
+      const at = ctx.currentTime;
+      tone(ctx, effectsBus, 'triangle', 146.83, at + 0.07, 0.13, 0.18);
+      tone(ctx, effectsBus, 'triangle', 123.47, at + 0.37, 0.14, 0.16);
+      tone(ctx, effectsBus, 'square', 185, at + 0.73, 0.08, 0.22);
+      return;
+    }
+    if (name === 'guard.dispatch') {
+      const at = ctx.currentTime;
+      tone(ctx, effectsBus, 'sine', 784, at, 0.07, 0.16);
+      tone(ctx, effectsBus, 'sine', 988, at + 0.13, 0.07, 0.16);
+      return;
+    }
     const bells = [[660, 880], [587, 784], [698, 932], [523, 698]];
     const notes: Record<string, number[]> = {
       'fire.start': [220, 262], 'bomb.start': [82, 82, 82], 'release.up': [330, 440], 'release.down': [330, 247],
@@ -660,10 +713,10 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
     if (!ctx) return;
     filterHz = cutoffForWarmth(easedMood.warmth);
     musicColour?.frequency.setTargetAtTime(filterHz, ctx.currentTime, 0.15);
-    const kitStopped = tension || easedMood.tension > 0.2;
+    const kitStopped = urgent(threat) || easedMood.tension >= 0.8;
     const minute = inputs().minute;
-    hatBus?.gain.setTargetAtTime(kitStopped || isNight(minute) ? 0 : hatVelocityMultiplier(minute), ctx.currentTime, 0.08);
-    drumsBus?.gain.setTargetAtTime(kitStopped ? 0 : 1, ctx.currentTime, 0.08);
+    hatBus?.gain.setTargetAtTime(kitStopped || isNight(minute) ? 0 : hatVelocityMultiplier(minute) * (1 - 0.6 * easedMood.tension), ctx.currentTime, 0.08);
+    drumsBus?.gain.setTargetAtTime(kitStopped ? 0 : 1 - 0.45 * easedMood.tension, ctx.currentTime, 0.08);
     musicBus?.gain.setTargetAtTime((settings.music ?? 60) / 100 * dbToGain(-6 * easedMood.tension), ctx.currentTime, 0.1);
     for (const [filter, cutoff] of musicFilters) filter.frequency.setTargetAtTime(Math.min(cutoff, filterHz), ctx.currentTime, 0.15);
   }
@@ -757,11 +810,12 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
             }
           }
         }
-        if (!tension && easedMood.tension <= 0.2) {
+        if (!urgent(threat) && easedMood.tension < 0.8) {
           const drumLayer = layers.get('drums');
           const hatLayer = layers.get('hat');
           if (drumsBus && hatBus && ctx && (drumLayer?.to || hatLayer?.to)) {
             for (const hit of drumHitsFor(game.world.seed, phraseIndex, barIndex, Math.max(0.15, easedMood.energy))) {
+              if (easedMood.tension >= 0.3 && (hit.kind === 'ghost' || hit.kind === 'open')) continue;
               const layer = hit.kind === 'kick' || hit.kind === 'snare' ? drumLayer : hatLayer;
               if (!layer) continue;
               const fade = layer.from + (layer.to - layer.from) * hit.beat / 4;
@@ -866,6 +920,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
     },
     get chapter() { return chapter; },
     get tension() { return tension; },
+    get tensionLevel() { return threatLevel(threat); },
     get weatherKind() { return weatherKind; },
     get tempo() { return tempo; },
     get filterHz() { return filterHz; },

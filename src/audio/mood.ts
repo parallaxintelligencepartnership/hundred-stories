@@ -75,6 +75,8 @@ export function venueFillFor(rooms: Iterable<Pick<Room, 'kind' | 'occupancy' | '
 /** Thresholds define how much of the chapter's band plays at the current energy. */
 export function activeLayers(chapter: Chapter, energy: number, tension: number, weekend = false): Voice[] {
   return voicesFor(chapter, weekend).filter(voice =>
-    energy >= ENTRY_THRESHOLD[voice] && !(tension > 0.2 && (voice === 'drums' || voice === 'hat' || voice === 'kinetic')),
+    energy >= ENTRY_THRESHOLD[voice]
+      && !(tension > 0.2 && voice === 'kinetic')
+      && !(tension >= 0.8 && (voice === 'drums' || voice === 'hat')),
   );
 }
