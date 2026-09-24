@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Hundred Stories",
-  "version": "0.4.8",
+  "version": "0.4.9",
   "identifier": "xyz.hundredstories.desktop",
   "build": {
     "frontendDist": "../dist-app",
