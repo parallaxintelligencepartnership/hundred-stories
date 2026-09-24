@@ -78,3 +78,5 @@
 - 2026-09-24 | a room needs at least one tile of structure directly under it (above it for basements); one-room overhangs stay legal; demolishing something that is the only support is refused; existing towers are grandfathered | why: Matt, chained overhangs "wouldnt work in real life"
 - 2026-09-24 | no arrivals enter the tower while a fire is burning | why: Matt, people walking into a burning building is bad design
 - 2026-09-24 | leaderboards held: Game Center and Play Games are per-platform, web cannot join, one shared board needs a server | why: Matt agreed to hold
+- 2026-09-24 | this round adds a replayable build log in the save, accessibility inside the UI polish spec, and a daily tower as its own mode with its own save slot (never a toggle inside standard games) | why: Matt, "Add 1 2 and 3"
+- 2026-09-24 | player-facing text never says "seed" (the new-game field becomes "Tower code") and is US English everywhere (color, neighbor, license, center); code identifiers and comments are left alone | why: Matt, "humans dont talk like that" and "US English in game"
