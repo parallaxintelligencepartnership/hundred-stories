@@ -11,7 +11,7 @@ import type { Treatment, VenueKind } from './venue';
 
 type Ctx = CanvasRenderingContext2D;
 
-const INK = '#222222';
+export const INK = '#222222';
 const BASE = FLOOR_PX - SLAB_PX; // 66, the first row of the slab
 const TY = INTERIOR_TOP; // 22, the first free row under the windows
 
@@ -19,21 +19,21 @@ export function css(color: number): string {
   return `#${(color & 0xffffff).toString(16).padStart(6, '0')}`;
 }
 
-function scaleColour(color: number, f: number): number {
+export function scaleColour(color: number, f: number): number {
   const r = Math.min(255, Math.round(((color >> 16) & 255) * f));
   const g = Math.min(255, Math.round(((color >> 8) & 255) * f));
   const b = Math.min(255, Math.round((color & 255) * f));
   return (r << 16) | (g << 8) | b;
 }
 
-function mixColour(a: number, b: number, t: number): number {
+export function mixColour(a: number, b: number, t: number): number {
   const ch = (s: number): number => Math.round(((a >> s) & 255) + (((b >> s) & 255) - ((a >> s) & 255)) * t);
   return (ch(16) << 16) | (ch(8) << 8) | ch(0);
 }
 
 // ---------------------------------------------------------------- primitives
 
-function rrPath(ctx: Ctx, x: number, y: number, w: number, h: number, r: number): void {
+export function rrPath(ctx: Ctx, x: number, y: number, w: number, h: number, r: number): void {
   const rr = Math.max(0, Math.min(r, w / 2, h / 2));
   ctx.beginPath();
   ctx.moveTo(x + rr, y);
@@ -49,7 +49,7 @@ function rrPath(ctx: Ctx, x: number, y: number, w: number, h: number, r: number)
 }
 
 /** A filled rounded box with the 2 px dark outline: the unit most fixtures are built from. */
-function box(ctx: Ctx, x: number, y: number, w: number, h: number, fill: string | CanvasGradient, r = 1.5, line = 2): void {
+export function box(ctx: Ctx, x: number, y: number, w: number, h: number, fill: string | CanvasGradient, r = 1.5, line = 2): void {
   rrPath(ctx, x, y, w, h, r);
   ctx.fillStyle = fill;
   ctx.fill();
@@ -60,7 +60,7 @@ function box(ctx: Ctx, x: number, y: number, w: number, h: number, fill: string 
   }
 }
 
-function disc(ctx: Ctx, x: number, y: number, r: number, fill: string, line = 2): void {
+export function disc(ctx: Ctx, x: number, y: number, r: number, fill: string, line = 2): void {
   ctx.beginPath();
   ctx.arc(x, y, r, 0, Math.PI * 2);
   ctx.fillStyle = fill;
@@ -72,7 +72,7 @@ function disc(ctx: Ctx, x: number, y: number, r: number, fill: string, line = 2)
   }
 }
 
-function line(ctx: Ctx, pts: readonly (readonly [number, number])[], color = INK, width = 2): void {
+export function line(ctx: Ctx, pts: readonly (readonly [number, number])[], color = INK, width = 2): void {
   ctx.beginPath();
   pts.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
   ctx.strokeStyle = color;
@@ -82,7 +82,7 @@ function line(ctx: Ctx, pts: readonly (readonly [number, number])[], color = INK
   ctx.stroke();
 }
 
-function poly(ctx: Ctx, pts: readonly (readonly [number, number])[], fill: string, lineW = 2): void {
+export function poly(ctx: Ctx, pts: readonly (readonly [number, number])[], fill: string, lineW = 2): void {
   ctx.beginPath();
   pts.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
   ctx.closePath();
@@ -96,14 +96,14 @@ function poly(ctx: Ctx, pts: readonly (readonly [number, number])[], fill: strin
   }
 }
 
-function vgrad(ctx: Ctx, y0: number, y1: number, top: string, bottom: string): CanvasGradient {
+export function vgrad(ctx: Ctx, y0: number, y1: number, top: string, bottom: string): CanvasGradient {
   const g = ctx.createLinearGradient(0, y0, 0, y1);
   g.addColorStop(0, top);
   g.addColorStop(1, bottom);
   return g;
 }
 
-function plant(ctx: Ctx, x: number, by: number, big = false): void {
+export function plant(ctx: Ctx, x: number, by: number, big = false): void {
   const s = big ? 1.3 : 1;
   const leaf = '#2f7d3a';
   const light = '#4fa55a';
@@ -126,26 +126,26 @@ function plant(ctx: Ctx, x: number, by: number, big = false): void {
   poly(ctx, [[x - 6, by - 11], [x + 6, by - 11], [x + 4.5, by], [x - 4.5, by]], '#a4522c');
 }
 
-function pendant(ctx: Ctx, x: number, drop: number, shade: string, lit: boolean): void {
+export function pendant(ctx: Ctx, x: number, drop: number, shade: string, lit: boolean): void {
   line(ctx, [[x, 20], [x, TY + drop]], '#333a44', 1);
   poly(ctx, [[x - 5, TY + drop + 5], [x - 2, TY + drop], [x + 2, TY + drop], [x + 5, TY + drop + 5]], shade);
   if (lit) disc(ctx, x, TY + drop + 6, 1.5, '#fff3b0', 0);
 }
 
-function chair(ctx: Ctx, x: number, by: number, color: string, faceRight: boolean): void {
+export function chair(ctx: Ctx, x: number, by: number, color: string, faceRight: boolean): void {
   const back = faceRight ? x : x + 9;
   box(ctx, back - 1, by - 22, 3, 22, color, 1);
   box(ctx, x, by - 12, 10, 3, color, 1);
   line(ctx, [[faceRight ? x + 9 : x + 1, by - 9], [faceRight ? x + 9 : x + 1, by]], INK, 2);
 }
 
-function stool(ctx: Ctx, x: number, by: number, seat: string): void {
+export function stool(ctx: Ctx, x: number, by: number, seat: string): void {
   box(ctx, x - 4, by - 15, 8, 3, seat, 1.5);
   line(ctx, [[x - 3, by - 12], [x - 4, by]], INK, 1.5);
   line(ctx, [[x + 3, by - 12], [x + 4, by]], INK, 1.5);
 }
 
-function monitor(ctx: Ctx, x: number, y: number, w: number, h: number, glow: string, chart = false): void {
+export function monitor(ctx: Ctx, x: number, y: number, w: number, h: number, glow: string, chart = false): void {
   box(ctx, x, y, w, h, '#1f2733', 1);
   ctx.fillStyle = glow;
   ctx.fillRect(x + 2, y + 2, w - 4, h - 4);

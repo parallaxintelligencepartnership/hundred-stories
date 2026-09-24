@@ -5,9 +5,12 @@
 
 import { describe, expect, it } from 'vitest';
 import { Rectangle, Texture, type Renderer as PixiRenderer } from 'pixi.js';
-import { createArt, TEXTURE_CLASS, TEXTURE_SIZE, VENUE_SHELL } from '../../src/render/art';
+import { createArt, CROWD_COLS, CROWD_KINDS, CROWD_ROWS, CROWD_STRIP_H, TEXTURE_CLASS, TEXTURE_SIZE, VENUE_SHELL } from '../../src/render/art';
 import { FRAME } from '../../src/render/anim';
+import { MARK_H, MARK_W, PROP_KINDS, PROP_SIZE } from '../../src/render/figure';
+import { SIM_H, SIM_W } from '../../src/render/grid';
 import { VENUE_BAND } from '../../src/render/illustrated';
+import { ATLAS_BUDGET_PX, CROWD_EXTRA_SCALE } from '../../src/render/renderer';
 
 interface Baked {
   scaleMode: string;
@@ -127,5 +130,54 @@ describe('texture budget', () => {
     const again = art.sim('worker', 'calm', FRAME.stride, 0);
     expect(again).not.toBe(stale);
     expect(again.destroyed).toBe(false);
+  });
+});
+
+// Package 8b: crowd mode draws what people carry and their stress marks, from a strip at the
+// foot of the same atlas, so the particle container still draws from one source.
+describe('the crowd atlas', () => {
+  it('lays out one column group per wardrobe, so roles that dress alike share cells', () => {
+    const { art } = harness(1);
+    const atlas = art.crowd!()!;
+    const cell = (kind: Parameters<typeof atlas.frameOf>[0]): Rectangle => atlas.frameOf(kind, 3, FRAME.stand).frame;
+    expect(cell('resident').x).toBe(cell('visitor').x);
+    expect(cell('thief').x).toBe(cell('visitor').x);
+    expect(cell('guard').x).not.toBe(cell('worker').x);
+    expect(cell('collector').x).not.toBe(cell('staff').x);
+    expect(CROWD_KINDS).toHaveLength(6);
+  });
+
+  it('stays inside the atlas budget at a device pixel ratio of 2, strip included', () => {
+    const { canvases } = (() => {
+      const h = harness(2);
+      h.art.crowd!();
+      return h;
+    })();
+    const atlas = canvases[canvases.length - 1]!;
+    expect(atlas.width).toBe(CROWD_COLS * SIM_W * 2);
+    expect(atlas.width).toBeLessThanOrEqual(ATLAS_BUDGET_PX);
+    expect(atlas.height).toBe((CROWD_ROWS * SIM_H + CROWD_STRIP_H) * 2);
+    expect(atlas.height).toBeLessThanOrEqual(ATLAS_BUDGET_PX);
+  });
+
+  it('cuts every prop and both stress marks from the strip under the people', () => {
+    const { art } = harness(1);
+    const atlas = art.crowd!()!;
+    for (const prop of PROP_KINDS) {
+      const t = atlas.propOf!(prop);
+      expect(t.frame.y, prop).toBe(CROWD_ROWS * SIM_H);
+      expect([t.frame.width, t.frame.height], prop).toEqual([PROP_SIZE[prop].w, PROP_SIZE[prop].h]);
+      expect(t.source, prop).toBe(atlas.frameOf('worker', 0, FRAME.stand).source);
+    }
+    for (const mark of ['dot', 'bang'] as const) {
+      const t = atlas.markOf!(mark);
+      expect(t.frame.y, mark).toBe(CROWD_ROWS * SIM_H);
+      expect([t.frame.width, t.frame.height], mark).toEqual([MARK_W, MARK_H]);
+    }
+    expect(CROWD_STRIP_H).toBeGreaterThanOrEqual(Math.max(...PROP_KINDS.map((p) => PROP_SIZE[p].h), MARK_H));
+  });
+
+  it('draws them at three quarters of their size in crowd mode', () => {
+    expect(CROWD_EXTRA_SCALE).toBe(0.75);
   });
 });

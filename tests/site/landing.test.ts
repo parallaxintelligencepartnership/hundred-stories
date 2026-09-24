@@ -39,6 +39,14 @@ describe('landing page', () => {
     expect(landing).toContain('src="/src/site/theme-init.ts"');
   });
 
+  it('describes the illustrated cross section the game draws, not the old pixel art', () => {
+    expect(flat(landing)).toContain(
+      'Hundred Stories is a tower-building simulation shown as an illustrated cross section, where you can watch every tenant, shop and elevator car.',
+    );
+    expect(landing).not.toContain('pixel art');
+    expect(guide).not.toContain('pixel art');
+  });
+
   it('keeps the still hero image as the fallback', () => {
     expect(landing).toContain('id="hero-shot"');
     expect(landing).toContain('id="hero-view"');
@@ -95,9 +103,12 @@ describe('the page is the building in cross section', () => {
 
   it('gives the guide the same shell, numbered B1 upward', () => {
     expect(guide).toContain('<div class="underground">');
-    expect(guide.match(/<section class="floor guide"/g)).toHaveLength(8);
+    expect(guide.match(/<section class="floor guide"/g)).toHaveLength(15);
     expect(guide).toContain('<p class="floor-tag">B1 &middot; ROOMS</p>');
-    expect(guide).toContain('<p class="floor-tag">B8 &middot; CONTROLS</p>');
+    expect(guide).toContain('<p class="floor-tag">B15 &middot; CONTROLS</p>');
+    // Numbered in order, one floor each, with no gaps.
+    const tags = [...guide.matchAll(/<p class="floor-tag">B(\d+) &middot;/g)].map((m) => Number(m[1]));
+    expect(tags).toEqual(Array.from({ length: 15 }, (_, i) => i + 1));
     // Heading order survives the rebuild: one h1, then the topic h2s.
     expect(guide.match(/<h1>/g)).toHaveLength(1);
   });
@@ -113,8 +124,46 @@ describe('guide page', () => {
       'Stars',
       'Saving and exporting',
       'Controls',
+      'People and their stories',
+      'Weather',
+      'The VIP visit',
+      'Guards and the shop thief',
+      'Waste and collection',
+      'Milestones and the chronicle',
+      'Sound',
     ]) {
       expect(guide).toContain(`>${topic}</h2>`);
+    }
+  });
+
+  it('describes stress by the mark over a head, not by body colour', () => {
+    expect(flat(guide)).toContain(
+      'You can see it over their head. A calm person carries no mark. A stressed one shows a small pink dot, and one near the end of their patience a red exclamation mark.',
+    );
+    expect(guide).not.toContain('You can see it in their color');
+    expect(guide).not.toMatch(/turn pink, then red/);
+  });
+
+  it('covers what shipped with the stories: following, the VIP checklist, the thief, waste, the chronicle and the music slider', () => {
+    const text = flat(guide);
+    expect(text).toContain('Choose Follow on the card to keep up with someone. You can follow eight people at a time.');
+    expect(text).toContain('The Stories panel, opened from the menu, lists the people you follow');
+    expect(text).toContain('The weather can change every six hours: clear, overcast, rain or storm.');
+    expect(text).toContain('Weather stays outside. It never changes how the tower runs');
+    expect(text).toContain('a suite ready for them, the suite clean, an elevator that stops at the suite floor, and no fire or bomb in the tower.');
+    expect(text).toContain('A security office staffs six guards, half on the day shift and half on the night.');
+    expect(text).toContain('If the thief gets away, the tower loses $2,000 and the shop is left a mess.');
+    expect(text).toContain('The center staffs collection workers, two at first and more as the tower grows.');
+    expect(text).toContain('At Tower status the game writes the tower chronicle');
+    expect(text).toContain('Save as image keeps a copy on your device. Nothing is uploaded.');
+    expect(text).toContain('Three sliders set the music, the effects and the ambient sound.');
+  });
+
+  it('keeps the house style: no em dashes and no spaced hyphens as dashes', () => {
+    for (const page of [landing, guide]) {
+      const text = flat(page.slice(page.indexOf('<main>'), page.indexOf('</main>')));
+      expect(text).not.toContain('\u2014');
+      expect(text).not.toMatch(/ - /);
     }
   });
 

@@ -80,27 +80,37 @@ import {
 } from './anim';
 import { createCurb, lobbyDoors } from './curb';
 import { placePerson, type PersonSprites } from './person';
-import { bodyOf, LOOK_CODES, lookCode, MARK_H, MARK_W, markBottomAboveFeet, personLookCode, stressMarkOf, type StressMark } from './figure';
+import {
+  bodyOf,
+  LOOK_CODES,
+  lookCode,
+  MARK_H,
+  MARK_W,
+  markBottomAboveFeet,
+  PROP_SIZE,
+  personLookCode,
+  propPlacement,
+  stressMarkOf,
+  type PropKind,
+  type StressMark,
+} from './figure';
+import { INTERIORS, interiorOpen, interiorVariant } from './interiors';
 import { INTERIOR_TOP, WIN_SILL, WIN_TOP } from './grid';
 import { layerPlan, occupancyLevel, zoomTier, type LayerPlan, type ZoomTier } from './hierarchy';
 import {
   carIndicator,
-  closedBand,
   POOL_ALPHA,
   POOL_H,
   POOL_STEP,
   POOL_TINT,
   POOL_W,
-  RESTAURANT_PASS_W,
-  SHOP_COUNTER_W,
   SIGN_DARK_TINT,
   SIGN_GLOW_TINT,
   signBoard,
-  VENUE_BAND,
   type SignState,
 } from './illustrated';
 import { BLOCK, BLOCK_FILL_LIFT, BLOCK_OUTLINE, PALETTE } from './palette';
-import { isVenueKind, venueOpen, venueOf, type Venue, type VenueKind } from './venue';
+import { isVenueKind, venueOf, type Venue } from './venue';
 import { createBuildFx } from './buildfx';
 import { Motion, TELEPORT_TILES } from './interpolate';
 import { floorsWithPeople, LIGHT_ALPHA, lerpColor, lightBand, lightTintAt, windowStateOf, windowStatesFor, type WindowState } from './light';
@@ -228,6 +238,11 @@ const SIM_WIDTH_PX = SIM_W; // one tile wide, matching art.ts
 const SIM_HEIGHT_PX = SIM_H; // three tiles tall
 const PARTICLE_THRESHOLD = 500;
 const PARTICLE_RELEASE = 400; // hysteresis, so a crowd on the edge does not thrash
+/**
+ * Crowd mode draws props and stress marks too, at three quarters of their size (package 8b):
+ * they come from a strip in the crowd atlas, so they cost one small row of it and nothing else.
+ */
+export const CROWD_EXTRA_SCALE = 0.75;
 /** How long a mouse press may hold still and still count as a click. A finger gets no limit. */
 const CLICK_MS = 600;
 const FIRE_FLICKER_MS = 110;
@@ -246,14 +261,11 @@ const CABLE_COLOR = 0x3b3f47;
 const NO_FLOORS: ReadonlySet<number> = new Set<number>();
 
 /**
- * Lobby segments are one tile wide: alternating the variant per id would stripe the lobby
- * every tile, so narrow rooms pick their variant by x in long runs and a continuous lobby
- * reads as one room.
+ * Every room's shell is plain (package 8b): its furniture, signs, shutters and lighting are
+ * illustrated layers on top (interiors.ts), which pick their own variant (interiorVariant).
  */
-function roomVariant(room: Room): number {
-  // A venue's shell is plain: its fixtures, sign and lighting are illustrated layers on top.
-  if (isVenueKind(room.kind)) return VENUE_SHELL;
-  return room.width <= 2 ? Math.floor(room.x / 6) % 2 : room.id % 2;
+function roomVariant(_room: Room): number {
+  return VENUE_SHELL;
 }
 
 /**
@@ -276,7 +288,7 @@ export function bakeRoomStates(art: Art, world: World): number {
   return baked;
 }
 
-const SIM_KINDS: readonly SimKind[] = ['worker', 'resident', 'guest', 'shopper', 'diner', 'staff', 'visitor', 'vip'];
+const SIM_KINDS: readonly SimKind[] = ['worker', 'resident', 'guest', 'shopper', 'diner', 'staff', 'visitor', 'vip', 'guard', 'collector', 'thief'];
 
 /**
  * A numeric stand-in for a person sprite's `${kind}|${frame}|${look}` key, cheap to build every
@@ -385,11 +397,13 @@ interface SimEntry extends PersonSprites {
   markKind: StressMark;
 }
 
-/** A venue's illustrated layers over its shell, and the state they last showed. */
+/** A room's illustrated layers over its shell (interiors.ts), and the state they last showed. */
 interface VenueEntry {
-  kind: VenueKind;
+  kind: RoomKind;
   width: number;
-  venue: Venue;
+  floors: number;
+  /** The brand and treatment, for an office, shop or restaurant; null for every other kind. */
+  venue: Venue | null;
   fixtures: Sprite;
   sign: Sprite | null;
   signGlow: Sprite | null;
@@ -403,7 +417,15 @@ interface VenueEntry {
 }
 
 /** Which rooms sit people down or have them browse, for the activity pose. */
-const ACTIVITY: Partial<Record<RoomKind, Pose>> = { office: 'sit', restaurant: 'sit', fastFood: 'sit', shop: 'browse' };
+const ACTIVITY: Partial<Record<RoomKind, Pose>> = {
+  office: 'sit',
+  restaurant: 'sit',
+  fastFood: 'sit',
+  shop: 'browse',
+  condo: 'sit',
+  cinema: 'sit',
+  medical: 'sit',
+};
 
 /** The venue clock: closed-hours state is looked at again every this many game minutes. */
 const VENUE_CLOCK_MINUTES = 10;
@@ -584,6 +606,8 @@ function guardArt(primary: Art, backup: Art): Art {
   };
   const p = primary;
   if (p.venue) guarded.venue = extra('venue', p.venue);
+  if (p.interior) guarded.interior = extra('interior', p.interior);
+  if (p.shut) guarded.shut = extra('shut', p.shut);
   if (p.sign) guarded.sign = extra('sign', p.sign);
   if (p.closed) guarded.closed = extra('closed', p.closed);
   if (p.glow) guarded.glow = extra('glow', p.glow);
@@ -644,10 +668,14 @@ export function simIsVisible(sim: Sim): boolean {
 /** One sim in four gets a sprite. The simulation runs every sim; the screen shows a
  *  sample, so a full lobby reads as busy rather than as a swarm, and a player who is
  *  sensitive to motion is not looking at hundreds of walkers at once. Chosen by id so
- *  a sim is either always drawn or never drawn, no popping. */
+ *  a sim is either always drawn or never drawn, no popping. The tower's recurring
+ *  characters, few by nature, are always drawn: the guards at their posts, the collectors,
+ *  the VIP and the thief (package 8b). Housekeepers stay in the sample: a hotel's six would
+ *  cost more person textures than the budget has room for. */
 export const CROWD_ONE_IN = 4;
+export const ALWAYS_DRAWN: ReadonlySet<SimKind> = new Set<SimKind>(['guard', 'collector', 'vip', 'thief']);
 export function inCrowd(sim: Sim): boolean {
-  return sim.id % CROWD_ONE_IN === 0;
+  return sim.id % CROWD_ONE_IN === 0 || ALWAYS_DRAWN.has(sim.kind);
 }
 
 /** How far from the tap, in tiles, a sim still counts as the thing that was tapped. */
@@ -945,6 +973,9 @@ export async function createRenderer(
   let crowdAtlas: CrowdAtlas | null = null;
   let particleMode = false;
   const simParticles = new Map<Id, Particle>();
+  // What people carry and their stress marks, as particles from the atlas's strip, at CROWD_EXTRA_SCALE.
+  const propParticles = new Map<Id, Particle>();
+  const markParticles = new Map<Id, { particle: Particle; mark: 'dot' | 'bang' }>();
 
   function dropSimEntry(id: Id, entry: SimEntry): void {
     entry.node.destroy();
@@ -976,7 +1007,51 @@ export async function createRenderer(
     particles.destroy();
     particles = null;
     simParticles.clear();
+    propParticles.clear();
+    markParticles.clear();
     particleMode = false;
+  }
+
+  /**
+   * Crowd mode's prop and stress mark for one person, drawn from the atlas strip at
+   * CROWD_EXTRA_SCALE: the prop in the hand for the atlas frame shown, the mark over the head.
+   */
+  function syncCrowdExtras(id: Id, kind: SimKind, look: number, frame: PersonFrame, band: StressBand, x: number, y: number): void {
+    const container = particles;
+    const atlas = crowdAtlas;
+    if (!container || !atlas) return;
+    const atlasFrame = frame === FRAME.stride || frame === FRAME.strideMirrored ? FRAME.stride : FRAME.stand;
+    const place = atlas.propOf ? propPlacement(kind, look, atlasFrame) : null;
+    let prop = propParticles.get(id);
+    if (place && atlas.propOf) {
+      const size = PROP_SIZE[place.prop as PropKind];
+      if (!prop) {
+        prop = new Particle({ texture: atlas.propOf(place.prop), anchorX: 0.5, anchorY: 0.5, scaleX: CROWD_EXTRA_SCALE, scaleY: CROWD_EXTRA_SCALE });
+        propParticles.set(id, prop);
+        container.addParticle(prop);
+      }
+      prop.x = x - SIM_WIDTH_PX / 2 + place.x + size.w / 2;
+      prop.y = y - SIM_HEIGHT_PX + place.y + size.h / 2;
+    } else if (prop) {
+      container.removeParticle(prop);
+      propParticles.delete(id);
+    }
+    const mark = atlas.markOf ? stressMarkOf(band) : null;
+    let held = markParticles.get(id);
+    if (held && held.mark !== mark) {
+      container.removeParticle(held.particle);
+      markParticles.delete(id);
+      held = undefined;
+    }
+    if (mark && atlas.markOf) {
+      if (!held) {
+        held = { particle: new Particle({ texture: atlas.markOf(mark), anchorX: 0.5, anchorY: 1, scaleX: CROWD_EXTRA_SCALE, scaleY: CROWD_EXTRA_SCALE }), mark };
+        markParticles.set(id, held);
+        container.addParticle(held.particle);
+      }
+      held.particle.x = x;
+      held.particle.y = y - markBottomAboveFeet(look);
+    }
   }
 
   /** Target this key at (x, y) and return where to draw it at alpha. */
@@ -1080,7 +1155,7 @@ export async function createRenderer(
       let entry = roomSprites.get(room.id);
       const placed = !entry;
       if (!entry) {
-        const sprite = new Sprite(art.room(room.kind, room.width, room.height, variant, state));
+        const sprite = new Sprite(roomTexture(room, variant, state));
         (drawsOverRooms(room.kind) ? connectorLayer : roomLayer).addChild(sprite);
         entry = { node: sprite, kind: room.kind, width: room.width, height: room.height, variant, state };
         roomSprites.set(room.id, entry);
@@ -1091,7 +1166,7 @@ export async function createRenderer(
         entry.variant !== variant ||
         entry.state !== state
       ) {
-        entry.node.texture = art.room(room.kind, room.width, room.height, variant, state);
+        entry.node.texture = roomTexture(room, variant, state);
         entry.kind = room.kind;
         entry.width = room.width;
         entry.height = room.height;
@@ -1104,7 +1179,7 @@ export async function createRenderer(
       // A room the player just placed settles, puffs dust and flashes; one loaded with the
       // world, or drawn on the first pass, simply appears. Nothing under reduced motion.
       if (placed && animateNew && !reducedMotion) buildFx.start([entry.node, slab.node], px, py, pw, ph);
-      if (art.venue && isVenueKind(room.kind)) syncVenue(w, room, px, py);
+      if (art.interior && !INTERIORS[room.kind].overlay) syncVenue(w, room, px, py);
     }
 
     for (const [id, entry] of roomSprites) {
@@ -1113,7 +1188,8 @@ export async function createRenderer(
       roomSprites.delete(id);
     }
     for (const [id, entry] of venueSprites) {
-      if (seenRooms.has(id) && w.rooms.get(id)?.kind === entry.kind) continue;
+      const room = w.rooms.get(id);
+      if (seenRooms.has(id) && room?.kind === entry.kind && room.height === entry.floors) continue;
       dropVenue(id, entry);
     }
     veilDirty = true;
@@ -1143,31 +1219,47 @@ export async function createRenderer(
     venueSprites.delete(id);
   }
 
-  /** Make or move one venue's layers. Fixtures and sign follow its treatment and brand (venue.ts). */
+  /**
+   * A room's texture in the room layer: its structural shell, or for stairs and escalators, which
+   * draw over the rooms they cross, their illustrated flight (interiors.ts overlay kinds).
+   */
+  function roomTexture(room: Room, variant: number, state: WindowState): Texture {
+    if (art.interior && INTERIORS[room.kind].overlay) return art.interior(room.kind, room.width, room.height, 0);
+    return art.room(room.kind, room.width, room.height, variant, state);
+  }
+
+  /**
+   * Make or move one room's illustrated layers: fixtures in its variant (a venue's treatment and
+   * brand, venue.ts), a sign over a shop or restaurant, and the pools of light under the ceiling.
+   */
   function syncVenue(w: World, room: Room, px: number, py: number): void {
-    const kind = room.kind as VenueKind;
+    const kind = room.kind;
+    const spec = INTERIORS[kind];
     const width = room.width * TILE_PX;
     let entry = venueSprites.get(room.id);
-    if (entry && entry.width !== room.width) {
+    if (entry && (entry.width !== room.width || entry.floors !== room.height)) {
       dropVenue(room.id, entry);
       entry = undefined;
     }
-    if (!entry && art.venue) {
-      const venue = venueOf(w.seed, room.id, kind);
-      const fixtures = layerSprite(venueLayer, art.venue(kind, room.width, venue.treatment), 0, 0, width, VENUE_BAND.height);
+    if (!entry && art.interior) {
+      const venue = isVenueKind(kind) ? venueOf(w.seed, room.id, kind) : null;
+      const variant = venue ? venue.treatment : interiorVariant(w.seed, room);
+      const band = spec.band(room.height);
+      const fixtures = layerSprite(venueLayer, art.interior(kind, room.width, room.height, variant), 0, 0, width, band.height);
       let sign: Sprite | null = null;
       let signGlow: Sprite | null = null;
-      if (kind !== 'office' && art.sign) {
-        const board = signBoard(kind, width);
+      if (venue && kind !== 'office' && art.sign) {
+        const k = kind as 'shop' | 'restaurant';
+        const board = signBoard(k, width);
         if (art.glow) {
           signGlow = layerSprite(venueLayer, art.glow(), 0, 0, board.w + 24, board.h + 20);
           signGlow.tint = SIGN_GLOW_TINT;
           signGlow.visible = false;
         }
-        sign = layerSprite(venueLayer, art.sign(kind, room.width, venue.name, venue.accent), 0, 0, board.w, board.h);
+        sign = layerSprite(venueLayer, art.sign(k, room.width, venue.name, venue.accent), 0, 0, board.w, board.h);
       }
       let pool: Container | null = null;
-      if (art.glow) {
+      if (art.glow && spec.pools && room.height === 1) {
         // Warm pools of light under the ceiling: the shared glow, one every POOL_STEP px.
         pool = new Container();
         for (let x = POOL_STEP / 2; x < width; x += POOL_STEP) {
@@ -1178,57 +1270,62 @@ export async function createRenderer(
         pool.visible = false;
         venuePoolLayer.addChild(pool);
       }
-      // The shutter and the staff are made the first time they show (updateVenues).
-      entry = { kind, width: room.width, venue, fixtures, sign, signGlow, closed: null, pool, staff: null, state: '', x: px, y: py };
+      // The closed overlay and the post are made the first time they show (updateVenues).
+      entry = { kind, width: room.width, floors: room.height, venue, fixtures, sign, signGlow, closed: null, pool, staff: null, state: '', x: px, y: py };
       venueSprites.set(room.id, entry);
     }
     if (!entry) return;
     entry.x = px;
     entry.y = py;
-    entry.fixtures.position.set(px, py + VENUE_BAND.top);
-    entry.closed?.position.set(px, py + closedBand(kind).top);
+    entry.fixtures.position.set(px, py + spec.band(room.height).top);
+    if (entry.closed && spec.closed) {
+      const r = spec.closed.rect(width, room.height);
+      entry.closed.position.set(px + r.x, py + r.y);
+    }
     entry.pool?.position.set(px, py);
-    if (kind !== 'office') {
-      const board = signBoard(kind, width);
+    if (entry.sign || entry.signGlow) {
+      const board = signBoard(kind as 'shop' | 'restaurant', width);
       entry.sign?.position.set(px + board.x, py + board.y);
       entry.signGlow?.position.set(px + board.x - 12, py + board.y - 10);
-      const behind = kind === 'shop' ? width - 6 - SHOP_COUNTER_W / 2 : width - 6 - RESTAURANT_PASS_W / 2 - 12;
-      entry.staff?.position.set(px + behind, py + FLOOR_PX - SLAB_TOP_PX);
     }
+    if (entry.staff && spec.post) entry.staff.position.set(px + spec.post.x(width), py + room.height * FLOOR_PX - SLAB_TOP_PX);
   }
 
   /**
-   * Closed hours, lit signs, light pools and staff, from the schedules and the room's occupancy.
-   * Nothing is baked here: shutters, pools and glows show and hide, a closed sign is tinted.
+   * Closed hours, lit signs, light pools and the people at their posts, from the schedules and
+   * the room's occupancy. Nothing is baked here but the first showing of an overlay or a post:
+   * shutters, pools and glows show and hide, a closed sign is tinted.
    */
   function updateVenues(w: World, night: boolean): void {
     for (const [id, v] of venueSprites) {
       const room = w.rooms.get(id);
       if (!room) continue;
-      const open = venueOpen(v.kind, w.time.minute);
+      const spec = INTERIORS[v.kind];
+      const open = interiorOpen(v.kind, w.time.minute);
       const occupied = room.occupancy > 0;
       const key = `${open ? 1 : 0}${night ? 1 : 0}${occupied ? 1 : 0}`;
       if (key === v.state) continue;
       v.state = key;
-      const sign: SignState = !open ? 'dark' : night ? 'lit' : 'day';
-      if (!open && !v.closed && art.closed) {
-        const band = closedBand(v.kind);
-        v.closed = layerSprite(venueClosedLayer, art.closed(v.kind, room.width), v.x, v.y + band.top, v.width * TILE_PX, band.height);
+      const width = v.width * TILE_PX;
+      if (!open && !v.closed && spec.closed && art.shut) {
+        const r = spec.closed.rect(width, v.floors);
+        v.closed = layerSprite(venueClosedLayer, art.shut(v.kind, v.width, v.floors), v.x + r.x, v.y + r.y, r.w, r.h);
       }
-      if (open && occupied && !v.staff && v.kind !== 'office') {
-        // A clerk behind the counter, a cook at the pass: drawn behind the fixtures.
-        const width = v.width * TILE_PX;
+      const post = spec.post;
+      const manned = !!post && open && (post.when === 'open' || occupied);
+      if (manned && post && !v.staff) {
+        // A clerk behind the counter, a cook at the pass, a nurse, a guard at the desk: behind the fixtures.
         const look = lookCode(bodyOf(w.seed, id + 7919), (id * 5 + 3) % 8);
-        v.staff = new Sprite(art.sim('diner', 'calm', FRAME.stand, look));
+        v.staff = new Sprite(art.sim(post.kind, 'calm', FRAME.stand, look));
         v.staff.anchor.set(0.5, 1);
         v.staff.setSize(SIM_WIDTH_PX, SIM_HEIGHT_PX);
-        const behind = v.kind === 'shop' ? width - 6 - SHOP_COUNTER_W / 2 : width - 6 - RESTAURANT_PASS_W / 2 - 12;
-        v.staff.position.set(v.x + behind, v.y + FLOOR_PX - SLAB_TOP_PX);
+        v.staff.position.set(v.x + post.x(width), v.y + v.floors * FLOOR_PX - SLAB_TOP_PX);
         venueStaffLayer.addChild(v.staff);
       }
       if (v.closed) v.closed.visible = !open;
-      if (v.pool) v.pool.visible = night && occupied;
-      if (v.staff) v.staff.visible = open && occupied;
+      if (v.pool) v.pool.visible = night && (occupied || (manned && post?.when === 'open'));
+      if (v.staff) v.staff.visible = manned;
+      const sign: SignState = !open ? 'dark' : night ? 'lit' : 'day';
       if (v.sign) v.sign.tint = sign === 'dark' ? SIGN_DARK_TINT : 0xffffff;
       if (v.signGlow) v.signGlow.visible = sign === 'lit';
     }
@@ -1594,6 +1691,7 @@ export async function createRenderer(
         }
         particle.x = drawX;
         particle.y = drawY;
+        syncCrowdExtras(sim.id, kind, look, frame, band, drawX, drawY);
         continue;
       }
 
@@ -1626,6 +1724,12 @@ export async function createRenderer(
         simParticles.delete(id);
         simMotion.forget(id);
         simSteps.delete(id);
+        const prop = propParticles.get(id);
+        if (prop) particles.removeParticle(prop);
+        propParticles.delete(id);
+        const held = markParticles.get(id);
+        if (held) particles.removeParticle(held.particle);
+        markParticles.delete(id);
       }
     }
   }
@@ -2256,7 +2360,21 @@ export async function createRenderer(
     (window as unknown as { __hsRender?: unknown }).__hsRender = {
       renderer,
       stats: () => art.stats?.() ?? null,
-      drawn: () => ({ people: simSprites.size, commuters: curb.count(), venues: venueSprites.size }),
+      drawn: () => ({
+        people: simSprites.size,
+        commuters: curb.count(),
+        venues: venueSprites.size,
+        posts: [...venueSprites.values()].filter((v) => v.staff?.visible).map((v) => v.kind),
+      }),
+      // The drawn people with a stress mark, and a pick as if tapped: the close capture selects one.
+      stressed: () =>
+        [...lastWorld.sims.values()].flatMap((sim) => {
+          const band = stressBand(sim.stress);
+          return drawn(sim) && band !== 'calm' ? [{ id: sim.id, kind: sim.kind, floor: sim.pos.floor, x: sim.pos.x, band, state: sim.state }] : [];
+        }),
+      pick: (hit: PickHit) => {
+        for (const cb of pickListeners) cb(hit);
+      },
     };
   }
 
