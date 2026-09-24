@@ -71,3 +71,28 @@ describe('pickSimAt', () => {
     expect(pickSimAt(sims, 3, 120, false)?.id).toBe(5);
   });
 });
+
+// Package 8b: the tower's recurring characters are few, so each is always drawn and can always
+// be picked: the guards at their posts, the collectors, the VIP and the thief.
+describe('recurring characters', () => {
+  function person(id: number, kind: Sim['kind']): Sim {
+    return { id, kind, pos: { floor: 3, x: 120 }, inCarId: null, state: 'walking' } as unknown as Sim;
+  }
+
+  it('draws every guard, collector, VIP and thief, whatever their id', () => {
+    for (const kind of ['guard', 'collector', 'vip', 'thief'] as const) {
+      for (const id of [1, 2, 3, 5]) expect(inCrowd(person(id, kind)), `${kind} ${id}`).toBe(true);
+    }
+  });
+
+  it('keeps everyone else, housekeepers included, in the one in four sample', () => {
+    for (const kind of ['worker', 'staff', 'visitor', 'shopper'] as const) {
+      expect(inCrowd(person(1, kind)), kind).toBe(false);
+      expect(inCrowd(person(4, kind)), kind).toBe(true);
+    }
+  });
+
+  it('lets a tap pick a guard the sample would have skipped', () => {
+    expect(pickSimAt([person(7, 'guard')], 3, 120)?.id).toBe(7);
+  });
+});

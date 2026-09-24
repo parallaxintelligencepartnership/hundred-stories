@@ -204,14 +204,18 @@ interface Figure {
 }
 
 /**
- * What a person wears, as far as the baked texture cares: the four wardrobes. Everyone else's
+ * What a person wears, as far as the baked texture cares: the six wardrobes. Everyone else's
  * role shows in what they carry (PropKind), an overlay, so one baked person serves every role.
+ * The guard's navy uniform and cap and the collector's high visibility vest (package 8) are
+ * the two recurring characters who dress for the job; the thief dresses as any visitor.
  */
-export type Wardrobe = 'casual' | 'worker' | 'staff' | 'vip';
+export type Wardrobe = 'casual' | 'worker' | 'staff' | 'vip' | 'guard' | 'collector';
+export const WARDROBES: readonly Wardrobe[] = ['casual', 'worker', 'staff', 'vip', 'guard', 'collector'];
 export function wardrobeOf(kind: SimKind): Wardrobe {
-  return kind === 'worker' || kind === 'staff' || kind === 'vip' ? kind : 'casual';
+  return kind === 'worker' || kind === 'staff' || kind === 'vip' || kind === 'guard' || kind === 'collector' ? kind : 'casual';
 }
-const WARDROBE_KIND: Record<Wardrobe, SimKind> = { casual: 'visitor', worker: 'worker', staff: 'staff', vip: 'vip' };
+/** One kind that wears each wardrobe, for drawing the wardrobe on its own (the crowd atlas). */
+export const WARDROBE_KIND: Record<Wardrobe, SimKind> = { casual: 'visitor', worker: 'worker', staff: 'staff', vip: 'vip', guard: 'guard', collector: 'collector' };
 
 const SHOE = '#2a2a2e';
 const DEG = Math.PI / 180;
@@ -225,9 +229,9 @@ export function darker(css: string, f = 0.78): string {
   return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`;
 }
 
-/** A role's clothes over the look: office wear for workers, the uniform, the VIP's long coat. */
-function outfitFor(kind: SimKind, look: Look): Look & { apron: boolean; coat: string | null } {
-  const out = { ...look, apron: false, coat: null as string | null };
+/** A role's clothes over the look: office wear for workers, the uniforms, the VIP's long coat. */
+function outfitFor(kind: SimKind, look: Look): Look & { apron: boolean; coat: string | null; cap: string | null; vest: string | null } {
+  const out = { ...look, apron: false, coat: null as string | null, cap: null as string | null, vest: null as string | null };
   if (kind === 'worker' && (look.cut === 'tee' || look.cut === 'hoodie')) out.cut = 'jacket';
   if (kind === 'staff') {
     out.cut = 'sweater';
@@ -237,6 +241,22 @@ function outfitFor(kind: SimKind, look: Look): Look & { apron: boolean; coat: st
     out.apron = true;
   }
   if (kind === 'vip') out.coat = '#b8864b';
+  if (kind === 'guard') {
+    // Navy uniform, a peaked cap, a badge: readable as security at zoom 1.
+    out.cut = 'jacket';
+    out.top = '#22365a';
+    out.bottom = 'trousers';
+    out.bottomColour = '#1c2330';
+    out.cap = '#1a2742';
+  }
+  if (kind === 'collector') {
+    // Work shirt and trousers under a high visibility vest with two reflective bands.
+    out.cut = 'sweater';
+    out.top = '#4a5a48';
+    out.bottom = 'trousers';
+    out.bottomColour = '#2f3a44';
+    out.vest = '#f2c230';
+  }
   return out;
 }
 
@@ -403,6 +423,18 @@ export function figureOf(kind: SimKind, code: number, frame: PersonFrame): Figur
     }
     if (o.bottom === 'trousers' && o.cut !== 'dress') details.push({ t: 'line', pts: [[cx - hw / 2 + 0.4 + shift, hipY], [cx + hw / 2 - 0.4 + shift, hipY]], w: 0.9, c: darker(o.bottomColour, 0.6) });
   }
+  if (o.vest) {
+    const vy0 = shoulderY + 0.6;
+    const vy1 = hipY + 0.4;
+    details.push({ t: 'poly', pts: [[cx - sw / 2 + 0.9 + shift, vy0], [cx - 1 + shift, vy0], [cx - 1 + shift, vy1], [cx - hw / 2 + 0.4 + shift, vy1]], c: o.vest });
+    details.push({ t: 'poly', pts: [[cx + 1 + shift, vy0], [cx + sw / 2 - 0.9 + shift, vy0], [cx + hw / 2 - 0.4 + shift, vy1], [cx + 1 + shift, vy1]], c: o.vest });
+    const band = vy0 + (vy1 - vy0) * 0.62;
+    details.push({ t: 'line', pts: [[cx - hw / 2 + 0.8 + shift, band], [cx + hw / 2 - 0.8 + shift, band]], w: 0.9, c: '#e4e8ee' });
+  }
+  if (o.cap) {
+    // The badge on the chest, the guard's one bright point.
+    details.push({ t: 'dot', x: cx - sw / 4 + shift, y: shoulderY + 2.6, r: 0.8, c: '#e8c547' });
+  }
   if (o.apron) {
     details.push({ t: 'poly', pts: [[cx - hw / 2 + 0.8 + shift, shoulderY + 3.5], [cx + hw / 2 - 0.8 + shift, shoulderY + 3.5], [cx + hw / 2 + shift, hipY + 3.5], [cx - hw / 2 + shift, hipY + 3.5]], c: '#f4f1ea' });
   }
@@ -425,6 +457,14 @@ export function figureOf(kind: SimKind, code: number, frame: PersonFrame): Figur
       const ang = a * DEG + tilt;
       parts.push({ t: 'circle', x: hx + Math.cos(ang) * r * 0.8, y: hy + Math.sin(ang) * r * 0.8, r: r * 0.5, c: o.hairColour });
     }
+  }
+
+  // The guard's peaked cap, over the hair: a crown and a short brim to the front.
+  if (o.cap) {
+    parts.push({ t: 'seg', x: hx, y: hy - 0.4, r: r + 0.7, from: 180 * DEG + tilt, to: 360 * DEG + tilt, c: o.cap });
+    const [b0x, b0y] = rot(hx - r - 1.2, hy - 0.2);
+    const [b1x, b1y] = rot(hx + r + 1.2, hy - 0.2);
+    parts.push({ t: 'cap', pts: [[clampX(b0x, 0.6), b0y], [clampX(b1x, 0.6), b1y]], w: 1.1, c: darker(o.cap, 0.8) });
   }
 
   // The face: two eyes, looking where the pose looks.
@@ -472,10 +512,23 @@ export function figureOf(kind: SimKind, code: number, frame: PersonFrame): Figur
 
 // ---------------------------------------------------------------- props
 
-/** What a role carries: the worker's briefcase, the resident's bag, the guest's suitcase. */
-export type PropKind = 'briefcase' | 'handbag' | 'suitcase' | 'shopping' | 'camera';
-export const PROP_KINDS: readonly PropKind[] = ['briefcase', 'handbag', 'suitcase', 'shopping', 'camera'];
-const PROP_OF: Partial<Record<SimKind, PropKind>> = { worker: 'briefcase', resident: 'handbag', guest: 'suitcase', shopper: 'shopping', visitor: 'camera' };
+/**
+ * What a role carries: the worker's briefcase, the resident's bag, the guest's suitcase, the
+ * guard's radio, the collector's wheeled bin. The thief carries a visitor's camera: shown to the
+ * player as a visitor until the encounter is resolved (src/sim/types.ts).
+ */
+export type PropKind = 'briefcase' | 'handbag' | 'suitcase' | 'shopping' | 'camera' | 'radio' | 'bin';
+export const PROP_KINDS: readonly PropKind[] = ['briefcase', 'handbag', 'suitcase', 'shopping', 'camera', 'radio', 'bin'];
+const PROP_OF: Partial<Record<SimKind, PropKind>> = {
+  worker: 'briefcase',
+  resident: 'handbag',
+  guest: 'suitcase',
+  shopper: 'shopping',
+  visitor: 'camera',
+  thief: 'camera',
+  guard: 'radio',
+  collector: 'bin',
+};
 
 export function propOf(kind: SimKind): PropKind | null {
   return PROP_OF[kind] ?? null;
@@ -488,6 +541,8 @@ export const PROP_SIZE: Record<PropKind, { w: number; h: number }> = {
   suitcase: { w: 9, h: 18 },
   shopping: { w: 8, h: 10 },
   camera: { w: 8, h: 7 },
+  radio: { w: 6, h: 10 },
+  bin: { w: 11, h: 18 },
 };
 
 /**
@@ -519,7 +574,7 @@ function placeProp(prop: PropKind, kind: SimKind, code: number, frame: PersonFra
   const cx = SIM_W / 2;
   if (prop === 'camera') return { prop, x: cx - w / 2, y: f.shoulderY + 1.5 };
   if (frame === FRAME.sit) return { prop, x: SIM_W - 3, y: f.feetY + 1.4 - h };
-  if (prop === 'suitcase') return { prop, x: right[0] + 0.5, y: f.feetY + 1.4 - h };
+  if (prop === 'suitcase' || prop === 'bin') return { prop, x: right[0] + 0.5, y: f.feetY + 1.4 - h };
   const hand = frame === FRAME.glance ? left : right;
   return { prop, x: hand[0] - w / 2, y: hand[1] - 1 };
 }
@@ -570,6 +625,20 @@ export function drawProp(ctx: Ctx2D, prop: PropKind): void {
       rect(1.5, 1.5, 5, 4, '#2a2a2e');
       circlePath(ctx, 4, 3.5, 1.1);
       ctx.fillStyle = '#7fb6e0';
+      ctx.fill();
+      return;
+    case 'radio':
+      strap([[2.4, 3.2], [2.4, 1]], INK_CSS, 1);
+      rect(1.5, 3.2, 3.2, 5.6, '#2a2a2e');
+      strap([[2.4, 5], [3.8, 5]], '#5fd38a', 0.8);
+      return;
+    case 'bin':
+      // A wheeled waste bin: a lid, a green body tapering down, one wheel at the back.
+      rect(1.5, 3.5, 8, 11, '#2f7d3a');
+      strap([[1.2, 3.2], [9.8, 3.2]], INK_CSS, 1.6);
+      strap([[3, 7], [8, 7]], '#256630', 0.8);
+      circlePath(ctx, 8, 15.6, 1.6);
+      ctx.fillStyle = INK_CSS;
       ctx.fill();
       return;
   }

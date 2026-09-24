@@ -116,8 +116,10 @@ export function fitRect(sw: number, sh: number, bw: number, bh: number): { x: nu
 }
 
 /**
- * Draw a thumbnail into a tile's canvas at the device pixel ratio, nearest neighbour, fitted
- * and centred. False when there is nothing to draw with (no 2d context, as in the tests).
+ * Draw a thumbnail into a tile's canvas at the device pixel ratio, fitted and centred. The
+ * source is the illustrated room (package 8b), several times the tile's size, so it is scaled
+ * down smoothly rather than by dropping pixels. False when there is nothing to draw with (no 2d
+ * context, as in the tests).
  */
 export function paintThumbnail(target: HTMLCanvasElement, source: HTMLCanvasElement, dpr: number): boolean {
   const ratio = Math.max(1, Math.min(3, Math.round(dpr || 1)));
@@ -128,7 +130,8 @@ export function paintThumbnail(target: HTMLCanvasElement, source: HTMLCanvasElem
   if (target.width !== bw) target.width = bw;
   if (target.height !== bh) target.height = bh;
   context.clearRect(0, 0, bw, bh);
-  context.imageSmoothingEnabled = false;
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = 'high';
   const box = fitRect(source.width, source.height, bw, bh);
   if (box.w > 0) context.drawImage(source, box.x, box.y, box.w, box.h);
   return true;

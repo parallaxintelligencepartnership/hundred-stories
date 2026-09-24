@@ -25,7 +25,24 @@ import { LOOK_KEYS } from '../sim/identity';
 import type { RoomKind, ShaftKind, SimKind, StressBand } from '../sim/types';
 import { SHAFTS } from '../sim/rules';
 import { canonicalFrame, DOOR_FRAMES, doorFrameOf, FRAME, type PersonFrame } from './anim';
-import { BODY_COUNT, drawPerson, drawProp, drawStressMark, lookCode, MARK_H, MARK_W, personKey, PROP_SIZE, type Ctx2D, type PropKind } from './figure';
+import {
+  BODY_COUNT,
+  drawPerson,
+  drawProp,
+  drawStressMark,
+  lookCode,
+  MARK_H,
+  MARK_W,
+  personKey,
+  PROP_KINDS,
+  PROP_SIZE,
+  WARDROBE_KIND,
+  WARDROBES,
+  wardrobeOf,
+  type Ctx2D,
+  type PropKind,
+} from './figure';
+import { bakesAtStructuralScale, INTERIORS } from './interiors';
 import {
   closedBand,
   drawCarIllustrated,
@@ -100,6 +117,14 @@ export interface Art {
   // The illustrated extras. Optional, so an Art without them (the flat fallback) draws none.
   /** A venue's fixtures in one of its treatments, over its shell (VENUE_SHELL), VENUE_BAND tall. */
   venue?(kind: VenueKind, widthTiles: number, treatment: Treatment): Texture;
+  /**
+   * Any room's illustrated layer over its shell (interiors.ts INTERIORS): the rows its band
+   * covers, in `variant`. A venue's is the same texture as venue(). Stairs and escalators: the
+   * whole room, drawn in place of a structural texture.
+   */
+  interior?(kind: RoomKind, widthTiles: number, heightFloors: number, variant: number): Texture;
+  /** A room's closed-hours overlay, its closed rect's size (interiors.ts); a venue's is closed(). */
+  shut?(kind: RoomKind, widthTiles: number, heightFloors: number): Texture;
   /** A sign board with its brand, the board's size (illustrated.ts signBoard). */
   sign?(kind: 'shop' | 'restaurant', widthTiles: number, name: string, accent: number): Texture;
   /** The closed-hours shutter (shop) or drawn blinds (office, restaurant), closedBand tall. */
@@ -127,6 +152,10 @@ export interface Art {
 export interface CrowdAtlas {
   /** The atlas cell for a person: walk frames show the stride, every other frame stands. */
   frameOf(kind: SimKind, look: number, frame: PersonFrame): Texture;
+  /** A prop in the atlas's strip, so crowd mode can draw what people carry from the same source. */
+  propOf?(prop: PropKind): Texture;
+  /** A stress mark in the atlas's strip. */
+  markOf?(mark: 'dot' | 'bang'): Texture;
 }
 
 export interface TextureStats {
@@ -154,10 +183,15 @@ export const TEXTURE_CLASS = {
  */
 export const VENUE_SHELL = 2;
 
-/** The crowd atlas layout: every kind and look key across, every build by stand and stride down. */
-export const CROWD_KINDS: readonly SimKind[] = ['worker', 'resident', 'guest', 'shopper', 'diner', 'staff', 'visitor', 'vip'];
+/**
+ * The crowd atlas layout: every wardrobe and look key across (roles that dress alike share a
+ * column, as their textures do), every build by stand and stride down, then one strip of props
+ * and stress marks, CROWD_STRIP_H tall, one per 16 px cell.
+ */
+export const CROWD_KINDS: readonly SimKind[] = WARDROBES.map((w) => WARDROBE_KIND[w]);
 export const CROWD_COLS = CROWD_KINDS.length * LOOK_KEYS;
 export const CROWD_ROWS = BODY_COUNT * 2;
+export const CROWD_STRIP_H = 20;
 
 /** Which window band a kind has, for the far zoom veil over it. */
 export function hasWindowBand(kind: RoomKind): boolean {
@@ -1844,7 +1878,7 @@ export function createArt(renderer: Renderer, options: { createCanvas?: CanvasFa
    * An illustrated texture: drawn on an anti-aliased canvas at illustratedScale, sampled linear.
    * `originY` crops the top: the canvas starts that many logical px down the drawing.
    */
-  function paint(key: string, w: number, h: number, draw: (ctx: CanvasRenderingContext2D) => void, scale = illustratedScale, originY = 0): Texture {
+  function paint(key: string, w: number, h: number, draw: (ctx: CanvasRenderingContext2D) => void, scale = illustratedScale, originY = 0, originX = 0): Texture {
     const person = key.startsWith('person:');
     if (person) personUsed.set(key, now());
     const hit = cache.get(key);
@@ -1855,7 +1889,7 @@ export function createArt(renderer: Renderer, options: { createCanvas?: CanvasFa
     const ctx = canvas.getContext('2d') as CanvasRenderingContext2D | null;
     if (ctx) {
       ctx.scale(scale, scale);
-      ctx.translate(0, -originY);
+      ctx.translate(-originX, -originY);
       draw(ctx);
     }
     const texture = new Texture({
@@ -1870,14 +1904,29 @@ export function createArt(renderer: Renderer, options: { createCanvas?: CanvasFa
     return texture;
   }
 
+  function venueTexture(kind: VenueKind, widthTiles: number, treatment: Treatment): Texture {
+    const tiles = Math.max(1, Math.round(widthTiles));
+    const { width: w } = TEXTURE_SIZE.venue(tiles);
+    return paint(`venue:${kind}:${tiles}:${treatment}`, w, VENUE_BAND.height, (ctx) => drawVenueFixtures(ctx, kind, treatment, w), illustratedScale, VENUE_BAND.top);
+  }
+
+  function closedTexture(kind: VenueKind, widthTiles: number): Texture {
+    const tiles = Math.max(1, Math.round(widthTiles));
+    const { width: w } = TEXTURE_SIZE.venue(tiles);
+    const band = closedBand(kind);
+    return paint(`closed:${kind}:${tiles}`, w, band.height, (ctx) => drawClosed(ctx, kind, w), illustratedScale, band.top);
+  }
+
   return {
     room(kind, width, height, variant, state) {
       const tiles = Math.max(1, Math.round(width));
       const floors = Math.max(1, Math.round(height));
       const v = Math.round(variant) === VENUE_SHELL ? VENUE_SHELL : ((Math.round(variant) % 2) + 2) % 2;
+      // A shell with no window band looks the same at every hour: one texture serves them all.
+      const s = v === VENUE_SHELL && !hasWindowBand(kind) ? 'day' : state;
       const { width: w, height: h } = TEXTURE_SIZE.room(tiles, floors);
-      return bakeTarget(`room:${kind}:${tiles}:${floors}:${v}:${state}`, w, h, () =>
-        roomContainer(kind, tiles, floors, v, state),
+      return bakeTarget(`room:${kind}:${tiles}:${floors}:${v}:${s}`, w, h, () =>
+        roomContainer(kind, tiles, floors, v, s),
       );
     },
 
@@ -1917,10 +1966,38 @@ export function createArt(renderer: Renderer, options: { createCanvas?: CanvasFa
       return bake(`ghost:${tiles}:${floors}:${ok ? 1 : 0}`, w, h, (g) => drawGhost(g, w, h, ok));
     },
 
-    venue(kind, widthTiles, treatment) {
+    venue: venueTexture,
+
+    interior(kind, widthTiles, heightFloors, variant) {
+      const spec = INTERIORS[kind];
+      const n = Math.max(1, spec.variants);
+      const v = ((Math.trunc(variant) % n) + n) % n;
       const tiles = Math.max(1, Math.round(widthTiles));
-      const { width: w } = TEXTURE_SIZE.venue(tiles);
-      return paint(`venue:${kind}:${tiles}:${treatment}`, w, VENUE_BAND.height, (ctx) => drawVenueFixtures(ctx, kind, treatment, w), illustratedScale, VENUE_BAND.top);
+      if (kind === 'office' || kind === 'shop' || kind === 'restaurant') return venueTexture(kind, tiles, v as Treatment);
+      const floors = Math.max(1, Math.round(heightFloors));
+      const w = tiles * TILE_PX;
+      const band = spec.band(floors);
+      return paint(`interior:${kind}:${tiles}:${floors}:${v}`, w, band.height, (ctx) => {
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        spec.draw(ctx, w, floors, v);
+      }, bakesAtStructuralScale(kind, tiles) ? resolution : illustratedScale, band.top);
+    },
+
+    shut(kind, widthTiles, heightFloors) {
+      const tiles = Math.max(1, Math.round(widthTiles));
+      if (kind === 'office' || kind === 'shop' || kind === 'restaurant') return closedTexture(kind, tiles);
+      const closed = INTERIORS[kind].closed;
+      const floors = Math.max(1, Math.round(heightFloors));
+      const w = tiles * TILE_PX;
+      if (!closed) return Texture.EMPTY;
+      const r = closed.rect(w, floors);
+      return paint(`shut:${kind}:${tiles}:${floors}`, r.w, r.h, (ctx) => {
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        closed.draw(ctx, w, floors);
+        // Shutters, blinds, a curtain, a grille: flat slats, plenty sharp at the structural resolution.
+      }, resolution, r.y, r.x);
     },
 
     sign(kind, widthTiles, name, accent) {
@@ -1928,12 +2005,7 @@ export function createArt(renderer: Renderer, options: { createCanvas?: CanvasFa
       return paint(`sign:${kind}:${board.w}:${name}:${accent}`, board.w, board.h, (ctx) => drawSign(ctx, board, name, accent));
     },
 
-    closed(kind, widthTiles) {
-      const tiles = Math.max(1, Math.round(widthTiles));
-      const { width: w } = TEXTURE_SIZE.venue(tiles);
-      const band = closedBand(kind);
-      return paint(`closed:${kind}:${tiles}`, w, band.height, (ctx) => drawClosed(ctx, kind, w), illustratedScale, band.top);
-    },
+    closed: closedTexture,
 
     glow() {
       // A soft gradient with no edges: the structural resolution is plenty.
@@ -1965,10 +2037,12 @@ export function createArt(renderer: Renderer, options: { createCanvas?: CanvasFa
         // One canvas at the structural resolution: at crowd zoom a person is a few pixels tall.
         const cellW = SIM_W;
         const cellH = SIM_H;
+        const stripY = CROWD_ROWS * cellH;
+        const marks = ['dot', 'bang'] as const;
         const atlas = paint(
           'crowd',
           CROWD_COLS * cellW,
-          CROWD_ROWS * cellH,
+          stripY + CROWD_STRIP_H,
           (ctx) => {
             for (let k = 0; k < CROWD_KINDS.length; k++) {
               for (let l = 0; l < LOOK_KEYS; l++) {
@@ -1982,13 +2056,36 @@ export function createArt(renderer: Renderer, options: { createCanvas?: CanvasFa
                 }
               }
             }
+            // The strip: every prop, then the two stress marks, one to a cell.
+            PROP_KINDS.forEach((prop, i) => {
+              ctx.save();
+              ctx.translate(i * cellW, stripY);
+              drawProp(ctx as unknown as Ctx2D, prop);
+              ctx.restore();
+            });
+            marks.forEach((mark, i) => {
+              ctx.save();
+              ctx.translate((PROP_KINDS.length + i) * cellW, stripY);
+              drawStressMark(ctx as unknown as Ctx2D, mark);
+              ctx.restore();
+            });
           },
           resolution,
         );
+        const stripCell = (i: number, w: number, h: number): Texture =>
+          new Texture({ source: atlas.source, frame: new Rectangle(i * cellW, stripY, w, h) });
+        const propCells = new Map<PropKind, Texture>(PROP_KINDS.map((prop, i) => [prop, stripCell(i, PROP_SIZE[prop].w, PROP_SIZE[prop].h)]));
+        const markCells = new Map(marks.map((mark, i) => [mark, stripCell(PROP_KINDS.length + i, MARK_W, MARK_H)]));
         const cells = new Map<number, Texture>();
         crowdAtlas = {
+          propOf(prop) {
+            return propCells.get(prop) as Texture;
+          },
+          markOf(mark) {
+            return markCells.get(mark) as Texture;
+          },
           frameOf(kind, look, frame) {
-            const k = Math.max(0, CROWD_KINDS.indexOf(kind));
+            const k = Math.max(0, WARDROBES.indexOf(wardrobeOf(kind)));
             const codes = BODY_COUNT * LOOK_KEYS;
             const code = ((Math.trunc(look) % codes) + codes) % codes;
             const col = k * LOOK_KEYS + (code % LOOK_KEYS);

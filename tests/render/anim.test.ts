@@ -179,4 +179,11 @@ describe('poseOf: what a person is doing, from their state', () => {
     expect(poseOf(sim('inRoom'), false, 0, 'shop')).toBe('browse');
     expect(poseOf(sim('inRoom'), false, 0, 'hotelSingle')).toBe('still');
   });
+
+  it('sits at home on the sofa, in a cinema seat and in the medical waiting room (package 8b)', () => {
+    expect(poseOf(sim('inRoom'), false, 0, 'condo')).toBe('sit');
+    expect(poseOf(sim('inRoom'), false, 0, 'cinema')).toBe('sit');
+    expect(poseOf(sim('inRoom'), false, 0, 'medical')).toBe('sit');
+    expect(poseOf(sim('inRoom'), false, 0, 'security')).toBe('still');
+  });
 });

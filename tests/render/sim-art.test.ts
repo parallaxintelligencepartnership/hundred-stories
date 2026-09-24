@@ -155,3 +155,44 @@ describe('stress mark', () => {
     }
   });
 });
+
+describe('the recurring characters (package 8b)', () => {
+  it('dresses guards and collectors for the job, and the thief as any visitor', () => {
+    const code = lookCode(1, 3);
+    expect(wardrobeOf('guard')).toBe('guard');
+    expect(wardrobeOf('collector')).toBe('collector');
+    expect(wardrobeOf('thief')).toBe('casual');
+    expect(personKey('guard', FRAME.stand, code)).not.toBe(personKey('worker', FRAME.stand, code));
+    expect(personKey('collector', FRAME.stand, code)).not.toBe(personKey('staff', FRAME.stand, code));
+    // Until the encounter is resolved the thief is the same baked person a visitor would be.
+    expect(personKey('thief', FRAME.stand, code)).toBe(personKey('visitor', FRAME.stand, code));
+  });
+
+  it('gives the guard a radio, the collector a wheeled bin, the thief a visitor camera', () => {
+    expect(propOf('guard')).toBe('radio');
+    expect(propOf('collector')).toBe('bin');
+    expect(propOf('thief')).toBe(propOf('visitor'));
+  });
+
+  it('wheels the bin at the feet like a suitcase, and holds the radio in the hand', () => {
+    const code = lookCode(0, 0);
+    const bin = propPlacement('collector', code, FRAME.stand)!;
+    const suitcase = propPlacement('guest', code, FRAME.stand)!;
+    expect(bin.y + PROP_SIZE.bin.h).toBeCloseTo(suitcase.y + PROP_SIZE.suitcase.h, 5);
+    const radio = propPlacement('guard', code, FRAME.stand)!;
+    expect(radio.y + PROP_SIZE.radio.h).toBeLessThan(SIM_H - 4);
+  });
+
+  it('keeps the uniforms inside the person box', () => {
+    for (const kind of ['guard', 'collector'] as SimKind[]) {
+      for (let body = 0; body < BODY_COUNT; body++) {
+        for (const frame of FRAMES) {
+          const e = figureExtents(kind, lookCode(body, 2), frame);
+          expect(e.left, `${kind} ${body} ${frame}`).toBeGreaterThanOrEqual(-0.01);
+          expect(e.right, `${kind} ${body} ${frame}`).toBeLessThanOrEqual(SIM_W + 0.01);
+          expect(e.top, `${kind} ${body} ${frame}`).toBeGreaterThanOrEqual(0);
+        }
+      }
+    }
+  });
+});
