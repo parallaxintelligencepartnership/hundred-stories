@@ -48,8 +48,9 @@ describe('connectors rise into empty air', () => {
     const world = makeWorld();
     lobby(world, 100, 10);
     expect(buildShaft(world, 'standard', 104, 1, 5)).toEqual(OK);
-    // Floor 2 has no room at all, only the shaft: the shaft tiles are floor enough.
-    expect(build(world, 'office', 3, 120)).toEqual(OK);
+    // Floor 2 has no room at all, only the shaft: the shaft tiles are floor enough for a room
+    // that stands over at least one of them (100 to 108 covers the shaft's 104 to 107).
+    expect(build(world, 'office', 3, 100)).toEqual(OK);
   });
 
   it('still refuses a shaft on floor 0 and outside the tower', () => {

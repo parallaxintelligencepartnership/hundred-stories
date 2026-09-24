@@ -40,7 +40,8 @@ function guards(world: World): Sim[] {
 /**
  * A three star tower: a lobby, one standard shaft from the lobby to `top` with `cars` cars,
  * an office at x 100 on every floor from 2 to `top` for support, a shop on `shopFloor` right of
- * the shaft and a security office on `officeFloor` left of it (none when null).
+ * the shaft and a security office on `officeFloor` left of it (none when null). The shop and the
+ * security office start at x 152, over the shaft's last two columns, so the shaft holds them up.
  */
 function tower(opts: { top: number; cars: number; shopFloor: number; officeFloor: number | null; seed?: number }): World {
   const world = createWorld(opts.seed ?? 11);
@@ -48,8 +49,8 @@ function tower(opts: { top: number; cars: number; shopFloor: number; officeFloor
   world.cash = 500_000_000;
   const script = [...lobbyRun(90, 200), { kind: 'shaft.build' as const, shaft: 'standard' as const, x: SHAFT_X, floorMin: 1, floorMax: opts.top }];
   for (let f = 2; f <= opts.top; f++) script.push(...buildRow('office', f, [100]));
-  script.push({ kind: 'build', room: 'shop', floor: opts.shopFloor, x: 160 });
-  if (opts.officeFloor !== null) script.push({ kind: 'build', room: 'security', floor: opts.officeFloor, x: 160 + (opts.officeFloor === opts.shopFloor ? 20 : 0) });
+  script.push({ kind: 'build', room: 'shop', floor: opts.shopFloor, x: 152 });
+  if (opts.officeFloor !== null) script.push({ kind: 'build', room: 'security', floor: opts.officeFloor, x: 152 + (opts.officeFloor === opts.shopFloor ? 20 : 0) });
   buildTower(world, script);
   const shaft = onlyShaft(world);
   for (let c = 1; c < opts.cars; c++) buildTower(world, [{ kind: 'shaft.addCar', shaftId: shaft.id }]);
@@ -339,6 +340,8 @@ describe('below three stars', () => {
 
   it('a two star tower hashes exactly as it did before guards and thieves', () => {
     // Recorded on 778dee5, before this package: a two star tower without a security office.
+    // Re-recorded when rooms had to rest on structure: the same tower with the condo and hotel
+    // rooms moved onto the floor 3 offices hashes 3bdf4126 on 778dee5 too.
     const world = createWorld(2024);
     world.stars = 2;
     world.cash = 50_000_000;
@@ -347,13 +350,14 @@ describe('below three stars', () => {
       { kind: 'shaft.build', shaft: 'standard', x: 150, floorMin: 1, floorMax: 8 },
       ...buildRow('office', 2, [100, 109, 118, 127, 160, 169]),
       ...buildRow('office', 3, [100, 109, 118, 127]),
-      ...buildRow('condo', 4, [100, 160]),
-      ...buildRow('hotelSingle', 5, [100, 104, 108, 112, 160, 164]),
+      // The second condo and the hotel rooms over it sit on the floor 3 offices, not in the air.
+      ...buildRow('condo', 4, [100, 116]),
+      ...buildRow('hotelSingle', 5, [100, 104, 108, 112, 116, 120]),
       ...buildRow('housekeeping', 6, [100]),
       ...buildRow('fastFood', 7, [100]),
     ]);
     resetEventTestHooks();
     runDays(world, 4);
-    expect(hashWorld(world)).toBe('a057d37a');
+    expect(hashWorld(world)).toBe('3bdf4126');
   });
 });

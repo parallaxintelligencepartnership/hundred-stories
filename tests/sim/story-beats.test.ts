@@ -91,8 +91,9 @@ describe('recording', () => {
 
   it('keeps a busy tower bounded: one unfollowed long wait per gap, followed people in full', () => {
     const world = createWorld(31);
+    world.cash = 5_000_000; // the lobby runs under every office, which the starting cash does not cover
     buildTower(world, [
-      ...lobbyRun(140, 160),
+      ...lobbyRun(94, 187), // under every office, so each one rests on it
       { kind: 'shaft.build', shaft: 'standard', x: 148, floorMin: 1, floorMax: 4 },
       ...buildRow('office', 2, [94, 103, 112, 121, 130, 139, 152, 161, 170, 179]),
       ...buildRow('office', 3, [94, 103, 112, 121, 130, 139, 152, 161, 170, 179]),
@@ -129,7 +130,7 @@ describe('recording', () => {
 
   it('a followed worker records trip.arrived on reaching the office', () => {
     const world = createWorld(5);
-    buildTower(world, [...lobbyRun(140, 160), { kind: 'shaft.build', shaft: 'standard', x: 148, floorMin: 1, floorMax: 3 }, ...buildRow('office', 2, [130])]);
+    buildTower(world, [...lobbyRun(130, 160), { kind: 'shaft.build', shaft: 'standard', x: 148, floorMin: 1, floorMax: 3 }, ...buildRow('office', 2, [130])]);
     at(world, 8, 1);
     const office = [...world.rooms.values()].find((r) => r.kind === 'office') as Room;
     const id = office.tenants[0] as number;

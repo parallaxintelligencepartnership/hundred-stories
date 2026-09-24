@@ -2,8 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { applyCommand, canBuild, canBuildShaft, canExtendShaft } from '../../src/sim/build';
 import { LIMITS, ROOMS, SHAFTS } from '../../src/sim/rules';
-import { createWorld } from '../../src/sim/world';
-import type { CommandResult, RoomKind, Shaft, ShaftKind, Star, World } from '../../src/sim/types';
+import { deserialize, serialize } from '../../src/sim/save';
+import { addRoom, allocId, createWorld } from '../../src/sim/world';
+import type { CommandResult, Room, RoomKind, Shaft, ShaftKind, Star, World } from '../../src/sim/types';
 
 // economy.ts is still a stub, so the tests run against a minimal spend:
 // it deducts the amount and refuses when the world cannot afford it.
@@ -159,22 +160,23 @@ describe('build: sky lobby', () => {
   it('builds a sky lobby on a listed floor with a three floor footprint', () => {
     const world = makeWorld(8_000_000, 3);
     lobby(world);
-    for (let f = 2; f <= 15; f++) expect(build(world, 'office', f, 100)).toEqual(OK);
-    expect(build(world, 'skyLobby', 15, 200)).toEqual(OK);
+    for (let f = 2; f <= 14; f++) expect(build(world, 'office', f, 100)).toEqual(OK);
+    // over the floor 14 office, so it rests on it
+    expect(build(world, 'skyLobby', 15, 104)).toEqual(OK);
     const sky = [...world.rooms.values()].find((r) => r.kind === 'skyLobby');
     expect(sky?.height).toBe(3);
     for (const f of [15, 16, 17]) {
       expect(world.floorIndex.rooms.get(f)?.some((r) => r.id === sky?.id)).toBe(true);
     }
     // the middle of the footprint is occupied
-    expect(reasonOf(canBuild(world, 'office', 16, 200))).toBe('Something is already there.');
+    expect(reasonOf(canBuild(world, 'office', 16, 100))).toBe('Something is already there.');
   });
 });
 
 describe('build: overlap and support', () => {
   it('refuses a room that overlaps another room', () => {
     const world = makeWorld();
-    lobby(world);
+    lobby(world, 100, 12); // under both offices
     expect(build(world, 'office', 2, 100)).toEqual(OK);
     expect(canBuild(world, 'office', 2, 104)).toEqual({ ok: false, reason: 'Something is already there.' });
     expect(build(world, 'office', 2, 109)).toEqual(OK);
@@ -182,7 +184,7 @@ describe('build: overlap and support', () => {
 
   it('lets a room stand over an elevator shaft column', () => {
     const world = makeWorld();
-    lobby(world);
+    lobby(world, 100, 63); // on to 162, under every office tried here
     expect(buildShaft(world, 'standard', 150, 1, 10)).toEqual(OK);
     expect(build(world, 'office', 2, 100)).toEqual(OK);
     // the office runs from 146 to 154, across the shaft columns 150 to 153: the shaft overlays it
@@ -194,7 +196,7 @@ describe('build: overlap and support', () => {
 
   it('lets a shaft pass through rooms of every kind', () => {
     const world = makeWorld();
-    lobby(world);
+    lobby(world, 100, 30); // on to 129, under the stairs at 120
     expect(build(world, 'office', 2, 100)).toEqual(OK);
     // the office on floor 2 is no obstacle, and neither are the lobby segments on floor 1
     expect(canBuildShaft(world, 'standard', 102, 1, 6).ok).toBe(true);
@@ -272,8 +274,8 @@ describe('build: overlap and support', () => {
     const world = makeWorld();
     lobby(world);
     expect(canBuild(world, 'office', 3, 200)).toEqual({ ok: false, reason: 'Build a floor below this one first.' });
-    expect(build(world, 'office', 2, 200)).toEqual(OK);
-    expect(build(world, 'office', 3, 200)).toEqual(OK);
+    expect(build(world, 'office', 2, 100)).toEqual(OK);
+    expect(build(world, 'office', 3, 100)).toEqual(OK);
   });
 
   it('needs the ground lobby for floor -1 and a room above for deeper floors', () => {
@@ -738,5 +740,126 @@ describe('canExtendShaft', () => {
     expect(canExtendShaft(world, shaft.id, 1, 16)).toEqual(OK);
     expect(shaft.floorMax).toBe(10);
     expect(world.log.length).toBe(lines);
+  });
+});
+
+describe('structural support', () => {
+  const AIR = 'Nothing is holding this up. Build under it first.';
+
+  function roomAtSpot(world: World, kind: RoomKind, floor: number, x: number): Room {
+    const room = [...world.rooms.values()].find((r) => r.kind === kind && r.floor === floor && r.x === x);
+    if (!room) throw new Error(`${kind} on ${floor} at ${x} missing`);
+    return room;
+  }
+
+  it('lets one room overhang the floor below, and refuses a second room out on the air', () => {
+    const world = makeWorld();
+    lobby(world, 100, 6); // floor 1 tiles 100 to 105
+    // the office runs 104 to 112: two tiles over the lobby, the rest overhangs
+    expect(build(world, 'office', 2, 104)).toEqual(OK);
+    // 113 to 121 has nothing at all under it on floor 1
+    expect(canBuild(world, 'office', 2, 113)).toEqual({ ok: false, reason: AIR });
+    expect(build(world, 'office', 2, 113)).toEqual({ ok: false, reason: AIR });
+    expect(world.rooms.size).toBe(7);
+    // floor 3 over the overhanging office is held up by it
+    expect(build(world, 'office', 3, 110)).toEqual(OK);
+  });
+
+  it('counts an elevator shaft passing the floor below as support', () => {
+    const world = makeWorld();
+    lobby(world, 100, 6);
+    expect(buildShaft(world, 'standard', 200, 1, 6)).toEqual(OK);
+    expect(build(world, 'office', 2, 100)).toEqual(OK);
+    // 196 to 204 overlaps the shaft column 200 to 203 on floor 1
+    expect(build(world, 'office', 2, 196)).toEqual(OK);
+    expect(canBuild(world, 'office', 2, 250)).toEqual({ ok: false, reason: AIR });
+  });
+
+  it('checks a multi floor room under its bottom floor', () => {
+    const world = makeWorld(8_000_000, 3);
+    lobby(world, 100, 6);
+    expect(build(world, 'office', 2, 100)).toEqual(OK);
+    // a party hall on floors 3 and 4 over the office is fine; one off to the side is not
+    expect(build(world, 'partyHall', 3, 100)).toEqual(OK);
+    expect(canBuild(world, 'partyHall', 3, 200)).toEqual({ ok: false, reason: AIR });
+  });
+
+  it('refuses a demolition that would strand a room above, and allows it once that room is gone', () => {
+    const world = makeWorld();
+    lobby(world, 100, 6);
+    expect(build(world, 'office', 2, 100)).toEqual(OK);
+    expect(build(world, 'office', 3, 100)).toEqual(OK);
+    const lower = roomAtSpot(world, 'office', 2, 100);
+    const upper = roomAtSpot(world, 'office', 3, 100);
+    const refused = { ok: false, reason: 'Something above rests on this. Remove that first.' };
+    expect(applyCommand(world, { kind: 'demolish', roomId: lower.id })).toEqual(refused);
+    expect(world.rooms.has(lower.id)).toBe(true);
+    // one of six lobby tiles can go: the office still has five under it
+    const lobbyTile = roomAtSpot(world, 'lobby', 1, 100);
+    expect(applyCommand(world, { kind: 'demolish', roomId: lobbyTile.id })).toEqual(OK);
+    expect(applyCommand(world, { kind: 'demolish', roomId: upper.id })).toEqual(OK);
+    expect(applyCommand(world, { kind: 'demolish', roomId: lower.id })).toEqual(OK);
+  });
+
+  it('refuses to demolish a shaft that is the only thing holding a room up', () => {
+    const world = makeWorld();
+    lobby(world, 100, 6);
+    expect(buildShaft(world, 'standard', 200, 1, 6)).toEqual(OK);
+    expect(build(world, 'office', 2, 100)).toEqual(OK);
+    expect(build(world, 'office', 2, 196)).toEqual(OK);
+    const shaft = onlyShaft(world);
+    expect(applyCommand(world, { kind: 'shaft.demolish', shaftId: shaft.id })).toEqual({
+      ok: false,
+      reason: 'Something above rests on this. Remove that first.',
+    });
+    expect(world.shafts.has(shaft.id)).toBe(true);
+  });
+
+  it('mirrors the rule underground: deeper floors hang from the structure above', () => {
+    const world = makeWorld(8_000_000, 3);
+    lobby(world, 100, 6);
+    // basement 1 keeps the lobby rule: any ground lobby will do, wherever it is
+    expect(build(world, 'parkingSpace', -1, 200)).toEqual(OK);
+    expect(build(world, 'parkingSpace', -2, 202)).toEqual(OK); // 202 to 205 under 200 to 203
+    expect(canBuild(world, 'parkingSpace', -2, 250)).toEqual({ ok: false, reason: AIR });
+    const upper = roomAtSpot(world, 'parkingSpace', -1, 200);
+    expect(applyCommand(world, { kind: 'demolish', roomId: upper.id })).toEqual({
+      ok: false,
+      reason: 'Something below rests on this. Remove that first.',
+    });
+  });
+
+  it('loads a save whose structure already breaks the rule, keeps it, and still lets it be demolished', () => {
+    const world = makeWorld();
+    lobby(world, 100, 6);
+    // an office hanging in the air, placed directly as an older build would have left it
+    const floating: Room = {
+      id: allocId(world),
+      kind: 'office',
+      floor: 2,
+      x: 300,
+      width: ROOMS.office.width,
+      height: 1,
+      eval: 1,
+      tenants: [],
+      occupancy: 0,
+      builtAtMinute: 0,
+      vacant: true,
+      dirty: false,
+      infested: false,
+      lowEvalSinceMinute: null,
+      onFire: false,
+      rent: 100,
+    };
+    addRoom(world, floating);
+    const loaded = deserialize(serialize(world));
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) return;
+    expect(loaded.world.rooms.get(floating.id)?.x).toBe(300);
+    expect(loaded.world.rooms.size).toBe(7);
+    // the old floating office blocks no demolition, and can itself be removed
+    const lobbyTile = roomAtSpot(loaded.world, 'lobby', 1, 105);
+    expect(applyCommand(loaded.world, { kind: 'demolish', roomId: lobbyTile.id })).toEqual(OK);
+    expect(applyCommand(loaded.world, { kind: 'demolish', roomId: floating.id })).toEqual(OK);
   });
 });

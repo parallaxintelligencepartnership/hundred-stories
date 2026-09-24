@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { applyCommand } from '../../src/sim/build';
 import { EVENT_TEST_HOOKS, resetEventTestHooks, startFire, startVip } from '../../src/sim/events';
 import { vipArrivalHour, vipPreference, VIP_PREFERENCES } from '../../src/sim/identity';
-import { EVENTS } from '../../src/sim/rules';
+import { EVENTS, ROOMS } from '../../src/sim/rules';
 import { deserialize, hashWorld, serialize } from '../../src/sim/save';
 import { personCard } from '../../src/sim/story';
 import { tick } from '../../src/sim/tick';
@@ -20,8 +20,12 @@ import { atOnDay, buildRow, buildTower, lobbyRun, onlyShaft, roomsMatching, runM
 type Visit = Extract<ActiveEvent, { kind: 'vip' }>;
 
 const SHAFT_X = 150;
-/** Right of the shaft, clear of the offices' noise on floors 2 and 4. */
-const SUITE_X = 160;
+/**
+ * Right of the shaft, clear of the offices' noise on floors 2 and 4. It starts over the shaft's
+ * last two columns, so the shaft holds it up.
+ */
+const SUITE_X = 152;
+const OFFICE_XS = [100, 109, 118, 127];
 
 function visitOf(world: World): Visit | undefined {
   return world.events.find((e): e is Visit => e.kind === 'vip');
@@ -36,6 +40,8 @@ function suiteOf(world: World): Room {
 /**
  * A small, well run tower: a lobby, one shaft with `cars` cars from the lobby to floor `top`,
  * four offices on floor 2 (or on `officeFloors`) left of the shaft and the suite on floor 3.
+ * Offices above floor 3 go in after the suite; with no offices on floor 3, only the ones over
+ * the suite have something under them, so only those are built.
  */
 function tower(opts: { cars: number; top: number; officeFloors?: number[]; suiteX?: number }): World {
   const world = createWorld(7);
@@ -45,11 +51,15 @@ function tower(opts: { cars: number; top: number; officeFloors?: number[]; suite
   buildTower(world, [
     ...lobbyRun(90, 170),
     { kind: 'shaft.build', shaft: 'standard', x: SHAFT_X, floorMin: 1, floorMax: opts.top },
-    ...floors.flatMap((f) => buildRow('office', f, [100, 109, 118, 127])),
+    ...floors.filter((f) => f <= 3).flatMap((f) => buildRow('office', f, OFFICE_XS)),
   ]);
   const shaft = onlyShaft(world);
   for (let c = 1; c < opts.cars; c++) buildTower(world, [{ kind: 'shaft.addCar', shaftId: shaft.id }]);
-  buildTower(world, [{ kind: 'build', room: 'hotelSuite', floor: 3, x: opts.suiteX ?? SUITE_X }]);
+  const suiteX = opts.suiteX ?? SUITE_X;
+  buildTower(world, [{ kind: 'build', room: 'hotelSuite', floor: 3, x: suiteX }]);
+  const overSuite = OFFICE_XS.filter((x) => x < suiteX + ROOMS.hotelSuite.width && suiteX < x + ROOMS.office.width);
+  const upperXs = floors.includes(3) ? OFFICE_XS : overSuite;
+  buildTower(world, floors.filter((f) => f > 3).flatMap((f) => buildRow('office', f, upperXs)));
   return world;
 }
 
@@ -132,7 +142,8 @@ describe('the VIP journey', () => {
   });
 
   it('one car in a crowded morning rates poor, and the breakdown names the wait', () => {
-    const floors = [2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+    // Floor 3 carries offices too, so the floors above have something under them.
+    const floors = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
     const world = tower({ cars: 1, top: 15, officeFloors: floors });
     EVENT_TEST_HOOKS.chance.vip = 0;
     // The VIP walks in on the hour their identity picks. Book one whose hour is 08:00, so they

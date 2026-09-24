@@ -98,7 +98,9 @@ export function buildDemoWorld(): World {
   world.time.minute = 8 * 60;
   world.cash = 2_000_000;
 
-  for (let x = 100; x <= 140; x++) makeRoom(world, 'lobby', 1, x, 0);
+  // The lobby runs on under the right hand offices (to x 178), so every room rests on
+  // structure, as the build rules require of a player's tower.
+  for (let x = 100; x <= 178; x++) makeRoom(world, 'lobby', 1, x, 0);
 
   for (const floor of [2, 3]) {
     for (const x of [100, 110, 120, 130, 160, 170]) makeRoom(world, 'office', floor, x, 6);

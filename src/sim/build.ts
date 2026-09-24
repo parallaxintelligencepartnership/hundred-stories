@@ -200,6 +200,76 @@ function hasSupport(world: World, floor: number): boolean {
   return floorIsBuilt(world, floor + 1);
 }
 
+/** Leave these out when asking what holds a footprint up: the room or shaft about to go. */
+interface Without {
+  roomId?: number;
+  shaftId?: number;
+}
+
+/**
+ * The floor a footprint rests on: the one under its bottom floor above ground, the one over its
+ * top floor underground. Null when it stands on the ground (floor 1) or hangs from the ground
+ * lobby (a basement whose top floor is -1), which the lobby rule covers instead.
+ */
+function restingFloor(floor: number, height: number): number | null {
+  if (floor >= 1) return floor === 1 ? null : floor - 1;
+  const top = floor + height - 1;
+  return top === -1 ? null : top + 1;
+}
+
+/**
+ * Structure directly under (or, underground, directly over) at least one tile of this footprint:
+ * a room of any kind, a lobby segment, or an elevator shaft passing that floor. A one-room
+ * overhang is fine; a room with nothing at all beneath it is not.
+ */
+function restsOnStructure(
+  world: World,
+  floor: number,
+  height: number,
+  x: number,
+  width: number,
+  without: Without = {},
+): boolean {
+  if (floor === 1) return true;
+  const top = floor + height - 1;
+  if (floor < 0 && top === -1) {
+    return roomsOnFloor(world, 1).some((r) => r.kind === 'lobby' && r.id !== without.roomId);
+  }
+  const under = restingFloor(floor, height);
+  if (under === null) return true;
+  for (const room of roomsOnFloor(world, under)) {
+    if (room.id === without.roomId) continue;
+    if (overlapsX(x, width, room.x, room.width)) return true;
+  }
+  for (const shaft of world.shafts.values()) {
+    if (shaft.id === without.shaftId) continue;
+    if (under < shaft.floorMin || under > shaft.floorMax) continue;
+    if (overlapsX(x, width, shaft.x, shaft.width)) return true;
+  }
+  return false;
+}
+
+/** Does this room rest on structure today? The same test a new build must pass. */
+export function isHeldUp(world: World, room: Room): boolean {
+  return restsOnStructure(world, room.floor, room.height, room.x, room.width);
+}
+
+/**
+ * Taking this room or shaft away would leave something with nothing holding it up. Only a room
+ * that rests on it today can be stranded, so a grandfathered room already hanging in the air
+ * never blocks a demolition. Shafts need no support and are never stranded.
+ */
+function strandsSomething(world: World, without: Without): CommandResult | null {
+  for (const room of world.rooms.values()) {
+    if (room.id === without.roomId) continue;
+    if (!restsOnStructure(world, room.floor, room.height, room.x, room.width)) continue;
+    if (restsOnStructure(world, room.floor, room.height, room.x, room.width, without)) continue;
+    const side = room.floor > 0 ? 'above' : 'below';
+    return no(`Something ${side} rests on this. Remove that first.`);
+  }
+  return null;
+}
+
 function isExpressStop(floor: number): boolean {
   return floor === 1 || floor < 0 || LIMITS.skyLobbyFloors.includes(floor);
 }
@@ -295,6 +365,9 @@ export function canBuild(world: World, kind: RoomKind, floor: number, x: number)
   }
 
   if (!hasSupport(world, floor)) return no('Build a floor below this one first.');
+  if (!restsOnStructure(world, floor, rule.height, x, rule.width)) {
+    return no('Nothing is holding this up. Build under it first.');
+  }
 
   if (roomInTheWay(world, kind, floors, x, rule.width, floor)) return no('Something is already there.');
   // A room may stand over an elevator's column; another connector may not.
@@ -363,6 +436,8 @@ function doDemolish(world: World, roomId: number): CommandResult {
   const room = world.rooms.get(roomId);
   if (!room) return no('There is nothing to demolish.');
   if (room.occupancy > 0) return no('People are inside.');
+  const stranded = strandsSomething(world, { roomId: room.id });
+  if (stranded) return stranded;
 
   // Story: every followed tenant gets their closing beat; the rest of the room shares one.
   let roomBeat = false;
@@ -441,6 +516,8 @@ function doDemolishShaft(world: World, shaftId: number): CommandResult {
   if (shaft.cars.some((car) => car.passengers.length > 0)) {
     return no('Wait until the cars are empty.');
   }
+  const stranded = strandsSomething(world, { shaftId: shaft.id });
+  if (stranded) return stranded;
   removeShaft(world, shaft.id);
   const name = SHAFTS[shaft.kind].label.toLowerCase();
   log(world, `Demolished the ${name} at ${floorName(shaft.floorMin)}.`);
