@@ -103,7 +103,6 @@ straight off the bind mount. Verify both pages with
 App-level rollback beyond one release: redeploy from the previous git tag
 (`git checkout <tag> && deploy/deploy.sh`).
 
-Save format: the same warning as in `cloudflare-pages.md` applies here. `html.prev` from before
-0.5.0 reads save formats 1 to 5 only; swapping it back refuses every 0.5.0 tower as unreadable
-(kept under `localStorage` `hs.save.unreadable`) and starts players fresh. Roll forward instead.
-
+Save format: 0.5.0 still writes format 5 (one optional field older builds ignore), so swapping
+`html.prev` back keeps every tower. A release that raises the format number must not ship until
+the rollback target reads it.

@@ -66,14 +66,11 @@ npx wrangler rollback
 
 `wrangler rollback` reverts to the previous version.
 
-Save format warning (since 0.5.0, 2026-09-25): 0.5.0 writes save format 6. The previous release,
-0.4.10 (`ship-2026-09-24b`), reads formats 1 to 5 only. If you roll back to it, every returning
-player's tower is refused as unreadable: the old build keeps the bytes under `localStorage`
-key `hs.save.unreadable`, starts a new tower and writes that new tower over the slot. Prefer
-rolling forward with a fix. If a rollback is unavoidable, tell players how to get the tower back:
-open the browser's storage inspector, copy the `hs.save.unreadable` value into a text file, and
-use "Open a saved file" once 0.5.0 or later is live again. Any future release that raises the
-save format inherits this note; the rollback target must read the current format.
+Save format (checked at the 0.5.0 closeout, 2026-09-25): 0.5.0 still writes save format 5, with one
+optional field (the cockroach spread timer) that older builds ignore, so a rollback to 0.4.10 loads
+every tower; only that timer resets. Keep it that way: a release that raises the format number
+must not ship until the rollback target reads the new format, or players who are rolled back lose
+their tower.
 
 ## Where the headers live
 
