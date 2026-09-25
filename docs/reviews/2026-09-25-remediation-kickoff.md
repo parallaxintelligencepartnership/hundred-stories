@@ -37,3 +37,4 @@ This note is for the session that runs the fix wave. Matt's words on 2026-09-25:
 - Matt's rule recorded in DECISIONS.md: no finding stays open at ship at any severity; device-step items get a fix and a test and close on that; verification-only findings get their probe run before the ship.
 - The built site served by the deploy nginx.conf in a container on pi2 mounts the game under the live CSP with no Refused or unsafe-eval console lines.
 - In flight: P8 (nine test guards with mutation proofs), the real-browser probe for line 294 and the phone-width News screenshot for line 354, both on pi2.
+- Done, 2026-09-25 evening: 0.5.0 shipped from main at 6027d25, tag ship-2026-09-25; the closing note is docs/reviews/2026-09-25-remediation-closing.md.
