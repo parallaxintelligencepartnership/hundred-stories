@@ -773,7 +773,7 @@ button.hs-readout:hover {
   --r-press: calc(var(--touch) / 2 - 2px);
   min-height: calc(var(--touch) + 8px);
   min-width: calc(var(--touch) + 8px);
-  padding: 0 18px 0 16px;
+  padding: 0 14px 0 12px;
 }
 
 .hs-round:hover {
@@ -825,9 +825,10 @@ button.hs-readout:hover {
   z-index: 3;
   /* Under the strip, whatever height it wrapped to. The fallback is the unwrapped strip. */
   top: calc(var(--top-actual, calc(var(--top-h) + var(--safe-top))) + var(--gap-float));
-  bottom: calc(var(--edge) + var(--safe-bottom));
   left: calc(var(--edge) + var(--safe-left));
   width: var(--palette-w);
+  /* As tall as its tabs and tiles, never past the bottom edge: the tower shows under it. */
+  max-height: calc(100% - var(--top-actual, calc(var(--top-h) + var(--safe-top))) - var(--gap-float) - var(--edge) - var(--safe-bottom));
   display: grid;
   grid-template-columns: var(--rail-w) minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr);
@@ -2683,12 +2684,16 @@ button.hs-news-toast {
 .hs-view-chip {
   position: absolute;
   top: calc(100% + var(--gap-float));
-  left: 0;
+  /* Centred under the bar on a wide screen, clear of the dock on the left and the card on the
+     right; a phone puts it on the left (below). */
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100% - 2 * (max(var(--palette-w), var(--panel-w)) + var(--gap-float)));
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 10px;
-  max-width: min(640px, 100%);
   min-height: var(--touch);
   padding: 0 4px 0 14px;
   background: var(--glass);
@@ -2975,6 +2980,15 @@ button.hs-news-toast {
     height: 26px;
   }
 
+  .hs-build-fab .hs-build-fab-close,
+  .hs-build-fab[aria-expanded='true'] .hs-build-fab-open {
+    display: none;
+  }
+
+  .hs-build-fab[aria-expanded='true'] .hs-build-fab-close {
+    display: block;
+  }
+
   .hs-build-fab-label {
     position: absolute;
     width: 1px;
@@ -3075,6 +3089,7 @@ button.hs-news-toast {
     touch-action: pan-x;
     overscroll-behavior: contain;
     scroll-snap-type: x proximity;
+    scroll-padding-inline: 12px;
   }
 
   .hs-build-items .hs-tool {
@@ -3167,6 +3182,9 @@ button.hs-news-toast {
 
   /* The chip under the bar leaves the map its corner. */
   .hs-view-chip {
+    left: 0;
+    transform: none;
+    width: auto;
     max-width: calc(100% - 80px);
     padding-left: 12px;
   }

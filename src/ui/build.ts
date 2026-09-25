@@ -113,7 +113,12 @@ export function createBuildDock(options: BuildDockOptions): BuildDock {
   fab.type = 'button';
   fab.setAttribute('aria-label', 'Build');
   fab.title = 'Build';
-  fab.append(icon('build', 'hs-icon hs-build-fab-icon') as unknown as HTMLElement, el('span', 'hs-build-fab-label', 'Build'));
+  // The hammer while shut, an x while the sheet is open (ui.css swaps them on aria-expanded).
+  fab.append(
+    icon('build', 'hs-icon hs-build-fab-icon hs-build-fab-open') as unknown as HTMLElement,
+    icon('close', 'hs-icon hs-build-fab-icon hs-build-fab-close') as unknown as HTMLElement,
+    el('span', 'hs-build-fab-label', 'Build'),
+  );
   fab.addEventListener('click', () => {
     const wasOpen = sheet === 'row' || sheet === 'full';
     setSheet(sheetAfterFab(sheet));
