@@ -42,16 +42,22 @@ export interface PaletteParts {
   toggle: HTMLButtonElement;
   current: HTMLSpanElement;
   chevron: HTMLSpanElement;
+  /** The category tabs, one per group, in GROUPS order. */
+  tabList: HTMLDivElement;
+  tabs: HTMLButtonElement[];
+  /** The group titles and the tiles, which the dock shows one category of at a time. */
+  items: HTMLDivElement;
+  titles: HTMLElement[];
 }
 
-export const GROUPS: { title: string; source: 'rooms' | 'shafts' | 'tools'; group?: string }[] = [
-  { title: 'Structure', source: 'rooms', group: 'structure' },
-  { title: 'Elevators', source: 'shafts' },
-  { title: 'Homes', source: 'rooms', group: 'residential' },
-  { title: 'Hotel', source: 'rooms', group: 'hotel' },
-  { title: 'Shops and fun', source: 'rooms', group: 'commercial' },
-  { title: 'Services', source: 'rooms', group: 'services' },
-  { title: 'Tools', source: 'tools' },
+export const GROUPS: { title: string; source: 'rooms' | 'shafts' | 'tools'; group?: string; icon: IconName }[] = [
+  { title: 'Structure', source: 'rooms', group: 'structure', icon: 'structure' },
+  { title: 'Elevators', source: 'shafts', icon: 'elevator' },
+  { title: 'Homes', source: 'rooms', group: 'residential', icon: 'home' },
+  { title: 'Hotel', source: 'rooms', group: 'hotel', icon: 'hotel' },
+  { title: 'Shops and fun', source: 'rooms', group: 'commercial', icon: 'shop' },
+  { title: 'Services', source: 'rooms', group: 'services', icon: 'services' },
+  { title: 'Tools', source: 'tools', icon: 'tools' },
 ];
 
 export function sameTool(a: Tool, b: Tool): boolean {
@@ -138,28 +144,59 @@ export function paintThumbnail(target: HTMLCanvasElement, source: HTMLCanvasElem
 }
 
 /**
- * Fill the palette: a header row that folds the board away, then a group title and a tile per
- * tool. The header is the whole board when it is collapsed, so it carries the tool in hand.
+ * Fill the palette: a header row that folds the board down to its icons, the category tabs,
+ * then a group title and a picture-first tile per tool. The header carries the tool in hand.
  */
-export function buildPalette(palette: HTMLElement, onPick: (row: PaletteRow) => void, onToggle: () => void): PaletteParts {
+export function buildPalette(
+  palette: HTMLElement,
+  onPick: (row: PaletteRow) => void,
+  onToggle: () => void,
+  onTab: (group: number) => void = () => {},
+): PaletteParts {
   const current = el('span', 'hs-palette-current');
   const chevron = el('span', 'hs-palette-chevron', '▾');
   chevron.setAttribute('aria-hidden', 'true');
   const toggle = el('button', 'hs-palette-toggle');
   toggle.type = 'button';
   toggle.addEventListener('click', onToggle);
-  toggle.replaceChildren(el('span', 'hs-palette-title', 'Build'), current, chevron);
+  const buildIcon = icon('build', 'hs-icon hs-palette-icon') as unknown as HTMLElement;
+  toggle.replaceChildren(buildIcon, el('span', 'hs-palette-title', 'Build'), current, chevron);
   toggle.setAttribute('aria-expanded', 'true');
   toggle.title = 'Show or hide the build tools';
   palette.append(toggle);
 
+  // The category tabs: an icon each, the name beside it where there is room and always in the
+  // aria-label. Every tab takes Tab, so a keyboard reaches each one without arrow keys.
+  const tabList = el('div', 'hs-build-tabs');
+  tabList.setAttribute('role', 'tablist');
+  tabList.setAttribute('aria-label', 'Build categories');
+  const tabs = GROUPS.map((group, groupIndex) => {
+    const tab = el('button', 'hs-build-tab');
+    tab.type = 'button';
+    tab.setAttribute('role', 'tab');
+    tab.setAttribute('aria-selected', groupIndex === 0 ? 'true' : 'false');
+    tab.setAttribute('aria-label', group.title);
+    tab.title = `${group.title} (key ${groupIndex + 1})`;
+    tab.dataset['group'] = String(groupIndex);
+    tab.append(icon(group.icon, 'hs-icon hs-build-tab-icon') as unknown as HTMLElement, el('span', 'hs-build-tab-label', group.title));
+    tab.addEventListener('click', () => onTab(groupIndex));
+    tabList.append(tab);
+    return tab;
+  });
+  palette.append(tabList);
+
+  const items = el('div', 'hs-build-items');
+  palette.append(items);
+  const titles: HTMLElement[] = [];
   const rows: PaletteRow[] = [];
   GROUPS.forEach((group, groupIndex) => {
     const title = el('h2', 'hs-group-title');
     const number = el('span', 'hs-group-key', String(groupIndex + 1));
     number.setAttribute('aria-hidden', 'true');
     title.append(number, el('span', 'hs-group-name', group.title));
-    palette.append(title);
+    title.dataset['group'] = String(groupIndex);
+    titles.push(title);
+    items.append(title);
     const specs: RowSpec[] = [];
     if (group.source === 'rooms') {
       for (const kind of Object.keys(ROOMS) as RoomKind[]) {
@@ -177,9 +214,9 @@ export function buildPalette(palette: HTMLElement, onPick: (row: PaletteRow) => 
       specs.push({ label: 'Look', footprint: 'Shows what you click', price: null, star: 1, tool: { kind: 'query' }, kind: null, glyph: 'query' });
     }
     const letters = assignLetters(specs.map((spec) => spec.label));
-    specs.forEach((spec, i) => rows.push(addRow(palette, spec, groupIndex, letters[i] ?? '', onPick)));
+    specs.forEach((spec, i) => rows.push(addRow(items, spec, groupIndex, letters[i] ?? '', onPick)));
   });
-  return { rows, toggle, current, chevron };
+  return { rows, toggle, current, chevron, tabList, tabs, items, titles };
 }
 
 interface RowSpec {
@@ -192,25 +229,42 @@ interface RowSpec {
   glyph: IconName | null;
 }
 
-function addRow(palette: HTMLElement, spec: RowSpec, group: number, letter: string, onPick: (row: PaletteRow) => void): PaletteRow {
+function addRow(host: HTMLElement, spec: RowSpec, group: number, letter: string, onPick: (row: PaletteRow) => void): PaletteRow {
   const { label, footprint, price, star, tool, kind, glyph } = spec;
   const node = el('button', 'hs-tool');
   node.type = 'button';
   node.setAttribute('aria-pressed', 'false');
 
+  node.dataset['group'] = String(group);
+
+  // Picture first: the art (or the tool's icon), and on it, while locked, a lock and the stars
+  // it needs. The words say the same in the cost line, so the badge is hidden from a reader.
+  const pic = el('span', 'hs-tool-pic');
+  pic.setAttribute('aria-hidden', 'true');
   let thumb: HTMLCanvasElement | null = null;
   if (kind) {
     thumb = el('canvas', 'hs-tool-thumb');
     thumb.setAttribute('aria-hidden', 'true');
     thumb.width = THUMB_W;
     thumb.height = THUMB_H;
-    node.append(thumb);
+    pic.append(thumb);
   } else {
     const box = el('span', 'hs-tool-thumb is-icon');
     box.setAttribute('aria-hidden', 'true');
     if (glyph) box.append(icon(glyph, 'hs-tool-icon') as unknown as HTMLElement);
-    node.append(box);
+    pic.append(box);
   }
+  const lock = el('span', 'hs-tool-lock');
+  // The count is drawn from the attribute (ui.css), so the tile's own text stays its name first.
+  const count = el('span', 'hs-tool-lock-count');
+  count.dataset['stars'] = String(star);
+  lock.append(
+    icon('lock', 'hs-icon hs-tool-lock-icon') as unknown as HTMLElement,
+    count,
+    icon('star', 'hs-icon hs-tool-lock-star') as unknown as HTMLElement,
+  );
+  pic.append(lock);
+  node.append(pic);
 
   const text = el('span', 'hs-tool-text');
   text.append(el('span', 'hs-tool-name', label), el('span', 'hs-tool-footprint', footprint));
@@ -230,7 +284,7 @@ function addRow(palette: HTMLElement, spec: RowSpec, group: number, letter: stri
     node.append(key);
     node.setAttribute('aria-keyshortcuts', `${group + 1} ${letter}`);
   }
-  palette.append(node);
+  host.append(node);
 
   const row: PaletteRow = { node, thumb, cost, short, progress, progressFill, tool, star, label, price, kind, group, letter };
   node.addEventListener('click', () => onPick(row));

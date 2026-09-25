@@ -9,6 +9,8 @@ export type GameEvent =
   | { kind: 'log'; entry: LogEntry }
   /** A build command the sim accepted. */
   | { kind: 'build'; command: Command['kind'] }
+  /** A command the sim refused (the haptics' double tap). */
+  | { kind: 'refused'; command: Command['kind'] }
   /** The clock crossed into a new quarter, when office rent is paid. */
   | { kind: 'rentDay' }
   /** The star rating moved. */

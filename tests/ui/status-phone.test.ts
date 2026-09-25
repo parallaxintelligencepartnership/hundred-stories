@@ -1,6 +1,7 @@
-// The top bar at phone width (390 px): the glass pill of cash, people, stars, the clock and the
-// weather is one row, the whole first row; the speed pill, Share and Menu sit on the right
-// under it, and the View choice under them until it moves to its own popover. The fake DOM has
+// The top bar at phone width (390 px): two rows. The glass pill of cash, people, stars, the
+// clock and the weather is the whole first row; the speed pill, Views, Share and Menu sit on the
+// right of the second, every one a 44 px target. The active view's chip hangs under the bar,
+// out of its flow. The fake DOM has
 // no layout, so the placement is read from the shell's DOM order and from the phone block of
 // ui.css, which is what puts each group on its row.
 import { readFileSync } from 'node:fs';
@@ -105,7 +106,7 @@ describe('top bar at phone width', () => {
   it('keeps the pill one row, the whole first row: cash, people, stars, then the clock with the weather', () => {
     const root = mount(12 * 60 + 59 + 2 * 1440); // 12:59 PM, the widest time
     const top = find(root, 'hs-top');
-    const [pill, views, actions] = top.children as [FakeElement, FakeElement, FakeElement];
+    const [pill, actions, chip] = top.children as [FakeElement, FakeElement, FakeElement];
     expect(has(pill, 'hs-status-pill')).toBe(true);
     expect(pill.getAttribute('role')).toBe('group');
     expect(pill.getAttribute('aria-label')).toBe('Your tower');
@@ -116,12 +117,15 @@ describe('top bar at phone width', () => {
       'hs-status-clock',
     ]);
     expect(rule(wide(), '.hs-status-pill')['flex-wrap']).toBe('nowrap');
-    // Row one is the pill alone; the controls and the View choice come after it.
+    // Row one is the pill alone; the controls are row two, and nothing else is in the flow: the
+    // chip is placed under the bar, so the bar is two rows with or without a view on.
     expect(rule(phoneBlock(), '.hs-status-pill').flex).toBe('1 1 100%');
     expect(has(actions, 'hs-top-actions')).toBe(true);
-    expect(has(views, 'hs-top-views')).toBe(true);
     expect(rule(phoneBlock(), '.hs-top-actions').order).toBe('2');
-    expect(rule(phoneBlock(), '.hs-top-views').order).toBe('3');
+    expect(has(chip, 'hs-view-chip')).toBe(true);
+    expect(rule(wide(), '.hs-view-chip').position).toBe('absolute');
+    expect(top.children).toHaveLength(3);
+    expect(css).not.toMatch(/hs-top-views/);
 
     // The day line is hidden on a phone and lives in the tooltip instead.
     const clock = find(pill, 'hs-status-clock');
@@ -211,6 +215,28 @@ describe('top bar at phone width', () => {
     expect(rule(phoneBlock(), '.hs-round .hs-btn-label').display).toBe('none');
     expect(rule(wide(), '.hs-icon-btn')['min-width']).toBe('var(--touch)');
     expect(rule(wide(), '.hs-icon-btn')['min-height']).toBe('var(--touch)');
-    expect(css).toMatch(/--touch: 44px;/);
+    expect(css).toMatch(/--touch: calc\(44px \* var\(--ui-scale\)\);/);
+    expect(css).toMatch(/:root \{\s*(\/\*[\s\S]*?\*\/\s*)?--ui-scale: 1;/);
+  });
+
+  it('fits row two at 390 px: the speed pill, Views, Share and Menu, all 44 px or more', () => {
+    const root = mount(9 * 60);
+    const actions = find(root, 'hs-top-actions');
+    const rounds = actions.children.filter((n) => n.tagName === 'BUTTON' && has(n, 'hs-round') && !n.hidden);
+    expect(rounds.map((n) => n.getAttribute('aria-label'))).toEqual(['Views', 'Share', 'Menu']);
+    const speed = find(actions, 'hs-speed');
+    expect(speed.children).toHaveLength(4);
+    // The sizes the css gives them on a phone.
+    expect(rule(phoneBlock(), '.hs-speed-btn')['min-width']).toBe('var(--touch)');
+    expect(rule(wide(), '.hs-round')['min-width']).toBe('calc(var(--touch) + 8px)');
+    expect(rule(phoneBlock(), '.hs-top').gap).toBe('6px');
+    const touch = 44;
+    const speedW = 4 * touch + 3 * 2 + 2 * 4; // four buttons, 2 px apart, in 4 px padding
+    const roundsW = 3 * (touch + 8);
+    const gaps = 3 * 6;
+    const room = 390 - 2 * 8; // the phone's 8 px edges
+    expect(speedW + roundsW + gaps).toBeLessThanOrEqual(room);
+    // The night mode label hangs off the speed pill, out of the row.
+    expect(rule(phoneBlock(), '.hs-speed-mode').position).toBe('absolute');
   });
 });

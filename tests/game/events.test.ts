@@ -99,7 +99,9 @@ describe('subscribeEvents on the game shell', () => {
 
     seen.length = 0;
     game.apply({ kind: 'build', room: 'lobby', floor: 1, x: 100 }); // refused: the tile is taken
-    expect(seen.map((e) => e.kind)).toEqual(['log']); // the refusal line, no build sound
+    // The refusal (the haptics' double tap) and its line, no build sound.
+    expect(seen.map((e) => e.kind)).toEqual(['refused', 'log']);
+    expect(seen[0]).toEqual({ kind: 'refused', command: 'build' });
 
     off();
     seen.length = 0;
@@ -113,11 +115,11 @@ describe('subscribeEvents on the game shell', () => {
     const seen: GameEvent[] = [];
     game.subscribeEvents((e) => seen.push(e));
     game.apply({ kind: 'shaft.removeCar', shaftId: 12345 }); // refused, one line
-    expect(seen.map((e) => e.kind)).toEqual(['log']); // the lobby built before subscribing is not replayed
+    expect(seen.map((e) => e.kind)).toEqual(['refused', 'log']); // the lobby built before subscribing is not replayed
     seen.length = 0;
     game.newGame(9);
     game.apply({ kind: 'shaft.removeCar', shaftId: 12345 });
-    expect(seen.map((e) => e.kind)).toEqual(['log']); // the swap to a new world is not news
+    expect(seen.map((e) => e.kind)).toEqual(['refused', 'log']); // the swap to a new world is not news
   });
 
   it('hears rent day from a tick batch that crosses into a new quarter', () => {

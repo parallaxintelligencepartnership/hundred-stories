@@ -61,6 +61,11 @@ import { placementNote } from './explain';
 import { createHoverCard } from './hover';
 import { createViewControl } from './overlays';
 import { createDailyPanel, dailyCard } from './daily';
+import { createBuildDock, isPhoneWidth } from './build';
+import { pageRoot, watchDisplayPrefs } from './display';
+import { createPageHaptics, hapticsEnabled } from './haptics';
+import { createGamepadInput, pageGamepadDeps, type GamepadInput, type PadDirection } from './gamepad';
+import { focusablesIn } from './sheet';
 
 export interface Ui {
   destroy(): void;
@@ -204,18 +209,25 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   let dailyShownKey = '';
 
   const shell = el('div', 'hs-ui');
+  // First in the tab order: a link past the chrome to the tower, visible when it has focus.
+  const skip = el('a', 'hs-skip', 'Skip to tower');
+  skip.href = '#view';
+  skip.addEventListener('click', (event: Event) => {
+    event.preventDefault?.();
+    focusTower();
+  });
+  shell.append(skip);
   // The icon symbols, once for the whole chrome; every icon() refers to them by id.
   shell.append(createIconSheet() as unknown as HTMLElement);
   const top = el('header', 'hs-top');
   // The top bar floats over the tower: one glass pill of cash, people, stars, the clock and
-  // the weather; the View choice (for now, until it moves to its own popover); then the speed
-  // pill, Share and Menu, which never hide or move. A phone gives the pill its own row.
+  // the weather; then the speed pill, Views, Share and Menu, which never hide or move. A phone
+  // gives the pill its own row and the controls the second.
   const pill = el('div', 'hs-status-pill');
   pill.setAttribute('role', 'group');
   pill.setAttribute('aria-label', 'Your tower');
-  const views = el('div', 'hs-top-views');
   const actions = el('div', 'hs-top-actions');
-  top.append(pill, views, actions);
+  top.append(pill, actions);
 
   // Readouts: the mono readout type is kept for cash and the clock only.
   const status = createStatusBar();
@@ -226,14 +238,16 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   hoverReadout.title = 'Floor under the cursor';
   hoverReadout.append(el('span', 'hs-readout-label', 'Cursor'), hoverValue);
 
-  // View: the information layers, one at a time or none, with the legend under the choice.
-  // Off by default and not remembered. A renderer without the method (tests) ignores it.
+  // Views: the information layers, one at a time or none, from a popover under the Views
+  // button; the one that is on is a chip under the bar. Off by default and not remembered. A
+  // renderer without the method (tests) ignores it.
   const view = createViewControl((kind) => {
     if (typeof renderer.setOverlay === 'function') renderer.setOverlay(kind);
+    shell.classList.toggle('has-view', kind !== null);
   });
 
   pill.append(status.cash, status.population, status.stars, status.clock, hoverReadout);
-  views.append(view.root);
+  top.append(view.chip);
 
   // Speed: one segmented pill of icons. The keys stay: space pauses, comma and period step.
   const speedBar = el('div', 'hs-speed');
@@ -265,7 +279,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   // Outside My tower (today's tower, a friend's tower) one tap goes back to it.
   const myTowerButton = button('My tower', 'hs-btn hs-pill-btn', () => openMyTower());
   myTowerButton.hidden = true;
-  actions.append(status.mode, speedBar, myTowerButton, shareButton, menuButton);
+  actions.append(status.mode, speedBar, myTowerButton, view.button, shareButton, menuButton);
 
   // Palette: a building directory board, with a header row that folds it away.
   const palette = el('nav', 'hs-palette');
@@ -278,7 +292,27 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     palette,
     (row) => pickRow(row, true),
     () => setPaletteCollapsed(!paletteCollapsed, true),
+    (group) => {
+      build.setCategory(group);
+      // A tab on the folded dock opens it on that category.
+      if (paletteCollapsed && !inSheetLayout()) setPaletteCollapsed(false, true);
+    },
   );
+  // The dock on a wide screen, the Build button and its sheet on a phone.
+  const build = createBuildDock({
+    palette,
+    parts: paletteParts,
+    isPhone: () => inSheetLayout(),
+    cancel: () => {
+      if (game.getPlacement()?.pending) game.cancelPending();
+      game.setTool({ kind: 'none' });
+      update();
+    },
+    changed: () => {
+      chromeWatch?.measure();
+      drawThumbnailsSoon();
+    },
+  });
   // Thumbnails are cut from the renderer's art a few per frame, and only while the board is
   // open, so opening the game does not stall on thirty GPU reads at once.
   let thumbQueue: PaletteRow[] = [];
@@ -297,7 +331,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   const card = createSideCard({
     skipGuide: () => finishGuide(),
     openTools: () => {
-      setPaletteCollapsed(false, false);
+      if (inSheetLayout()) build.open();
+      else setPaletteCollapsed(false, false);
       update();
     },
     toggleGoals: () => {
@@ -383,9 +418,12 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
         onMove: () => refreshPlacement(),
       })
     : null;
-  shell.append(top, palette, card.node, hint, chip, bar, panelSlot);
+  // The controller's cursor: the middle of the tower view, shown only while a pad is in use.
+  const padCursor = el('div', 'hs-pad-cursor is-hidden');
+  padCursor.setAttribute('aria-hidden', 'true');
+  shell.append(top, palette, build.fab, card.node, hint, chip, bar, panelSlot);
   if (minimap) shell.append(minimap.node);
-  shell.append(toasts, toastLayer.news);
+  shell.append(toasts, toastLayer.news, view.menu, padCursor);
   root.append(shell);
 
   // The hover card: a preview of the shaft or room under the pointer, or under the tap.
@@ -431,6 +469,10 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     openMyTower() {
       openMyTower();
     },
+    setDisplay(name) {
+      // The switch is already stored; Larger text and the color-blind views follow at once.
+      if (name === 'largeText' || name === 'colorBlind') display.refresh();
+    },
     select(sel) {
       // A name in a list is a way into that person: the list's panel steps aside for theirs.
       if (panelKind !== 'none') panelKind = 'none';
@@ -453,6 +495,29 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     game.setChrome(band.top, band.bottom);
     refreshPlacement();
   });
+  // Larger text and color-blind friendly views, now and whenever Settings changes them.
+  const display = watchDisplayPrefs({
+    root: pageRoot(),
+    colorBlind(on) {
+      if (typeof renderer.setOverlayColorBlind === 'function') renderer.setOverlayColorBlind(on);
+      view.setColorBlind(on);
+    },
+  });
+  // Haptics: only where something can be felt (the apps, or a touch screen that can vibrate),
+  // so a desktop never listens to the event stream for nothing.
+  const haptics = createPageHaptics();
+  const unsubscribeHaptics =
+    hapticsCapable() && typeof game.subscribeEvents === 'function'
+      ? game.subscribeEvents((event) => {
+          if (event.kind === 'build') haptics.play('place');
+          else if (event.kind === 'refused') haptics.play('refuse');
+          else if (event.kind === 'stars' && event.to > event.from) haptics.play('star');
+        })
+      : null;
+  // A controller, where the browser has the Gamepad API. It polls only while one is connected.
+  const padDeps = pageGamepadDeps();
+  const pad: GamepadInput | null = padDeps ? createGamepadInput(padHandlers(), padDeps) : null;
+
   lastLogTotal = game.world.logTotal;
   const unsubscribe = game.subscribe(() => update());
   // Capture, so a card with a text field open can hold the camera's keys back as well.
@@ -483,13 +548,19 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
 
     const tool = game.getTool();
     let held = '';
+    let heldRow: PaletteRow | null = null;
     for (const row of rows) {
       const state = toolRowState(row, world, tool);
       applyRowState(row, state);
-      if (state.selected) held = row.label;
+      if (state.selected) {
+        held = row.label;
+        heldRow = row;
+      }
     }
     // Collapsed, the header row is the only thing left to say what is in hand.
     setText(paletteParts.current, held);
+    // On a phone the sheet shrinks to the placing bar while a tool is in hand.
+    build.sync(heldRow);
 
     refreshPlacement();
     hoverCard.update();
@@ -675,7 +746,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
         if (step !== shownStep) {
           shownStep = step;
           // On a phone the card and the open sheet share the bottom: show the step first.
-          if (panelKind === 'none' && inSheetLayout()) setPaletteCollapsed(true, false);
+          if (panelKind === 'none' && inSheetLayout()) build.close();
         }
         return;
       }
@@ -1108,9 +1179,120 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     writeReducedMotion(on);
   }
 
-  /** The palette spans the shell: it is the phone sheet, not the desktop rail. */
+  /** The phone layout: the Build button and its sheet instead of the dock. */
   function inSheetLayout(): boolean {
-    return isSheetLayout(palette.getBoundingClientRect().width, shell.getBoundingClientRect().width);
+    return isPhoneWidth(viewportWidth());
+  }
+
+  /** Skip to tower: focus the tower view itself, where the camera keys work. */
+  function focusTower(): void {
+    const target = typeof document !== 'undefined' ? (document.getElementById?.('view') as HTMLElement | null) : null;
+    if (!target) return;
+    if (!target.hasAttribute?.('tabindex')) target.setAttribute('tabindex', '-1');
+    target.focus?.();
+  }
+
+  // ---------------------------------------------------------- controller
+
+  /** The cursor's point on screen: the middle of the band the camera frames the tower in. */
+  function cursorPoint(): { x: number; y: number } {
+    const box = shell.getBoundingClientRect();
+    return { x: box.left + box.width / 2, y: box.top + (viewBand.top + box.height) / 2 };
+  }
+
+  /** Something that holds focus for the d-pad: an open panel, the Views list, the build sheet. */
+  function padMenu(): HTMLElement | null {
+    if (view.isOpen()) return view.menu;
+    if (mountedPanel) return (mountedPanel.sheet?.node as HTMLElement | undefined) ?? mountedPanel;
+    const sheet = build.sheet();
+    if (sheet === 'row' || sheet === 'full') return palette;
+    return null;
+  }
+
+  /** Point, press and let go on the tower where the cursor is, as a mouse would. */
+  function pointAtTower(kind: 'move' | 'click'): void {
+    const canvas = typeof document !== 'undefined' ? (document.querySelector?.('#view canvas') as HTMLElement | null) : null;
+    if (!canvas || typeof PointerEvent === 'undefined') return;
+    const { x, y } = cursorPoint();
+    const init = { clientX: x, clientY: y, pointerId: 99, pointerType: 'mouse', button: 0, buttons: 1, bubbles: true };
+    canvas.dispatchEvent(new PointerEvent('pointermove', { ...init, buttons: 0 }));
+    if (kind === 'move') return;
+    canvas.dispatchEvent(new PointerEvent('pointerdown', init));
+    canvas.dispatchEvent(new PointerEvent('pointerup', { ...init, buttons: 0 }));
+    canvas.dispatchEvent(new MouseEvent('click', { clientX: x, clientY: y, button: 0, bubbles: true }));
+  }
+
+  function padHandlers(): Parameters<typeof createGamepadInput>[0] {
+    return {
+      pan(dx, dy) {
+        renderer.camera?.panBy(dx, dy);
+        pointAtTower('move');
+      },
+      zoom(factor) {
+        const { x, y } = cursorPoint();
+        renderer.camera?.zoomAt(factor, x, y);
+        pointAtTower('move');
+      },
+      a() {
+        const active = typeof document !== 'undefined' ? (document.activeElement as HTMLElement | null) : null;
+        if (active && active !== shell && shell.contains(active) && typeof active.click === 'function') {
+          active.click();
+          return;
+        }
+        pointAtTower('click');
+      },
+      b() {
+        padBack();
+        update();
+      },
+      speed(step) {
+        game.setSpeed(stepSpeed(game.getSpeed(), step));
+        update();
+      },
+      start() {
+        setPanel(panelKind === 'settings' ? 'none' : 'settings');
+      },
+      dpad(direction: PadDirection) {
+        const menu = padMenu();
+        if (!menu) return false;
+        const items = focusablesIn(menu);
+        if (items.length === 0) return false;
+        const active = typeof document !== 'undefined' ? document.activeElement : null;
+        const at = items.indexOf(active as HTMLElement);
+        const forward = direction === 'down' || direction === 'right';
+        const next = at < 0 ? items[0] : items[(at + (forward ? 1 : -1) + items.length) % items.length];
+        next?.focus?.();
+        return true;
+      },
+      active(on) {
+        padCursor.classList.toggle('is-hidden', !on);
+        shell.classList.toggle('is-pad', on);
+        if (!on) return;
+        const { x, y } = cursorPoint();
+        const box = shell.getBoundingClientRect();
+        padCursor.style.left = `${Math.round(x - box.left)}px`;
+        padCursor.style.top = `${Math.round(y - box.top)}px`;
+      },
+    };
+  }
+
+  /** B: close the nearest thing open, else put the tool down. */
+  function padBack(): void {
+    if (view.isOpen()) {
+      view.close({ restoreFocus: true });
+      return;
+    }
+    const sheet = build.sheet();
+    if (sheet === 'row' || sheet === 'full') {
+      build.close();
+      return;
+    }
+    if (panelKind !== 'none' || game.getSelection()) {
+      ctx.close();
+      return;
+    }
+    if (game.getPlacement()?.pending) game.cancelPending();
+    game.setTool({ kind: 'none' });
   }
 
   function setPaletteCollapsed(on: boolean, remember: boolean): void {
@@ -1134,16 +1316,16 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
    */
   function pickRow(row: PaletteRow, toggle: boolean): void {
     lastGroup = row.group;
+    build.setCategory(row.group);
     if (game.world.stars < row.star) {
       notice(`${row.label} ${row.star === 1 ? 'needs 1 star' : `needs ${row.star} stars`}.`);
+      if (hapticsEnabled()) haptics.play('refuse');
       return;
     }
     const tool = row.tool;
     game.setTool(toggle && sameTool(tool, game.getTool()) ? { kind: 'none' } : tool);
-    // A sheet sits over the tower. Once a tool is in hand there is nothing left to pick,
-    // so the board folds away and the player can see where they are placing it. Their own
-    // choice of collapsed or not is not overwritten: this one is not remembered.
-    if (game.getTool().kind !== 'none' && inSheetLayout()) setPaletteCollapsed(true, false);
+    // On a phone the sheet shrinks to the placing bar with the tool in hand (build.sync), so
+    // the player can see where they are placing it.
     update();
   }
 
@@ -1159,6 +1341,13 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
 
   function onKeyDown(event: KeyboardEvent): void {
     if (event.defaultPrevented) return;
+    // The Views list and the phone build sheet close on Escape before anything else.
+    if (event.key === 'Escape' && view.isOpen()) {
+      event.preventDefault();
+      view.close({ restoreFocus: true });
+      return;
+    }
+    if (build.handleKey(event)) return;
     // An open sheet takes Escape (close) and Tab (stay inside) before anything else.
     if (mountedPanel?.sheet?.handleKey(event)) return;
     if (isFormField(event.target)) return;
@@ -1207,6 +1396,10 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     update,
     destroy() {
       destroyed = true;
+      display.stop();
+      unsubscribeHaptics?.();
+      pad?.destroy();
+      view.destroy();
       if (bandKey !== '' && typeof renderer.setGuideBand === 'function') renderer.setGuideBand(null);
       stopPlacementLoop();
       unsubscribe();
@@ -1283,11 +1476,13 @@ function watchChrome(
     const barBottom = strip.bottom - shell.top;
     parts.shell.style.setProperty('--top-actual', `${Math.round(barBottom)}px`);
     const paletteRect = parts.palette.getBoundingClientRect();
+    // A closed phone sheet is not laid out at all: it covers nothing.
+    const shown = paletteRect.height > 0;
     const measured = {
       shellHeight: shell.height,
       barBottom,
-      paletteTop: paletteRect.top - shell.top,
-      sheet: isSheetLayout(paletteRect.width, shell.width),
+      paletteTop: shown ? paletteRect.top - shell.top : Infinity,
+      sheet: shown && (isPhoneWidth(viewportWidth()) || isSheetLayout(paletteRect.width, shell.width)),
     };
     const view = viewInsets(measured);
     const keepOut = chromeInsets(measured);
@@ -1322,6 +1517,26 @@ function iconButton(glyph: IconName, label: string, tip: string, className: stri
   node.setAttribute('aria-label', label);
   node.title = tip;
   return node;
+}
+
+/** The window's width in css pixels, or undefined where there is none to ask. */
+function viewportWidth(): number | undefined {
+  try {
+    return typeof window === 'undefined' ? undefined : (window as { innerWidth?: number }).innerWidth;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Can a haptic be felt here: inside the apps, or on a touch screen that can vibrate. */
+function hapticsCapable(): boolean {
+  try {
+    if ((globalThis as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.() === true) return true;
+    const nav = typeof navigator === 'undefined' ? null : (navigator as { vibrate?: unknown });
+    return typeof nav?.vibrate === 'function' && coarsePointer();
+  } catch {
+    return false;
+  }
 }
 
 /** True on a touch screen. A browser that will not answer is treated as a mouse. */

@@ -756,6 +756,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
       if (!res.ok) logEvent(world, res.reason, 'warn');
       else followBuild(cmd);
       if (res.ok && eventListeners.size > 0 && isBuildCommand(cmd.kind)) emit({ kind: 'build', command: cmd.kind });
+      if (!res.ok && eventListeners.size > 0) emit({ kind: 'refused', command: cmd.kind });
       drainEvents();
       notify();
       return res;

@@ -1,6 +1,7 @@
 // Panel builders. Each one returns a detached element that the shell in ui.ts mounts.
 // Panels read the world through GameApi only and never reach into the sim modules.
 
+import { hapticsEnabled, setHapticsEnabled } from './haptics';
 import type { Sound } from '../audio/audio';
 import type { GameApi } from '../game/api';
 import {
@@ -1431,6 +1432,8 @@ export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElem
       applyGlassClear(on);
       ctx.setDisplay?.('glassClear', on);
     }).row,
+    // Haptics, last: on by default (src/ui/haptics.ts).
+    switchRow('hs-haptics', 'Haptics', hapticsEnabled(), (on) => setHapticsEnabled(on)).row,
   );
   main.append(display.node);
 

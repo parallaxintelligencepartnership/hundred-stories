@@ -212,6 +212,7 @@ export function effectFor(event: GameEvent): Effect | null {
     case 'log':
       return event.entry.level === 'alert' ? 'alert' : null;
     case 'beat':
+    case 'refused':
       return null;
   }
 }
