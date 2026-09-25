@@ -7,7 +7,8 @@
 // texture lies exactly over its room's shell. Pure drawing: the context is passed in.
 
 import { FLOOR_PX, INTERIOR_TOP, SLAB_PX, WIN_PANE_TOP, WIN_SILL, WIN_TOP } from './grid';
-import type { Treatment, VenueKind } from './venue';
+import { PALETTE } from './palette';
+import { mix, type Treatment, type VenueKind } from './venue';
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -185,18 +186,36 @@ const TREATMENT_PALETTE: Record<VenueKind, readonly (readonly [number, number, n
   ],
 };
 
-/** A venue's fixtures over its shell: the interior only, transparent elsewhere. `w` is the room's width in px. */
-export function drawVenueFixtures(ctx: Ctx, kind: VenueKind, treatment: Treatment, w: number): void {
-  const [accent, second, material] = TREATMENT_PALETTE[kind][treatment] as readonly [number, number, number];
+/**
+ * How many fixture layouts each venue kind bakes: one per treatment, and for offices a fourth,
+ * the meeting room, which two of the office looks share (interiors.ts OFFICE_LOOKS).
+ */
+export const VENUE_BASES: Record<VenueKind, number> = { office: 4, shop: 3, restaurant: 3 };
+
+/** The meeting room's palette: cobalt chairs, a sticky yellow, an oak table. */
+const MEETING_PALETTE = [0x3d6fb0, 0xffd866, 0xc98a45] as const;
+
+/**
+ * A venue's fixtures over its shell: the interior only, transparent elsewhere. `w` is the room's
+ * width in px. `base` is the layout: a treatment, or for an office 3, the meeting room. Plants,
+ * frames and pets are not drawn here: a room's look places them (interiors.ts DECOR).
+ */
+export function drawVenueFixtures(ctx: Ctx, kind: VenueKind, base: number, w: number): void {
+  const b = Math.max(0, Math.min(VENUE_BASES[kind] - 1, Math.trunc(base)));
+  const [accent, second, material] = (TREATMENT_PALETTE[kind][b] ?? MEETING_PALETTE) as readonly [number, number, number];
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
-  if (kind === 'office') drawOffice(ctx, treatment, w, accent, second, material);
-  else if (kind === 'shop') drawShop(ctx, treatment, w, accent, second, material);
-  else drawRestaurant(ctx, treatment, w, accent, second, material);
+  if (kind === 'office') drawOffice(ctx, b, w, accent, second, material);
+  else if (kind === 'shop') drawShop(ctx, b as Treatment, w, accent, second, material);
+  else drawRestaurant(ctx, b as Treatment, w, accent, second, material);
 }
 
-function drawOffice(ctx: Ctx, t: Treatment, w: number, accent: number, second: number, material: number): void {
+function drawOffice(ctx: Ctx, t: number, w: number, accent: number, second: number, material: number): void {
   const by = BASE;
+  if (t === 3) {
+    drawMeetingRoom(ctx, w, accent, second, material);
+    return;
+  }
   if (t === 0) {
     // Studio: a pinboard of sticky notes, one long shared bench of laptops, pendant lamps, a plant.
     box(ctx, 6, TY + 1, 30, 15, '#c9a06a', 1);
@@ -213,7 +232,6 @@ function drawOffice(ctx: Ctx, t: Treatment, w: number, accent: number, second: n
       box(ctx, x + 18, by - 24, 4, 5, css(accent), 1, 1.5); // a mug
       pendant(ctx, x + 8, 2, css(accent), false);
     }
-    plant(ctx, w - 16, by, true);
     return;
   }
   if (t === 1) {
@@ -269,10 +287,54 @@ function drawOffice(ctx: Ctx, t: Treatment, w: number, accent: number, second: n
     poly(ctx, [[tx - 8, by - 17], [tx - 1, by - 17], [tx, by - 24], [tx - 7, by - 24]], '#c4ccd6');
     stool(ctx, tx - 17, by, css(accent));
   }
-  plant(ctx, w - 12, by);
   // String lights along the ceiling.
   line(ctx, [[4, TY - 1], [w / 2, TY + 2], [w - 4, TY - 1]], '#333a44', 0.8);
   for (let x = 10; x < w - 6; x += 12) disc(ctx, x, TY - 0.5 + 3 * Math.sin((x / w) * Math.PI), 1.2, x % 24 < 12 ? '#ffd866' : css(second), 0.8);
+}
+
+/**
+ * The meeting room: a frosted glass partition with its door, a wall screen with the quarter's
+ * chart, a long table with chairs behind it and one at each end, notes and mugs, pendants.
+ */
+function drawMeetingRoom(ctx: Ctx, w: number, accent: number, second: number, material: number): void {
+  const by = BASE;
+  // The partition at the near end: a frame, frosted glass, a band of frosting, a handle.
+  box(ctx, 3, TY - 1, 16, by - TY + 1, 'rgba(191,222,240,0.55)', 0.5, 2);
+  ctx.fillStyle = 'rgba(255,255,255,0.6)';
+  ctx.fillRect(4, TY + 14, 14, 5);
+  line(ctx, [[15, TY + 22], [15, TY + 28]], '#5a6472', 1.5);
+  line(ctx, [[6, TY + 3], [10, TY + 8]], 'rgba(255,255,255,0.8)', 1);
+  // The wall screen over the table, the quarter's bars on it.
+  const sx = Math.round(w / 2) - 12;
+  box(ctx, sx, TY, 30, 16, '#1f2733', 1);
+  ctx.fillStyle = '#243b57';
+  ctx.fillRect(sx + 2, TY + 2, 26, 12);
+  for (let i = 0; i < 4; i++) {
+    const h = 3 + ((i * 5) % 8);
+    ctx.fillStyle = i % 2 ? css(second) : '#5fd38a';
+    ctx.fillRect(sx + 5 + i * 6, TY + 13 - h, 4, h);
+  }
+  const tl = 32;
+  const tr = w - 20;
+  // The chairs behind the table first, their backs showing over the top.
+  for (let x = tl + 8; x + 11 < tr - 4; x += 20) {
+    box(ctx, x, by - 31, 11, 13, css(accent), 2.5, 1.5);
+    line(ctx, [[x + 5.5, by - 18], [x + 5.5, by - 15]], INK, 2);
+  }
+  // The table: a long top on two trestle legs.
+  box(ctx, tl, by - 19, tr - tl, 3.5, css(material), 1);
+  box(ctx, tl + 6, by - 15.5, 4, 15.5, css(scaleColour(material, 0.8)), 0.5, 1.5);
+  box(ctx, tr - 10, by - 15.5, 4, 15.5, css(scaleColour(material, 0.8)), 0.5, 1.5);
+  // A chair at each end, facing in.
+  chair(ctx, tl - 12, by, css(accent), true);
+  chair(ctx, tr + 2, by, css(accent), false);
+  // On the table: a laptop, notepads, mugs.
+  poly(ctx, [[tl + 12, by - 19], [tl + 24, by - 19], [tl + 26, by - 28], [tl + 14, by - 28]], '#c4ccd6');
+  box(ctx, tl + 38, by - 21, 10, 2, css(second), 0.5, 1);
+  box(ctx, tr - 32, by - 21, 10, 2, '#f7f5ee', 0.5, 1);
+  box(ctx, tr - 17, by - 24, 4, 5, '#f7f5ee', 1, 1.5);
+  box(ctx, tl + 54, by - 24, 4, 5, css(accent), 1, 1.5);
+  for (let x = tl + 18; x < tr - 8; x += 36) pendant(ctx, x, 3, '#f7f1d8', false);
 }
 
 function drawShop(ctx: Ctx, t: Treatment, w: number, accent: number, second: number, material: number): void {
@@ -549,6 +611,39 @@ export function drawClosed(ctx: Ctx, kind: VenueKind, w: number): void {
 
 export type CarKind = 'standard' | 'express' | 'service';
 
+/**
+ * The car finishes: the cab's lit interior, its door panels and the trim around the opening
+ * (palette.ts carFinish). The first is the original warm cab with brushed doors and no trim.
+ */
+export type CarFinish = (typeof PALETTE.carFinish)[number];
+export const CAR_FINISHES: readonly CarFinish[] = PALETTE.carFinish;
+
+const FINISH_SALT = 0x2545f491;
+
+/**
+ * Each shaft's car finish, so every car in a shaft matches: a pure function of the seed, the
+ * shaft's id and where the shafts stand. A shaft whose nearest neighbor to the left overlaps it
+ * in floors takes a different finish from that neighbor. Never reads world.rng; never saved.
+ */
+export function carFinishes(seed: number, shafts: Iterable<{ id: number; x: number; floorMin: number; floorMax: number }>): Map<number, number> {
+  const n = CAR_FINISHES.length;
+  const sorted = [...shafts].sort((a, b) => a.x - b.x || a.id - b.id);
+  const out = new Map<number, number>();
+  sorted.forEach((shaft, i) => {
+    const h = mix((seed | 0) ^ FINISH_SALT, Math.trunc(shaft.id));
+    let finish = h % n;
+    for (let j = i - 1; j >= 0; j--) {
+      const left = sorted[j] as (typeof sorted)[number];
+      if (left.floorMax < shaft.floorMin || left.floorMin > shaft.floorMax) continue;
+      const taken = out.get(left.id);
+      if (taken === finish) finish = (finish + 1 + ((h >>> 16) % (n - 1))) % n;
+      break;
+    }
+    out.set(shaft.id, finish);
+  });
+  return out;
+}
+
 /** The floor indicator's housing, above the doors, relative to the car texture. */
 export function carIndicator(w: number, top: number): { x: number; y: number; w: number; h: number } {
   return { x: w / 2 - 11, y: top + 3, w: 22, h: 8 };
@@ -559,7 +654,7 @@ export function carIndicator(w: number, top: number): { x: number; y: number; w:
  * panels that slide out by `door` (0 closed, 1 open), the indicator housing above the doors, a
  * 4 px cast shadow on top. `bodyH` excludes the shadow.
  */
-export function drawCarIllustrated(ctx: Ctx, kind: CarKind, w: number, bodyH: number, door: number, shadowPx: number): void {
+export function drawCarIllustrated(ctx: Ctx, kind: CarKind, w: number, bodyH: number, door: number, shadowPx: number, finish = 0): void {
   ctx.fillStyle = 'rgba(51,51,51,0.25)';
   ctx.fillRect(2, 0, w - 4, shadowPx);
   const top = shadowPx;
@@ -584,14 +679,16 @@ export function drawCarIllustrated(ctx: Ctx, kind: CarKind, w: number, bodyH: nu
   const oy = top + 13;
   const ow = w - 12;
   const oh = bodyH - 19;
-  box(ctx, ox, oy, ow, oh, vgrad(ctx, oy, oy + oh, '#fff3c4', '#f0bf62'), 1, 2);
+  const f = CAR_FINISHES[((Math.trunc(finish) % CAR_FINISHES.length) + CAR_FINISHES.length) % CAR_FINISHES.length] as CarFinish;
+  if (f.trim !== null) box(ctx, ox - 2.5, oy - 1.5, ow + 5, oh + 3, css(f.trim), 2, 1.5); // the door trim
+  box(ctx, ox, oy, ow, oh, vgrad(ctx, oy, oy + oh, css(f.interior[0]), css(f.interior[1])), 1, 2);
   ctx.fillStyle = 'rgba(255,255,255,0.35)';
   ctx.fillRect(ox + 2, oy + 2, ow - 4, 3);
   line(ctx, [[ox + 3, oy + oh * 0.55], [ox + ow - 3, oy + oh * 0.55]], 'rgba(120,80,20,0.6)', 1.2);
   const open = Math.min(1, Math.max(0, door));
   const panelW = ow / 2;
   const slide = panelW * 0.8 * open;
-  const metal = vgrad(ctx, oy, oy + oh, '#eef0f3', '#b3bac4');
+  const metal = vgrad(ctx, oy, oy + oh, css(f.door[0]), css(f.door[1]));
   if (panelW - slide > 0.5) {
     box(ctx, ox, oy, panelW - slide, oh, metal, 0.5, 1.5);
     box(ctx, ox + panelW + slide, oy, panelW - slide, oh, metal, 0.5, 1.5);

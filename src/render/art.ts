@@ -42,8 +42,9 @@ import {
   type Ctx2D,
   type PropKind,
 } from './figure';
-import { bakesAtStructuralScale, INTERIORS } from './interiors';
+import { bakesAtStructuralScale, DECOR, INTERIORS, type DecorName } from './interiors';
 import {
+  CAR_FINISHES,
   closedBand,
   drawCarIllustrated,
   drawClosed,
@@ -107,7 +108,7 @@ export interface Art {
   slab(widthTiles: number): Texture;
   shaft(kind: ShaftKind, floors: number): Texture;
   /** A car with its doors at `door` (0 closed, 1 open), baked at the nearest of DOOR_FRAMES. */
-  car(kind: ShaftKind, door: number): Texture;
+  car(kind: ShaftKind, door: number, finish?: number): Texture;
   /**
    * A person in frame `frame` (anim.ts PersonFrame), with look code `look` (figure.ts: build and
    * look key). Stress is not drawn into the person: the renderer puts a mark over the head.
@@ -116,13 +117,19 @@ export interface Art {
   ghost(widthTiles: number, heightFloors: number, ok: boolean): Texture;
   // The illustrated extras. Optional, so an Art without them (the flat fallback) draws none.
   /** A venue's fixtures in one of its treatments, over its shell (VENUE_SHELL), VENUE_BAND tall. */
-  venue?(kind: VenueKind, widthTiles: number, treatment: Treatment): Texture;
+  venue?(kind: VenueKind, widthTiles: number, base: Treatment | number): Texture;
   /**
    * Any room's illustrated layer over its shell (interiors.ts INTERIORS): the rows its band
-   * covers, in `variant`. A venue's is the same texture as venue(). Stairs and escalators: the
+   * covers, in fixture layout `variant` (a look's base, interiors.ts lookOf). A venue's is the
+   * same texture as venue(). Stairs and escalators: the
    * whole room, drawn in place of a structural texture.
    */
   interior?(kind: RoomKind, widthTiles: number, heightFloors: number, variant: number): Texture;
+  /**
+   * A decor piece a look places (interiors.ts DECOR), its own size, baked once for every room
+   * that shows it: at twice the structural resolution when `fine`, else at the structural one.
+   */
+  decor?(piece: DecorName, fine: boolean): Texture;
   /** A room's closed-hours overlay, its closed rect's size (interiors.ts); a venue's is closed(). */
   shut?(kind: RoomKind, widthTiles: number, heightFloors: number): Texture;
   /** A sign board with its brand, the board's size (illustrated.ts signBoard). */
@@ -1904,7 +1911,7 @@ export function createArt(renderer: Renderer, options: { createCanvas?: CanvasFa
     return texture;
   }
 
-  function venueTexture(kind: VenueKind, widthTiles: number, treatment: Treatment): Texture {
+  function venueTexture(kind: VenueKind, widthTiles: number, treatment: Treatment | number): Texture {
     const tiles = Math.max(1, Math.round(widthTiles));
     const { width: w } = TEXTURE_SIZE.venue(tiles);
     return paint(`venue:${kind}:${tiles}:${treatment}`, w, VENUE_BAND.height, (ctx) => drawVenueFixtures(ctx, kind, treatment, w), illustratedScale, VENUE_BAND.top);
@@ -1942,12 +1949,13 @@ export function createArt(renderer: Renderer, options: { createCanvas?: CanvasFa
       return bake(`shaft:${kind}:${n}`, w, h, (g) => drawShaft(g, kind, w, h));
     },
 
-    car(kind, door) {
+    car(kind, door, finish = 0) {
       const { width: w, height: h } = TEXTURE_SIZE.car(kind);
       // Three baked door positions of the five: closed, half and open. The tween still runs on
       // the five, and a quarter reads as half at 60 ms a step (the texture budget, package 2).
       const frame = [0, 2, 2, 2, 4][doorFrameOf(door)] as 0 | 2 | 4;
-      return paint(`car:${kind}:${frame}`, w, h, (ctx) => drawCarIllustrated(ctx, kind, w, h - CAR_SHADOW_PX, DOOR_FRAMES[frame], CAR_SHADOW_PX));
+      const f = ((Math.trunc(finish) % CAR_FINISHES.length) + CAR_FINISHES.length) % CAR_FINISHES.length;
+      return paint(`car:${kind}:${frame}:${f}`, w, h, (ctx) => drawCarIllustrated(ctx, kind, w, h - CAR_SHADOW_PX, DOOR_FRAMES[frame], CAR_SHADOW_PX, f));
     },
 
     sim(kind, _band, frame, look) {
@@ -1970,10 +1978,10 @@ export function createArt(renderer: Renderer, options: { createCanvas?: CanvasFa
 
     interior(kind, widthTiles, heightFloors, variant) {
       const spec = INTERIORS[kind];
-      const n = Math.max(1, spec.variants);
+      const n = Math.max(1, spec.bases ?? spec.variants);
       const v = ((Math.trunc(variant) % n) + n) % n;
       const tiles = Math.max(1, Math.round(widthTiles));
-      if (kind === 'office' || kind === 'shop' || kind === 'restaurant') return venueTexture(kind, tiles, v as Treatment);
+      if (kind === 'office' || kind === 'shop' || kind === 'restaurant') return venueTexture(kind, tiles, v);
       const floors = Math.max(1, Math.round(heightFloors));
       const w = tiles * TILE_PX;
       const band = spec.band(floors);
@@ -1982,6 +1990,15 @@ export function createArt(renderer: Renderer, options: { createCanvas?: CanvasFa
         ctx.lineCap = 'round';
         spec.draw(ctx, w, floors, v);
       }, bakesAtStructuralScale(kind, tiles) ? resolution : illustratedScale, band.top);
+    },
+
+    decor(piece, fine) {
+      const p = DECOR[piece];
+      return paint(`decor:${piece}:${fine ? 2 : 1}`, p.w, p.h, (ctx) => {
+        ctx.lineJoin = 'round';
+        ctx.lineCap = 'round';
+        p.draw(ctx);
+      }, fine ? illustratedScale : resolution);
     },
 
     shut(kind, widthTiles, heightFloors) {

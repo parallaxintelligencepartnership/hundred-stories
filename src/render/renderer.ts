@@ -94,10 +94,11 @@ import {
   type PropKind,
   type StressMark,
 } from './figure';
-import { INTERIORS, interiorOpen, interiorVariant } from './interiors';
-import { INTERIOR_TOP, WIN_SILL, WIN_TOP } from './grid';
+import { bakesAtStructuralScale, DECOR, INTERIORS, interiorFlip, interiorOpen, interiorVariant, interiorVariants, lookOf as interiorLook } from './interiors';
+import { INTERIOR_TOP, WALL_SHADOW_PX, WIN_SILL, WIN_TOP } from './grid';
 import { layerPlan, occupancyLevel, zoomTier, type LayerPlan, type ZoomTier } from './hierarchy';
 import {
+  carFinishes,
   carIndicator,
   POOL_ALPHA,
   POOL_H,
@@ -109,7 +110,7 @@ import {
   signBoard,
   type SignState,
 } from './illustrated';
-import { BLOCK, BLOCK_FILL_LIFT, BLOCK_OUTLINE, PALETTE } from './palette';
+import { BLOCK, BLOCK_FILL_LIFT, BLOCK_OUTLINE, PALETTE, shade } from './palette';
 import { isVenueKind, venueOf, type Venue } from './venue';
 import { createBuildFx } from './buildfx';
 import { Motion, TELEPORT_TILES } from './interpolate';
@@ -379,6 +380,8 @@ interface CarEntry {
   /** The hoist cable from the car's roof to the top of the shaft, a 2 px line scaled to length. */
   cable: Graphics;
   kind: ShaftKind;
+  /** The shaft's car finish (illustrated.ts carFinishes). */
+  finish: number;
   /** Where the doors are, 0 closed to 1 open, tweened on the frame loop. */
   door: number;
   /** The baked door frame the sprite shows now. */
@@ -402,9 +405,15 @@ interface VenueEntry {
   kind: RoomKind;
   width: number;
   floors: number;
+  /** The room's variant (interiors.ts interiorVariants) and whether it is drawn mirrored. */
+  variant: number;
+  flip: boolean;
   /** The brand and treatment, for an office, shop or restaurant; null for every other kind. */
   venue: Venue | null;
   fixtures: Sprite;
+  /** The look's plants, pets, frames and counter fronts; its painted wall. */
+  decor: Container | null;
+  wall: Container | null;
   sign: Sprite | null;
   signGlow: Sprite | null;
   closed: Sprite | null;
@@ -600,13 +609,14 @@ function guardArt(primary: Art, backup: Art): Art {
     room: (kind, width, height, variant, state) => call('room', (a) => a.room(kind, width, height, variant, state)),
     slab: (widthTiles) => call('slab', (a) => a.slab(widthTiles)),
     shaft: (kind, floors) => call('shaft', (a) => a.shaft(kind, floors)),
-    car: (kind, door) => call('car', (a) => a.car(kind, door)),
+    car: (kind, door, finish) => call('car', (a) => a.car(kind, door, finish)),
     sim: (kind, band, frame, outfit) => call('sim', (a) => a.sim(kind, band, frame, outfit)),
     ghost: (widthTiles, heightFloors, ok) => call('ghost', (a) => a.ghost(widthTiles, heightFloors, ok)),
   };
   const p = primary;
   if (p.venue) guarded.venue = extra('venue', p.venue);
   if (p.interior) guarded.interior = extra('interior', p.interior);
+  if (p.decor) guarded.decor = extra('decor', p.decor);
   if (p.shut) guarded.shut = extra('shut', p.shut);
   if (p.sign) guarded.sign = extra('sign', p.sign);
   if (p.closed) guarded.closed = extra('closed', p.closed);
@@ -813,8 +823,9 @@ export async function createRenderer(
   // The veil that mutes the window band below zoom 0.75, over the shells and under the signs.
   const windowVeil = new Graphics();
   windowVeil.visible = false;
-  // A venue's illustrated layers: staff behind the fixtures, then the fixtures and signs, then
-  // the closed-hours shutters, then the night's pools of light.
+  // A venue's illustrated layers: a look's painted wall, staff behind the fixtures, then the
+  // fixtures, decor and signs, then the closed-hours shutters, then the night's pools of light.
+  const venueWallLayer = new Container();
   const venueStaffLayer = new Container();
   const venueLayer = new Container();
   const venueClosedLayer = new Container();
@@ -831,6 +842,7 @@ export async function createRenderer(
     floorStrips,
     roomLayer,
     windowVeil,
+    venueWallLayer,
     venueStaffLayer,
     venueLayer,
     venueClosedLayer,
@@ -939,6 +951,8 @@ export async function createRenderer(
   const slabSprites = new Map<Id, SlabEntry>();
   const shaftSprites = new Map<Id, ShaftEntry>();
   const carSprites = new Map<Id, CarEntry>();
+  /** Each shaft's car finish, refreshed with the shafts (reconcileShafts). */
+  let shaftFinish = new Map<Id, number>();
   const simSprites = new Map<Id, SimEntry>();
   const fireGraphics = new Map<Id, Graphics>();
   const carMotion = new Motion<Id>(TELEPORT_PX);
@@ -1127,6 +1141,8 @@ export async function createRenderer(
   function reconcileRooms(w: World, night: boolean, animateNew: boolean): void {
     seenRooms.clear();
     const peopleFloors = night ? floorsWithPeople(w) : NO_FLOORS;
+    // Every room's look, neighbors considered: one pass per reconcile, from ids and positions.
+    const looks = art.interior ? interiorVariants(w.seed, w.rooms.values()) : null;
     for (const room of w.rooms.values()) {
       seenRooms.add(room.id);
       const state = windowStateOf(room, night, peopleFloors);
@@ -1179,7 +1195,7 @@ export async function createRenderer(
       // A room the player just placed settles, puffs dust and flashes; one loaded with the
       // world, or drawn on the first pass, simply appears. Nothing under reduced motion.
       if (placed && animateNew && !reducedMotion) buildFx.start([entry.node, slab.node], px, py, pw, ph);
-      if (art.interior && !INTERIORS[room.kind].overlay) syncVenue(w, room, px, py);
+      if (art.interior && !INTERIORS[room.kind].overlay) syncVenue(w, room, px, py, looks?.get(room.id) ?? interiorVariant(w.seed, room));
     }
 
     for (const [id, entry] of roomSprites) {
@@ -1215,7 +1231,7 @@ export async function createRenderer(
   }
 
   function dropVenue(id: Id, entry: VenueEntry): void {
-    for (const node of [entry.fixtures, entry.sign, entry.signGlow, entry.closed, entry.pool, entry.staff]) node?.destroy({ children: true });
+    for (const node of [entry.fixtures, entry.decor, entry.wall, entry.sign, entry.signGlow, entry.closed, entry.pool, entry.staff]) node?.destroy({ children: true });
     venueSprites.delete(id);
   }
 
@@ -1232,20 +1248,46 @@ export async function createRenderer(
    * Make or move one room's illustrated layers: fixtures in its variant (a venue's treatment and
    * brand, venue.ts), a sign over a shop or restaurant, and the pools of light under the ceiling.
    */
-  function syncVenue(w: World, room: Room, px: number, py: number): void {
+  function syncVenue(w: World, room: Room, px: number, py: number, variant: number): void {
     const kind = room.kind;
     const spec = INTERIORS[kind];
     const width = room.width * TILE_PX;
     let entry = venueSprites.get(room.id);
-    if (entry && (entry.width !== room.width || entry.floors !== room.height)) {
+    // A new neighbor can change a room's look (interiorVariants): its layers are made afresh.
+    if (entry && (entry.width !== room.width || entry.floors !== room.height || entry.variant !== variant)) {
       dropVenue(room.id, entry);
       entry = undefined;
     }
     if (!entry && art.interior) {
       const venue = isVenueKind(kind) ? venueOf(w.seed, room.id, kind) : null;
-      const variant = venue ? venue.treatment : interiorVariant(w.seed, room);
+      const look = interiorLook(kind, variant);
+      const flip = interiorFlip(w.seed, room);
       const band = spec.band(room.height);
-      const fixtures = layerSprite(venueLayer, art.interior(kind, room.width, room.height, variant), 0, 0, width, band.height);
+      // A painted feature wall, behind the staff and the fixtures, clear of the wall's shadow face.
+      let wall: Container | null = null;
+      if (look.wall !== null) {
+        wall = new Container();
+        const top = WIN_SILL + LINE_PX;
+        const bottom = FLOOR_PX - SLAB_PX;
+        const face = width - LINE_PX - WALL_SHADOW_PX;
+        layerSprite(wall, Texture.WHITE, LINE_PX, top, face - LINE_PX, bottom - top).tint = look.wall;
+        layerSprite(wall, Texture.WHITE, face, top, WALL_SHADOW_PX, bottom - top).tint = shade(look.wall);
+        venueWallLayer.addChild(wall);
+      }
+      const fixtures = layerSprite(venueLayer, art.interior(kind, room.width, room.height, look.base), 0, 0, width, band.height);
+      if (flip) fixtures.scale.x = -Math.abs(fixtures.scale.x);
+      // The look's decor over the fixtures, mirrored with them.
+      let decor: Container | null = null;
+      if (art.decor && look.decor.length > 0) {
+        decor = new Container();
+        const fine = !bakesAtStructuralScale(kind, room.width);
+        for (const p of look.decor) {
+          const piece = DECOR[p.piece];
+          const sprite = layerSprite(decor, art.decor(p.piece, fine), flip ? width - p.x : p.x, p.y, piece.w, piece.h);
+          if (flip) sprite.scale.x = -Math.abs(sprite.scale.x);
+        }
+        venueLayer.addChild(decor);
+      }
       let sign: Sprite | null = null;
       let signGlow: Sprite | null = null;
       if (venue && kind !== 'office' && art.sign) {
@@ -1271,13 +1313,15 @@ export async function createRenderer(
         venuePoolLayer.addChild(pool);
       }
       // The closed overlay and the post are made the first time they show (updateVenues).
-      entry = { kind, width: room.width, floors: room.height, venue, fixtures, sign, signGlow, closed: null, pool, staff: null, state: '', x: px, y: py };
+      entry = { kind, width: room.width, floors: room.height, variant, flip, venue, fixtures, decor, wall, sign, signGlow, closed: null, pool, staff: null, state: '', x: px, y: py };
       venueSprites.set(room.id, entry);
     }
     if (!entry) return;
     entry.x = px;
     entry.y = py;
-    entry.fixtures.position.set(px, py + spec.band(room.height).top);
+    entry.fixtures.position.set(px + (entry.flip ? width : 0), py + spec.band(room.height).top);
+    entry.decor?.position.set(px, py);
+    entry.wall?.position.set(px, py);
     if (entry.closed && spec.closed) {
       const r = spec.closed.rect(width, room.height);
       entry.closed.position.set(px + r.x, py + r.y);
@@ -1340,6 +1384,7 @@ export async function createRenderer(
     const rooms = plan.rooms;
     roomLayer.visible = rooms;
     slabLayer.visible = rooms;
+    venueWallLayer.visible = rooms;
     venueStaffLayer.visible = rooms;
     venueLayer.visible = rooms;
     venueClosedLayer.visible = rooms;
@@ -1500,6 +1545,7 @@ export async function createRenderer(
 
   function reconcileShafts(w: World): void {
     seenShafts.clear();
+    shaftFinish = carFinishes(w.seed, w.shafts.values());
     for (const shaft of w.shafts.values()) {
       seenShafts.add(shaft.id);
       const floors = shaftFloorSpan(shaft);
@@ -1556,17 +1602,18 @@ export async function createRenderer(
     const frame = doorFrameOf(reducedMotion ? (target ? 1 : 0) : entry.door);
     if (frame !== entry.frame) {
       entry.frame = frame;
-      entry.node.texture = art.car(entry.kind, DOOR_FRAMES[frame]);
+      entry.node.texture = art.car(entry.kind, DOOR_FRAMES[frame], entry.finish);
     }
   }
 
   function drawCar(shaft: Shaft, car: Car, alpha: number): void {
     const open = car.state === 'doorsOpen';
     let entry = carSprites.get(car.id);
+    const finish = shaftFinish.get(shaft.id) ?? 0;
     if (!entry) {
       // A car first seen with its doors open shows them open: there was no closing to watch.
       const door = open ? 1 : 0;
-      const sprite = new Sprite(art.car(shaft.kind, door));
+      const sprite = new Sprite(art.car(shaft.kind, door, finish));
       // Bottom center on the slab line, so a door frame swap never moves the car.
       sprite.anchor.set(0.5, 1);
       carSpriteLayer.addChild(sprite);
@@ -1576,11 +1623,12 @@ export async function createRenderer(
       cableLayer.addChild(cable);
       const indicator = new Graphics();
       indicatorLayer.addChild(indicator);
-      entry = { node: sprite, cable, indicator, indicatorKey: '', kind: shaft.kind, door, frame: doorFrameOf(door), open, latch: false };
+      entry = { node: sprite, cable, indicator, indicatorKey: '', kind: shaft.kind, finish, door, frame: doorFrameOf(door), open, latch: false };
       carSprites.set(car.id, entry);
-    } else if (entry.kind !== shaft.kind) {
+    } else if (entry.kind !== shaft.kind || entry.finish !== finish) {
       entry.kind = shaft.kind;
-      entry.node.texture = art.car(shaft.kind, DOOR_FRAMES[entry.frame]); // texture swap only
+      entry.finish = finish;
+      entry.node.texture = art.car(shaft.kind, DOOR_FRAMES[entry.frame], finish); // texture swap only
     }
     entry.open = open;
     if (open) entry.latch = true; // seen open once, even for a tick: the doors open all the way
