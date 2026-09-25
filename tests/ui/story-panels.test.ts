@@ -115,7 +115,7 @@ describe('person panel', () => {
     expect(items).toHaveLength(2);
     expect(items[0]).toContain('eight minutes');
     expect(items[1]).toContain('two minutes');
-    expect(node(panel).textContent).toContain('More cars on this shaft, or another shaft on this route.');
+    expect(node(panel).textContent).toContain('More cars in this elevator, or another elevator for this trip.');
   });
 });
 
@@ -126,7 +126,7 @@ describe('room panel occupants', () => {
     const sims = Array.from({ length: 6 }, () => worker(world, home));
     const c = context();
     const panel = createQueryPanel({ world } as never, { roomId: home.id }, c.ctx);
-    expect(titles(panel)).toContain('Occupants');
+    expect(titles(panel)).toContain('Who is here');
     const rows = node(panel).descendants().filter((n) => n.className === 'hs-occupant');
     expect(rows).toHaveLength(6);
     expect(rows[0]?.textContent).toContain(storyName(world, (sims[0] as Sim).id));
@@ -140,12 +140,12 @@ describe('room panel occupants', () => {
 });
 
 describe('stories', () => {
-  it('opens from a Stories button beside Save and Export', () => {
+  it('opens from a Stories button beside the save buttons', () => {
     const c = context();
     const panel = createSettingsPanel({ world: { seed: 1, log: [], logTotal: 0 } } as never, c.ctx);
     const actions = node(panel).descendants().filter((n) => n.className === 'hs-actions');
-    const saves = actions.find((row) => row.children.some((b) => b.textContent === 'Export'));
-    expect(saves?.children.map((b) => b.textContent)).toEqual(['Save', 'Load', 'Export', 'Stories']);
+    const saves = actions.find((row) => row.children.some((b) => b.textContent === 'Save to a file'));
+    expect(saves?.children.map((b) => b.textContent)).toEqual(['Save now', 'Go back to last save', 'Save to a file', 'Stories']);
     press(buttonsNamed(panel, 'Stories')[0]);
     expect(c.stories).toBe(1);
   });

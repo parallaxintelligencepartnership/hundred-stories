@@ -358,8 +358,8 @@ function floorText(floor: number): string {
 export function guardStatus(world: World, sim: Sim): string {
   const g = sim.guard;
   if (!g) return 'In the office';
-  if (g.task === 'respond' && g.respond) return `Responding to ${floorText(g.respond.floor)}`;
-  if (!onShiftAt(g.shift, clockOf(world.time.minute).minuteOfDay)) return 'Off shift';
+  if (g.task === 'respond' && g.respond) return `Going to ${floorText(g.respond.floor)}`;
+  if (!onShiftAt(g.shift, clockOf(world.time.minute).minuteOfDay)) return 'Off work';
   if (g.task === 'patrol' && g.floor !== null) return `Patrolling ${floorText(g.floor)}`;
   return 'In the office';
 }

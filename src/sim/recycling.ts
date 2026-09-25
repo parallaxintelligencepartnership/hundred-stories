@@ -203,7 +203,7 @@ function noteUnreachable(world: World, center: Room, floor: number): void {
   list.push(floor);
   list.sort((a, b) => a - b);
   center.wasteUnreachable = list;
-  log(world, `Collection could not reach ${floorText(floor)}.`, 'warn', { roomId: center.id });
+  log(world, `The waste collectors could not reach ${floorText(floor)}.`, 'warn', { roomId: center.id });
 }
 
 function noteReachable(world: World, floor: number): void {
@@ -463,7 +463,7 @@ export function collectorStatus(world: World, sim: Sim): string {
   if ((c.task === 'toRoom' || c.task === 'collecting') && room) return `Collecting on ${floorText(room.floor)}`;
   if (c.task === 'toCenter') return 'Returning to the center';
   if (c.task === 'unloading') return 'Unloading';
-  if (!onCollectionShift(clockOf(world.time.minute).minuteOfDay)) return 'Off shift';
+  if (!onCollectionShift(clockOf(world.time.minute).minuteOfDay)) return 'Off work';
   return 'In the center';
 }
 

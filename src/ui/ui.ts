@@ -96,7 +96,7 @@ export function hintText(coarsePointer: boolean): string {
 export function placementChipText(placement: Placement): string {
   // Stretching an elevator costs nothing: the shaft's price covered every floor it can serve.
   if (placement.ok) return `${placement.label} \u00b7 ${placement.cost === 0 ? 'Free' : formatMoney(placement.cost)}`;
-  return placement.reason ?? 'That spot will not take it.';
+  return placement.reason ?? 'You cannot build it there.';
 }
 
 /**
@@ -249,7 +249,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
 
   // Palette: a building directory board, with a header row that folds it away.
   const palette = el('nav', 'hs-palette');
-  palette.setAttribute('aria-label', 'Build palette');
+  palette.setAttribute('aria-label', 'Build tools');
   let paletteCollapsed = readPaletteCollapsed();
   let chromeWatch: ChromeWatch | null = null;
   /** The palette group last picked by a number key or a tile, for letters with nothing in hand. */

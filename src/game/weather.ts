@@ -48,7 +48,7 @@ export function weatherLabel(kind: WeatherKind): string {
     case 'clear':
       return 'Clear';
     case 'overcast':
-      return 'Overcast';
+      return 'Cloudy';
     case 'rain':
       return 'Rain';
     case 'storm':

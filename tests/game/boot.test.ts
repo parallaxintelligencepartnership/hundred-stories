@@ -61,7 +61,7 @@ describe('boot', () => {
       }),
     );
     const view = (app as unknown as { querySelector(s: string): HTMLElement | null }).querySelector('#view');
-    expect(view?.textContent).toBe('This browser cannot draw the tower. WebGL is required.');
+    expect(view?.textContent).toBe('This browser cannot draw the tower. It needs WebGL, which is turned off or missing here.');
     expect(app.children.length).toBeGreaterThan(0);
   });
 
@@ -77,9 +77,9 @@ describe('boot', () => {
     );
     const view = (app as unknown as { querySelector(s: string): HTMLElement | null }).querySelector('#view');
     expect(view?.textContent).toBe(
-      "The page's security policy blocked the tower renderer. This is a site bug, not your browser. Please reload later.",
+      'Something on our site stopped the tower from loading. It is our mistake, not your browser. Please try again later.',
     );
-    expect(view?.textContent).not.toBe('This browser cannot draw the tower. WebGL is required.');
+    expect(view?.textContent).not.toBe('This browser cannot draw the tower. It needs WebGL, which is turned off or missing here.');
   });
 
   it('one notify is one ui update: boot leaves the subscription to the ui', async () => {
@@ -118,7 +118,7 @@ describe('boot', () => {
   it('shows the offline first-load message when offline with no service worker controller', async () => {
     const app = fakeApp();
     await boot(app, baseDeps({ online: () => false, hasController: () => false }));
-    expect(app.textContent).toBe('Hundred Stories needs one online load before it can play offline.');
+    expect(app.textContent).toBe('Hundred Stories needs to load once while you are online. After that it works offline.');
   });
 
   it('boots offline in the native shell, which serves the game from the app bundle and has no service worker', async () => {
@@ -135,7 +135,7 @@ describe('boot', () => {
       },
     });
     await boot(app, deps);
-    expect(app.textContent).not.toBe('Hundred Stories needs one online load before it can play offline.');
+    expect(app.textContent).not.toBe('Hundred Stories needs to load once while you are online. After that it works offline.');
     expect(rendererAsked).toBe(true);
     expect((app as unknown as { querySelector(s: string): HTMLElement | null }).querySelector('#view')).not.toBeNull();
   });

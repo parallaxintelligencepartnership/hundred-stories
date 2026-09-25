@@ -66,7 +66,7 @@ describe('share panel capture failure', () => {
 
     const { panel, notices } = setup(renderer);
 
-    expect(notices).toEqual(['Could not capture the tower.']);
+    expect(notices).toEqual(['Could not take a picture of the tower.']);
     expect(shareModule.composeShareImage).not.toHaveBeenCalled();
     expect(messageText(panel)).toBe(shareMessage(STATS));
     expect(saveButton(panel)?.disabled).toBe(true);
@@ -79,7 +79,7 @@ describe('share panel capture failure', () => {
 
     const { panel, notices } = setup(renderer);
 
-    expect(notices).toEqual(['Could not capture the tower.']);
+    expect(notices).toEqual(['Could not take a picture of the tower.']);
     expect(shareModule.composeShareImage).toHaveBeenCalledTimes(1);
     expect(messageText(panel)).toBe(shareMessage(STATS));
     expect(saveButton(panel)?.disabled).toBe(true);

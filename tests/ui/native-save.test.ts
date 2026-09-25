@@ -57,7 +57,7 @@ function setup(importResult: ImportResult = { ok: true }) {
   };
   const panel = createSettingsPanel(game, ctx) as unknown as FakeElement;
   const all = panel.descendants();
-  const exportBtn = all.find((n) => n.tagName === 'BUTTON' && n.textContent === 'Export');
+  const exportBtn = all.find((n) => n.tagName === 'BUTTON' && n.textContent === 'Save to a file');
   const importCtl = all.find((n) => n.id === 'hs-import');
   if (!exportBtn || !importCtl) throw new Error('no export or import control');
   return { notices, imported, exportBtn, importCtl };
@@ -80,7 +80,7 @@ describe('settings panel export and import by platform', () => {
     expect([link.download, link.href]).toEqual(['hundred-stories.json', 'blob:save']);
     expect(plugins.exportSaveWithDialog).not.toHaveBeenCalled();
     expect(plugins.shareSave).not.toHaveBeenCalled();
-    expect(notices).toEqual(['Save exported.']);
+    expect(notices).toEqual(['Saved to a file.']);
     expect(importCtl.tagName).toBe('INPUT');
   });
 
@@ -92,7 +92,7 @@ describe('settings panel export and import by platform', () => {
     expect(plugins.exportSaveWithDialog).toHaveBeenCalledWith(SAVE);
     expect(plugins.shareSave).not.toHaveBeenCalled();
     expect(dom.clicked).toEqual([]);
-    expect(notices).toEqual(['Save exported.']);
+    expect(notices).toEqual(['Saved to a file.']);
   });
 
   it('Capacitor export calls shareSave with the save and keeps the file input', async () => {
@@ -103,7 +103,7 @@ describe('settings panel export and import by platform', () => {
     expect(plugins.shareSave).toHaveBeenCalledWith(SAVE);
     expect(plugins.exportSaveWithDialog).not.toHaveBeenCalled();
     expect(dom.clicked).toEqual([]);
-    expect(notices).toEqual(['Save exported.']);
+    expect(notices).toEqual(['Saved to a file.']);
     expect(importCtl.tagName).toBe('INPUT');
   });
 
@@ -124,7 +124,7 @@ describe('settings panel export and import by platform', () => {
     await settle();
     expect(plugins.importSaveWithDialog).toHaveBeenCalledTimes(1);
     expect(imported).toEqual([SAVE]);
-    expect(notices).toEqual(['Game imported.']);
+    expect(notices).toEqual(['Tower opened.']);
   });
 
   it('a cancelled Tauri dialog (null) imports nothing and shows no toast', async () => {

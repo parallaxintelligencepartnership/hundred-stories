@@ -82,7 +82,7 @@ export async function boot(app: HTMLElement, deps: BootDeps = defaultDeps): Prom
   app.innerHTML = '';
   // The shells serve the game from the app bundle, so offline is fine without a service worker.
   if (!deps.native?.() && !deps.online() && !deps.hasController()) {
-    app.textContent = 'Hundred Stories needs one online load before it can play offline.';
+    app.textContent = 'Hundred Stories needs to load once while you are online. After that it works offline.';
     return;
   }
   const view = deps.createElement('div');
@@ -98,7 +98,7 @@ export async function boot(app: HTMLElement, deps: BootDeps = defaultDeps): Prom
   // Resume the autosave unless the player asked for a fresh tower with ?new. The seed only applies to new games.
   if (!params.has('new')) {
     const resumed = await game.load();
-    if (resumed.ok) game.world.log.push({ minute: game.world.time.minute, text: 'Welcome back. Your tower was restored from the last autosave.', level: 'info' });
+    if (resumed.ok) game.world.log.push({ minute: game.world.time.minute, text: 'Welcome back. Your tower is just as it was when it last saved.', level: 'info' });
   }
   applyDevWeather(deps.search(), import.meta.env.DEV, game.world);
   if (import.meta.env.DEV) await applyDevAudio(deps.search(), import.meta.env.DEV, () => import('./audio/presets'));
@@ -108,8 +108,8 @@ export async function boot(app: HTMLElement, deps: BootDeps = defaultDeps): Prom
   } catch (e) {
     const message = String((e as { message?: unknown })?.message ?? e);
     view.textContent = message.includes('unsafe-eval')
-      ? "The page's security policy blocked the tower renderer. This is a site bug, not your browser. Please reload later."
-      : 'This browser cannot draw the tower. WebGL is required.';
+      ? 'Something on our site stopped the tower from loading. It is our mistake, not your browser. Please try again later.'
+      : 'This browser cannot draw the tower. It needs WebGL, which is turned off or missing here.';
     console.error(e);
     return;
   }

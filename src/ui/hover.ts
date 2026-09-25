@@ -84,7 +84,7 @@ export function roomCard(room: Room): CardContent {
     title: rule.label,
     rows: [
       ['Where', where],
-      ['Evaluation', formatEval(room.eval)],
+      ['Happiness', formatEval(room.eval)],
       ['Rent', takesRent(room.kind) ? `${room.rent}%` : 'None'],
       ['Tenants', formatCount(room.tenants.length)],
     ],

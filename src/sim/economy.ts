@@ -61,7 +61,7 @@ export function onQuarterStart(world: World): void {
 
   log(
     world,
-    `Quarter closed: income $${income.toLocaleString('en-US')}, upkeep $${upkeep.toLocaleString('en-US')}, net $${net.toLocaleString('en-US')}. Cash: $${world.cash.toLocaleString('en-US')}.`,
+    `The quarter is over. Earned $${income.toLocaleString('en-US')}, spent $${upkeep.toLocaleString('en-US')}, profit $${net.toLocaleString('en-US')}. Cash: $${world.cash.toLocaleString('en-US')}.`,
   );
 
   if (world.cash < ECONOMY.bankruptAtCash) {
@@ -69,7 +69,7 @@ export function onQuarterStart(world: World): void {
     world.stats.badQuarterStreak = streak;
     if (streak >= ECONOMY.bankruptAfterQuarters && !world.gameOver) {
       world.gameOver = { at: world.time.minute, reason: 'The bank has foreclosed on the tower.' };
-      log(world, 'The bank has foreclosed on the tower.', 'alert');
+      log(world, 'The bank took the tower because your cash stayed too low for too long.', 'alert');
     }
   } else {
     world.stats.badQuarterStreak = 0;

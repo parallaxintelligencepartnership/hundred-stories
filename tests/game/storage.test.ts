@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { createStorage } from '../../src/game/storage';
 
-const REFUSED = 'The browser refused to store the save.';
+const REFUSED = 'This browser would not let the game save.';
 
 /** An in memory stand in for window.localStorage. */
 function fakeLocalStorage(onSet?: (key: string, value: string) => void): Storage {

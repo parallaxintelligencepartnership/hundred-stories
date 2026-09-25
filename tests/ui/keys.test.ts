@@ -193,8 +193,10 @@ describe('keys in the shell', () => {
   it('ignores every key, and holds the camera keys back, while a card with a text field is open', () => {
     const game = stubGame(3);
     const root = mount(game);
-    const menu = root.descendants().find((n) => n.tagName === 'BUTTON' && n.textContent === 'Menu') as FakeElement;
-    for (const fn of menu.listeners.get('click') ?? []) fn({});
+    // The share card holds the message text field (Settings lost its only one, the starting number).
+    const share = root.descendants().find((n) => n.tagName === 'BUTTON' && n.textContent === 'Share') as FakeElement;
+    for (const fn of share.listeners.get('click') ?? []) fn({});
+    expect(root.descendants().some((n) => n.tagName === 'TEXTAREA')).toBe(true);
     const seen = press('2');
     press(' ');
     expect(game.tool).toEqual({ kind: 'none' });

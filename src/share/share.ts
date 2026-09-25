@@ -12,6 +12,18 @@ export interface ShareStats {
   floors: number;
   people: number;
   stars: number;
+  /**
+   * The tower's starting number (world.seed), so a friend can start the same tower. Travels as
+   * `tower` in the link; absent from links made before it was added, and from invalid ones.
+   */
+  start?: number;
+}
+
+/** The largest starting number a link may carry: the range of the 32 bit rng state. */
+export const MAX_START = 4_294_967_295;
+
+function validStart(n: number): boolean {
+  return Number.isSafeInteger(n) && n >= 0 && n <= MAX_START;
 }
 
 /** The highest floor with a room on it, 0 if the tower has none. Underground floors never count. */
@@ -21,12 +33,14 @@ export function shareStats(world: World): ShareStats {
     const top = room.floor + room.height - 1;
     if (top > floors) floors = top;
   }
-  return { floors, people: world.population, stars: world.stars };
+  const stats: ShareStats = { floors, people: world.population, stars: world.stars };
+  if (validStart(world.seed)) stats.start = world.seed;
+  return stats;
 }
 
 export function shareText(s: ShareStats): string {
   const peopleWord = s.people === 1 ? 'person' : 'people';
-  return `I'm building a ${formatCount(s.floors)}-floor tower with ${formatCount(s.people)} ${peopleWord} in Hundred Stories, a free tower sim you play in the browser. Think you can do better?`;
+  return `I'm building a ${formatCount(s.floors)}-floor tower with ${formatCount(s.people)} ${peopleWord} in Hundred Stories, a free tower-building game you play in your browser. Think you can do better?`;
 }
 
 /** The full message a share sends: the text, then the link, on their own lines. */
@@ -40,12 +54,17 @@ export function shareUrl(s: ShareStats): string {
     people: String(s.people),
     stars: String(s.stars),
   });
+  if (s.start !== undefined && validStart(s.start)) params.set('tower', String(s.start));
   return `${SITE_URL}?${params.toString()}`;
 }
 
 const INT_RE = /^\d+$/;
 
-/** Reads the numbers a shared link carries. All three must be present, integer and in range. */
+/**
+ * Reads the numbers a shared link carries. Floors, people and stars must be present, integer
+ * and in range. The starting number is optional: when it is missing or invalid the challenge
+ * still reads, just without `start`.
+ */
 export function parseChallenge(search: string): ShareStats | null {
   const params = new URLSearchParams(search);
   const floorsRaw = params.get('floors');
@@ -59,7 +78,10 @@ export function parseChallenge(search: string): ShareStats | null {
   if (floors < 1 || floors > 200) return null;
   if (people < 0 || people > 999_999) return null;
   if (stars < 1 || stars > 6) return null;
-  return { floors, people, stars };
+  const stats: ShareStats = { floors, people, stars };
+  const startRaw = params.get('tower');
+  if (startRaw !== null && INT_RE.test(startRaw) && validStart(Number(startRaw))) stats.start = Number(startRaw);
+  return stats;
 }
 
 const BAND_HEIGHT = 96;

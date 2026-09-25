@@ -124,7 +124,7 @@ describe('selectStorage order: Tauri, then Capacitor, then the browser', () => {
     const loadTauriFs = vi.fn(async () => stubTauriFs());
     const loadFs = vi.fn(async () => capacitorFs());
     const slot = selectStorage({ global: {}, loadTauriFs, loadFs });
-    await expect(slot.writeSave('x')).rejects.toThrow('The browser refused to store the save.');
+    await expect(slot.writeSave('x')).rejects.toThrow('This browser would not let the game save.');
     expect(loadTauriFs).not.toHaveBeenCalled();
     expect(loadFs).not.toHaveBeenCalled();
   });
@@ -167,7 +167,7 @@ describe('the Tauri slot', () => {
     fs.writeTextFile = async () => {
       throw new Error('ENOSPC');
     };
-    await expect(slot.writeSave('new')).rejects.toThrow('The device refused to store the save.');
+    await expect(slot.writeSave('new')).rejects.toThrow('This device would not let the game save.');
     expect(await slot.readSave()).toBe('good');
   });
 
@@ -179,7 +179,7 @@ describe('the Tauri slot', () => {
       throw new Error('EACCES');
     };
     const slot = createTauriStorage(fs);
-    await expect(slot.writeSave('first')).rejects.toThrow('The device refused to store the save.');
+    await expect(slot.writeSave('first')).rejects.toThrow('This device would not let the game save.');
     await slot.writeSave('second');
     expect(await slot.readSave()).toBe('second');
     expect(fs.dirs).toBe(1);

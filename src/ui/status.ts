@@ -160,7 +160,7 @@ export function nightArcPath(): string {
 export function speedModeText(speed: Speed, minute: number): string {
   if (!isNightMinute(clockOf(Math.max(0, Math.floor(minute))).minuteOfDay)) return '';
   if (speed === 0) return `Paused, night x${NIGHT_MULTIPLIER}`;
-  return `Night x${NIGHT_MULTIPLIER}, effective x${speed * NIGHT_MULTIPLIER}`;
+  return `Night x${NIGHT_MULTIPLIER}, x${speed * NIGHT_MULTIPLIER} in all`;
 }
 
 // --------------------------------------------------------------- weather
@@ -311,7 +311,7 @@ export function createStatusBar(): StatusBar {
     const delta = quarterDelta(world);
     setText(cashMeta, quarterDeltaText(world));
     cashMeta.classList.toggle('is-down', delta !== null && delta < 0);
-    setAttr(cashMeta, 'title', delta === null ? 'Change this quarter, known from the next quarter on' : 'Change since the quarter began');
+    setAttr(cashMeta, 'title', delta === null ? 'Change this quarter, shown once the next quarter starts' : 'Change since the quarter began');
     // Under 400 px the delta lines are hidden (ui.css), so each readout's tooltip carries its change.
     setAttr(cash, 'title', `Open finances. ${quarterDeltaText(world)}`);
 

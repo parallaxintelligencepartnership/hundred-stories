@@ -14,7 +14,7 @@ const DB = 'hundred-stories';
 const STORE = 'saves';
 const KEY = 'autosave';
 
-const REFUSED_REASON = 'The browser refused to store the save.';
+const REFUSED_REASON = 'This browser would not let the game save.';
 
 export interface StorageDeps {
   indexedDB?: IDBFactory;
@@ -98,7 +98,7 @@ export const FILE_SLOT_NAME = 'autosave.json';
 // module never imports the plugin on the web path.
 const DATA_DIRECTORY = 'DATA';
 const UTF8 = 'utf8';
-const DEVICE_REFUSED_REASON = 'The device refused to store the save.';
+const DEVICE_REFUSED_REASON = 'This device would not let the game save.';
 
 /**
  * The native save slot: one file in the app data directory, the same interface as the browser
@@ -348,7 +348,7 @@ async function loadTauriFileDeps(): Promise<TauriFileDeps> {
  */
 export async function exportSaveWithDialog(text: string, deps?: TauriFileDeps): Promise<boolean> {
   const { fs, dialog } = deps ?? (await loadTauriFileDeps());
-  const path = await dialog.save({ title: 'Export save', defaultPath: EXPORT_FILE_NAME, filters: SAVE_FILTERS });
+  const path = await dialog.save({ title: 'Save to a file', defaultPath: EXPORT_FILE_NAME, filters: SAVE_FILTERS });
   if (!path) return false;
   await fs.writeTextFile(path, text);
   return true;
@@ -360,7 +360,7 @@ export async function exportSaveWithDialog(text: string, deps?: TauriFileDeps): 
  */
 export async function importSaveWithDialog(deps?: TauriFileDeps): Promise<string | null> {
   const { fs, dialog } = deps ?? (await loadTauriFileDeps());
-  const path = await dialog.open({ title: 'Import save', multiple: false, directory: false, filters: SAVE_FILTERS });
+  const path = await dialog.open({ title: 'Open a saved file', multiple: false, directory: false, filters: SAVE_FILTERS });
   if (!path) return null;
   return fs.readTextFile(path);
 }

@@ -29,7 +29,7 @@ describe('placementChipText', () => {
   });
 
   it('still says something when a refusal arrives without a reason', () => {
-    expect(placementChipText({ ...office, ok: false })).toBe('That spot will not take it.');
+    expect(placementChipText({ ...office, ok: false })).toBe('You cannot build it there.');
   });
 });
 

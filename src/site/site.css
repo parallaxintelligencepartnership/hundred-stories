@@ -355,6 +355,11 @@ p {
   text-decoration: none;
 }
 
+/* The friend greeting's Start the same tower button stays hidden until a link carries a tower. */
+.button[hidden] {
+  display: none;
+}
+
 .button:hover {
   transform: translate(1px, 1px);
   box-shadow: 2px 2px 0 var(--w-outline);

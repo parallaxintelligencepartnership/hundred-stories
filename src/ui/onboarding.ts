@@ -50,7 +50,7 @@ export const INTRO_SCREENS: readonly IntroScreen[] = [
   {
     title: 'What empties a tower',
     lines: [
-      'Stress: people who wait too long for an elevator get cross, and cross tenants move out.',
+      'Stress: people who wait too long for an elevator get upset, and upset tenants move out.',
       'Noise: shops and offices next to condos or hotel rooms, or fast food next to offices, drive tenants away.',
       'Reach: a room no elevator reaches stays empty.',
     ],
@@ -330,8 +330,8 @@ function clockHour(minuteOfDay: number): string {
 export const TIP_TEXT = {
   longWait: (): string => 'Someone waited over 5 minutes for a car, and another car from the elevator panel shortens the wait.',
   tenantLeft: (reason: string): string => `A tenant moved out: ${lowerFirst(reason)}`,
-  firstRent: (income: number): string => `Rent day: the tower took in ${formatMoney(income)} last quarter, and the finances panel has the details.`,
-  firstEvent: (): string => 'Events arrive as alerts, and the ones that need a decision carry the button that answers them.',
+  firstRent: (income: number): string => `Rent day: the tower took in ${formatMoney(income)} last quarter. The finances panel shows the details.`,
+  firstEvent: (): string => 'Big events show up as alerts. When one needs you to choose, it has a button for that.',
   nightSpeed: (mode: string): string =>
     `${mode}: from ${clockHour(SCHEDULES.nightStart)} to ${clockHour(SCHEDULES.nightEnd)} the clock runs faster while the tower sleeps.`,
   firstPanel: (): string => 'Panels show the details, and Close puts one away while the tower keeps running.',

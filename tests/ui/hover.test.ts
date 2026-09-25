@@ -137,7 +137,7 @@ describe('hover card content', () => {
       title: 'Office',
       rows: [
         ['Where', 'Floor 4'],
-        ['Evaluation', 'Good 72%'],
+        ['Happiness', 'Good 72%'],
         ['Rent', '90%'],
         ['Tenants', '3'],
       ],

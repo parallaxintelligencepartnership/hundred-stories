@@ -134,8 +134,8 @@ export function hasTextField(root: unknown): boolean {
 /** The keyboard lines the Help section shows, for a palette of this many groups. */
 export function keyHelpLines(groupCount: number): string[] {
   return [
-    `Tools: 1 to ${Math.min(9, groupCount)} pick a palette group and its first tool, then the letter on a tile picks that tool. Hover a tile to see its keys.`,
-    'Speed: comma slows down one step and period speeds up one step (pause, 1x, 2x, 4x). Space pauses and resumes.',
-    'Escape drops the current tool.',
+    `Tools: 1 to ${Math.min(9, groupCount)} pick a group of build tools and its first tool, then the letter on a tile picks that tool. Point at a tile to see its keys.`,
+    'Speed: comma slows down one step and period speeds up one step (pause, 1x, 2x, 4x). Space pauses and starts again.',
+    'Escape puts down the tool you are holding.',
   ];
 }

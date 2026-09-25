@@ -89,7 +89,7 @@ describe('VIP card', () => {
     expect(rows['Fire or bomb']).toBe('No');
     expect(rows['Rating']).toBe(last.rating.charAt(0).toUpperCase() + last.rating.slice(1));
     expect(view?.nextChance).toBe(
-      'Next chance: weekday 1, quarter 2, year 1 at 6:00 AM. VIP visits are rolled at 6:00 AM on the first day of each quarter, a 50% chance while you have 3 stars and a clean, empty suite.',
+      'Next chance: weekday 1, quarter 2, year 1 at 6:00 AM. On the first day of each quarter at 6:00 AM, there is a 50% chance a VIP books a visit, if you have at least 3 stars and a clean, empty suite.',
     );
   });
 

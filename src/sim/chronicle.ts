@@ -156,7 +156,7 @@ export function assembleChronicle(world: World): Chronicle {
   const minute = world.time.minute;
   const lines: string[] = [];
 
-  lines.push(`Tower seed ${world.seed}, day ${dayOf(minute)}.`);
+  lines.push(`Day ${dayOf(minute)} in the tower.`);
   lines.push(`Population ${countText(world.population)}.`);
 
   for (let star = 2; star <= world.stars; star += 1) {
@@ -173,7 +173,7 @@ export function assembleChronicle(world: World): Chronicle {
   }
 
   const departures = recent.filter((beat) => beat.code === 'room.vacated');
-  lines.push(departures.length === 1 ? '1 departure recorded.' : `${countText(departures.length)} departures recorded.`);
+  lines.push(departures.length === 1 ? '1 tenant moved out.' : `${countText(departures.length)} tenants moved out.`);
   for (const beat of departures.slice(-3)) lines.push(beatLine(world, beat));
 
   const ratings = recent.filter((beat) => beat.code === 'vip.rated');
@@ -182,11 +182,11 @@ export function assembleChronicle(world: World): Chronicle {
 
   const caught = recent.filter((beat) => beat.code === 'theft.caught').length;
   const escaped = recent.filter((beat) => beat.code === 'theft.escaped').length;
-  lines.push(`Thefts recorded: ${countText(caught)} caught, ${countText(escaped)} got away.`);
+  lines.push(`Thieves: ${countText(caught)} caught, ${countText(escaped)} got away.`);
 
   const backlogs = recent.filter((beat) => beat.code === 'waste.backlog').length;
   const cleared = recent.filter((beat) => beat.code === 'waste.cleared').length;
-  lines.push(`Waste backlogs recorded: ${countText(backlogs)}, cleared: ${countText(cleared)}.`);
+  lines.push(`Times waste piled up: ${countText(backlogs)}, cleaned up: ${countText(cleared)}.`);
 
   const weddings = world.stats.weddingsHeld;
   if (weddings > 0) lines.push(weddings === 1 ? 'The cathedral held a wedding.' : `The cathedral held ${countText(weddings)} weddings.`);
