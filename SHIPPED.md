@@ -31,11 +31,11 @@ Before deploying, load `/play/` from the nginx container in headless Chrome and 
 Fallback, pi3 (`deploy/README.md`): copy `deploy/.env.example` to `deploy/.env`, set `SITE_HOST`, run `deploy/deploy.sh`.
 
 ## How to roll back
-Rehearsed on 2026-09-24 at the 0.4.9 ship: checked out `ship-2026-09-22b` (0.4.7) in a scratch worktree, ran `npm ci`, `npm run build` (green, dist/_headers present) and `npx vitest run` (985 passed, 74 files), then removed the worktree.
+Rehearsed on 2026-09-24 at the 0.4.10 ship: checked out `ship-2026-09-24` (0.4.9) in a scratch worktree, ran `npm ci` and `npm run build` (green, dist/_headers present), then removed the worktree. Cloudflare still holds the 0.4.9 version 744a976a-67a5-4050-a884-764c78275aa3; 0.4.10 is 9d224970-fa39-41f6-a1aa-bd205166a0b6.
 
 - Cloudflare: `npx wrangler rollback` returns the live site to the previous uploaded version; `npx wrangler versions list` shows the versions. Or check out the previous tag and `npm run deploy`.
 - pi3: `deploy.sh` snapshots the live tree to `html.prev` before every sync; the swap is in `deploy/README.md` under Rollback.
-- Return target for this ship: `git checkout ship-2026-09-24`. Previous good state: `ship-2026-09-22c` (0.4.8, live from 2026-09-22 22:53 until this deploy), three commits after the rehearsed `ship-2026-09-22b`.
+- Return target for this ship: `git checkout ship-2026-09-24b`. Previous good state: `ship-2026-09-24` (0.4.9), or `npx wrangler rollback 744a976a-67a5-4050-a884-764c78275aa3`.
 
 ## Known limitations and accepted risks
 No finding was accepted; the accepted risks list is empty. The findings still open in `.itworks/REVIEWS.md` are listed as OUTSTANDING at the end of this section.
