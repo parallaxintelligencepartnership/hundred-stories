@@ -394,7 +394,7 @@ describe('commands', () => {
 });
 
 // Audit 2026-09-25 B S2: turning a stop off under a rider bound for it would strand them.
-// The refusal lives here; build.ts's shaft.setStop handler returns it (a separate package).
+// The refusal lives in elevators.ts; build.ts's shaft.setStop handler returns it.
 describe('turning off a stop someone is riding to', () => {
   it('is refused in plain words while a rider aboard is bound for that floor', () => {
     const world = createWorld(7);
@@ -412,6 +412,29 @@ describe('turning off a stop someone is riding to', () => {
     run(world, 2);
     expect(rider.state).toBe('riding');
     expect(stopOffRefusal(world, shaft, 5)).toBeNull();
+  });
+
+  it('refuses the setStop off command and keeps the stop', () => {
+    const world = createWorld(7);
+    const shaft = buildShaft(world, { floorMax: 6 });
+    const rider = addWaiter(world, shaft, 'diner', 1, 4);
+    run(world, 2);
+    expect(rider.state).toBe('riding');
+    expect(applyCommand(world, { kind: 'shaft.setStop', shaftId: shaft.id, floor: 4, stops: false })).toEqual({
+      ok: false,
+      reason: 'Someone is riding to that floor.',
+    });
+    expect(shaft.stops.has(4)).toBe(true);
+  });
+
+  it('still takes the setStop off command for a floor no rider is bound for', () => {
+    const world = createWorld(7);
+    const shaft = buildShaft(world, { floorMax: 6 });
+    const rider = addWaiter(world, shaft, 'diner', 1, 4);
+    run(world, 2);
+    expect(rider.state).toBe('riding');
+    expect(applyCommand(world, { kind: 'shaft.setStop', shaftId: shaft.id, floor: 5, stops: false })).toEqual({ ok: true });
+    expect(shaft.stops.has(5)).toBe(false);
   });
 });
 

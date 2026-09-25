@@ -2,7 +2,7 @@
 // Keep this file boring: no gameplay rules here, only bookkeeping.
 
 import { createRng } from './rng';
-import { LIMITS } from './rules';
+import { GAME_START_MINUTE, LIMITS, STORY } from './rules';
 import { createStoryState } from './story';
 import { spanFloors } from './types';
 import type { FloorIndex, Id, LogEntry, Room, Shaft, Sim, World } from './types';
@@ -21,7 +21,7 @@ export function createWorld(seed: number, start: TowerStart = {}): World {
   return {
     seed,
     rng: createRng(seed),
-    time: { minute: 6 * 60 }, // a new game opens at 06:00 on the first weekday
+    time: { minute: GAME_START_MINUTE }, // a new game opens at 06:00 on the first weekday
     cash,
     quarterStartCash: cash, // a new game opens inside its first quarter
     stars: 1,
@@ -63,8 +63,8 @@ export function log(world: World, text: string, level: LogEntry['level'] = 'info
   if (world.log.length > 2000) world.log.splice(0, world.log.length - 2000);
 }
 
-/** A hall wait longer than this many minutes counts as a long wait. */
-export const LONG_WAIT_MINUTES = 5;
+/** A hall wait longer than this many minutes counts as a long wait (one number, in rules.ts). */
+export const LONG_WAIT_MINUTES = STORY.longWaitMinutes;
 const LONG_WAIT_SLOTS = 24;
 
 function emptyLongWaits(): World['longWaits'] {

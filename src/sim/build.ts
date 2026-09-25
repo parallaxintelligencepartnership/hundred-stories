@@ -2,6 +2,7 @@
 // Every number comes from rules.ts; every refusal reason is plain English shown to the player verbatim.
 
 import { spend } from './economy';
+import { stopOffRefusal } from './elevators';
 import { handleEventCommand } from './events';
 import { isFollowed, recordBeat } from './story';
 import {
@@ -25,6 +26,7 @@ import type {
   RoomKind,
   Shaft,
   ShaftKind,
+  Sim,
   World,
 } from './types';
 import {
@@ -40,6 +42,7 @@ import {
   removeSim,
   roomsOfKind,
   roomsOnFloor,
+  setOccupancy,
 } from './world';
 
 const OK: CommandResult = { ok: true };
@@ -222,6 +225,17 @@ function hasSupport(world: World, floor: number, height: number): boolean {
   return floorIsBuilt(world, top + 1);
 }
 
+/**
+ * Why hasSupport said no, in the direction the support lies: below above ground, above
+ * underground, where B1 hangs from the lobby (audit 2026-09-25 A S4). src/ui/explain.ts reads
+ * these three sentences back.
+ */
+function noSupportReason(floor: number): string {
+  if (floor >= 1) return 'Build a floor below this one first.';
+  if (floor === -1) return 'Build a lobby first.';
+  return 'Build the floor above this one first.';
+}
+
 /** Leave these out when asking what holds a footprint up: the room or shaft about to go. */
 interface Without {
   roomId?: number;
@@ -398,7 +412,7 @@ export function canBuild(world: World, kind: RoomKind, floor: number, x: number)
     return no(`You can build ${countText(rule.maxCount, rule.label)}.`);
   }
 
-  if (!hasSupport(world, floor, rule.height)) return no('Build a floor below this one first.');
+  if (!hasSupport(world, floor, rule.height)) return no(noSupportReason(floor));
   if (!restsOnStructure(world, kind, floor, rule.height, x, rule.width)) {
     return no('Nothing is holding this up. Build under it first.');
   }
@@ -466,6 +480,38 @@ function doBuild(world: World, kind: RoomKind, floor: number, x: number): Comman
   return OK;
 }
 
+/**
+ * A tenant taken out with its room may sit in another room or ride a car. Give that room its
+ * seat back (as sendAway in people.ts does; guards and collectors never counted) and take the
+ * rider off the car, with its car call when no other rider still wants that floor
+ * (audit 2026-09-25 B S4). sendAway itself keeps a rider aboard to the next stop, which does
+ * not fit a sim that is removed at once.
+ */
+function freeSeatAndCar(world: World, sim: Sim, homeId: number): void {
+  if (sim.inRoomId !== null && sim.inRoomId !== homeId) {
+    const seat = world.rooms.get(sim.inRoomId);
+    if (seat && sim.kind !== 'guard' && sim.kind !== 'collector') {
+      setOccupancy(world, seat, Math.max(0, seat.occupancy - 1));
+    }
+  }
+  if (sim.inCarId === null) return;
+  const leg = sim.route[0];
+  const dest = leg && leg.kind === 'ride' ? leg.toFloor : null;
+  for (const shaft of world.shafts.values()) {
+    for (const car of shaft.cars) {
+      if (!car.passengers.includes(sim.id)) continue;
+      car.passengers = car.passengers.filter((id) => id !== sim.id);
+      if (dest === null) continue;
+      const stillWanted = car.passengers.some((id) => {
+        const other = world.sims.get(id)?.route[0];
+        return other !== undefined && other.kind === 'ride' && other.toFloor === dest;
+      });
+      if (!stillWanted) car.calls.delete(dest);
+    }
+  }
+  sim.inCarId = null;
+}
+
 function doDemolish(world: World, roomId: number): CommandResult {
   const room = world.rooms.get(roomId);
   if (!room) return no('There is nothing to demolish.');
@@ -491,6 +537,7 @@ function doDemolish(world: World, roomId: number): CommandResult {
       recordBeat(world.story, { code: 'room.vacated', minute: world.time.minute, simId, roomId: room.id, value: 0 });
       if (!followed) roomBeat = true;
     }
+    freeSeatAndCar(world, sim, room.id);
     sim.state = 'gone';
     sim.inRoomId = null;
     sim.homeRoomId = null;
@@ -687,6 +734,9 @@ function doSetStop(world: World, shaftId: number, floor: number, stops: boolean)
 
   if (stops) shaft.stops.add(floor);
   else {
+    // A rider aboard bound for this floor would have nowhere to get off (audit 2026-09-25 B S2).
+    const refusal = stopOffRefusal(world, shaft, floor);
+    if (refusal) return no(refusal);
     shaft.stops.delete(floor);
     // The home floor must stay a floor the elevator actually serves.
     if (shaft.homeFloor === floor) shaft.homeFloor = pickHomeFloor(shaft.stops, shaft.floorMin, shaft.floorMax);
