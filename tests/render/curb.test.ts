@@ -8,6 +8,7 @@ import { Container, Sprite, Texture } from 'pixi.js';
 import type { Art } from '../../src/render/art';
 import {
   CURB_MAX,
+  CURB_WAIT_PX,
   curbFigures,
   curbOffset,
   createCurb,
@@ -195,5 +196,94 @@ describe('the curb layer', () => {
     curb.update({ world, view: view(0), doors: lobbyDoors(world), lookOf: () => 0, nowMs: 5000, dtMs: 16, reducedMotion: true, people: false, viewLeft: -1e6, viewRight: 1e6 });
     expect(curb.count()).toBe(0);
     expect(sprites(layer, 'vehicle|fire')).toHaveLength(1);
+  });
+});
+
+describe('the street during a fire (audit 2026-09-25 F3 S1)', () => {
+  function stubArt(): Art {
+    const tex = (label: string): Texture => new Texture({ label });
+    return {
+      room: () => tex('room'),
+      slab: () => tex('slab'),
+      shaft: () => tex('shaft'),
+      car: () => tex('car'),
+      sim: (kind, _band, frame, look) => tex(`person|${kind}|${frame}|${look}`),
+      ghost: () => tex('ghost'),
+      umbrella: (c) => tex(`umbrella|${c}`),
+      vehicle: (k) => tex(`vehicle|${k}`),
+    };
+  }
+  function bodies(root: Container): Sprite[] {
+    const out: Sprite[] = [];
+    const walk = (n: Container): void => {
+      if (n instanceof Sprite && n.visible && n.texture.label?.startsWith('person|')) out.push(n);
+      for (const c of n.children) walk(c as Container);
+    };
+    walk(root);
+    return out;
+  }
+  /** Forty seconds of the street, one frame every 100 ms: the closest any commuter came to a door, px. */
+  function closestToDoor(world: World): { closest: number; seen: number } {
+    const doors = lobbyDoors(world);
+    if (!doors) throw new Error('no lobby');
+    const layer = new Container();
+    const art = stubArt();
+    const curb = createCurb(layer, () => art);
+    let closest = Infinity;
+    let seen = 0;
+    for (let t = 0; t <= 40_000; t += 100) {
+      curb.update({ world, view: view(0), doors, lookOf: () => 0, nowMs: t, dtMs: 100, reducedMotion: false, people: true, viewLeft: -1e6, viewRight: 1e6 });
+      for (const body of bodies(layer)) {
+        seen++;
+        const d = body.x < doors.left + 1 ? doors.left - body.x : body.x - doors.right;
+        closest = Math.min(closest, d);
+      }
+    }
+    return { closest, seen };
+  }
+
+  it('sends nobody in while a fire burns: the people outside wait on the street, clear of the door', () => {
+    const world = createWorld(4);
+    lobby(world, 100, 140);
+    for (let i = 0; i < 200; i++) person(world, 'outside');
+    world.events.push({ kind: 'fire', roomIds: [1], startedAt: 0, spreadAt: 0 });
+    const figures = curbFigures(world.sims.values(), CURB_MAX, { fire: emergencyVehicle(world) === 'fire' });
+    expect(figures).toHaveLength(CURB_MAX);
+    expect(figures.filter((f) => f.heading === 'in')).toEqual([]);
+    for (const f of figures) {
+      for (let t = 0; t < 60_000; t += 250) {
+        const offset = curbOffset(f, t, false);
+        expect(offset).not.toBeNull();
+        expect(offset as number).toBeGreaterThanOrEqual(CURB_WAIT_PX);
+      }
+    }
+    // The drawn street agrees: over forty seconds nobody comes within reach of a door.
+    const { closest, seen } = closestToDoor(world);
+    expect(seen).toBeGreaterThan(0);
+    expect(closest).toBeGreaterThanOrEqual(CURB_WAIT_PX);
+  });
+
+  it('still walks people in to the door when there is no fire', () => {
+    const world = createWorld(4);
+    lobby(world, 100, 140);
+    for (let i = 0; i < 200; i++) person(world, 'outside');
+    expect(curbFigures(world.sims.values()).every((f) => f.heading === 'in')).toBe(true);
+    expect(closestToDoor(world).closest).toBeLessThanOrEqual(3);
+  });
+});
+
+describe('a person on the way out (audit 2026-09-25 F3 S4)', () => {
+  it('is on the street only in the ground lobby and only when the tower does not draw them', () => {
+    const world = createWorld(4);
+    lobby(world, 100, 140);
+    const doors = lobbyDoors(world);
+    const upstairs = person(world, 'leaving');
+    upstairs.pos = { floor: 10, x: 120 };
+    const inLobby = person(world, 'leaving');
+    inLobby.pos = { floor: 1, x: 120 };
+    const drawnInside = person(world, 'leaving');
+    drawnInside.pos = { floor: 1, x: 121 };
+    const ids = curbFigures(world.sims.values(), CURB_MAX, { lobby: doors, inTower: (sim) => sim.id === drawnInside.id }).map((f) => f.simId);
+    expect(ids).toEqual([inLobby.id]);
   });
 });

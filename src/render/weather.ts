@@ -328,6 +328,34 @@ export function weatherNow(seed: number, minute: number): WeatherSnapshot {
   return forced ?? weatherAt(seed, minute);
 }
 
+// ------------------------------------------------------ what the screen shows
+
+/**
+ * The kind a view shows: rain or storm exactly while rain falls on screen (rainFalling, the one
+ * test the streaks and the umbrellas draw by), else the heavier of clear and overcast.
+ */
+export function shownKind(view: WeatherView): WeatherKind {
+  if (rainFalling(view) > 0) return view.weights.storm > view.weights.rain ? 'storm' : 'rain';
+  return view.weights.overcast > view.weights.clear ? 'overcast' : 'clear';
+}
+
+let shown: { seed: number; view: WeatherView } | null = null;
+
+/**
+ * The renderer hands over the view it drew this frame, so the status bar names the weather on
+ * screen. The fade runs on real time, so at 2x and 4x night speed a short rain block may never
+ * wet the view; the forecast alone would say Rain over a dry street. Null forgets it.
+ */
+export function publishWeatherView(seed: number, view: WeatherView | null): void {
+  shown = view ? { seed, view } : null;
+}
+
+/** The weather to name for a tower: what the renderer last drew for it, else the forecast. */
+export function shownWeatherKind(seed: number, minute: number): WeatherKind {
+  if (shown && shown.seed === seed) return shownKind(shown.view);
+  return weatherNow(seed, minute).kind;
+}
+
 /** Parse ?weather= and ?hour=; anything unknown is null. */
 export function parseWeatherQuery(search: string): { kind: WeatherKind | null; hour: number | null } {
   const params = new URLSearchParams(search);

@@ -13,6 +13,8 @@ import { ROOMS } from '../../src/sim/rules';
 import type { Car, Room, RoomKind, Sim, World } from '../../src/sim/types';
 import { addRoom, addShaft, addSim, allocId, createWorld, markStructureChanged, setOccupancy, setOnFire } from '../../src/sim/world';
 import { floorTopY } from '../../src/render/camera';
+import { interiorVariants } from '../../src/render/interiors';
+import { venueOf } from '../../src/render/venue';
 
 // Every fake application, newest last, so a test can walk the stage createRenderer built.
 const apps = vi.hoisted(
@@ -62,9 +64,11 @@ const stubArt: Art = {
   sim: (kind, band, frame, outfit) => tex(`sim|${kind}|${band}|${frame}|${outfit ?? -1}`),
   ghost: (w, h, ok) => tex(`ghost|${w}|${h}|${ok}`),
 };
+// A test may hand the renderer richer art (interiors and signs); every other test gets stubArt.
+const artHolder = vi.hoisted(() => ({ art: null as unknown }));
 vi.mock('../../src/render/art', async (importOriginal) => {
   const art = await importOriginal<typeof import('../../src/render/art')>();
-  return { ...art, createArt: () => stubArt };
+  return { ...art, createArt: () => (artHolder.art as Art | null) ?? stubArt };
 });
 
 // The sky's gradient needs a DOM canvas; the frame loop tests only need the sky to exist.
@@ -83,6 +87,7 @@ beforeEach(() => {
 afterEach(() => {
   for (const r of renderers) r.destroy();
   renderers = [];
+  artHolder.art = null;
   vi.unstubAllGlobals();
 });
 
@@ -652,5 +657,102 @@ describe('information view tint (setOverlay)', () => {
     expect(overlayRoot.scale.x).toBe(worldRoot.scale.x);
     expect(overlayRoot.position.x).toBe(worldRoot.position.x);
     expect(overlayRoot.position.y).toBe(worldRoot.position.y);
+  });
+});
+
+// Audit 2026-09-25, lane F1: ids restart at 1 in every world, so a tower switch (Today's tower, a
+// friend's link, New game, Open a file) must not keep anything the renderer holds by id or by
+// the built signature. The same sequence game.ts swapWorld runs: resetMotion, then render the new world.
+describe('a replaced world keeps nothing of the old tower', () => {
+  it('F1 S1: an office that takes over a stairs id is drawn in the room layer, and the stairs in the connector layer', async () => {
+    const a = createWorld(1);
+    a.time.minute = NOON;
+    const stairs = makeRoom(a, 'stairs', 2, 100);
+    const b = createWorld(2);
+    b.time.minute = NOON;
+    const office = makeRoom(b, 'office', 2, 100);
+    expect(office.id).toBe(stairs.id);
+
+    const { renderer, stage } = await mount(a);
+    renderer.render(a, 1);
+    renderer.resetMotion();
+    renderer.render(b, 1);
+    const offices = spritesWith(stage, 'room|office');
+    expect(offices).toHaveLength(1);
+    expect(offices[0]!.parent?.label).toBe('rooms');
+    expect(spritesWith(stage, 'room|stairs')).toHaveLength(0);
+
+    // And the other way round: the stairs of the next tower go over the rooms again.
+    renderer.resetMotion();
+    renderer.render(a, 1);
+    const flights = spritesWith(stage, 'room|stairs');
+    expect(flights).toHaveLength(1);
+    expect(flights[0]!.parent?.label).toBe('connectors');
+  });
+
+  it('F1 S3: a shop sign shows the new tower brand, the one the panel names', async () => {
+    artHolder.art = {
+      ...stubArt,
+      interior: (kind, w, h, v) => tex(`interior|${kind}|${w}|${h}|${v}`),
+      sign: (_kind, _w, name) => tex(`sign|${name}`),
+      glow: () => tex('glow'),
+    } satisfies Art;
+    let checked = 0;
+    for (let seed = 2; seed < 80 && checked < 2; seed++) {
+      const a = createWorld(1);
+      a.time.minute = NOON;
+      makeRoom(a, 'shop', 2, 100);
+      const b = createWorld(seed);
+      b.time.minute = NOON;
+      const shop = makeRoom(b, 'shop', 2, 100);
+      // Only a pair whose layout variant matches and whose brand differs shows the stale sign.
+      if (interiorVariants(1, a.rooms.values()).get(shop.id) !== interiorVariants(seed, b.rooms.values()).get(shop.id)) continue;
+      const name = venueOf(seed, shop.id, 'shop').name;
+      if (venueOf(1, shop.id, 'shop').name === name) continue;
+      const { renderer, stage } = await mount(a);
+      renderer.render(a, 1);
+      renderer.resetMotion();
+      renderer.render(b, 1);
+      expect(spritesWith(stage, 'sign|').map((s) => s.texture.label)).toEqual([`sign|${name}`]);
+      checked++;
+    }
+    expect(checked).toBe(2);
+  });
+
+  it('F1 S4: the floor strips move to the new tower even when the built signature is the same', async () => {
+    const a = createWorld(1);
+    a.time.minute = NOON;
+    makeRoom(a, 'office', 5, 100);
+    const b = createWorld(2);
+    b.time.minute = NOON;
+    makeRoom(b, 'office', 2, 300);
+    const { renderer, stage } = await mount(a);
+    renderer.render(a, 1);
+    // worldRoot, then the tower layer, then the floor strips at the back of it.
+    const tower = (stage.children[3] as Container).children[1] as Container;
+    const strips = tower.children[0] as Graphics;
+    expect(strips.getLocalBounds().x).toBe(100 * 16);
+    renderer.resetMotion();
+    renderer.render(b, 1);
+    const after = strips.getLocalBounds();
+    expect(after.x).toBe(300 * 16);
+    expect(after.y).toBe(floorTopY(2));
+  });
+
+  it('builds the new tower without build feedback and leaves a same-world render alone', async () => {
+    const a = createWorld(1);
+    a.time.minute = NOON;
+    makeRoom(a, 'office', 2, 100);
+    const b = createWorld(2);
+    b.time.minute = NOON;
+    makeRoom(b, 'office', 3, 120);
+    const { renderer, stage } = await mount(a);
+    renderer.render(a, 1);
+    renderer.resetMotion();
+    renderer.render(b, 1);
+    const sprite = roomSprite(stage);
+    renderer.render(b, 1);
+    expect(roomSprite(stage)).toBe(sprite); // no rebuild on a same-world render
+    expect(sprite.y).toBe(floorTopY(3));
   });
 });
