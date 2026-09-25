@@ -205,6 +205,39 @@ describe('the neighbor rule', () => {
     expect(between.get(a)).toBe(between.get(b));
   });
 
+  it('never repaints a room when a newer one is built beside it: build A, then B to its left', () => {
+    for (let seed = 1; seed <= 40; seed++) {
+      for (const kind of FOUR) {
+        const w = ROOMS[kind].width;
+        const a = { id: 10, kind, floor: 4, x: 200 };
+        const before = interiorVariants(seed, [a]).get(a.id);
+        const b = { id: 11, kind, floor: 4, x: 200 - w };
+        const after = interiorVariants(seed, [a, b]);
+        expect(after.get(a.id), `${kind} seed ${seed}`).toBe(before);
+        const venue = kind === 'office' || kind === 'restaurant';
+        if (!venue || venueOf(seed, 10, kind).treatment === venueOf(seed, 11, kind).treatment) {
+          expect(after.get(b.id), `${kind} seed ${seed}`).not.toBe(after.get(a.id)); // the newer room moved
+        }
+      }
+    }
+  });
+
+  it('keeps every existing look as a floor fills up in any order', () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      const slots = Array.from({ length: 10 }, (_, i) => 100 + i * ROOMS.office.width);
+      // A build order from the seed; each build takes the next id.
+      const order = [...slots].sort((p, q) => ((p * 31 + seed * 17) % 97) - ((q * 31 + seed * 17) % 97));
+      const built: { id: number; kind: RoomKind; floor: number; x: number }[] = [];
+      let last = new Map<number, number>();
+      order.forEach((x, i) => {
+        built.push({ id: 100 + i, kind: 'office', floor: 2, x });
+        const now = interiorVariants(seed, built);
+        for (const [id, v] of last) expect(now.get(id), `seed ${seed} room ${id}`).toBe(v);
+        last = now;
+      });
+    }
+  });
+
   it('only applies to the four kinds', () => {
     expect([...NEIGHBOR_KINDS].sort()).toEqual([...FOUR].sort());
   });

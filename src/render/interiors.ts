@@ -9,7 +9,7 @@
 // canvas paths, a 2 px #222222 outline on every shape, baked by art.ts at twice the structural
 // resolution, and each texture covers only the rows it draws. Pure drawing: no pixi, no DOM.
 
-import { SCHEDULES, WASTE } from '../sim/rules';
+import { ROOMS, SCHEDULES, WASTE } from '../sim/rules';
 import { clockOf, type Id, type RoomKind, type SimKind } from '../sim/types';
 import { FLOOR_PX, INTERIOR_TOP, OPEN_TOP, SLAB_PX, TILE_PX, WIN_PANE_TOP, WIN_SILL } from './grid';
 import {
@@ -1688,40 +1688,56 @@ export function interiorVariant(seed: number, room: { id: Id; kind: RoomKind; x:
   return mod(room.id, n);
 }
 
+/** How far apart, in tiles, two rooms on a floor may stand and still be neighbors: an express shaft's width. */
+export const NEIGHBOR_GAP_TILES = 6;
+
+type Placed = { id: Id; kind: RoomKind; floor: number; x: number; width?: number };
+
 /**
- * Every room's variant, with the neighbor rule: along each floor from left to right, a room of a
- * NEIGHBOR_KINDS kind whose nearest room to the left is the same kind in the same variant takes
- * another of its candidates, when it has one. Stairs and escalators, drawn over the rooms they
- * cross, are not neighbors. A pure function of the seed and each room's id, kind, floor and x:
- * never world.rng, never saved, never in the world hash.
+ * Every room's variant, with the neighbor rule: a room of a NEIGHBOR_KINDS kind avoids the
+ * variants of its same-kind neighbors on its floor (within NEIGHBOR_GAP_TILES of it, either side)
+ * that have a lower id, when another of its candidates is free. Builds always take higher ids, so
+ * building next to a room never changes its look; only the newer room moves away. Stairs and
+ * escalators, drawn over the rooms they cross, are not neighbors. A pure function of the seed and
+ * each room's id, kind, floor, x and width: never world.rng, never saved, never in the world hash.
  */
-export function interiorVariants(seed: number, rooms: Iterable<{ id: Id; kind: RoomKind; floor: number; x: number }>): Map<Id, number> {
-  const floors = new Map<number, { id: Id; kind: RoomKind; floor: number; x: number }[]>();
+export function interiorVariants(seed: number, rooms: Iterable<Placed>): Map<Id, number> {
+  const groups = new Map<string, Placed[]>();
   const out = new Map<Id, number>();
   for (const room of rooms) {
-    if (INTERIORS[room.kind].overlay) {
+    if (INTERIORS[room.kind].overlay || !NEIGHBOR_KINDS.has(room.kind)) {
       out.set(room.id, interiorVariant(seed, room));
       continue;
     }
-    const list = floors.get(room.floor);
+    const key = `${room.floor}|${room.kind}`;
+    const list = groups.get(key);
     if (list) list.push(room);
-    else floors.set(room.floor, [room]);
+    else groups.set(key, [room]);
   }
-  for (const list of floors.values()) {
-    list.sort((a, b) => a.x - b.x || a.id - b.id);
-    let prev: { kind: RoomKind; variant: number } | null = null;
-    for (const room of list) {
+  const widthOf = (r: Placed): number => r.width ?? ROOMS[r.kind].width;
+  for (const list of groups.values()) {
+    list.sort((a, b) => a.id - b.id);
+    list.forEach((room, i) => {
       let v = interiorVariant(seed, room);
-      if (prev && prev.kind === room.kind && prev.variant === v && NEIGHBOR_KINDS.has(room.kind)) {
+      const taken = new Set<number>();
+      for (let j = 0; j < i; j++) {
+        const older = list[j] as Placed;
+        const gap = Math.max(older.x - (room.x + widthOf(room)), room.x - (older.x + widthOf(older)));
+        if (gap <= NEIGHBOR_GAP_TILES) taken.add(out.get(older.id) as number);
+      }
+      if (taken.has(v)) {
         const c = candidatesOf(seed, room);
-        if (c.length > 1) {
-          const i = Math.max(0, c.indexOf(v));
-          v = c[(i + 1 + (mix((seed | 0) ^ NEIGHBOR_SALT, Math.trunc(room.id)) % (c.length - 1))) % c.length] as number;
+        const start = mix((seed | 0) ^ NEIGHBOR_SALT, Math.trunc(room.id)) % c.length;
+        for (let k = 0; k < c.length; k++) {
+          const next = c[(start + k) % c.length] as number;
+          if (!taken.has(next)) {
+            v = next;
+            break;
+          }
         }
       }
       out.set(room.id, v);
-      prev = { kind: room.kind, variant: v };
-    }
+    });
   }
   return out;
 }
