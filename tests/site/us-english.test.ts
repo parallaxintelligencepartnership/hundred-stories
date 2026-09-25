@@ -173,7 +173,7 @@ describe('never the word seed', () => {
 // confirms a parked outline (decision 2026-09-19, two step touch placement).
 describe('plain words', () => {
   const NOT_PLAIN = /\bhaptics\b|\bshafts?\b|\bin all\b/i;
-  const NAMED = ['panels.ts', 'status.ts', 'onboarding.ts', 'controls.ts', 'ui.ts'];
+  const NAMED = ['panels.ts', 'status.ts', 'onboarding.ts', 'controls.ts', 'ui.ts', 'explain.ts'];
 
   it('finds a word that is not plain when it is there', () => {
     const hits = literals("switchRow('x', 'Haptics'); button('Whole shaft'); `Night x8, x${n} in all`;").filter(
@@ -202,5 +202,13 @@ describe('plain words', () => {
     const build = controlLines('touch').find((line) => line.icon === 'build');
     expect(build?.text).toMatch(/then tap Build\b/);
     expect(hintText(true)).toMatch(/\bBuild\b/);
+  });
+
+  it('names the Build step wherever a site page says tap to place', () => {
+    for (const path of ['index.html', 'how-to-play/index.html']) {
+      const text = visibleText(PAGES[path] as string);
+      expect(text, path).toMatch(/tap to place/);
+      expect(text.match(/tap to place[^.]*/g)?.every((said) => /then tap Build\b/.test(said)), path).toBe(true);
+    }
   });
 });

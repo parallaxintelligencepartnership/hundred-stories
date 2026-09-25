@@ -1,6 +1,6 @@
 // The log and room panels on a fake DOM: what a refresh builds, and what it leaves alone.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createFinancesPanel, createLogPanel, createQueryPanel, createSettingsPanel, LOG_PANEL_LINES, type PanelContext } from '../../src/ui/panels';
+import { createFinancesPanel, createLogPanel, createQueryPanel, createSettingsPanel, type PanelContext } from '../../src/ui/panels';
 import type { Sound } from '../../src/audio/audio';
 import { RENT } from '../../src/sim/rules';
 import type { LogEntry } from '../../src/sim/types';
@@ -22,14 +22,18 @@ const ctx: PanelContext = {
   setReducedMotion: () => {},
 };
 
-function logGame(): { game: never; world: { log: LogEntry[]; logTotal: number }; push(n: number): void } {
-  const world = { log: [] as LogEntry[], logTotal: 0 };
+function logGame(): {
+  game: never;
+  world: { log: LogEntry[]; logTotal: number; time: { minute: number } };
+  push(n: number, minute?: number, level?: LogEntry['level']): void;
+} {
+  const world = { log: [] as LogEntry[], logTotal: 0, time: { minute: 0 } };
   return {
     game: { world } as never,
     world,
-    push(n: number) {
+    push(n: number, minute = world.time.minute, level: LogEntry['level'] = 'info') {
       for (let i = 0; i < n; i += 1) {
-        world.log.push({ minute: 0, text: `line ${world.logTotal}`, level: 'info' });
+        world.log.push({ minute, text: `line ${world.logTotal}`, level });
         world.logTotal += 1;
       }
     },
@@ -44,45 +48,100 @@ function listOf(panel: unknown): FakeElement {
   return list;
 }
 
+/** Each line's sentence (the text span, or the whole li for the empty line). */
 const texts = (list: FakeElement): string[] =>
-  list.children.map((li) => li.children[1]?.textContent ?? li.textContent);
+  list.children.map((li) => li.children.find((c) => c.className === 'hs-log-text')?.textContent ?? li.textContent);
+/** Each line's time words. */
+const times = (list: FakeElement): string[] =>
+  list.children.map((li) => li.children.find((c) => c.className === 'hs-log-time')?.textContent ?? '');
+const showOlder = (panel: unknown): FakeElement | undefined =>
+  node(panel).descendants().find((n) => n.tagName === 'BUTTON' && n.textContent === 'Show older');
+const tap = (target: FakeElement): void => {
+  for (const fn of target.listeners.get('click') ?? []) fn({});
+};
 
-describe('log panel', () => {
-  it('appends each new line on top and caps the list, even after 300 lines', () => {
-    const { game, push } = logGame();
-    const panel = createLogPanel(game, ctx);
-    const list = listOf(panel);
-    expect(list.children.map((c) => c.textContent)).toEqual(['Nothing has happened yet.']);
-    for (let i = 0; i < 300; i += 1) {
-      push(1);
-      panel.refresh?.();
-    }
-    expect(list.children.length).toBe(LOG_PANEL_LINES);
-    expect(texts(list)[0]).toBe('line 299');
-    expect(texts(list)[LOG_PANEL_LINES - 1]).toBe('line 100');
-    // Everything in the panel: the sheet's grab handle, the header (the head, its title holding an icon svg with its
-    // <use> and the title text, and a close button), the body, the list, and three nodes per
-    // line (the li, its time and its text).
-    expect(node(panel).descendants().length).toBe(1 + 6 + 1 + 1 + LOG_PANEL_LINES * 3);
+describe('News panel', () => {
+  it('is called News', () => {
+    const { game } = logGame();
+    const panel = node(createLogPanel(game, ctx));
+    const title = panel.descendants().find((n) => n.className === 'hs-panel-title-text');
+    expect(title?.textContent).toBe('News');
+    expect(panel.textContent).not.toMatch(/event log/i);
   });
 
-  it('builds only the lines that landed, and keeps the ones already shown', () => {
+  it('shows the newest ten lines, newest first', () => {
     const { game, push } = logGame();
-    push(50);
+    push(25);
+    const list = listOf(createLogPanel(game, ctx));
+    expect(texts(list)).toEqual(['line 24', 'line 23', 'line 22', 'line 21', 'line 20', 'line 19', 'line 18', 'line 17', 'line 16', 'line 15']);
+  });
+
+  it('puts a new line on top and keeps ten', () => {
+    const { game, push } = logGame();
+    push(12);
     const panel = createLogPanel(game, ctx);
-    const list = listOf(panel);
-    const before = [...list.children];
-    dom.created = 0;
-    push(3);
+    push(2);
     panel.refresh?.();
-    expect(dom.created).toBe(3 * 3); // three li, each with a time and a text span
-    expect(texts(list).slice(0, 4)).toEqual(['line 52', 'line 51', 'line 50', 'line 49']);
-    expect(list.children.slice(3)).toEqual(before);
+    const list = listOf(panel);
+    expect(list.children.length).toBe(10);
+    expect(texts(list).slice(0, 3)).toEqual(['line 13', 'line 12', 'line 11']);
   });
 
-  it('a refresh with no new line builds nothing', () => {
+  it('says when each line happened in words, from the game clock', () => {
+    const { game, world, push } = logGame();
+    world.time.minute = 3 * 1440 + 12 * 60; // noon on the fourth day
+    push(1, 1 * 1440 + 9 * 60); // two days ago
+    push(1, 2 * 1440 + 18 * 60); // yesterday evening
+    push(1, 3 * 1440 + 7 * 60); // five hours ago
+    push(1, 3 * 1440 + 11 * 60); // an hour ago
+    push(1, 3 * 1440 + 11 * 60 + 50); // ten minutes ago
+    const panel = createLogPanel(game, ctx);
+    expect(times(listOf(panel))).toEqual(['just now', 'an hour ago', '5 hours ago', 'yesterday', '2 days ago']);
+    // The words move on as the clock does, with no new line.
+    world.time.minute += 60;
+    panel.refresh?.();
+    expect(times(listOf(panel))[0]).toBe('an hour ago');
+  });
+
+  it('has no clock stamp, level tag or id in any line', () => {
+    const { game, world, push } = logGame();
+    world.time.minute = 2000;
+    push(3, 1990, 'warn');
+    push(3, 1995, 'alert');
+    world.log.push({ minute: 1999, text: 'A tenant moved in.', level: 'info', roomId: 42, simId: 77 });
+    world.logTotal += 1;
+    const list = listOf(createLogPanel(game, ctx));
+    for (const li of list.children) {
+      expect(li.textContent).not.toMatch(/\b(info|warn|alert)\b|\d{1,2}:\d{2}|weekday|weekend|42|77|#/i);
+    }
+    expect(list.children[0]?.textContent).toContain('A tenant moved in.');
+  });
+
+  it('Show older reveals the next fifty, and goes away when there is no more', () => {
+    const { game, push } = logGame();
+    push(70);
+    const panel = createLogPanel(game, ctx);
+    const older = showOlder(panel);
+    expect(older).toBeDefined();
+    tap(older as FakeElement);
+    const list = listOf(panel);
+    expect(list.children.length).toBe(60);
+    expect(texts(list)[59]).toBe('line 10');
+    expect(showOlder(panel)?.hidden).toBe(false);
+    tap(showOlder(panel) as FakeElement);
+    expect(list.children.length).toBe(70);
+    expect(showOlder(panel)?.hidden ?? true).toBe(true);
+  });
+
+  it('has no Show older when ten lines or fewer', () => {
     const { game, push } = logGame();
     push(10);
+    expect(showOlder(createLogPanel(game, ctx))?.hidden ?? true).toBe(true);
+  });
+
+  it('a refresh with no new line and no change of time builds nothing', () => {
+    const { game, push } = logGame();
+    push(30);
     const panel = createLogPanel(game, ctx);
     dom.created = 0;
     panel.refresh?.();
@@ -99,15 +158,9 @@ describe('log panel', () => {
     expect(texts(listOf(panel))).toEqual(['loaded']);
   });
 
-  it('a burst past the cap rebuilds to the newest 200', () => {
-    const { game, push } = logGame();
-    push(5);
-    const panel = createLogPanel(game, ctx);
-    push(250);
-    panel.refresh?.();
-    const list = listOf(panel);
-    expect(list.children.length).toBe(LOG_PANEL_LINES);
-    expect(texts(list)[0]).toBe('line 254');
+  it('says so when nothing has happened yet', () => {
+    const { game } = logGame();
+    expect(texts(listOf(createLogPanel(game, ctx)))).toEqual(['Nothing has happened yet.']);
   });
 });
 
@@ -220,7 +273,7 @@ describe('panel header', () => {
       },
     } as never;
     const cases: [unknown, string, string][] = [
-      [createLogPanel(game, ctx), 'Event log', 'log'],
+      [createLogPanel(game, ctx), 'News', 'log'],
       [createSettingsPanel({ world: { seed: 1, log: [], logTotal: 0 } } as never, ctx), 'Settings', 'settings'],
       [createQueryPanel(room, { roomId: 1 }, ctx), 'Office', 'room'],
       [createQueryPanel(room, { roomId: 99 }, ctx), 'Nothing selected', 'query'],

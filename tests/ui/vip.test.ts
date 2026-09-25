@@ -134,7 +134,7 @@ describe('VIP card', () => {
   });
 });
 
-describe('VIP card in the event log', () => {
+describe('VIP card in News', () => {
   let dom: FakeDom;
   let uninstall: () => void;
   beforeEach(() => {

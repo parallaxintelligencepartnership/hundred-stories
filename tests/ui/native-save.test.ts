@@ -148,3 +148,33 @@ describe('settings panel export and import by platform', () => {
     expect(notices).toEqual(['That is not a Hundred Stories save.']);
   });
 });
+
+describe('the kept copy of a tower that could not be opened', () => {
+  const KEPT = '{"version":5,"kept":true}';
+  const panelWith = (kept: string | null): FakeElement => {
+    const game = {
+      world: { seed: 1, log: [], logTotal: 0 },
+      exportSave: () => SAVE,
+      importSave: () => ({ ok: true }),
+      getKeptCopy: () => kept,
+    } as never;
+    const ctx: PanelContext = { apply: () => ({ ok: true }) as never, notice: () => {}, close: () => {}, reducedMotion: false, setReducedMotion: () => {} };
+    return createSettingsPanel(game, ctx) as unknown as FakeElement;
+  };
+  const oldTowerButton = (panel: FakeElement): FakeElement | undefined =>
+    panel.descendants().find((n) => n.tagName === 'BUTTON' && n.textContent === 'Save the old tower to a file');
+
+  it('has no button when there is no kept copy', () => {
+    expect(oldTowerButton(panelWith(null))).toBeUndefined();
+  });
+
+  it('offers "Save the old tower to a file", which saves the kept text, not the tower in play', async () => {
+    g['__TAURI_INTERNALS__'] = {};
+    const found = oldTowerButton(panelWith(KEPT));
+    expect(found).toBeDefined();
+    fire(found as FakeElement, 'click');
+    await settle();
+    expect(plugins.exportSaveWithDialog).toHaveBeenCalledWith(KEPT);
+    expect(plugins.exportSaveWithDialog).not.toHaveBeenCalledWith(SAVE);
+  });
+});
