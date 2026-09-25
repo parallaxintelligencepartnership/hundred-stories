@@ -4,11 +4,12 @@ import { assembleChronicle } from './chronicle';
 import { ROOMS, STARS, type StarRule } from './rules';
 import { recordBeat } from './story';
 import { log } from './world';
-import type { Star, Stats, World } from './types';
+import type { Id, Star, Stats, World } from './types';
 
 const VIP_ORDER: Record<Stats['vipRating'], number> = { none: 0, poor: 1, fair: 2, good: 3 };
 
 export function populationOf(world: World): number {
+  const staffIn = housekeepersByRoom(world);
   let population = 0;
   for (const room of world.rooms.values()) {
     if (room.kind === 'office' && !room.vacant) {
@@ -17,12 +18,25 @@ export function populationOf(world: World): number {
       population += ROOMS.condo.capacity;
     } else if (
       (room.kind === 'hotelSingle' || room.kind === 'hotelTwin' || room.kind === 'hotelSuite') &&
-      room.occupancy > 0
+      room.occupancy - (staffIn.get(room.id) ?? 0) > 0
     ) {
       population += ROOMS[room.kind].capacity;
     }
   }
   return population;
+}
+
+/**
+ * Housekeepers standing in a room, by room id. A keeper cleaning adds to the room's
+ * occupancy like anyone inside, but staff never count toward population.
+ */
+function housekeepersByRoom(world: World): Map<Id, number> {
+  const out = new Map<Id, number>();
+  for (const sim of world.sims.values()) {
+    if (sim.kind !== 'staff' || sim.inRoomId === null) continue;
+    out.set(sim.inRoomId, (out.get(sim.inRoomId) ?? 0) + 1);
+  }
+  return out;
 }
 
 function meetsRequires(world: World, requires: StarRule['requires']): boolean {

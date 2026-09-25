@@ -4,6 +4,8 @@ import {
   handleEventCommand,
   hooksActive,
   startFire,
+  startTheft,
+  startVip,
   resetEventTestHooks,
   tickEvents,
   vipRatingOf,
@@ -203,6 +205,41 @@ describe('fire: nobody walks into a burning building', () => {
     }
     tickMany(world, 20);
     expect(office.occupancy).toBe(0);
+  });
+});
+
+describe('fire hold: the VIP and a booked thief wait outside too (audit 2026-09-25 B S6, decision 3)', () => {
+  it('keeps the VIP and the thief outside until the fire ends, and the visit is not an incident', () => {
+    const w = createWorld(11);
+    w.cash = 50_000_000;
+    w.stars = 5;
+    buildTower(w, [
+      ...lobbyRun(100, 199),
+      { kind: 'build', room: 'office', floor: 2, x: 100 },
+      { kind: 'build', room: 'hotelSuite', floor: 3, x: 100 },
+      { kind: 'build', room: 'shop', floor: 2, x: 120 },
+      { kind: 'shaft.build', shaft: 'standard', x: 190, floorMin: 1, floorMax: 3 },
+    ]);
+    const office = [...w.rooms.values()].find((r) => r.kind === 'office') as Room;
+    startVip(w);
+    const visit = eventOf(w, 'vip') as Extract<ActiveEvent, { kind: 'vip' }>;
+    visit.arrivesAt = w.time.minute + 2;
+    startTheft(w, (w.time.minute % 1440) + 3);
+    EVENT_TEST_HOOKS.target.fire = office.id;
+    startFire(w);
+
+    tickMany(w, 30);
+    expect(eventOf(w, 'fire')).toBeDefined();
+    expect(w.sims.get(visit.simId)?.state).toBe('outside');
+    expect(visit.phase).toBe('notice');
+    expect([...w.sims.values()].filter((s) => s.kind === 'thief')).toEqual([]);
+    expect(eventOf(w, 'theft')?.phase).toBe('notice');
+
+    expect(handleEventCommand(w, { kind: 'fire.callHelicopter' }).ok).toBe(true);
+    tickMany(w, 3);
+    expect(w.sims.get(visit.simId)?.state).not.toBe('outside');
+    expect(visit.incident).toBe(false);
+    expect([...w.sims.values()].filter((s) => s.kind === 'thief')).toHaveLength(1);
   });
 });
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createWorld, addRoom } from '../../src/sim/world';
+import { addRoom, addSim, allocId, createWorld } from '../../src/sim/world';
 import { ROOMS, STARS } from '../../src/sim/rules';
 import { populationOf, recomputeStars } from '../../src/sim/stars';
 import type { Room, RoomKind, World } from '../../src/sim/types';
@@ -60,6 +60,49 @@ describe('stars: populationOf', () => {
     const world = createWorld(1);
     addRoom(world, makeRoom({ kind: 'hotelTwin', floor: 2, x: 100, occupancy: 0 }));
     expect(populationOf(world)).toBe(0);
+  });
+
+  // Audit 2026-09-25 new S2: a housekeeper cleaning is not a guest.
+  function keeperIn(world: World, room: Room): void {
+    const id = allocId(world);
+    addSim(world, {
+      id,
+      kind: 'staff',
+      homeRoomId: null,
+      pos: { floor: room.floor, x: room.x },
+      inCarId: null,
+      inRoomId: room.id,
+      route: [],
+      state: 'inRoom',
+      stress: 0,
+      waitStart: null,
+      schedule: [],
+      nextScheduleIndex: 0,
+      stayUntil: null,
+      wallet: 0,
+      leaveReason: null,
+    });
+    room.occupancy += 1;
+  }
+
+  it('does not count housekeepers cleaning empty hotel rooms', () => {
+    const world = createWorld(1);
+    addRoom(world, makeRoom({ kind: 'office', floor: 2, x: 100, vacant: false }));
+    const before = populationOf(world);
+    for (const x of [100, 110, 120]) {
+      const room = makeRoom({ kind: 'hotelSingle', floor: 3, x, dirty: true });
+      addRoom(world, room);
+      keeperIn(world, room);
+    }
+    expect(populationOf(world)).toBe(before);
+  });
+
+  it('still counts a hotel room with a guest in it while a housekeeper is there too', () => {
+    const world = createWorld(1);
+    const room = makeRoom({ kind: 'hotelTwin', floor: 3, x: 100, occupancy: 1 });
+    addRoom(world, room);
+    keeperIn(world, room);
+    expect(populationOf(world)).toBe(ROOMS.hotelTwin.capacity);
   });
 
   it('sums population across several rooms', () => {

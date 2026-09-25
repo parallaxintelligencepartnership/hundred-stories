@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { applyCommand } from '../../src/sim/build';
-import { isLeftoverCar, requestHallCall, tickElevators } from '../../src/sim/elevators';
+import { isLeftoverCar, requestHallCall, stopOffRefusal, tickElevators } from '../../src/sim/elevators';
 import { findRoute } from '../../src/sim/routing';
 import { SHAFTS } from '../../src/sim/rules';
 import { deserialize, hashWorld, serialize, SAVE_VERSION } from '../../src/sim/save';
@@ -390,6 +390,28 @@ describe('commands', () => {
     applyCommand(world, { kind: 'shaft.setCarServes', shaftId: shaft.id, carId: second.id, serves: 'office' });
     expect(applyCommand(world, { kind: 'shaft.removeCar', shaftId: shaft.id })).toEqual({ ok: true });
     expect(shaft.cars).toHaveLength(1);
+  });
+});
+
+// Audit 2026-09-25 B S2: turning a stop off under a rider bound for it would strand them.
+// The refusal lives here; build.ts's shaft.setStop handler returns it (a separate package).
+describe('turning off a stop someone is riding to', () => {
+  it('is refused in plain words while a rider aboard is bound for that floor', () => {
+    const world = createWorld(7);
+    const shaft = buildShaft(world, { floorMax: 6 });
+    const rider = addWaiter(world, shaft, 'diner', 1, 4);
+    run(world, 2);
+    expect(rider.state).toBe('riding');
+    expect(stopOffRefusal(world, shaft, 4)).toBe('Someone is riding to that floor.');
+  });
+
+  it('is allowed for a floor no rider aboard is bound for', () => {
+    const world = createWorld(7);
+    const shaft = buildShaft(world, { floorMax: 6 });
+    const rider = addWaiter(world, shaft, 'diner', 1, 4);
+    run(world, 2);
+    expect(rider.state).toBe('riding');
+    expect(stopOffRefusal(world, shaft, 5)).toBeNull();
   });
 });
 
