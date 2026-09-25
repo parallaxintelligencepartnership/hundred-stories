@@ -154,7 +154,7 @@ describe('the security office panel', () => {
     const lines = items.map((n) => n.textContent);
     for (const id of office.tenants) expect(lines.some((l) => l.startsWith(personName(world.seed, id)))).toBe(true);
     // Morning: the day shift is out on the floors, the night shift is off.
-    expect(lines.filter((l) => l.endsWith('Off shift'))).toHaveLength(3);
+    expect(lines.filter((l) => l.endsWith('Off work'))).toHaveLength(3);
     expect(lines.filter((l) => /Patrolling floor \d$/.test(l))).toHaveLength(3);
   });
 });

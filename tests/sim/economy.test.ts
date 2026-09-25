@@ -211,7 +211,7 @@ describe('economy: onQuarterStart totals and reset', () => {
     world.cash = 1_000_000;
     onQuarterStart(world);
     const last = world.log[world.log.length - 1];
-    expect(last?.text).toContain('Quarter closed');
+    expect(last?.text).toContain('The quarter is over.');
   });
 });
 

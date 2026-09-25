@@ -34,7 +34,7 @@ function addRoom(world: World, overrides: Partial<Room>): void {
 describe('shareStats', () => {
   it('reads 0 floors from a world with no rooms', () => {
     const world = createWorld(1);
-    expect(shareStats(world)).toEqual({ floors: 0, people: 0, stars: 1 });
+    expect(shareStats(world)).toEqual({ floors: 0, people: 0, stars: 1, start: 1 });
   });
 
   it('takes the highest floor a room reaches, ignoring rooms underground', () => {
@@ -44,20 +44,20 @@ describe('shareStats', () => {
     addRoom(world, { id: 3, floor: -2, height: 1 }); // basement, does not count
     world.population = 42;
     world.stars = 3;
-    expect(shareStats(world)).toEqual({ floors: 7, people: 42, stars: 3 });
+    expect(shareStats(world)).toEqual({ floors: 7, people: 42, stars: 3, start: 1 });
   });
 });
 
 describe('shareText', () => {
   it('uses singular forms for one floor and one person', () => {
     expect(shareText({ floors: 1, people: 1, stars: 1 })).toBe(
-      "I'm building a 1-floor tower with 1 person in Hundred Stories, a free tower sim you play in the browser. Think you can do better?",
+      "I'm building a 1-floor tower with 1 person in Hundred Stories, a free tower-building game you play in your browser. Think you can do better?",
     );
   });
 
   it('uses plural forms otherwise, with thousands separators', () => {
     expect(shareText({ floors: 12, people: 1234, stars: 4 })).toBe(
-      "I'm building a 12-floor tower with 1,234 people in Hundred Stories, a free tower sim you play in the browser. Think you can do better?",
+      "I'm building a 12-floor tower with 1,234 people in Hundred Stories, a free tower-building game you play in your browser. Think you can do better?",
     );
   });
 
@@ -76,6 +76,32 @@ describe('shareMessage', () => {
 describe('shareUrl', () => {
   it('carries the numbers in the query string against the site url', () => {
     expect(shareUrl({ floors: 12, people: 340, stars: 4 })).toBe(`${SITE_URL}?floors=12&people=340&stars=4`);
+  });
+
+  it('carries the starting number as tower, so a friend can start the same tower', () => {
+    expect(shareUrl({ floors: 12, people: 340, stars: 4, start: 123456 })).toBe(
+      `${SITE_URL}?floors=12&people=340&stars=4&tower=123456`,
+    );
+    expect(shareUrl({ floors: 12, people: 340, stars: 4, start: 0 })).toBe(`${SITE_URL}?floors=12&people=340&stars=4&tower=0`);
+  });
+
+  it('never carries the word seed', () => {
+    const world = createWorld(98765);
+    expect(shareUrl(shareStats(world))).not.toMatch(/seed/i);
+    expect(shareMessage(shareStats(world))).not.toMatch(/seed/i);
+  });
+
+  it('leaves out a starting number that is not a whole number in range', () => {
+    expect(shareUrl({ floors: 12, people: 340, stars: 4, start: -5 })).toBe(`${SITE_URL}?floors=12&people=340&stars=4`);
+    expect(shareUrl({ floors: 12, people: 340, stars: 4, start: 1.5 })).toBe(`${SITE_URL}?floors=12&people=340&stars=4`);
+  });
+
+  it('round trips a tower: the link a friend opens reads back the same starting number', () => {
+    const world = createWorld(98765);
+    addRoom(world, { id: 1, floor: 1, height: 1 });
+    world.stars = 2;
+    const url = shareUrl(shareStats(world));
+    expect(parseChallenge(url.slice(url.indexOf('?')))).toEqual({ floors: 1, people: 0, stars: 2, start: 98765 });
   });
 });
 
@@ -106,6 +132,13 @@ describe('parseChallenge', () => {
     expect(parseChallenge('?floors=12&people=1000000&stars=4')).toBeNull();
     expect(parseChallenge('?floors=12&people=340&stars=0')).toBeNull();
     expect(parseChallenge('?floors=12&people=340&stars=7')).toBeNull();
+  });
+
+  it('reads the starting number when the link carries one, and still reads the challenge when it does not', () => {
+    expect(parseChallenge('?floors=12&people=340&stars=4&tower=123456')).toEqual({ floors: 12, people: 340, stars: 4, start: 123456 });
+    expect(parseChallenge('?floors=12&people=340&stars=4&tower=abc')).toEqual({ floors: 12, people: 340, stars: 4 });
+    expect(parseChallenge('?floors=12&people=340&stars=4&tower=-1')).toEqual({ floors: 12, people: 340, stars: 4 });
+    expect(parseChallenge('?floors=12&people=340&stars=4&tower=99999999999')).toEqual({ floors: 12, people: 340, stars: 4 });
   });
 
   it('rejects huge values that would still pass a naive number check', () => {

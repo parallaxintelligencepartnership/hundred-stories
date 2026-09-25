@@ -113,8 +113,8 @@ describe('clock dial', () => {
 
 describe('night speed mode', () => {
   it('names the night multiplier and the effective speed, and nothing by day', () => {
-    expect(speedModeText(2, 23 * 60 + 30)).toBe(`Night x${NIGHT_MULTIPLIER}, effective x${2 * NIGHT_MULTIPLIER}`);
-    expect(speedModeText(2, 23 * 60 + 30)).toBe('Night x8, effective x16');
+    expect(speedModeText(2, 23 * 60 + 30)).toBe(`Night x${NIGHT_MULTIPLIER}, x${2 * NIGHT_MULTIPLIER} in all`);
+    expect(speedModeText(2, 23 * 60 + 30)).toBe('Night x8, x16 in all');
     expect(speedModeText(0, 2 * 60)).toBe('Paused, night x8');
     expect(speedModeText(4, 12 * 60)).toBe('');
   });
@@ -143,7 +143,7 @@ describe('status bar on the page', () => {
     const mode = bar.mode as unknown as FakeElement;
     expect(mode.classList.contains('is-hidden')).toBe(true);
     bar.update(stubWorld({ time: { minute: 23 * 60 } }), 2);
-    expect([mode.textContent, mode.classList.contains('is-hidden')]).toEqual(['Night x8, effective x16', false]);
+    expect([mode.textContent, mode.classList.contains('is-hidden')]).toEqual(['Night x8, x16 in all', false]);
   });
 
   it('builds nothing on an update that changes nothing', () => {
@@ -165,7 +165,7 @@ describe('weather readout beside the clock', () => {
   const kinds: WeatherKind[] = ['clear', 'overcast', 'rain', 'storm'];
 
   it('names each kind with weatherLabel and a two letter short form', () => {
-    expect(kinds.map(weatherLabel)).toEqual(['Clear', 'Overcast', 'Rain', 'Storm']);
+    expect(kinds.map(weatherLabel)).toEqual(['Clear', 'Cloudy', 'Rain', 'Storm']);
     expect(kinds.map(weatherShort)).toEqual(['CL', 'OV', 'RN', 'ST']);
   });
 

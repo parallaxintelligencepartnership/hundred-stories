@@ -186,7 +186,7 @@ describe('tips', () => {
   });
 
   it('names the night mode the status bar shows', () => {
-    expect(TIP_TEXT.nightSpeed('Night x8, effective x8')).toBe('Night x8, effective x8: from 11 PM to 6 AM the clock runs faster while the tower sleeps.');
+    expect(TIP_TEXT.nightSpeed('Night x8, x8 in all')).toBe('Night x8, x8 in all: from 11 PM to 6 AM the clock runs faster while the tower sleeps.');
   });
 });
 

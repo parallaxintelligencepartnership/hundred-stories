@@ -47,9 +47,9 @@ export interface PaletteParts {
 export const GROUPS: { title: string; source: 'rooms' | 'shafts' | 'tools'; group?: string }[] = [
   { title: 'Structure', source: 'rooms', group: 'structure' },
   { title: 'Elevators', source: 'shafts' },
-  { title: 'Residential', source: 'rooms', group: 'residential' },
+  { title: 'Homes', source: 'rooms', group: 'residential' },
   { title: 'Hotel', source: 'rooms', group: 'hotel' },
-  { title: 'Commercial', source: 'rooms', group: 'commercial' },
+  { title: 'Shops and fun', source: 'rooms', group: 'commercial' },
   { title: 'Services', source: 'rooms', group: 'services' },
   { title: 'Tools', source: 'tools' },
 ];
@@ -174,7 +174,7 @@ export function buildPalette(palette: HTMLElement, onPick: (row: PaletteRow) => 
       }
     } else {
       specs.push({ label: 'Demolish', footprint: 'Removes what you click', price: null, star: 1, tool: { kind: 'demolish' }, kind: null, glyph: 'demolish' });
-      specs.push({ label: 'Query', footprint: 'Shows what you click', price: null, star: 1, tool: { kind: 'query' }, kind: null, glyph: 'query' });
+      specs.push({ label: 'Look', footprint: 'Shows what you click', price: null, star: 1, tool: { kind: 'query' }, kind: null, glyph: 'query' });
     }
     const letters = assignLetters(specs.map((spec) => spec.label));
     specs.forEach((spec, i) => rows.push(addRow(palette, spec, groupIndex, letters[i] ?? '', onPick)));

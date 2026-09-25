@@ -136,7 +136,7 @@ describe('room panel flags', () => {
   it('builds no flag spans on a refresh where the flags did not change', () => {
     const { game } = roomGame();
     const panel = createQueryPanel(game, { roomId: 1 }, ctx);
-    expect(flags(panel).map((n) => n.textContent)).toEqual(['Vacant']);
+    expect(flags(panel).map((n) => n.textContent)).toEqual(['Empty']);
     dom.created = 0;
     panel.refresh?.();
     panel.refresh?.();
@@ -235,5 +235,54 @@ describe('panel header', () => {
       expect(close?.textContent).toBe('Close');
       expect(close?.getAttribute('aria-label')).toBe(`Close ${title.toLowerCase()}`);
     }
+  });
+});
+
+describe('settings: saved games and new game', () => {
+  const click = (target: FakeElement): void => {
+    for (const fn of target.listeners.get('click') ?? []) fn({});
+  };
+  const named = (panel: unknown, text: string): FakeElement[] =>
+    node(panel).descendants().filter((n) => n.tagName === 'BUTTON' && n.textContent === text);
+
+  it('says the tower saves by itself and names each save button in plain words', () => {
+    const panel = createSettingsPanel({ world: { seed: 1, log: [], logTotal: 0 } } as never, ctx);
+    const all = node(panel).descendants();
+    expect(all.some((n) => n.className === 'hs-section-title' && n.textContent === 'Saved games')).toBe(true);
+    expect(all.some((n) => n.className === 'hs-note' && n.textContent === 'Your tower saves by itself.')).toBe(true);
+    for (const text of ['Save now', 'Go back to last save', 'Save to a file']) expect(named(panel, text)).toHaveLength(1);
+    for (const old of ['Save', 'Load', 'Export', 'Import']) expect(named(panel, old)).toHaveLength(0);
+    const file = all.find((n) => n.id === 'hs-import') as FakeElement;
+    expect(file.getAttribute('aria-label')).toBe('Open a saved file');
+    expect(all.some((n) => n.tagName === 'LABEL' && n.textContent === 'Open a saved file')).toBe(true);
+  });
+
+  it('tells the player where they are after going back to the last save', async () => {
+    const notices: string[] = [];
+    const game = { world: { seed: 1, log: [], logTotal: 0 }, load: async () => ({ ok: true }) } as never;
+    const panel = createSettingsPanel(game, { ...ctx, notice: (t) => notices.push(t) });
+    click(named(panel, 'Go back to last save')[0] as FakeElement);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(notices).toEqual(['Back to your last save.']);
+  });
+
+  it('has no starting number field, and New game starts a fresh random tower', () => {
+    const started: number[] = [];
+    const notices: string[] = [];
+    const game = { world: { seed: 424242, log: [], logTotal: 0 }, newGame: (n: number) => started.push(n) } as never;
+    const panel = createSettingsPanel(game, { ...ctx, notice: (t) => notices.push(t) });
+    const all = node(panel).descendants();
+    expect(all.some((n) => n.id === 'hs-seed')).toBe(false);
+    expect(all.some((n) => n.tagName === 'INPUT' && (n as unknown as { type: string }).type === 'number')).toBe(false);
+    const realNow = Date.now;
+    Date.now = () => 1_758_700_000_123;
+    try {
+      click(named(panel, 'New game')[0] as FakeElement);
+    } finally {
+      Date.now = realNow;
+    }
+    expect(started).toEqual([123]);
+    expect(notices).toEqual(['New game started.']);
   });
 });

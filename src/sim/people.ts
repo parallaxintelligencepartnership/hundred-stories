@@ -131,7 +131,7 @@ function fillVacantOffices(world: World, clock: Clock): void {
       const sim = spawnWorker(world, room, clock);
       room.tenants.push(sim.id);
     }
-    log(world, `An office on ${floorLabel(room.floor)} leased to a new tenant.`, 'info', { roomId: room.id });
+    log(world, `An office on ${floorLabel(room.floor)} was rented to a new tenant.`, 'info', { roomId: room.id });
   }
 }
 
@@ -150,7 +150,7 @@ function sellVacantCondos(world: World, clock: Clock): void {
       const sim = spawnResident(world, room);
       room.tenants.push(sim.id);
     }
-    log(world, `A condo on ${floorLabel(room.floor)} sold to a new owner.`, 'info', { roomId: room.id });
+    log(world, `A condo on ${floorLabel(room.floor)} was sold to a new owner.`, 'info', { roomId: room.id });
   }
 }
 

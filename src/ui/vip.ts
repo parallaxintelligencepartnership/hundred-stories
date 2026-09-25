@@ -141,7 +141,7 @@ function nextRollMinute(minute: number): number {
  */
 export function vipNextChance(world: VipWorld): string {
   const percent = Math.round(EVENTS.vip.quarterlyChance * 100);
-  const rule = `VIP visits are rolled at ${formatClock(EVENT_ROLL_MINUTE_OF_DAY)} on the first day of each quarter, a ${percent}% chance while you have ${EVENTS.vip.minStar} stars and a clean, empty suite.`;
+  const rule = `On the first day of each quarter at ${formatClock(EVENT_ROLL_MINUTE_OF_DAY)}, there is a ${percent}% chance a VIP books a visit, if you have at least ${EVENTS.vip.minStar} stars and a clean, empty suite.`;
   if (activeVisit(world)) return rule;
   const next = nextRollMinute(world.time.minute + 1);
   const clock = clockOf(next);

@@ -73,7 +73,7 @@ describe('selectStorage', () => {
       },
     });
     // node has neither IndexedDB nor localStorage, so the browser slot refuses in its own words
-    await expect(slot.writeSave('x')).rejects.toThrow('The browser refused to store the save.');
+    await expect(slot.writeSave('x')).rejects.toThrow('This browser would not let the game save.');
     expect(await slot.readSave()).toBeNull();
     expect(loaded).toBe(false);
   });
@@ -115,7 +115,7 @@ describe('the Filesystem slot', () => {
     fs.writeFile = async () => {
       throw new Error('ENOSPC');
     };
-    await expect(createFileStorage(fs).writeSave('x')).rejects.toThrow('The device refused to store the save.');
+    await expect(createFileStorage(fs).writeSave('x')).rejects.toThrow('This device would not let the game save.');
   });
 
   it('reads a Blob result as text', async () => {

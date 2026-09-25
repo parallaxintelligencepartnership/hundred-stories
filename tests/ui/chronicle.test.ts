@@ -153,7 +153,7 @@ describe('tower chronicle', () => {
     expect(chronicle.minute).toBe(world.time.minute);
     const a = storyName(world, 700);
     const b = storyName(world, 701);
-    expect(chronicle.lines[0]).toBe('Tower seed 31, day 41.');
+    expect(chronicle.lines[0]).toBe('Day 41 in the tower.');
     expect(chronicle.lines[1]).toBe('Population 15,006.');
     expect(chronicle.lines.slice(2, 6)).toEqual([
       'Reached 2 stars on day 4.',
@@ -164,12 +164,12 @@ describe('tower chronicle', () => {
     expect(chronicle.lines[6]).toBe('Reached Tower status on day 41.');
     expect(chronicle.lines[7]).toMatch(new RegExp(`^${a}: .*eleven minutes`, "i"));
     expect(chronicle.lines[8]).toMatch(new RegExp(`^${b}: .*moved out of the office on floor 12`));
-    expect(chronicle.lines[9]).toBe('1 departure recorded.');
+    expect(chronicle.lines[9]).toBe('1 tenant moved out.');
     expect(chronicle.lines[10]).toMatch(new RegExp(`^${b}: `));
     expect(chronicle.lines.slice(11)).toEqual([
       'The VIP rated the tower fair.',
-      'Thefts recorded: 1 caught, 0 got away.',
-      'Waste backlogs recorded: 1, cleared: 0.',
+      'Thieves: 1 caught, 0 got away.',
+      'Times waste piled up: 1, cleaned up: 0.',
       'The cathedral held a wedding.',
     ]);
   });
@@ -272,7 +272,7 @@ describe('chronicle panel and export', () => {
     expect(canvas.width).toBe(1200);
     expect(canvas.height).toBeGreaterThan(200);
     expect(canvas.drawn[0]).toBe('Tower chronicle');
-    expect(canvas.drawn).toContain('Tower seed 41, day 41.');
+    expect(canvas.drawn).toContain('Day 41 in the tower.');
     const link = dom.clicked[dom.clicked.length - 1] as unknown as { download: string; href: string };
     expect(link.download).toBe('hundred-stories-chronicle.png');
     expect(notices).toEqual(['Image saved.']);

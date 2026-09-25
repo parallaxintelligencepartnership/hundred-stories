@@ -387,7 +387,7 @@ function towerLine(beat: StoryBeat, room: Room | undefined): string {
     case 'waste.backlog':
       return room ? `Waste piled up in ${placeText(room)} with nobody to collect it.` : 'Waste piled up with nobody to collect it.';
     case 'waste.cleared':
-      return room ? `The collectors cleared the waste from ${placeText(room)}.` : 'The collectors cleared a backlog of waste.';
+      return room ? `The collectors cleared the waste from ${placeText(room)}.` : 'The collectors cleared a pile of waste.';
     default:
       return '';
   }
@@ -428,7 +428,7 @@ export const ROLE_LABELS: Record<Sim['kind'], string> = {
 /** The card's four headings, in the order the panel shows them. */
 export const PERSON_CARD_HEADINGS = ['Who', 'On their mind', 'Recent chapter', 'What helps'] as const;
 
-export const WAIT_HELP = 'More cars on this shaft, or another shaft on this route.';
+export const WAIT_HELP = 'More cars in this elevator, or another elevator for this trip.';
 export const NOTHING_HELPS = 'Nothing right now.';
 export const NOTHING_RECORDED = 'Nothing recorded yet.';
 const CHAPTER_LINES = 6;

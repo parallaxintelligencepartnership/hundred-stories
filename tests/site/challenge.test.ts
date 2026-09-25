@@ -37,6 +37,29 @@ describe('mountChallenge', () => {
     expect(el.textContent).toBe('');
   });
 
+  it('shows Start the same tower, pointed at the play page with the friend’s starting number', () => {
+    const el = fakeBanner();
+    const play = { href: '/play/', hidden: true };
+    mountChallenge('?floors=12&people=340&stars=1&tower=123456', el, play);
+    expect(el.hidden).toBe(false);
+    expect(play).toEqual({ href: '/play/?seed=123456', hidden: false });
+  });
+
+  it('keeps the button hidden when the link carries no starting number', () => {
+    const el = fakeBanner();
+    const play = { href: '/play/', hidden: true };
+    mountChallenge('?floors=12&people=340&stars=1', el, play);
+    expect(el.hidden).toBe(false);
+    expect(play).toEqual({ href: '/play/', hidden: true });
+  });
+
+  it('keeps the button hidden when the challenge itself is invalid', () => {
+    const el = fakeBanner();
+    const play = { href: '/play/', hidden: true };
+    mountChallenge('?floors=0&people=340&stars=1&tower=123456', el, play);
+    expect(play).toEqual({ href: '/play/', hidden: true });
+  });
+
   it('leaves the banner untouched and hidden with an invalid query string', () => {
     const el = fakeBanner();
     mountChallenge('?floors=0&people=340&stars=1', el);

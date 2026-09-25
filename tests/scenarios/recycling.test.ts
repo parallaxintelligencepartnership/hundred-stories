@@ -107,7 +107,7 @@ describe('collection workers', () => {
     expect(c.occupancy).toBe(0);
     const card = personCard(world, staff[0] as Sim);
     expect(card.who).toEqual([personIdentity(world.seed, staff[0]!.id, 'collector').name, 'Collection worker', 'Works for the recycling center on floor B2']);
-    expect(collectorStatus(world, staff[0] as Sim)).toBe('Off shift');
+    expect(collectorStatus(world, staff[0] as Sim)).toBe('Off work');
     expect(applyCommand(world, { kind: 'demolish', roomId: c.id })).toEqual({ ok: true });
     tick(world);
     expect(collectors(world)).toHaveLength(0);
@@ -144,7 +144,7 @@ describe('collection workers', () => {
     expect(collectionLines(world, c)).toEqual([
       ['Workers', '2 (grows with the tower)'],
       ['Collected today', '9 units'],
-      ['Rooms in backlog', '0'],
+      ['Rooms piling up', '0'],
       ['Cannot reach', 'None'],
     ]);
     expect(wasteLine(world, officeOn(world, 3))).toBe('Waste: 0 of 9, collected today');
@@ -173,7 +173,7 @@ describe('collection workers', () => {
     const c = center(world);
     atOnDay(world, 1, 11, 0);
     expect(officeOn(world, 4).waste).toBe(5);
-    expect(logCount(world, 'Collection could not reach floor 4.')).toBe(1);
+    expect(logCount(world, 'The waste collectors could not reach floor 4.')).toBe(1);
     expect(collectionLines(world, c)[3]).toEqual(['Cannot reach', 'Floor 4']);
     for (const sim of collectors(world)) expect(sim.inRoomId).toBe(c.id);
 
@@ -183,7 +183,7 @@ describe('collection workers', () => {
     expect(officeOn(world, 4).waste).toBe(0);
     expect(centerSummary(world, c).collectedToday).toBe(5);
     expect(centerSummary(world, c).unreachableFloors).toEqual([]);
-    expect(logCount(world, 'Collection could not reach floor 4.')).toBe(1);
+    expect(logCount(world, 'The waste collectors could not reach floor 4.')).toBe(1);
   });
 });
 
@@ -202,7 +202,7 @@ describe('backlog', () => {
     expect(room.dirty).toBe(true);
     expect(room.wasteBacklogSince).toBe(3 * 1440 + 6 * 60);
     expect(world.story.recent.filter((b) => b.code === 'waste.backlog' && b.roomId === room.id)).toHaveLength(1);
-    expect(wasteLine(world, room)).toMatch(/^Waste: \d of 9, backlog since this morning$/);
+    expect(wasteLine(world, room)).toMatch(/^Waste: \d of 9, piling up since this morning$/);
     expect(centerSummary(world, center(world)).backlogRooms).toBeGreaterThanOrEqual(1);
     // Evaluation takes the dirty penalty and names the waste if the tenant leaves over it.
     atOnDay(world, 3, 7, 31);

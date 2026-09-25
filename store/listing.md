@@ -38,7 +38,7 @@ Build a skyscraper, keep your tenants happy, and climb from one star to TOWER.
 
 ## Promotional line (170 characters at most, App Store promotional text)
 
-Every room, price, elevator limit and stress rule is tuned so a tower can fail. Tenants notice slow elevators, noisy neighbors and dirty rooms, and they leave.
+Every room, price, elevator and stress rule is set up so a tower can fail. Tenants notice slow elevators, noisy neighbors and dirty rooms, and they leave.
 
 ## Long description
 
@@ -46,16 +46,16 @@ Build a tower. Run it well.
 
 Hundred Stories is a tower-building simulation with pixel art drawn in code. Start with a lobby and a little cash. Place offices, condos, hotel rooms, shops and restaurants, run elevators up through the floors, and keep the people inside happy enough to stay.
 
-A hundred stories is the height of a tower worth building. It is also what goes on inside one: the tenant on 40 who wants a quieter floor, the shop on 2 that lives on the lunch crowd, the hotel guest who missed the last express elevator and is not coming back. Every floor is a story. Everyone's got one.
+A hundred stories is the height of a tower worth building. It is also what goes on inside one: the tenant on 40 who wants a quieter floor, the shop on 2 that counts on the lunch crowd, the hotel guest who missed the last express elevator and is not coming back. Every floor is a story. Everyone's got one.
 
 Your tower can fail
-Every room, price, elevator limit and stress rule is tuned so a tower can fail. Tenants notice slow elevators, noisy neighbors and dirty rooms, and they leave. Set the rent per room, give each elevator car its own floors and riders, and answer the events that arrive: a fire, a bomb threat, a VIP guest who rates your suite, cockroaches in a dirty hotel room.
+Every room, price, elevator and stress rule is set up so a tower can fail. Tenants notice slow elevators, noisy neighbors and dirty rooms, and they leave. Set the rent per room, give each elevator car its own floors and riders, and answer the events that arrive: a fire, a bomb threat, a VIP guest who rates your suite, cockroaches in a dirty hotel room.
 
 Climb the star ladder
-Earn stars as the tower grows. Each star opens new rooms: security, housekeeping, sky lobbies and escalators, a cinema, a metro station, and at the top a cathedral. One hundred stories is the ceiling.
+Earn stars as the tower grows. Each star opens new rooms: security, housekeeping, sky lobbies and escalators, a cinema, a metro station, and at the top a cathedral. The tower can grow to one hundred floors.
 
 Yours, and private
-There is no account and nothing is tracked. Your tower is saved on your device as you play, and you can export it as a file whenever you like and import it on another device.
+There is no account and nothing is tracked. Your tower saves by itself on your device as you play. You can save it to a file whenever you like and open it on another device.
 
 Touch, mouse or keyboard
 On a phone or tablet: one finger moves, pinch zooms, tap to place. On a desktop: drag, scroll, or W A S D to move, and 1, 2, 3 or space to set the speed.

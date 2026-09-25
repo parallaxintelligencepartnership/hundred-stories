@@ -148,7 +148,7 @@ describe('guards', () => {
     for (const g of guards(world).filter((g) => g.guard?.shift === 1)) {
       expect(g.state).toBe('inRoom');
       expect(g.inRoomId).toBe(office.id);
-      expect(guardStatus(world, g)).toBe('Off shift');
+      expect(guardStatus(world, g)).toBe('Off work');
     }
   });
 });
@@ -169,7 +169,7 @@ describe('the shop thief', () => {
     const guardId = theft.guardId as number;
     expect(world.log.some((l) => l.text.startsWith('Theft on floor 5, a guard is on the way.'))).toBe(true);
     const sentStatus = guardStatus(world, world.sims.get(guardId) as Sim);
-    expect(sentStatus).toBe('Responding to floor 5');
+    expect(sentStatus).toBe('Going to floor 5');
 
     const guardFloors = new Set<number>();
     runTheft(world, (w) => {
@@ -188,7 +188,7 @@ describe('the shop thief', () => {
     expect(guardFloors.has(5)).toBe(true);
     // Released: back on the loop.
     tick(world);
-    expect(guardStatus(world, world.sims.get(guardId) as Sim)).not.toBe('Responding to floor 5');
+    expect(guardStatus(world, world.sims.get(guardId) as Sim)).not.toBe('Going to floor 5');
   });
 
   it('with the office twenty floors away and one slow shaft, the thief escapes: cash lost and the shop left dirty', () => {
@@ -307,7 +307,7 @@ describe('fire and bomb with guards', () => {
     expect(sent?.roomId).toBe(target.id);
     const guard = world.sims.get(sent?.simId as number) as Sim;
     expect(guard.kind).toBe('guard');
-    expect(guardStatus(world, guard)).toBe('Responding to floor 5');
+    expect(guardStatus(world, guard)).toBe('Going to floor 5');
     expect(beatCodes(world).some((c) => c.startsWith('theft.'))).toBe(false);
     // The security office still puts it out on its own timer.
     const startedAt = (fire as Extract<ActiveEvent, { kind: 'fire' }>).startedAt;

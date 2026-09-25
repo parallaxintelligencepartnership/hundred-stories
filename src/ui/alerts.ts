@@ -22,7 +22,7 @@ export const FIRE_OUT_LINGER_MS = 8000;
 /** Real milliseconds a notice stays up. */
 export const NOTICE_LINGER_MS = 6000;
 
-export const SECURITY_RESPONDING = 'Security is responding.';
+export const SECURITY_RESPONDING = 'Security is on the way.';
 export const SECURITY_LESSON = 'A security office puts fires out on its own.';
 
 export interface AlertStackDeps {
@@ -190,7 +190,7 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
     const body = el('div', 'hs-toast-body');
     const card: Card = { node, gone: false };
     const shut = button('×', 'hs-toast-close', () => close(card));
-    shut.setAttribute('aria-label', 'Dismiss this alert');
+    shut.setAttribute('aria-label', 'Close this alert');
     shut.title = 'Dismiss (Escape)';
     node.append(shut, body);
     host.append(node);

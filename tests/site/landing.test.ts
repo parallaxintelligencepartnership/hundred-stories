@@ -41,7 +41,7 @@ describe('landing page', () => {
 
   it('describes the illustrated cross section the game draws, not the old pixel art', () => {
     expect(flat(landing)).toContain(
-      'Hundred Stories is a tower-building simulation shown as an illustrated cross section, where you can watch every tenant, shop and elevator car.',
+      'Hundred Stories is a tower-building game. You see the whole tower cut open like a dollhouse, so you can watch every tenant, shop and elevator car.',
     );
     expect(landing).not.toContain('pixel art');
     expect(guide).not.toContain('pixel art');
@@ -54,6 +54,10 @@ describe('landing page', () => {
 
   it('carries a hidden challenge line for a friend arriving from a shared link', () => {
     expect(landing).toContain('<p id="challenge" class="challenge" hidden></p>');
+  });
+
+  it('carries a hidden Start the same tower button beside the challenge line', () => {
+    expect(landing).toContain('<a id="challenge-play" class="button" href="/play/" hidden>Start the same tower</a>');
   });
 
   it('invites a phone and a tablet, not a desktop only', () => {
@@ -71,7 +75,7 @@ describe('the page is the building in cross section', () => {
   it('opens on the name, before what it is', () => {
     expect(landing).toContain('<h2 id="the-name">Why Hundred Stories</h2>');
     expect(flat(landing)).toContain(
-      "A hundred stories is the height of a tower worth building. It is also what goes on inside one: the tenant on 40 who wants a quieter floor, the shop on 2 that lives on the lunch crowd, the hotel guest who missed the last express lift and is not coming back. Every floor is a story. Everyone's got one.",
+      "A hundred stories is the height of a tower worth building. It is also what goes on inside one: the tenant on 40 who wants a quieter floor, the shop on 2 that counts on the lunch crowd, the hotel guest who missed the last express elevator and is not coming back. Every floor is a story. Everyone's got one.",
     );
   });
 
@@ -123,7 +127,7 @@ describe('guide page', () => {
       'Tenants and stress',
       'Money and the quarter',
       'Stars',
-      'Saving and exporting',
+      'Saving',
       'Controls',
       'People and their stories',
       'Weather',
@@ -139,7 +143,7 @@ describe('guide page', () => {
 
   it('describes stress by the mark over a head, not by body colour', () => {
     expect(flat(guide)).toContain(
-      'You can see it over their head. A calm person carries no mark. A stressed one shows a small pink dot, and one near the end of their patience a red exclamation mark.',
+      'You can see it over their head. A calm person has no mark. A stressed person shows a small pink dot, and someone who has almost run out of patience shows a red exclamation mark.',
     );
     expect(guide).not.toContain('You can see it in their color');
     expect(guide).not.toMatch(/turn pink, then red/);
@@ -149,15 +153,15 @@ describe('guide page', () => {
     const text = flat(guide);
     expect(text).toContain('Choose Follow on the card to keep up with someone. You can follow eight people at a time.');
     expect(text).toContain('The Stories panel, opened from the menu, lists the people you follow');
-    expect(text).toContain('The weather can change every six hours: clear, overcast, rain or storm.');
+    expect(text).toContain('The weather can change every six hours: clear, cloudy, rain or storm.');
     expect(text).toContain('Weather stays outside. It never changes how the tower runs');
     expect(text).toContain('a suite ready for them, the suite clean, an elevator that stops at the suite floor, and no fire or bomb in the tower.');
-    expect(text).toContain('A security office staffs six guards, half on the day shift and half on the night.');
+    expect(text).toContain('A security office has six guards: half work the day shift and half work the night.');
     expect(text).toContain('If the thief gets away, the tower loses $2,000 and the shop is left a mess.');
-    expect(text).toContain('The center staffs collection workers, two at first and more as the tower grows.');
+    expect(text).toContain('The center has collection workers, two at first and more as the tower grows.');
     expect(text).toContain('At Tower status the game writes the tower chronicle');
     expect(text).toContain('Save as image keeps a copy on your device. Nothing is uploaded.');
-    expect(text).toContain('Three sliders set the music, the effects and the ambient sound.');
+    expect(text).toContain('Three sliders set the music, the sound effects and the background sound.');
   });
 
   it('keeps the house style: no em dashes and no spaced hyphens as dashes', () => {
@@ -170,7 +174,7 @@ describe('guide page', () => {
 
   it('tells a player with a touch screen what their fingers do', () => {
     expect(flat(guide)).toContain(
-      'Touch: one finger moves the view, pinch zooms, tap places, two fingers drag to pan while sizing a lobby or an elevator.',
+      'Touch: one finger moves the view, pinch to zoom, tap to place. While you size a lobby or an elevator, drag with two fingers to move the view.',
     );
   });
 

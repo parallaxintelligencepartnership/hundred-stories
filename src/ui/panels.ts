@@ -105,11 +105,11 @@ export type Selection = { roomId?: Id; simId?: Id; shaftId?: Id };
 
 /** The same lines as the guide, for the player who looks in the menu instead. */
 const CONTROL_LINES: readonly string[] = [
-  'Move around: drag anywhere with the mouse, even with most build tools selected. The lobby and elevator tools drag to size, so pan with the right button, scroll, or keys while they are active. Scroll the wheel to move up and down, hold shift to move sideways. On a trackpad, two-finger scroll moves the view.',
+  'Move around: drag with the mouse, even while you hold most build tools. The lobby and elevator tools use dragging to set their size, so while you hold one, move with the right mouse button, the scroll wheel, or the keys. Scroll the wheel to move up and down, and hold shift to move sideways. On a trackpad, scroll with two fingers to move the view.',
   'Zoom: hold ctrl and scroll, or pinch on a trackpad. Plus and minus keys also zoom.',
   'Keys: W A S D or the arrow keys move the view.',
-  'Touch: one finger moves the view, pinch zooms, tap places, two fingers drag to pan while sizing a lobby or an elevator.',
-  'Place a room: pick it from the palette, then click where it goes. A click that does not move places; a press that moves pans.',
+  'Touch: one finger moves the view, pinch to zoom, tap to place. While you size a lobby or an elevator, drag with two fingers to move the view.',
+  'Place a room: pick it from the build tools, then click where it goes. Click without moving to place it. Press and drag to move the view instead.',
   ...keyHelpLines(GROUPS.length),
 ];
 
@@ -258,7 +258,7 @@ function roomPanel(roomId: Id, game: GameApi, ctx: PanelContext): PanelElement {
     body.append(el('p', 'hs-note hs-venue', venueLine(room.kind, venueOf(game.world.seed, room.id, room.kind))));
   }
 
-  const evaluation = section('Evaluation');
+  const evaluation = section('Happiness');
   const bar = evalBar(room.eval);
   const readout = row('Score', formatEval(room.eval));
   evaluation.append(bar.node, readout);
@@ -282,7 +282,7 @@ function roomPanel(roomId: Id, game: GameApi, ctx: PanelContext): PanelElement {
   // A recycling center's are its collection workers, under what they did today.
   const isSecurity = room.kind === 'security';
   const isRecycling = room.kind === 'recycling';
-  const occupants = section(isSecurity ? 'Guards' : isRecycling ? 'Workers' : 'Occupants');
+  const occupants = section(isSecurity ? 'Guards' : isRecycling ? 'Workers' : 'Who is here');
   const coverage = isSecurity ? row('Patrol covers', coverageText(game.world, room)) : null;
   if (coverage) occupants.append(coverage);
   const collection = isRecycling ? collectionRows(game, room) : null;
@@ -331,7 +331,7 @@ function roomPanel(roomId: Id, game: GameApi, ctx: PanelContext): PanelElement {
       el(
         'p',
         'hs-note',
-        'A discount keeps tenants happier next to noise or a slow elevator. A premium pays more but wears on them.',
+        'Lower rent keeps tenants happier next to noise or a slow elevator. Higher rent pays more but makes them less happy.',
       ),
     );
   }
@@ -350,7 +350,7 @@ function roomPanel(roomId: Id, game: GameApi, ctx: PanelContext): PanelElement {
     );
     // The string is compared first, so a refresh that changes nothing builds nothing.
     const wanted: [string, boolean][] = [];
-    if (room.vacant) wanted.push(['Vacant', false]);
+    if (room.vacant) wanted.push(['Empty', false]);
     if (room.dirty) wanted.push(['Needs cleaning', false]);
     if (room.infested) wanted.push(['Cockroaches', true]);
     if (room.onFire) wanted.push(['On fire', true]);
@@ -412,15 +412,15 @@ function backlogDayText(now: number, since: number): string {
 
 /**
  * A producing room's waste line, or null while the tower has no recycling center:
- * "Waste: 4 of 9, collected today", "Waste: 7 of 9, backlog since weekday 2",
- * "Waste: 2 of 9, waiting for collection".
+ * "Waste: 4 of 9, collected today", "Waste: 7 of 9, piling up since weekday 2",
+ * "Waste: 2 of 9, waiting to be picked up".
  */
 export function wasteLine(world: World, room: Room): string | null {
   if (!producesWaste(room.kind) || recyclingCenters(world).length === 0) return null;
   const head = `Waste: ${room.waste ?? 0} of ${WASTE.roomCap}`;
-  if (room.wasteBacklogSince != null) return `${head}, backlog since ${backlogDayText(world.time.minute, room.wasteBacklogSince)}`;
+  if (room.wasteBacklogSince != null) return `${head}, piling up since ${backlogDayText(world.time.minute, room.wasteBacklogSince)}`;
   if (room.wasteCollectedAt !== undefined && room.wasteCollectedAt >= wasteDayStart(world.time.minute)) return `${head}, collected today`;
-  if ((room.waste ?? 0) > 0) return `${head}, waiting for collection`;
+  if ((room.waste ?? 0) > 0) return `${head}, waiting to be picked up`;
   return head;
 }
 
@@ -432,7 +432,7 @@ export function collectionLines(world: World, center: Room): [string, string][] 
   return [
     ['Workers', `${formatCount(sum.workers)} (grows with the tower)`],
     ['Collected today', units],
-    ['Rooms in backlog', formatCount(sum.backlogRooms)],
+    ['Rooms piling up', formatCount(sum.backlogRooms)],
     ['Cannot reach', floors.length === 0 ? 'None' : `${floors.length === 1 ? 'Floor' : 'Floors'} ${floors.map(floorWord).join(', ')}`],
   ];
 }
@@ -657,7 +657,7 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
     el(
       'p',
       'hs-note',
-      'Give a car its own floors and its own riders. A dedicated car still picks up everyone else while its own riders are idle.',
+      'You can give a car its own floors and its own riders. A car kept for some riders still picks up anyone else when its own riders do not need it.',
     ),
     carList,
   );
@@ -766,7 +766,7 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
       }
       row.whole.hidden = car.range === null;
       row.whole.disabled = busy;
-      row.whole.title = busy ? 'People are inside.' : 'Work the whole shaft again';
+      row.whole.title = busy ? 'People are inside.' : 'Serve the whole shaft again';
     }
   };
 
@@ -875,8 +875,8 @@ export function createFinancesPanel(game: GameApi, ctx: PanelContext): PanelElem
 
   const last = section('Last quarter');
   const income = row('Income', formatMoney(stats.lastQuarter.income));
-  const upkeep = row('Upkeep', formatMoney(stats.lastQuarter.upkeep));
-  const net = row('Net', formatSignedMoney(stats.lastQuarter.net));
+  const upkeep = row('Costs', formatMoney(stats.lastQuarter.upkeep));
+  const net = row('Profit', formatSignedMoney(stats.lastQuarter.net));
   last.append(income, upkeep, net);
   body.append(last);
 
@@ -888,7 +888,7 @@ export function createFinancesPanel(game: GameApi, ctx: PanelContext): PanelElem
   const incomeSection = section('Income this quarter so far');
   const incomeList = el('div', 'hs-list');
   incomeSection.append(incomeList);
-  const upkeepSection = section('Upkeep this quarter so far');
+  const upkeepSection = section('Costs this quarter so far');
   const upkeepList = el('div', 'hs-list');
   upkeepSection.append(upkeepList);
   body.append(incomeSection, upkeepSection);
@@ -1195,6 +1195,11 @@ export function createChroniclePanel(game: GameApi, ctx: PanelContext): PanelEle
 
 // --------------------------------------------------------- settings panel
 
+/** A fresh random start for New game, drawn the same way main.ts draws one for a first visit. */
+function freshStart(): number {
+  return Math.floor(Date.now() % 1_000_000);
+}
+
 export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElement {
   const { panel, body } = panelShell('Settings', 'settings', ctx);
 
@@ -1222,17 +1227,17 @@ export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElem
 
   const saves = el('div', 'hs-actions');
   saves.append(
-    button('Save', 'hs-btn', () => {
+    button('Save now', 'hs-btn', () => {
       void game.save().then((result) => {
         ctx.notice(result.ok ? 'Game saved.' : result.reason);
       });
     }),
-    button('Load', 'hs-btn', () => {
+    button('Go back to last save', 'hs-btn', () => {
       void game.load().then((result) => {
-        ctx.notice(result.ok ? 'Game loaded.' : result.reason);
+        ctx.notice(result.ok ? 'Back to your last save.' : result.reason);
       });
     }),
-    button('Export', 'hs-btn', () => {
+    button('Save to a file', 'hs-btn', () => {
       exportSave(game.exportSave(), ctx);
     }),
   );
@@ -1242,23 +1247,23 @@ export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElem
     stories.title = 'The people you follow and the latest from around the tower';
     saves.append(stories);
   }
-  body.append(section('Saved games'), saves);
+  body.append(section('Saved games'), el('p', 'hs-note', 'Your tower saves by itself.'), saves);
 
   const importField = el('div', 'hs-field');
-  const importLabel = el('label', 'hs-row-label', 'Import');
+  const importLabel = el('label', 'hs-row-label', 'Open a saved file');
   if (savePlatform() === 'tauri') {
     // The desktop shell: a system open dialog, not a file input.
-    const pick = button('Import', 'hs-btn', () => {
+    const pick = button('Open a saved file', 'hs-btn', () => {
       void importSaveWithDialog()
         .then((text) => {
           if (text === null) return;
           const result = game.importSave(text);
-          ctx.notice(result.ok ? 'Game imported.' : result.reason);
+          ctx.notice(result.ok ? 'Tower opened.' : result.reason);
         })
         .catch(() => ctx.notice('That file could not be read.'));
     });
     pick.id = 'hs-import';
-    pick.setAttribute('aria-label', 'Import a saved game file');
+    pick.setAttribute('aria-label', 'Open a saved file');
     importLabel.htmlFor = pick.id;
     importField.append(importLabel, pick);
   } else {
@@ -1267,27 +1272,16 @@ export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElem
   }
   body.append(importField);
 
-  const seedField = el('div', 'hs-field');
-  const seedLabel = el('label', 'hs-row-label', 'Seed');
-  const seed = el('input');
-  seed.type = 'number';
-  seed.id = 'hs-seed';
-  seed.value = String(game.world.seed);
-  seedLabel.htmlFor = seed.id;
-  seedField.append(seedLabel, seed);
+  // A new tower always gets a fresh random start. The starting number is still reachable
+  // through the page address (?seed=, read in main.ts) for testing, never from this panel.
   const newGame = el('div', 'hs-actions');
   newGame.append(
     button('New game', 'hs-btn', () => {
-      const value = Number(seed.value);
-      if (!Number.isFinite(value)) {
-        ctx.notice('Enter a whole number for the seed.');
-        return;
-      }
-      game.newGame(Math.trunc(value));
+      game.newGame(freshStart());
       ctx.notice('New game started.');
     }),
   );
-  body.append(section('New game'), seedField, newGame);
+  body.append(section('New game'), newGame);
 
   const motion = section('Display');
   const motionField = el('div', 'hs-field');
@@ -1298,7 +1292,7 @@ export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElem
   motionBox.addEventListener('change', () => {
     ctx.setReducedMotion(motionBox.checked);
   });
-  const motionLabel = el('label', 'hs-row-label', 'Reduced motion');
+  const motionLabel = el('label', 'hs-row-label', 'Less motion');
   motionLabel.htmlFor = motionBox.id;
   motionField.append(motionBox, motionLabel);
   motion.append(motionField);
@@ -1357,9 +1351,9 @@ function soundSection(sound: Sound): HTMLDivElement {
   };
   node.append(
     level('hs-sound-music', 'Music', sound.settings.music ?? 60, (n) => sound.setMusic?.(n)),
-    level('hs-sound-effects', 'Effects', sound.settings.effects, (n) => sound.setEffects(n)),
-    level('hs-sound-ambient', 'Ambient', sound.settings.ambient, (n) => sound.setAmbient(n)),
-    el('p', 'hs-note', 'Music grows with the tower. Effects mark events and stars. Ambient follows the hour and weather.'),
+    level('hs-sound-effects', 'Sound effects', sound.settings.effects, (n) => sound.setEffects(n)),
+    level('hs-sound-ambient', 'Background', sound.settings.ambient, (n) => sound.setAmbient(n)),
+    el('p', 'hs-note', 'Music grows with the tower. Sound effects play for events and stars. Background sound follows the time of day and the weather.'),
   );
 
   box.addEventListener('change', () => {
@@ -1450,7 +1444,7 @@ export function createSharePanel(game: GameApi, renderer: Renderer, ctx: PanelCo
     const composed = composeShareImage(source, stats);
     composed.toBlob((result) => {
       if (!result) {
-        ctx.notice('Could not capture the tower.');
+        ctx.notice('Could not take a picture of the tower.');
         return;
       }
       blob = result;
@@ -1463,7 +1457,7 @@ export function createSharePanel(game: GameApi, renderer: Renderer, ctx: PanelCo
       if (sendButton) sendButton.disabled = false;
     }, 'image/png');
   } catch {
-    ctx.notice('Could not capture the tower.');
+    ctx.notice('Could not take a picture of the tower.');
   }
 
   const removeSelf = panel.remove.bind(panel);
@@ -1481,7 +1475,7 @@ function importFileInput(game: GameApi, ctx: PanelContext): HTMLInputElement {
   file.type = 'file';
   file.accept = 'application/json,.json';
   file.className = 'hs-file';
-  file.setAttribute('aria-label', 'Import a saved game file');
+  file.setAttribute('aria-label', 'Open a saved file');
   file.addEventListener('change', () => {
     const chosen = file.files && file.files.length > 0 ? file.files[0] : null;
     if (!chosen) return;
@@ -1489,7 +1483,7 @@ function importFileInput(game: GameApi, ctx: PanelContext): HTMLInputElement {
       .text()
       .then((text) => {
         const result = game.importSave(text);
-        ctx.notice(result.ok ? 'Game imported.' : result.reason);
+        ctx.notice(result.ok ? 'Tower opened.' : result.reason);
       })
       .catch(() => ctx.notice('That file could not be read.'))
       .finally(() => {
@@ -1509,16 +1503,16 @@ function exportSave(text: string, ctx: PanelContext): void {
   if (platform === 'tauri') {
     void exportSaveWithDialog(text)
       .then((written) => {
-        if (written) ctx.notice('Save exported.');
+        if (written) ctx.notice('Saved to a file.');
       })
-      .catch(() => ctx.notice('The save could not be exported.'));
+      .catch(() => ctx.notice('The tower could not be saved to a file.'));
   } else if (platform === 'capacitor') {
     void shareSave(text)
-      .then(() => ctx.notice('Save exported.'))
+      .then(() => ctx.notice('Saved to a file.'))
       .catch((err: unknown) => {
         // The Share plugin rejects with "Share canceled" when the player dismisses the sheet.
         if (/cancel/i.test(String((err as { message?: unknown } | null)?.message ?? err))) return;
-        ctx.notice('The save could not be exported.');
+        ctx.notice('The tower could not be saved to a file.');
       });
   } else {
     downloadSave(text, ctx);
@@ -1536,9 +1530,9 @@ function downloadSave(text: string, ctx: PanelContext): void {
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
-    ctx.notice('Save exported.');
+    ctx.notice('Saved to a file.');
   } catch {
-    ctx.notice('The save could not be exported.');
+    ctx.notice('The tower could not be saved to a file.');
   }
 }
 

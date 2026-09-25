@@ -65,10 +65,10 @@ describe('the recycling center panel', () => {
     const items = panel.descendants().filter((n) => n.className === 'hs-occupant');
     expect(items).toHaveLength(2);
     const lines = items.map((n) => n.textContent);
-    for (const id of c.tenants) expect(lines).toContain(`${personName(world.seed, id)}Off shift`);
+    for (const id of c.tenants) expect(lines).toContain(`${personName(world.seed, id)}Off work`);
     expect(rowValue(panel, 'Workers')).toBe('2 (grows with the tower)');
     expect(rowValue(panel, 'Collected today')).toBe('0 units');
-    expect(rowValue(panel, 'Rooms in backlog')).toBe('0');
+    expect(rowValue(panel, 'Rooms piling up')).toBe('0');
     expect(rowValue(panel, 'Cannot reach')).toBe('None');
 
     // On shift: out collecting, then the count moves on refresh.
@@ -102,7 +102,7 @@ describe('a room’s waste line', () => {
     atOnDay(world, 1, 7, 0);
     const room = office(world, 3);
     const panel = panelFor(world, room);
-    expect(panel.textContent).toContain('Waste: 1 of 9, waiting for collection');
+    expect(panel.textContent).toContain('Waste: 1 of 9, waiting to be picked up');
     atOnDay(world, 1, 12, 0);
     panel.refresh?.();
     expect(panel.textContent).toContain('Waste: 0 of 9, collected today');
@@ -110,13 +110,13 @@ describe('a room’s waste line', () => {
     expect(applyCommand(world, { kind: 'shaft.setStop', shaftId: onlyShaft(world).id, floor: -2, stops: false }).ok).toBe(true);
     room.waste = 7;
     atOnDay(world, 3, 7, 0);
-    expect(wasteLine(world, room)).toBe('Waste: 9 of 9, backlog since this morning');
+    expect(wasteLine(world, room)).toBe('Waste: 9 of 9, piling up since this morning');
     atOnDay(world, 4, 7, 0);
-    expect(wasteLine(world, room)).toBe('Waste: 9 of 9, backlog since weekday 1');
+    expect(wasteLine(world, room)).toBe('Waste: 9 of 9, piling up since weekday 1');
     atOnDay(world, 5, 7, 0);
-    expect(wasteLine(world, room)).toBe('Waste: 9 of 9, backlog since weekday 1');
+    expect(wasteLine(world, room)).toBe('Waste: 9 of 9, piling up since weekday 1');
     panel.refresh?.();
-    expect(panel.textContent).toContain('Waste: 9 of 9, backlog since weekday 1');
+    expect(panel.textContent).toContain('Waste: 9 of 9, piling up since weekday 1');
     expect(panel.textContent).not.toMatch(/—/);
   });
 });

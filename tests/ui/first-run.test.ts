@@ -320,7 +320,7 @@ describe('tips', () => {
     game.notify();
     game.notify();
     expect(tipsOf(first.root)).toHaveLength(1);
-    expect(tipsOf(first.root)[0]?.textContent).toContain('Night x8, effective x16: from 11 PM to 6 AM');
+    expect(tipsOf(first.root)[0]?.textContent).toContain('Night x8, x16 in all: from 11 PM to 6 AM');
     click(buttonNamed(first.root, 'Got it'));
     expect(tipsOf(first.root)).toHaveLength(0);
     expect(JSON.parse(store().getItem('hs.tips') ?? '[]')).toContain('nightSpeed');
@@ -352,8 +352,8 @@ describe('tips', () => {
     expect(tipsOf(root)).toHaveLength(0);
     expect(seen).toContain('Someone waited over 5 minutes for a car, and another car from the elevator panel shortens the wait.Got it');
     expect(seen).toContain('A tenant moved out: too long waiting for an elevator on floor 4.Got it');
-    expect(seen).toContain('Rent day: the tower took in $10,000 last quarter, and the finances panel has the details.Got it');
-    expect(seen).toContain('Events arrive as alerts, and the ones that need a decision carry the button that answers them.Got it');
+    expect(seen).toContain('Rent day: the tower took in $10,000 last quarter. The finances panel shows the details.Got it');
+    expect(seen).toContain('Big events show up as alerts. When one needs you to choose, it has a button for that.Got it');
   });
 
   it('the first panel tip comes with the first panel', () => {
