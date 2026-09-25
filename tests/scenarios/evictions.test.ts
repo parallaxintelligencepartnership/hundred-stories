@@ -113,9 +113,8 @@ describe('B S4: occupancy matches the people inside after a room is lost', () =>
     expect(phantomRooms(world)).toEqual([]);
   });
 
-  it('demolish: a condo or office demolished while its tenant is out heals within the hour', () => {
-    // The demolish command itself lives in build.ts (another package); until it frees the
-    // seat directly, the hourly recount in people.ts puts the count right.
+  it('demolish: a condo demolished while its tenant is out frees that seat at once', () => {
+    // The command itself frees the seat; the hourly recount in people.ts only heals old saves.
     const world = createWorld(11);
     world.cash = 50_000_000;
     world.stars = 3;
@@ -129,7 +128,39 @@ describe('B S4: occupancy matches the people inside after a room is lost', () =>
     const restaurant = [...world.rooms.values()].find((r) => r.kind === 'restaurant') as Room;
     const { office: condo } = untilTenantAtLunch(world, condos, restaurant, true);
     expect(applyCommand(world, { kind: 'demolish', roomId: condo.id }).ok).toBe(true);
-    tickMany(world, 60);
+    expect(phantomRooms(world)).toEqual([]);
+  });
+});
+
+describe('B S4: a tenant riding when their room is demolished', () => {
+  it('is taken off the car, and the car drops a call nobody else wants', () => {
+    const { world, offices } = lunchTower();
+    const shaft = onlyShaft(world);
+    let found: { office: Room; sim: Sim } | null = null;
+    for (let i = 0; i < 4 * 1440 && !found; i++) {
+      tick(world);
+      for (const office of offices) {
+        if (office.occupancy !== 0) continue;
+        for (const id of office.tenants) {
+          const sim = world.sims.get(id);
+          if (sim && sim.state === 'riding' && sim.inCarId !== null) found = { office, sim };
+        }
+      }
+    }
+    if (!found) throw new Error('no tenant of an empty office ever rode');
+    const { office, sim } = found;
+    const car = shaft.cars.find((c) => c.id === sim.inCarId);
+    const leg = sim.route[0];
+    const dest = leg && leg.kind === 'ride' ? leg.toFloor : null;
+    const res = applyCommand(world, { kind: 'demolish', roomId: office.id });
+    expect(res).toEqual({ ok: true });
+    expect(car?.passengers).not.toContain(sim.id);
+    for (const id of car?.passengers ?? []) expect(world.sims.has(id)).toBe(true);
+    const othersWant = (car?.passengers ?? []).some((id) => {
+      const l = world.sims.get(id)?.route[0];
+      return l !== undefined && l.kind === 'ride' && l.toFloor === dest;
+    });
+    if (dest !== null && !othersWant) expect(car?.calls.has(dest)).toBe(false);
     expect(phantomRooms(world)).toEqual([]);
   });
 });

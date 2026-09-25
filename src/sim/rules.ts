@@ -174,6 +174,9 @@ export const STORY = {
   unfollowedBeatGapMinutes: 10,
 };
 
+/** The minute of the day a new game opens on: 06:00 on the first weekday. */
+export const GAME_START_MINUTE = 6 * 60;
+
 export const EVAL = {
   leaveThreshold: 0.34, // red zone; a full day here and the tenant leaves
   leaveAfterMinutes: 1440,

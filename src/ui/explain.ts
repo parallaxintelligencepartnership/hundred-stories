@@ -5,7 +5,8 @@
 
 import type { Placement, Tool } from '../game/api';
 import { servedFloors } from '../render/overlays';
-import { LIMITS } from '../sim/rules';
+import { LIMITS, ROOMS } from '../sim/rules';
+import { spanTop } from '../sim/types';
 import type { ShaftKind, Star, World } from '../sim/types';
 import { formatFloor, formatMoney, starsTitle } from './format';
 
@@ -19,7 +20,13 @@ export type RefusalKind = 'cash' | 'noFloorBelow' | 'overlapsRoom' | 'overlapsSh
  */
 export function refusalKind(reason: string): { kind: RefusalKind; star?: Star } | null {
   if (reason.startsWith('Not enough cash.')) return { kind: 'cash' };
-  if (reason === 'Build a floor below this one first.') return { kind: 'noFloorBelow' };
+  if (
+    reason === 'Build a floor below this one first.' ||
+    reason === 'Build the floor above this one first.' ||
+    reason === 'Build a lobby first.'
+  ) {
+    return { kind: 'noFloorBelow' };
+  }
   if (reason === 'Something is already there.') return { kind: 'overlapsRoom' };
   if (reason === 'An elevator is in the way.') return { kind: 'overlapsShaft' };
   if (reason === 'That does not fit inside the tower.' || reason === 'That floor does not exist.') return { kind: 'outOfTower' };
@@ -33,15 +40,23 @@ function floorName(floor: number): string {
   return formatFloor(floor).toLowerCase();
 }
 
-/** The floor a room on this floor stands on (build.ts hasSupport): below above ground, above underground. */
-function supportFloor(floor: number): number {
-  if (floor > 1) return floor - 1;
-  if (floor === -1) return 1;
-  return floor + 1;
+/**
+ * The floor a footprint stands on (build.ts hasSupport): the one under its bottom above
+ * ground, the one over its top underground (`top` is the span's top floor, floorMax + 1 for
+ * a shaft span). B1 and a basement span reaching it hang from the lobby on floor 1.
+ */
+function supportFloor(floorMin: number, top: number): number {
+  if (floorMin > 1) return floorMin - 1;
+  if (floorMin === -1 || top === -1) return 1;
+  return top + 1;
 }
 
 /** One sentence under a refused chip, or null when the reason is not one of the common ones. */
-export function refusalExplainer(placement: Placement, world: Pick<World, 'cash' | 'stars'>): string | null {
+export function refusalExplainer(
+  placement: Placement,
+  world: Pick<World, 'cash' | 'stars'>,
+  height = 1,
+): string | null {
   if (placement.ok || !placement.reason) return null;
   const found = refusalKind(placement.reason);
   if (!found) return null;
@@ -49,8 +64,10 @@ export function refusalExplainer(placement: Placement, world: Pick<World, 'cash'
     case 'cash':
       return `It costs ${formatMoney(placement.cost)} and you have ${formatMoney(world.cash)}. Rent comes in each quarter.`;
     case 'noFloorBelow': {
-      const under = supportFloor(placement.floorMin);
-      if (placement.floorMin === -1) return 'Basement 1 needs the lobby on floor 1 above it.';
+      // A room's placement keeps floorMax at its floor, so its height gives the span's top.
+      const top = Math.max(placement.floorMax, spanTop(placement.floorMin, height));
+      const under = supportFloor(placement.floorMin, top);
+      if (placement.floorMin < 0 && under === 1) return 'Basement 1 needs the lobby on floor 1 above it.';
       const side = placement.floorMin > 0 ? 'under' : 'above';
       return `${formatFloor(placement.floorMin)} needs ${floorName(under)} built ${side} it.`;
     }
@@ -82,7 +99,7 @@ export function servesLine(kind: ShaftKind, floorMin: number, floorMax: number):
 
 /** The chip's second line for this placement, or empty for none. */
 export function placementNote(placement: Placement, tool: Tool, world: Pick<World, 'cash' | 'stars' | 'shafts'>): string {
-  if (!placement.ok) return refusalExplainer(placement, world) ?? '';
+  if (!placement.ok) return refusalExplainer(placement, world, tool.kind === 'room' ? ROOMS[tool.room].height : 1) ?? '';
   const kind = placementShaftKind(placement, tool, world);
   return kind ? servesLine(kind, placement.floorMin, placement.floorMax) : '';
 }

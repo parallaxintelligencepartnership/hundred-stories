@@ -278,13 +278,18 @@ describe('build: overlap and support', () => {
     expect(build(world, 'office', 3, 100)).toEqual(OK);
   });
 
+  // Audit 2026-09-25 A S4: a basement hangs from the floor above it, and the reason says so.
   it('needs the ground lobby for floor -1 and a room above for deeper floors', () => {
     const world = makeWorld(8_000_000, 3);
     expect(canBuild(world, 'parkingSpace', -1, 100)).toEqual({
       ok: false,
-      reason: 'Build a floor below this one first.',
+      reason: 'Build a lobby first.',
     });
     lobby(world);
+    expect(canBuild(world, 'parkingSpace', -2, 100)).toEqual({
+      ok: false,
+      reason: 'Build the floor above this one first.',
+    });
     expect(build(world, 'parkingSpace', -1, 100)).toEqual(OK);
     expect(canBuild(world, 'parkingSpace', -3, 100).ok).toBe(false);
     expect(build(world, 'parkingSpace', -2, 100)).toEqual(OK);
@@ -302,7 +307,7 @@ describe('build: overlap and support', () => {
     // a one floor parking space at B3 still needs B2 built over it
     expect(canBuild(world, 'parkingSpace', -3, 100)).toEqual({
       ok: false,
-      reason: 'Build a floor below this one first.',
+      reason: 'Build the floor above this one first.',
     });
   });
 
@@ -910,7 +915,7 @@ describe('stairs and escalators: overlay, depth and support', () => {
     it(`joins B1 to the ground with ${kind}, and refuses them any deeper`, () => {
       const world = makeWorld(8_000_000, 3);
       const deep = `${kind === 'stairs' ? 'Stairs' : 'Escalators'} can only go down one level, to B1.`;
-      expect(canBuild(world, kind, -1, 100)).toEqual({ ok: false, reason: 'Build a floor below this one first.' });
+      expect(canBuild(world, kind, -1, 100)).toEqual({ ok: false, reason: 'Build a lobby first.' });
       lobby(world, 100, 6);
       expect(build(world, kind, -1, 100)).toEqual(OK);
       const flight = [...world.rooms.values()].find((r) => r.kind === kind) as Room;
