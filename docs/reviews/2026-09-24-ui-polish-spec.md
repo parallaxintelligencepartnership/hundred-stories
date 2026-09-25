@@ -55,3 +55,17 @@ Goal: the game should feel like a 2026 app, not a 2020 web page. The tower is th
 - The landing page (already reworked today).
 - Game art and the tower rendering.
 - New features.
+
+## 2026 research addendum (added after approval, same day)
+
+What is winning now, and what changes here because of it:
+
+- **Apple iOS 27 (WWDC 2026)** walked Liquid Glass back: less transparency by default, a user slider from clear to tinted, and consistent nested corner radii. Guidance: glass is for the navigation and controls layer, never behind content. Here: glass only on the top bar, speed pill, round buttons and toasts. Sheets and cards with text use a heavily tinted, nearly solid surface. Settings gets a "See-through buttons" switch, off by default.
+- **NN/g on Liquid Glass**: the main failures were low contrast, needless animation, cramped targets, and controls that hide or move. Here: controls never move or hide with context, primary buttons have icon plus label on desktop and tablet, targets are 44 px or more, and motion only happens in response to the player.
+- **Material 3 Expressive (Android 17)**: spring physics motion with a small overshoot, connected button groups, floating toolbars, and shapes that change on press. Here: spring easing through CSS linear(), the speed control as a connected button group, the build dock as a floating toolbar, and buttons that press in and square off slightly.
+- **Apple Design Awards 2026**: the Interaction game winner (Sago Mini Jinja's Garden) needs no reading at all. Here: key controls carry icons clear enough for a young player to guess, and build tiles lead with the picture.
+- **What works in apps in 2026**: low-stimulus UI (calm palettes, fewer animations), accessibility-first design, glass only on overlays, and bento grids for summary screens. Here: finances and the quarter recap become bento grids of tiles.
+- **Web platform (Interop 2026)**: View Transitions, the Popover API, anchor positioning and @starting-style are safe with fallbacks. Here: popovers use the Popover API, tooltips use anchor positioning, and enter animations use @starting-style.
+- **Haptics** (package 2B): light taps on place, refuse and star earned, through the Vibration API on Android web and @capacitor/haptics (pinned exact) in the apps, with an off switch in Settings.
+
+Sources: apple.com newsroom and developer.apple.com design awards 2026; cultofmac.com Liquid Glass iOS 27 changes; nngroup.com/articles/liquid-glass; blog.google Material 3 Expressive launch; web.dev/blog/interop-2026; intuitia.tech app design trends 2026.
