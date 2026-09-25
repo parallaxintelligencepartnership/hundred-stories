@@ -117,7 +117,7 @@ import { floorsWithPeople, LIGHT_ALPHA, lerpColor, lightBand, lightTintAt, windo
 import { createOverlayPass, type OverlayKind, type ViewRect } from './overlays';
 import { createSky, isNight, nightness, skyBackground, type Sky } from './sky';
 import { easeView, settledView, weatherLightTint, weatherNow, weatherSkyColor, type Rect as WeatherRect } from './weather';
-import { basementSpanOf, createWeatherFx, towerRectOf } from './weatherfx';
+import { basementSpanOf, createWeatherFx, floorRectsOf } from './weatherfx';
 import { createThumbnails, type ThumbnailKind } from './thumbnail';
 
 export interface PickHit {
@@ -909,7 +909,7 @@ export async function createRenderer(
   // over the horizon bands (cityNear, still behind the world root), the wet street on the ground.
   const weatherFx = createWeatherFx({ sky: layers.sky, sheet: layers.cityNear, ground: layers.ground });
   let weatherView = settledView(weatherNow(world.seed, world.time.minute));
-  let weatherTower: WeatherRect | null = null;
+  let weatherFloors: readonly WeatherRect[] = [];
   let weatherBasement: { left: number; right: number } | null = null;
 
   let reducedMotion =
@@ -1101,7 +1101,7 @@ export async function createRenderer(
   function rebuildFloorStrips(w: World): void {
     const extents = builtFloorExtents(w);
     curbDoors = lobbyDoors(w);
-    weatherTower = towerRectOf(extents);
+    weatherFloors = floorRectsOf(extents);
     weatherBasement = basementSpanOf(extents);
     floorStrips.clear();
     for (const [floor, extent] of extents) {
@@ -2141,6 +2141,7 @@ export async function createRenderer(
     // One weather snapshot a frame, eased in real time: the fade runs under reduced motion too.
     weatherView = easeView(weatherView, weatherNow(lastWorld.seed, lastWorld.time.minute), dt);
     sky.update(clock.minuteOfDay, camera, width, height, reducedMotion ? 0 : dt, { view: weatherView, seed: lastWorld.seed });
+    const background = weatherSkyColor(skyBackground(clock.minuteOfDay), weatherView);
     weatherFx.update({
       view: weatherView,
       seed: lastWorld.seed,
@@ -2150,8 +2151,10 @@ export async function createRenderer(
       originX: worldRoot.position.x,
       originY: worldRoot.position.y,
       zoom: camera.zoom,
-      tower: weatherTower,
+      floors: weatherFloors,
       basement: weatherBasement,
+      doors: curbDoors,
+      skyColor: background,
       dtMs: dt,
       reducedMotion,
     });
@@ -2189,7 +2192,6 @@ export async function createRenderer(
       lastLightMinute = lightMinute;
     }
     if (lightSprite.width !== width || lightSprite.height !== height) lightSprite.setSize(width, height);
-    const background = weatherSkyColor(skyBackground(clock.minuteOfDay), weatherView);
     if (background !== lastBackground) {
       app.renderer.background.color = background;
       lastBackground = background;

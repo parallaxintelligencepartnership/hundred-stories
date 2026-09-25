@@ -16,7 +16,7 @@ import { headTopOf } from './figure';
 import { placePerson, type PersonSprites } from './person';
 import { SIM_H, SIM_W, TILE_PX } from './grid';
 import { UMBRELLA_COLOURS, UMBRELLA_H, UMBRELLA_W, VEHICLE_SIZE, type VehicleKind } from './illustrated';
-import { wetness, type WeatherView } from './weather';
+import { RAIN_ON, rainFalling, type WeatherView } from './weather';
 
 /** At most this many commuters are on the street at once. */
 export const CURB_MAX = 12;
@@ -26,8 +26,8 @@ export const CURB_WALK_PX_PER_S = 30;
 export const CURB_PATH_PX = 720;
 /** A gap at the door end of each loop, so a commuter is not always mid street. */
 const CURB_LOOP_PX = CURB_PATH_PX + 120;
-/** Umbrellas open above this much rain and storm in the eased weather. */
-export const UMBRELLA_WEIGHT = 0.5;
+/** Umbrellas open above this much rain and storm in the eased weather: weather.ts RAIN_ON. */
+export const UMBRELLA_WEIGHT = RAIN_ON;
 /** A vehicle pulls up or drives off over this long. */
 export const VEHICLE_MOVE_MS = 1500;
 
@@ -64,9 +64,9 @@ export function curbFigures(sims: Iterable<Sim>, max = CURB_MAX): CurbFigure[] {
   }));
 }
 
-/** Umbrellas up: rain and storm together above UMBRELLA_WEIGHT in the eased weather. */
+/** Umbrellas up exactly while rain is falling on screen: the same test the rain layer draws by. */
 export function umbrellasUp(view: WeatherView): boolean {
-  return wetness(view) > UMBRELLA_WEIGHT;
+  return rainFalling(view) > 0;
 }
 
 /** The VIP's car is at the curb from the last vip.arrival beat until a vip.rated beat follows it. */

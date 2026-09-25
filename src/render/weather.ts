@@ -52,6 +52,50 @@ export function wetness(view: WeatherView): number {
   return Math.min(1, view.weights.rain + view.weights.storm);
 }
 
+// ------------------------------------------------------ is it raining
+
+/** Rain falls, and umbrellas open, once rain and storm together pass this in the eased view. */
+export const RAIN_ON = 0.5;
+/**
+ * The faintest rain ever drawn, as a strength from 0 to 1. Rain starts at this strength rather
+ * than fading up from nothing, so there is never a moment with umbrellas up and no rain to see.
+ */
+export const RAIN_MIN_STRENGTH = 0.65;
+
+/**
+ * The one test every rain layer and the umbrellas share: how hard rain is falling on screen
+ * now. 0 when it is not raining; above RAIN_ON it is at least RAIN_MIN_STRENGTH, rising to 1
+ * with the weather's weight and intensity. Umbrellas are up exactly when this is above 0.
+ */
+export function rainFalling(view: WeatherView): number {
+  const wet = wetness(view);
+  if (wet <= RAIN_ON) return 0;
+  const ramp = Math.min(1, (wet - RAIN_ON) / (1 - RAIN_ON));
+  const intensity = Math.max(0, Math.min(1, view.intensity));
+  return RAIN_MIN_STRENGTH + (1 - RAIN_MIN_STRENGTH) * ramp * intensity;
+}
+
+/** Real ms for a dry street to soak through once rain is falling. */
+export const STREET_SOAK_MS = 3000;
+/** Real ms for a soaked street to dry out once the rain stops. */
+export const STREET_DRY_MS = 40_000;
+
+/** How wet the street is on the first frame: soaked in rain, dry otherwise (no fade on load). */
+export function settledStreetWet(view: WeatherView): number {
+  return rainFalling(view) > 0 ? 1 : 0;
+}
+
+/**
+ * The street's wetness, 0 dry to 1 soaked, stepped by `dtMs` of real time: it soaks through
+ * in STREET_SOAK_MS while rain falls and dries over STREET_DRY_MS after it stops, so the
+ * pavement stays wet for a while after the umbrellas close. Overcast alone never wets it.
+ */
+export function stepStreetWet(wet: number, view: WeatherView, dtMs: number): number {
+  const dt = Math.max(0, dtMs);
+  if (rainFalling(view) > 0) return Math.min(1, wet + dt / STREET_SOAK_MS);
+  return Math.max(0, wet - dt / STREET_DRY_MS);
+}
+
 // ---------------------------------------------------------------- sky
 
 /** How far each kind pulls the sky toward gray. Clear keeps the sky exactly. */
@@ -123,47 +167,101 @@ export function intersects(a: Rect, b: Rect): boolean {
   return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 }
 
-/** The distant sheet's drops: 60 degrees at 120 css px a second in rain, 70 and 200 in storm. */
+/**
+ * The rain's streaks: a slight slant (76 degrees from the horizontal in rain, 68 in a storm) at
+ * 460 css px a second in rain and 640 in a storm. Reduced motion keeps the rain falling, slower
+ * and thinner, never stopped: REDUCED_RAIN_SPEED of the speed and only the first lattice.
+ */
 export const RAIN_SHEET = {
-  rain: { angleDeg: 60, speed: 120 },
-  storm: { angleDeg: 70, speed: 200 },
-  alpha: 0.25,
+  rain: { angleDeg: 76, speed: 460 },
+  storm: { angleDeg: 68, speed: 640 },
+  /** The streaks' opacity at full strength. */
+  alpha: 0.85,
 } as const;
+export const REDUCED_RAIN_SPEED = 0.3;
 
-export function sheetStyle(view: WeatherView): { angleDeg: number; speed: number; alpha: number } {
+export interface SheetStyle {
+  angleDeg: number;
+  speed: number;
+  /** 0 when no rain falls; otherwise the streaks' opacity, never below RAIN_MIN_STRENGTH of full. */
+  alpha: number;
+  /** 0 to 1: how much of the storm's extra lattice shows. */
+  storm: number;
+}
+
+export function sheetStyle(view: WeatherView): SheetStyle {
   const style = view.weights.storm > view.weights.rain ? RAIN_SHEET.storm : RAIN_SHEET.rain;
-  return { ...style, alpha: RAIN_SHEET.alpha * view.intensity * wetness(view) };
+  const falling = rainFalling(view);
+  return {
+    angleDeg: style.angleDeg,
+    speed: style.speed,
+    alpha: RAIN_SHEET.alpha * falling,
+    storm: falling > 0 ? Math.min(1, view.weights.storm / Math.max(RAIN_ON, wetness(view))) : 0,
+  };
 }
 
 /**
- * Where the rain sheet may draw: the view above the street, less the tower's rectangle. Up to
- * three rectangles, left of the tower, right of it, and above the roof, none of them touching
- * the tower. Any coordinate space works as long as all three inputs share it. With no tower,
- * the whole view above the street.
+ * Where the rain sheet may draw: the view above the street, less every built floor's band.
+ * `floors` are the built spans, one rectangle per floor (or one rectangle for a whole tower),
+ * all in the same coordinate space as `view` and `streetY`. The result covers everything
+ * above the street that no floor covers, as few rectangles as rows allow, so rain falls in
+ * the open air beside a narrow ground floor too, where the commuters walk, and never on a
+ * room cell or a shaft.
  */
-export function rainSheetRects(tower: Rect | null, view: Rect, streetY: number): Rect[] {
+export function rainSheetRects(floors: readonly Rect[] | Rect | null, view: Rect, streetY: number): Rect[] {
+  const list: readonly Rect[] = floors === null ? [] : Array.isArray(floors) ? floors : [floors as Rect];
+  const top = view.y;
   const bottom = Math.min(view.y + view.h, streetY);
-  if (bottom <= view.y) return [];
   const out: Rect[] = [];
-  const add = (x0: number, y0: number, x1: number, y1: number): void => {
-    const x = Math.max(x0, view.x);
-    const y = Math.max(y0, view.y);
-    const r = Math.min(x1, view.x + view.w);
-    const b = Math.min(y1, bottom);
-    if (r > x && b > y) out.push({ x, y, w: r - x, h: b - y });
-  };
-  if (!tower) {
-    add(view.x, view.y, view.x + view.w, bottom);
-    return out;
+  if (bottom <= top) return out;
+  const left = view.x;
+  const right = view.x + view.w;
+  // Row breaks: every floor's top and bottom inside the view.
+  const ys: number[] = [top, bottom];
+  const live: Rect[] = [];
+  for (const f of list) {
+    if (f.w <= 0 || f.h <= 0 || f.y >= bottom || f.y + f.h <= top || f.x >= right || f.x + f.w <= left) continue;
+    live.push(f);
+    if (f.y > top) ys.push(f.y);
+    if (f.y + f.h < bottom) ys.push(f.y + f.h);
   }
-  add(view.x, view.y, tower.x, bottom); // left of the tower
-  add(tower.x + tower.w, view.y, view.x + view.w, bottom); // right of it
-  add(tower.x, view.y, tower.x + tower.w, tower.y); // above the roof
+  ys.sort((a, b) => a - b);
+  // Open rectangles from the row above, extended downward while the next row repeats them.
+  let open: Rect[] = [];
+  const spans: { x0: number; x1: number }[] = [];
+  for (let i = 0; i + 1 < ys.length; i++) {
+    const y0 = ys[i] as number;
+    const y1 = ys[i + 1] as number;
+    if (y1 <= y0) continue;
+    spans.length = 0;
+    for (const f of live) if (f.y < y1 && f.y + f.h > y0) spans.push({ x0: Math.max(left, f.x), x1: Math.min(right, f.x + f.w) });
+    spans.sort((a, b) => a.x0 - b.x0);
+    const next: Rect[] = [];
+    let x = left;
+    const gap = (x0: number, x1: number): void => {
+      if (x1 <= x0) return;
+      const same = open.find((r) => r.x === x0 && r.w === x1 - x0 && r.y + r.h === y0);
+      if (same) {
+        same.h = y1 - same.y;
+        next.push(same);
+      } else {
+        const r = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+        out.push(r);
+        next.push(r);
+      }
+    };
+    for (const s of spans) {
+      gap(x, s.x0);
+      if (s.x1 > x) x = s.x1;
+    }
+    gap(x, right);
+    open = next;
+  }
   return out;
 }
 
 /** How tall the wet street band is, in world px under the street line. */
-export const WET_BAND_PX = 18;
+export const WET_BAND_PX = 24;
 
 /**
  * Where the wet street may draw: the band under the street line, less the x span of anything
