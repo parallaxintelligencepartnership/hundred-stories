@@ -100,6 +100,8 @@ describe('web build precache', () => {
       expect(precached).not.toContain('og.png');
       expect(precached.some((url) => url.startsWith('wordmark-'))).toBe(false);
       expect(precached.some((url) => url.startsWith('assets/main-'))).toBe(false);
+      expect(precached.some((url) => url.startsWith('assets/site-'))).toBe(false);
+      expect(precached.some((url) => url.startsWith('assets/theme-init-'))).toBe(false);
     },
     120_000,
   );

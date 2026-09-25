@@ -28,7 +28,7 @@ function hotelTower(): World {
 const anyInfested = (world: World): boolean => [...world.rooms.values()].some((r) => r.infested);
 
 describe('cockroach spread timer across a save (audit C S1)', () => {
-  it('a hotel tower saved and loaded at minute 6181 hashes equal to the straight run after 5 days', () => {
+  it('a hotel tower saved and loaded at minute 6181 hashes equal to the straight run after 2 days', () => {
     const straight = hotelTower();
     while (!anyInfested(straight)) tick(straight);
     expect(straight.time.minute).toBe(4681);
@@ -41,14 +41,16 @@ describe('cockroach spread timer across a save (audit C S1)', () => {
     expect(hashWorld(reloaded)).toBe(hashWorld(straight));
 
     let firstDiff = -1;
-    for (let i = 0; i < 5 * 1440; i++) {
+    // Two days reach well past the old first difference (minute 7561, 1380 minutes after the
+    // load); five days took 17 s or more and timed out on a busy test host.
+    for (let i = 0; i < 2 * 1440; i++) {
       tick(straight);
       tick(reloaded);
       if (firstDiff < 0 && hashWorld(straight) !== hashWorld(reloaded)) firstDiff = straight.time.minute;
     }
     expect(firstDiff).toBe(-1);
     expect(hashWorld(reloaded)).toBe(hashWorld(straight));
-  });
+  }, 60_000); // about 3 s alone, but past the 5 s default on a busy test host
 
   it('a v5 save (no timer field) loads with the old first-spread timing: the timer starts at the next roll', () => {
     const straight = hotelTower();

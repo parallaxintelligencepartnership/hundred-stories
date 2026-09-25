@@ -52,12 +52,22 @@ describe('B S3: an exiting person whose floor loses its only route', () => {
       { kind: 'shaft.build', shaft: 'standard', x: 150, floorMin: 1, floorMax: 3 },
     ]);
     const shaft = onlyShaft(world);
+    // The stop can only come off once no rider aboard is bound for floor 3 (B S2 refuses it
+    // otherwise), so wait for a diner on the way out at a moment when nobody is riding to 3.
+    const ridingTo3 = (): boolean =>
+      shaft.cars.some((car) =>
+        car.passengers.some((id) => {
+          const leg = world.sims.get(id)?.route[0];
+          return leg?.kind === 'ride' && leg.toFloor === 3;
+        }),
+      );
     let diner: Sim | undefined;
     for (let i = 0; i < 3000 && !diner; i++) {
       tick(world);
+      if (ridingTo3()) continue;
       diner = [...world.sims.values()].find((s) => s.kind === 'diner' && s.state === 'waiting' && s.exiting && s.pos.floor === 3);
     }
-    if (!diner) throw new Error('no diner ever waited on 3 on the way out');
+    if (!diner) throw new Error('no diner ever waited on 3 on the way out with nobody riding to 3');
     expect(applyCommand(world, { kind: 'shaft.setStop', shaftId: shaft.id, floor: 3, stops: false }).ok).toBe(true);
 
     const budget = HALL_CALL_RETRY_MINUTES * RETRIES_BEFORE_REROUTE + 1;

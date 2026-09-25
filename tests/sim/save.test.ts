@@ -657,7 +657,7 @@ describe('room order, guards, collectors and fire events (audit I S6)', () => {
       tick(reversed);
     }
     expect(hashWorld(reversed)).toBe(hashWorld(world));
-  });
+  }, 60_000); // two days of a ten-floor tower: about 1 s alone, 17 to 42 s on a busy test host
 
   it("keeps a guard's state and a collector's round across serialize and deserialize", () => {
     const world = richWorld();
