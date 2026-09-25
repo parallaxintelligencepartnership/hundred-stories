@@ -1127,7 +1127,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
         lastNoticeText = '';
         return;
       }
-      toastLayer.show(newest.text, { time: formatTimestamp(newest.minute), onTap: openLog, tapLabel: 'Open the event log' });
+      toastLayer.show(newest.text, { time: formatTimestamp(newest.minute), onTap: openLog, tapLabel: 'Open the news' });
       return;
     }
     if (!beat || newsShowsAlert || beat.simId === undefined) return;
@@ -1138,7 +1138,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
       time: formatTimestamp(beat.minute),
       className: 'is-story',
       onTap: openLog,
-      tapLabel: 'Open the event log',
+      tapLabel: 'Open the news',
     });
   }
 

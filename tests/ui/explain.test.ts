@@ -55,7 +55,7 @@ describe('refusal explainer', () => {
     applyCommand(world, { kind: 'shaft.build', shaft: 'standard', x: 20, floorMin: 1, floorMax: 2 });
     const shaft = reasonOf(canBuildShaft(world, 'standard', 22, 1, 2));
     expect(shaft).toBe('An elevator is in the way.');
-    expect(refusalExplainer(refused(shaft), world)).toBe('It overlaps an elevator. Move it clear of the shaft.');
+    expect(refusalExplainer(refused(shaft), world)).toBe('It overlaps an elevator. Move it away from the elevator.');
   });
 
   it('gives the size of the tower for a spot outside it', () => {

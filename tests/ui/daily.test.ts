@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { DailyChoice, DailyInfo } from '../../src/game/api';
 import { dailyTwist } from '../../src/game/daily';
+import { DAILY_COPY_FAILED } from '../../src/game/game';
 import { createDailyPanel, dailyCard, type DailyPanelActions } from '../../src/ui/daily';
 import { createSettingsPanel, type PanelContext } from '../../src/ui/panels';
 import { FakeDom, type FakeElement } from './fake-dom';
@@ -142,6 +143,81 @@ describe('an older daily', () => {
     const panel = createDailyPanel(game, ctx, recorder(), '2026-09-25') as unknown as FakeElement;
     const notes = panel.descendants().filter((n) => n.className === 'hs-note').map((n) => n.textContent);
     expect(notes).toContain(`Everyone who plays the tower from September 24, 2026 gets the same start. You have 8 days in the game to fit in as many people as you can.`);
+  });
+});
+
+// Audit 2026-09-25, C S2 (the ui half): the saved Today's tower is dated after today because the
+// device's date moved back. The card says so, names the date, and offers both ways on.
+describe('a saved tower dated after today', () => {
+  const ahead: DailyChoice = { savedDate: '2026-09-30', today: DATE, yesterday: false, ahead: true };
+  const notesOf = (panel: FakeElement): string[] => panel.descendants().filter((n) => n.className === 'hs-note').map((n) => n.textContent);
+
+  it('says plainly the saved tower is from a later date, and names it', () => {
+    const panel = createDailyPanel(dailyGame({ choice: ahead }), ctx, recorder(), DATE) as unknown as FakeElement;
+    const notes = notesOf(panel);
+    expect(notes).toContain('The tower saved here is from September 30, 2026, which is later than today.');
+    expect(panel.textContent).not.toContain('You did not finish');
+    expect(panel.textContent).not.toMatch(/seed/i);
+  });
+
+  it('Keep playing that tower finishes it; Start today\'s tower instead starts today\'s', () => {
+    const actions = recorder();
+    const panel = createDailyPanel(dailyGame({ choice: ahead }), ctx, actions, DATE) as unknown as FakeElement;
+    click(buttonNamed(panel, 'Keep playing that tower'));
+    click(buttonNamed(panel, "Start today's tower instead"));
+    expect(actions.calls).toEqual(['choose:finish', 'choose:today']);
+  });
+
+  it('when the copy could not be kept, says so in a plain line and keeps the choice', () => {
+    const game = dailyGame({ choice: ahead }) as unknown as { world: { log: unknown[]; logTotal: number } };
+    game.world.log.push({ minute: 0, text: DAILY_COPY_FAILED, level: 'warn' });
+    game.world.logTotal += 1;
+    const panel = createDailyPanel(game as never, ctx, recorder(), DATE) as unknown as FakeElement;
+    expect(notesOf(panel)).toContain('We could not keep a copy, so that tower is still here.');
+    buttonNamed(panel, 'Keep playing that tower');
+    buttonNamed(panel, "Start today's tower instead");
+  });
+
+  it('says nothing about a copy before the player has tried', () => {
+    const panel = createDailyPanel(dailyGame({ choice: ahead }), ctx, recorder(), DATE) as unknown as FakeElement;
+    expect(panel.textContent).not.toContain('We could not keep a copy');
+  });
+});
+
+// Audit 2026-09-25, E1 S7: an older daily's twist line and share message do not say "today".
+describe('the words for an older daily', () => {
+  /** The first September date whose twist is this one. */
+  const dateWith = (id: string): string => {
+    for (let d = 1; d <= 28; d += 1) {
+      const date = `2026-09-${String(d).padStart(2, '0')}`;
+      if (dailyTwist(date).id === id) return date;
+    }
+    throw new Error(`no date with ${id}`);
+  };
+
+  it('the twist line on the start card speaks of that day, not today', () => {
+    // A date whose twist is the normal day, so the line would be "No twist today."
+    const date = dateWith('normal');
+    const panel = createDailyPanel(dailyGame({ date }), ctx, recorder(), '2026-09-29') as unknown as FakeElement;
+    const notes = panel.descendants().filter((n) => n.className === 'hs-note').map((n) => n.textContent);
+    expect(notes.join(' ')).not.toMatch(/today/i);
+    expect(notes).toContain('No twist on that day. Build the best tower you can.');
+  });
+
+  it('the tight money line on an older daily does not say today', () => {
+    const date = dateWith('tightMoney');
+    const panel = createDailyPanel(dailyGame({ date }), ctx, recorder(), '2026-09-29') as unknown as FakeElement;
+    const notes = panel.descendants().filter((n) => n.className === 'hs-note').map((n) => n.textContent);
+    expect(notes).toContain('This tower starts with less money, so spend it with care.');
+  });
+
+  it('the share message names the date of an older daily', () => {
+    const actions = recorder();
+    const panel = createDailyPanel(dailyGame({ finished: true, date: '2026-09-24' }), ctx, actions, '2026-09-25') as unknown as FakeElement;
+    click(buttonNamed(panel, 'Share'));
+    expect(actions.calls).toEqual([
+      'share:I got 1,234 people in the tower from September 24, 2026. Can you beat it?|https://hundredstories.xyz/play/?daily=2026-09-24',
+    ]);
   });
 });
 

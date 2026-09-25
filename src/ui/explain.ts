@@ -57,7 +57,7 @@ export function refusalExplainer(placement: Placement, world: Pick<World, 'cash'
     case 'overlapsRoom':
       return 'It overlaps a room. Move it to an empty stretch of floor.';
     case 'overlapsShaft':
-      return 'It overlaps an elevator. Move it clear of the shaft.';
+      return 'It overlaps an elevator. Move it away from the elevator.';
     case 'outOfTower':
       return `The tower runs from basement ${-LIMITS.minFloor} to floor ${LIMITS.maxFloor}, ${LIMITS.towerWidth} tiles across.`;
     case 'needsStar':
