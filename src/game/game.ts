@@ -45,6 +45,16 @@ function plainReason(reason: string): string {
   return found[1] ?? reason;
 }
 
+/**
+ * deserialize with the reason in the player's words: every route a save or a file is opened by
+ * (My tower, Today's tower, Friend's tower, Open a saved file) comes through here, so a field
+ * path never reaches a player.
+ */
+function openSaveText(text: string): ReturnType<typeof deserialize> {
+  const res = deserialize(text);
+  return res.ok ? res : { ok: false, reason: plainReason(res.reason) };
+}
+
 /** What the player is told when their My tower save cannot be opened, at boot or on the My tower tap. */
 export function unreadableMessage(reason: string, copied: boolean): string {
   reason = plainReason(reason);
@@ -546,7 +556,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
   async function readWorld(name: SlotName): Promise<{ world: World | null; text: string | null; reason: string }> {
     const text = await readFrom(name);
     if (!text) return { world: null, text: null, reason: '' };
-    const res = deserialize(text);
+    const res = openSaveText(text);
     return res.ok ? { world: res.world, text, reason: '' } : { world: null, text, reason: res.reason };
   }
 
@@ -1031,7 +1041,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
       const name = slot;
       const text = await readFrom(name);
       if (!text) return { ok: false, reason: 'There is no saved game yet.' };
-      const res = deserialize(text);
+      const res = openSaveText(text);
       if (!res.ok) {
         if (name === 'mine') keepUnreadable(text, res.reason);
         else {
@@ -1053,7 +1063,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     getKeptCopy: () => readUnreadable() ?? unreadableText,
     getKeptDailyCopy: () => readDailyCopy(),
     importSave(text) {
-      const res = deserialize(text);
+      const res = openSaveText(text);
       if (!res.ok) return res;
       if (slot === 'daily') {
         // Today's tower stays today's: the daily is left first (saved if it moved) and the

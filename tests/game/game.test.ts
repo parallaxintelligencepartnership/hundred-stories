@@ -2,7 +2,7 @@
 // createGame must not touch the DOM: only start() and attach() may, and neither runs here.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LIMITS } from '../../src/sim/rules';
-import { hashWorld } from '../../src/sim/save';
+import { deserialize, hashWorld } from '../../src/sim/save';
 import { createGame, shouldAutosave, unreadableMessage } from '../../src/game/game';
 import { stashUnreadable, writeSave } from '../../src/game/storage';
 
@@ -75,9 +75,16 @@ describe('export and import', () => {
 
     const damaged = JSON.parse(game.exportSave()) as Record<string, any>;
     damaged.rooms[0].floor = 0;
-    const result = game.importSave(JSON.stringify(damaged));
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.reason).toBe('This save is damaged and was not loaded. (rooms[0].floor)');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const result = game.importSave(JSON.stringify(damaged));
+      expect(result).toEqual({ ok: false, reason: 'This save is damaged and was not loaded.' });
+      // The field path is for a developer: one console line, never the player's notice.
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain('rooms[0].floor');
+    } finally {
+      warn.mockRestore();
+    }
     expect(hashWorld(game.world)).toBe(before);
   });
 });
@@ -88,7 +95,8 @@ describe('the unreadable save message', () => {
     expect(game.apply({ kind: 'build', room: 'lobby', floor: 1, x: 100 })).toEqual({ ok: true });
     const damaged = JSON.parse(game.exportSave()) as Record<string, any>;
     damaged.rooms[0].floor = 0;
-    const result = game.importSave(JSON.stringify(damaged));
+    // The loader's own reason, field path and all, as boot hands it on.
+    const result = deserialize(JSON.stringify(damaged));
     expect(result.ok).toBe(false);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {

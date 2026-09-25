@@ -196,6 +196,36 @@ describe('new S1: tapping My tower keeps an unreadable My tower save', () => {
   });
 });
 
+describe('checkpoint: a damaged daily or friend save shows no field path', () => {
+  for (const entry of ['friend', 'daily'] as const) {
+    it(`${entry}: load says it in plain words and sends the path to the console`, async () => {
+      const ls = fakeLocalStorage();
+      vi.stubGlobal('localStorage', ls.store);
+      const { game } = gameOn();
+      if (entry === 'friend') await game.openFriend(4242);
+      else await game.openDaily();
+      expect(game.apply({ kind: 'build', room: 'lobby', floor: 1, x: 150 })).toEqual({ ok: true });
+      await game.save();
+      const key = `hundred-stories:${entry}`;
+      const damaged = JSON.parse(ls.data.get(key)!) as { rooms: { floor: number }[] };
+      damaged.rooms[0]!.floor = 0;
+      ls.data.set(key, JSON.stringify(damaged));
+
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const result = await game.load();
+        expect(result).toEqual({ ok: false, reason: 'This save is damaged and was not loaded.' });
+        const said = warns(game);
+        expect(said[said.length - 1]).toBe('We could not open this saved tower. This save is damaged and was not loaded.');
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(String(warn.mock.calls[0]?.[0])).toContain('rooms[0].floor');
+      } finally {
+        warn.mockRestore();
+      }
+    });
+  }
+});
+
 describe('C S2: a daily dated after today is never thrown away', () => {
   it('dailyOpening never says fresh for a stored date later than today', () => {
     expect(dailyOpening({ date: '2026-09-25', finished: false }, '2026-09-24')).not.toBe('fresh');
