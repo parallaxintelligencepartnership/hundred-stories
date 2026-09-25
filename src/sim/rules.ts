@@ -68,6 +68,45 @@ export const SHAFTS: Record<ShaftKind, ShaftRule> = {
   express: { label: 'Express elevator', width: 6, shaftCost: 400_000, carCost: 150_000, upkeepPerQuarterPerCar: 20_000, maxSpan: null, maxCars: 8, capacity: 42, floorsPerMinute: 2, doorOpenMinutes: 1, star: 3, expressOnly: true },
 };
 
+/**
+ * The plural of every label a refusal names ("Lobbies cost $5,000."). A label that reads as a
+ * whole service rather than a count (Housekeeping, Fast food) keeps its own form and takes a
+ * singular verb; see UNCOUNTED_LABELS.
+ */
+export const PLURAL_LABELS: Readonly<Record<string, string>> = {
+  Lobby: 'Lobbies',
+  'Sky lobby': 'Sky lobbies',
+  Stairs: 'Stairs',
+  Escalator: 'Escalators',
+  Office: 'Offices',
+  Condo: 'Condos',
+  'Single room': 'Single rooms',
+  'Twin room': 'Twin rooms',
+  Suite: 'Suites',
+  'Fast food': 'Fast food',
+  Restaurant: 'Restaurants',
+  Shop: 'Shops',
+  Cinema: 'Cinemas',
+  'Party hall': 'Party halls',
+  'Medical center': 'Medical centers',
+  'Security office': 'Security offices',
+  Housekeeping: 'Housekeeping',
+  'Parking ramp': 'Parking ramps',
+  'Parking space': 'Parking spaces',
+  'Recycling center': 'Recycling centers',
+  'Metro station': 'Metro stations',
+  Cathedral: 'Cathedrals',
+  Elevator: 'Elevators',
+  'Service elevator': 'Service elevators',
+  'Express elevator': 'Express elevators',
+  'Elevator car': 'Elevator cars',
+  'Service elevator car': 'Service elevator cars',
+  'Express elevator car': 'Express elevator cars',
+};
+
+/** Labels with no plural of their own: "Housekeeping costs", not "Housekeeping cost". */
+export const UNCOUNTED_LABELS: readonly string[] = ['Housekeeping', 'Fast food'];
+
 // Rent is a percent of a room's standard rate, 50..150 in steps of 10, default 100.
 // evalWeight: at 50% rent the bonus is +0.3, enough to offset one and a half noisy neighbours
 // at noisePenaltyPerNeighbor 0.2; at 150% it is a 0.3 penalty.

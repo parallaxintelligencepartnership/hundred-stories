@@ -4,8 +4,19 @@
 import { spend } from './economy';
 import { handleEventCommand } from './events';
 import { isFollowed, recordBeat } from './story';
-import { DEMO_CAP_REASON, EDITION, insideDemoCap, LIMITS, RENT, ROOMS, SHAFTS, takesRent } from './rules';
-import { MAX_FLOOR, MIN_FLOOR, spanFloors, spanTop, TOWER_WIDTH } from './types';
+import {
+  DEMO_CAP_REASON,
+  EDITION,
+  insideDemoCap,
+  LIMITS,
+  PLURAL_LABELS,
+  RENT,
+  ROOMS,
+  SHAFTS,
+  takesRent,
+  UNCOUNTED_LABELS,
+} from './rules';
+import { floorDistance, MAX_FLOOR, MIN_FLOOR, spanFloors, spanTop, TOWER_WIDTH } from './types';
 import type {
   Car,
   Command,
@@ -58,8 +69,10 @@ function money(amount: number): string {
   return `${amount < 0 ? '-' : ''}$${grouped}`;
 }
 
-/** "Office" -> "Offices", "Stairs" -> "Stairs" */
+/** "Office" -> "Offices", "Lobby" -> "Lobbies", "Housekeeping" -> "Housekeeping" (rules.ts table) */
 function plural(label: string): string {
+  const known = PLURAL_LABELS[label];
+  if (known !== undefined) return known;
   return label.endsWith('s') ? label : `${label}s`;
 }
 
@@ -74,7 +87,8 @@ function starText(star: number): string {
 }
 
 function cannotAfford(label: string, cost: number): string {
-  return `Not enough cash. ${plural(label)} cost ${money(cost)}.`;
+  const verb = UNCOUNTED_LABELS.includes(label) ? 'costs' : 'cost';
+  return `Not enough cash. ${plural(label)} ${verb} ${money(cost)}.`;
 }
 
 function floorName(floor: number): string {
@@ -192,12 +206,20 @@ function floorIsBuilt(world: World, floor: number): boolean {
   return false;
 }
 
-/** A floor may only be built on when the floor nearer the ground already exists. */
-function hasSupport(world: World, floor: number): boolean {
+/**
+ * A floor may only be built on when the floor nearer the ground already exists. Above ground
+ * that is the floor under the base; underground it is the floor over the footprint's top, so a
+ * room two or three floors tall hangs from the floor above its highest floor, and one whose top
+ * is B1 hangs from the ground lobby.
+ */
+function hasSupport(world: World, floor: number, height: number): boolean {
   if (floor === 1) return true;
   if (floor > 1) return floorIsBuilt(world, floor - 1);
   if (floor === -1) return groundLobby(world) !== undefined;
-  return floorIsBuilt(world, floor + 1);
+  const top = spanTop(floor, height);
+  if (top >= 1) return true; // reaches the ground floor itself; the depth rules cover this
+  if (top === -1) return groundLobby(world) !== undefined;
+  return floorIsBuilt(world, top + 1);
 }
 
 /** Leave these out when asking what holds a footprint up: the room or shaft about to go. */
@@ -376,7 +398,7 @@ export function canBuild(world: World, kind: RoomKind, floor: number, x: number)
     return no(`You can build ${countText(rule.maxCount, rule.label)}.`);
   }
 
-  if (!hasSupport(world, floor)) return no('Build a floor below this one first.');
+  if (!hasSupport(world, floor, rule.height)) return no('Build a floor below this one first.');
   if (!restsOnStructure(world, kind, floor, rule.height, x, rule.width)) {
     return no('Nothing is holding this up. Build under it first.');
   }
@@ -447,6 +469,14 @@ function doBuild(world: World, kind: RoomKind, floor: number, x: number): Comman
 function doDemolish(world: World, roomId: number): CommandResult {
   const room = world.rooms.get(roomId);
   if (!room) return no('There is nothing to demolish.');
+  // A fire or a bomb is tied to its room: taking the room away would leave the threat with
+  // nowhere to end (decision 2026-09-25: refuse, the player deals with the threat first).
+  if (room.onFire || world.events.some((e) => e.kind === 'fire' && e.roomIds.includes(room.id))) {
+    return no('Put the fire out first.');
+  }
+  if (world.events.some((e) => e.kind === 'bomb' && e.roomId === room.id)) {
+    return no('Deal with the bomb first.');
+  }
   if (room.occupancy > 0) return no('People are inside.');
   const stranded = strandsSomething(world, { roomId: room.id });
   if (stranded) return stranded;
@@ -720,14 +750,15 @@ function doSetCarRange(
   const car = shaft.cars.find((c) => c.id === carId);
   if (!car) return no('That car is gone.');
   if (range !== null) {
-    if (!Number.isInteger(range.lo) || !Number.isInteger(range.hi)) {
+    // floorExists also refuses floor 0, which no shaft has.
+    if (!floorExists(range.lo) || !floorExists(range.hi)) {
       return no('That floor is not on this elevator.');
     }
     if (range.lo < shaft.floorMin || range.hi > shaft.floorMax) {
       return no('That floor is not on this elevator.');
     }
     if (range.lo > range.hi) return no('The bottom floor cannot be above the top floor.');
-    if (range.hi - range.lo < 1) return no('A car must serve at least two floors.');
+    if (floorDistance(range.lo, range.hi) < 1) return no('A car must serve at least two floors.');
   }
   // Changing the floors under a rider aboard would strand them: the car may not leave
   // its range, so a destination outside it would never come.

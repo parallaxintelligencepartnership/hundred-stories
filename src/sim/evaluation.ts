@@ -125,7 +125,7 @@ export function leaveReasonFor(world: World, room: Room): string {
       text: `People waited too long for an elevator on floor ${room.floor}.`,
     },
     {
-      weight: takesRent(room.kind) ? (Math.max(0, room.rent - 100) / 100) * RENT.evalWeight : 0,
+      weight: takesRent(room.kind) ? (Math.max(0, room.rent - RENT.default) / RENT.default) * RENT.evalWeight : 0,
       text: `The rent on floor ${room.floor} was too high.`,
     },
   ];
@@ -142,7 +142,7 @@ export function evaluateRoom(world: World, room: Room): number {
   const noisePenalty = quiet ? EVAL.noisePenaltyPerNeighbor * noisyNeighborsOf(world, room).length : 0;
   const dirtyPenalty = room.dirty ? EVAL.dirtyPenalty : 0;
   const infestedPenalty = room.infested ? EVAL.infestedPenalty : 0;
-  const rentTerm = takesRent(room.kind) ? ((100 - room.rent) / 100) * RENT.evalWeight : 0;
+  const rentTerm = takesRent(room.kind) ? ((RENT.default - room.rent) / RENT.default) * RENT.evalWeight : 0;
   return clamp01(1 + rentTerm - stressPenalty - noisePenalty - dirtyPenalty - infestedPenalty);
 }
 
