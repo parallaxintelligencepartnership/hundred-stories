@@ -61,6 +61,7 @@ function fakeRenderer(
     setToolOwnsDrag: (on: boolean) => toolDrag.push(on),
     setReducedMotion: () => {},
     setChrome: () => {},
+    resetMotion: () => {},
     destroy: () => {},
   } as unknown as Renderer;
   return {
@@ -554,5 +555,17 @@ describe('stretching an elevator that is already standing', () => {
     expect(game.getPlacement()).toMatchObject({ floorMin: 1, floorMax: 3 });
     game.resizePending(0, 1);
     expect(game.getPlacement()).toMatchObject({ floorMin: -1, floorMax: 3 });
+  });
+});
+
+describe('Open a saved file drops the parked outline (audit E2 S4)', () => {
+  it('parks an outline, opens a saved file, and nothing is parked any more', () => {
+    const { game, host } = started();
+    const text = game.exportSave();
+    host.fire('pointerdown', finger(800, 0));
+    host.fire('pointerup', finger(800, 120));
+    expect(game.getPlacement()).toMatchObject({ pending: true });
+    expect(game.importSave(text)).toEqual({ ok: true });
+    expect(game.getPlacement()).toBe(null);
   });
 });
