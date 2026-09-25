@@ -43,7 +43,40 @@ export interface StorageDeps {
 
 export interface SaveStorage {
   writeSave(text: string): Promise<void>;
+  /** The slot's text, null when nothing is stored. Throws a SaveReadError when the store could not be read. */
   readSave(): Promise<string | null>;
+}
+
+/**
+ * A slot that could not be read: the store failed, which is not the same as holding nothing.
+ * The game must never start a tower over a slot that threw this (src/game/game.ts). `cause`
+ * carries the store's own error for the console.
+ */
+export class SaveReadError extends Error {
+  constructor(cause: unknown) {
+    super(`The save could not be read: ${describeError(cause)}`, { cause });
+    this.name = 'SaveReadError';
+  }
+}
+
+function describeError(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof e === 'object' && e !== null && 'message' in e) return String((e as { message: unknown }).message);
+  return String(e);
+}
+
+/**
+ * A native read that failed only because the file is not there yet (first launch, or a slot
+ * never used). The Capacitor Filesystem plugin says "... does not exist." with the code
+ * OS-PLUG-FILE-0008 on both phones (and "File does not exist." on the web); the Tauri fs plugin
+ * passes on the OS error: "No such file or directory (os error 2)" on macOS and Linux, "The
+ * system cannot find the file specified. (os error 2)" or "... the path specified. (os error 3)"
+ * on Windows. Anything else (a locked file, an I/O error, a denied permission) is a read failure.
+ */
+function isMissingFile(e: unknown): boolean {
+  const code = typeof e === 'object' && e !== null && 'code' in e ? String((e as { code: unknown }).code) : '';
+  if (code === 'OS-PLUG-FILE-0008' || code === 'ENOENT') return true;
+  return /does not exist|no such file or directory|cannot find the (file|path) specified|\(os error 2\)|\bENOENT\b/i.test(describeError(e));
 }
 
 function openDb(factory: IDBFactory): Promise<IDBDatabase> {
@@ -187,8 +220,8 @@ export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): 
         seqReq.onsuccess = () => resolve(text ? { text, stamp, seq: stampOf(seqReq.result) } : null);
         seqReq.onerror = () => reject(seqReq.error);
       });
-    } catch {
-      return null; // the localStorage copy, if any, is all there is
+    } catch (e) {
+      throw new SaveReadError(e);
     }
   }
 
@@ -207,7 +240,19 @@ export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): 
   }
 
   async function readSave(): Promise<string | null> {
-    const fromDb = deps.indexedDB ? await readIndexedDb(deps.indexedDB) : null;
+    let fromDb: StampedText | null = null;
+    if (deps.indexedDB) {
+      try {
+        fromDb = await readIndexedDb(deps.indexedDB);
+      } catch (e) {
+        // IndexedDB would not open or read. A localStorage copy, when there is one, is read as
+        // before (a browser whose IndexedDB never works keeps its tower there). With none, the
+        // slot is unknown, not empty: a read failure, so no fresh tower is saved over it.
+        const local = readLocal();
+        if (local) return local.text;
+        throw e;
+      }
+    }
     const fromLocal = readLocal();
     if (fromDb && fromLocal) {
       // A copy with no number was written by a build before sequence numbers, so any numbered
@@ -255,9 +300,11 @@ export function createFileStorage(fs: FileSlotFs | Promise<FileSlotFs>, slot: Sl
       // With an encoding the plugin always returns a string; a Blob only comes back without one.
       const text = typeof data === 'string' ? data : await data.text();
       return text ? text : null;
-    } catch {
-      // no file yet (first launch) reads as no save, same as an empty browser slot
-      return null;
+    } catch (e) {
+      // No file yet (first launch) reads as no save, same as an empty browser slot. Any other
+      // failure is not "no save": the file may hold a tower this read could not get at.
+      if (isMissingFile(e)) return null;
+      throw new SaveReadError(e);
     }
   }
 
@@ -400,9 +447,11 @@ export function createTauriStorage(fs: TauriSlotFs | Promise<TauriSlotFs>, slot:
     try {
       const text = await (await fs).readTextFile(FILE_SLOT_NAME);
       return text ? text : null;
-    } catch {
-      // no file yet (first launch) reads as no save, same as an empty browser slot
-      return null;
+    } catch (e) {
+      // No file yet (first launch) reads as no save, same as an empty browser slot. A locked
+      // file or any other failure is a read failure, never "no save".
+      if (isMissingFile(e)) return null;
+      throw new SaveReadError(e);
     }
   }
 

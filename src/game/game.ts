@@ -30,6 +30,11 @@ const TICKS_PER_SECOND_AT_1X = 10;
 export const DAILY_OVER_REASON = "Today's tower is over. Come back tomorrow for a new one.";
 /** Said once per session, the first time a save the player did not ask for fails. */
 export const NOT_SAVING_NOTICE = 'This device is not saving your tower right now.';
+/**
+ * Said when a slot's save could not be read (the store failed, not an empty slot). The tower in
+ * hand is then not saved over that slot until a later read works or the player picks New game.
+ */
+export const READ_FAILED_NOTICE = 'We could not read your saved tower. Reload the page to try again.';
 /** Said when "Start today's tower instead" cannot keep a copy of the later tower first. */
 export const DAILY_COPY_FAILED = 'We could not keep a copy of that tower, so it stays for now.';
 
@@ -240,6 +245,12 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
   let mineHeld = false;
   // The unreadable text itself, for Save to a file this session even when no copy could be kept.
   let unreadableText: string | null = null;
+  // Slots whose save could not be read (the store failed, which is not "empty"): the tower in
+  // hand is a stand-in, and nothing writes it over the slot. A later read of the slot that works,
+  // or New game there, lifts it. Save now is refused meanwhile, with the same words.
+  const unread = new Set<SlotName>();
+  // The world in hand is the one createGame made, and its slot has not been read yet.
+  let standIn = true;
   // The failed-save notice goes out once per session; the last save's outcome decides whether
   // Open a saved file may leave an unsaved daily behind.
   let notSavingShown = false;
@@ -476,6 +487,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
    */
   async function saveWorld(kind: 'player' | 'quiet' | 'background', name: SlotName = slot, w: World = world): Promise<CommandResult> {
     if (kind !== 'player' && name === 'mine' && mineHeld) return { ok: true };
+    if (unread.has(name)) return kind === 'player' ? { ok: false, reason: READ_FAILED_NOTICE } : { ok: true };
     const at = edits;
     try {
       markCheckpoint(w); // the hash here lets a replay find where it drifted
@@ -503,9 +515,33 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     return name === 'mine' ? readSave() : readSlot(name);
   }
 
+  /**
+   * A slot's text, null when nothing is stored, or failed when the store could not be read. A
+   * read that works lifts the slot's protection: its caller puts that slot's own tower in hand.
+   */
+  async function tryRead(name: SlotName): Promise<{ failed: false; text: string | null } | { failed: true }> {
+    try {
+      const text = await readFrom(name);
+      unread.delete(name);
+      return { failed: false, text };
+    } catch (e) {
+      console.warn('The save could not be read', e);
+      return { failed: true };
+    }
+  }
+
+  /** A slot's save could not be read: protect it and tell the player. */
+  function readFailed(name: SlotName): void {
+    unread.add(name);
+    logEvent(world, READ_FAILED_NOTICE, 'warn');
+    drainEvents();
+    notify();
+  }
+
   /** Put a world in hand: the same reset importSave and newGame do. */
   function swapWorld(next: World): void {
     world = next;
+    standIn = false;
     dirty = false;
     primeTap(tap, world);
     selection = null;
@@ -564,11 +600,13 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
   }
 
   /** A slot's save as a world, with the text when it is there but does not read. */
-  async function readWorld(name: SlotName): Promise<{ world: World | null; text: string | null; reason: string }> {
-    const text = await readFrom(name);
-    if (!text) return { world: null, text: null, reason: '' };
+  async function readWorld(name: SlotName): Promise<{ world: World | null; text: string | null; reason: string; failed: boolean }> {
+    const read = await tryRead(name);
+    if (read.failed) return { world: null, text: null, reason: READ_FAILED_NOTICE, failed: true };
+    const text = read.text;
+    if (!text) return { world: null, text: null, reason: '', failed: false };
     const res = openSaveText(text);
-    return res.ok ? { world: res.world, text, reason: '' } : { world: null, text, reason: res.reason };
+    return res.ok ? { world: res.world, text, reason: '', failed: false } : { world: null, text, reason: res.reason, failed: false };
   }
 
   /**
@@ -1050,8 +1088,18 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     },
     async load() {
       const name = slot;
-      const text = await readFrom(name);
-      if (!text) return { ok: false, reason: 'There is no saved game yet.' };
+      const read = await tryRead(name);
+      if (read.failed) {
+        // Not "no save": the slot may hold a tower this read could not get at. The tower in
+        // hand, when it is only the stand-in createGame made, is never saved over it.
+        if (standIn) readFailed(name);
+        return { ok: false, reason: READ_FAILED_NOTICE };
+      }
+      const text = read.text;
+      if (!text) {
+        standIn = false; // the slot is empty: the tower in hand is now its tower
+        return { ok: false, reason: 'There is no saved game yet.' };
+      }
       const res = openSaveText(text);
       if (!res.ok) {
         if (name === 'mine') keepUnreadable(text, res.reason);
@@ -1076,11 +1124,14 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     importSave(text) {
       const res = openSaveText(text);
       if (!res.ok) return res;
-      if (slot === 'daily') {
-        // Today's tower stays today's: the daily is left first (saved if it moved) and the
-        // file opens as My tower, with a running clock.
+      // My tower could not be read: an opened file would be saved over it, so not yet.
+      if (unread.has('mine')) return { ok: false, reason: READ_FAILED_NOTICE };
+      if (slot !== 'mine') {
+        // An opened file is always My tower. Today's tower stays today's and a friend's tower
+        // stays theirs: that slot is left first (saved if it moved) and the file opens as My
+        // tower, with a running clock, so it is there at /play/ and no friend link replaces it.
         if (dirty && lastSaveFailed) return { ok: false, reason: NOT_SAVING_NOTICE };
-        if (dirty) void saveWorld('quiet', 'daily', world);
+        if (dirty) void saveWorld('quiet', slot, world);
         cancelScheduledSave();
         takeSlot('mine');
         startSpeed();
@@ -1107,6 +1158,13 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
         const read = await readWorld('daily');
         const saved = read.world;
         takeSlot('daily');
+        if (read.failed) {
+          // Today's tower in hand, never saved over the slot that would not read.
+          freshTower(dailyStart(today), { start: dailyTwist(today).start, mode: dailyMode(today) });
+          startSpeed();
+          readFailed('daily');
+          return;
+        }
         const savedDate = saved ? dateOfMode(buildLogOf(saved).mode) : null;
         const opening = dailyOpening(saved && savedDate !== null ? { date: savedDate, finished: dailyFinished(saved) } : null, today);
         if (opening === 'fresh' || !saved || savedDate === null) {
@@ -1151,9 +1209,13 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
       switching(async () => {
         if (!(await readyToLeave('friend'))) return;
         // The same link opened again goes on with the tower it started; another link starts over.
-        const saved = (await readWorld('friend')).world;
+        const read = await readWorld('friend');
+        const saved = read.world;
         takeSlot('friend');
-        if (saved && saved.seed === friendSeed) swapWorld(saved);
+        if (read.failed) {
+          freshTower(friendSeed);
+          readFailed('friend');
+        } else if (saved && saved.seed === friendSeed) swapWorld(saved);
         else {
           freshTower(friendSeed);
           await saveWorld('quiet');
@@ -1166,7 +1228,10 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
         if (!(await readyToLeave('mine'))) return;
         const read = await readWorld('mine');
         takeSlot('mine');
-        if (read.world) {
+        if (read.failed) {
+          freshTower(time.freshSeed());
+          readFailed('mine');
+        } else if (read.world) {
           swapWorld(read.world);
           mineHeld = false;
         } else {
@@ -1182,6 +1247,9 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
         notify();
       }),
     newGame(newSeed) {
+      // New game on purpose: this tower replaces whatever the slot holds, read or not.
+      unread.delete(slot);
+      standIn = false;
       world = createWorld(newSeed);
       startBuildLog(world);
       dailyChoice = null;

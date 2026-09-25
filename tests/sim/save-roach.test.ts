@@ -63,4 +63,19 @@ describe('cockroach spread timer across a save (audit C S1)', () => {
     if (!loaded.ok) throw new Error(loaded.reason);
     expect(loaded.world.roachLastSpread ?? null).toBe(null);
   });
+
+  it('writes the timer as an optional field of format 5, so a build that reads 1 to 5 still opens the tower (closeout 2026-09-25)', () => {
+    const straight = hotelTower();
+    while (!anyInfested(straight)) tick(straight);
+    for (let i = 0; i < 1500; i++) tick(straight);
+    expect(straight.roachLastSpread).not.toBe(null);
+    const text = serialize(straight);
+    const data = JSON.parse(text) as Record<string, unknown>;
+    expect(data.version).toBe(5);
+    expect(data.roachLastSpread).toBe(straight.roachLastSpread);
+    // Read by presence, not by version number.
+    const loaded = deserialize(text);
+    if (!loaded.ok) throw new Error(loaded.reason);
+    expect(loaded.world.roachLastSpread).toBe(straight.roachLastSpread);
+  });
 });

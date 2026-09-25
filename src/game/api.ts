@@ -121,8 +121,8 @@ export interface GameApi {
    */
   getKeptDailyCopy(): string | null;
   /**
-   * Open a saved file. Inside Today's tower this leaves the daily first (saving it if it moved)
-   * and the file opens as My tower.
+   * Open a saved file. It always opens as My tower: from Today's tower or Friend's tower this
+   * leaves that slot first (saving it if it moved).
    */
   importSave(text: string): CommandResult;
   newGame(seed: number): void;

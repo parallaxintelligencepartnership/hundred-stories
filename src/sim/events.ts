@@ -52,7 +52,7 @@ export function resetEventTestHooks(): void {
 }
 
 // The dirty-since timer lives on room.dirtySinceMinute and the spread cadence on
-// world.roachLastSpread, so both survive save and load (save v6) and a reloaded tower
+// world.roachLastSpread, so both survive save and load (optional in save format 5 since 0.5.0) and a reloaded tower
 // spreads on the same day as one that never stopped.
 
 export function formatDollars(amount: number): string {

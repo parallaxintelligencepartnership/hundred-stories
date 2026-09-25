@@ -39,7 +39,12 @@ import type {
 /** v1 and pre-rent v2 saves have no `rent`; it is normalized to RENT.default on load. */
 type SaveRoom = Omit<Room, 'rent'> & { rent?: number };
 
-export const SAVE_VERSION = 6;
+/**
+ * The format number stays at 5. Since 0.5.0 a save may also carry the optional cockroach spread
+ * timer (roachLastSpread); it is read by presence, never by number, so a build that reads 1 to 5
+ * (0.4.10 and older ignore keys they do not know) still opens a tower this build wrote.
+ */
+export const SAVE_VERSION = 5;
 
 /**
  * Versions this loader understands. v1 has no per car settings and boolean hall calls.
@@ -52,15 +57,16 @@ export const SAVE_VERSION = 6;
  * recycling center in an older save hires its collectors on the first tick, as guards are hired.
  * v5 adds the build log (src/sim/buildlog.ts). v1 to v4 load with an empty one marked
  * startedBeforeLog: the tower plays on, only replay is unavailable for it.
- * v6 adds the cockroach spread timer (world.roachLastSpread). v1 to v5 load it as null, which is
- * what those builds rebuilt it as after a load: the timer starts again at the next 06:00 roll.
+ * Format 5 with the optional roach timer since 0.5.0: world.roachLastSpread is written as an
+ * optional field. A save without it (every build before 0.5.0) loads it as null, which is what
+ * those builds rebuilt it as after a load: the timer starts again at the next 06:00 roll.
  */
-const READABLE_VERSIONS = [1, 2, 3, 4, 5, 6];
+const READABLE_VERSIONS = [1, 2, 3, 4, 5];
 
 /**
  * The version the hash projection names. It stays at 2 because v3 only added the two display
- * baselines, v4 only the story and v5 only the build log, which the hash leaves out, and v6's
- * roach timer hashes as absent while it is null, so a tower without cockroaches hashes exactly
+ * baselines, v4 only the story and v5 only the build log, which the hash leaves out, and the
+ * optional roach timer (format 5 since 0.5.0) hashes as absent while it is null, so a tower without cockroaches hashes exactly
  * as it did under v2.
  */
 const HASH_VERSION = 2;
@@ -115,7 +121,7 @@ interface SaveData {
   shafts: SaveShaft[];
   sims: Sim[];
   events: World['events'];
-  roachLastSpread?: number | null; // absent before v6
+  roachLastSpread?: number | null; // optional in format 5 since 0.5.0; absent before
   stats: World['stats'];
   gameOver: World['gameOver'];
   log: LogEntry[];
@@ -694,7 +700,8 @@ export function deserialize(text: string): { ok: true; world: World } | { ok: fa
     // The build log sits beside the world, not in it, and not in the hash.
     setBuildLog(world, buildLogFromSave(parsed.version >= 5 ? (parsed.buildLog ?? null) : undefined));
     world.events = parsed.events.map((event) => (event.kind === 'vip' ? loadVipEvent(world, event) : event));
-    world.roachLastSpread = parsed.version >= 6 ? (parsed.roachLastSpread ?? null) : null;
+    // Read by presence, not by version: format 5 carries it as an optional field since 0.5.0.
+    world.roachLastSpread = parsed.roachLastSpread ?? null;
     world.stats = parsed.stats;
     world.gameOver = parsed.gameOver;
     world.log = parsed.log.slice(-LOG_LIMIT);
@@ -878,7 +885,7 @@ export function hashWorld(world: World): string {
     sims: byId(world.sims.values()).map(simForHash),
     events: world.events.map((event) => ({ ...event })),
     // null and absent hash alike (undefined drops out of the JSON), so a tower that never had
-    // cockroaches, or has none now, hashes exactly as before v6.
+    // cockroaches, or has none now, hashes exactly as before 0.5.0 added the optional timer.
     roachLastSpread: world.roachLastSpread ?? undefined,
     stats: world.stats,
     gameOver: world.gameOver,

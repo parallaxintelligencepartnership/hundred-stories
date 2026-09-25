@@ -224,14 +224,16 @@ describe('save/deserialize round trip', () => {
 });
 
 describe('deserialize error handling', () => {
-  it('reports a version reason for a save from a different version', () => {
+  it('reports a version reason for an unknown newer version', () => {
     const world = richWorld();
-    const data = JSON.parse(serialize(world));
-    data.version = SAVE_VERSION + 1;
-    const result = deserialize(JSON.stringify(data));
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.reason).toBe('This save is from a different version of the game.');
+    for (const version of [SAVE_VERSION + 1, 6, 99]) {
+      const data = JSON.parse(serialize(world));
+      data.version = version;
+      const result = deserialize(JSON.stringify(data));
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.reason).toBe('This save is from a different version of the game.');
+    }
   });
 
   it('reports a plain reason for garbage text', () => {
@@ -477,12 +479,12 @@ describe('hashWorld covers every field in types.ts', () => {
 
 describe('status bar baselines (save v3)', () => {
   it('writes the current version and round trips both baselines, set or not yet known', () => {
-    expect(SAVE_VERSION).toBe(6);
+    expect(SAVE_VERSION).toBe(5);
     const world = richWorld();
     world.quarterStartCash = 100_000;
     world.dayStartPopulation = 42;
     const text = serialize(world);
-    expect(JSON.parse(text).version).toBe(6);
+    expect(JSON.parse(text).version).toBe(5);
     const result = deserialize(text);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
