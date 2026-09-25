@@ -167,7 +167,7 @@ describe('top bar at phone width', () => {
     expect(face['font-family']).toBe('var(--font-readout)');
     expect(face['font-variant-numeric']).toBe('tabular-nums');
     expect(rule(wide(), '.hs-status-cash .hs-readout-value')['font-family']).toBe('var(--font-readout)');
-    // Every other use of the readout face is gone: two selectors in one rule, and the token.
+    // Every other use of the readout face is gone: one rule (cash, the clock, panel money), and the token.
     const uses = css.match(/font-family: var\(--font-readout\)/g) ?? [];
     expect(uses).toHaveLength(1);
     expect(rule(wide(), '.hs-readout-value')['font-family']).toBeUndefined();

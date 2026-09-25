@@ -1,11 +1,11 @@
 // Today's tower cards: the start card with the day's twist, the choice between an older
 // unfinished daily and today's, and the result card when the daily ends. One panel, whose
-// content follows the game's state. Plain markup and existing classes only.
+// content follows the game's state. Plain markup and the panels' shared classes only.
 
 import type { GameApi } from '../game/api';
 import { dailyResult, dailyShareText, dailyShareUrl, formatDateKey, DAILY_DAYS } from '../game/daily';
 import { formatCount, formatMoney, starsGlyphs } from './format';
-import { button, el, panelShell, row, type PanelContext, type PanelElement } from './panels';
+import { button, el, panelShell, row, tile, type PanelContext, type PanelElement } from './panels';
 
 export const DAILY_TITLE = "Today's tower";
 
@@ -52,18 +52,23 @@ export function createDailyPanel(game: GameApi, ctx: PanelContext, actions: Dail
   if (card === 'result') {
     const result = dailyResult(game.world, daily.date);
     body.append(row('Date', formatDateKey(result.date)), row('Twist', result.twist.name));
-    const people = el('p', 'hs-daily-people');
-    people.append(el('span', 'hs-daily-people-count', formatCount(result.people)), el('span', 'hs-daily-people-label', result.people === 1 ? ' person' : ' people'));
-    body.append(people);
-    body.append(
-      row('Floors', formatCount(result.floors)),
-      row('Stars', starsGlyphs(result.stars)),
-      row('Money', formatMoney(result.money)),
-      el('p', 'hs-note', 'Come back tomorrow for a new tower.'),
+    // The score as a bento grid: the people big across the top, then floors, stars and money.
+    const bento = el('div', 'hs-bento');
+    const people = el('div', 'hs-tile is-wide hs-daily-people');
+    people.append(
+      el('span', 'hs-tile-label', result.people === 1 ? 'Person in the tower' : 'People in the tower'),
+      el('span', 'hs-daily-people-count', formatCount(result.people)),
     );
+    bento.append(
+      people,
+      tile('Floors', formatCount(result.floors)),
+      tile('Stars', starsGlyphs(result.stars)),
+      tile('Money', formatMoney(result.money), { wide: true, money: true }),
+    );
+    body.append(bento, el('p', 'hs-note', 'Come back tomorrow for a new tower.'));
     const buttons = el('div', 'hs-actions');
     buttons.append(
-      button('Share', 'hs-btn', () => actions.share(dailyShareText(result.people), dailyShareUrl(result.date))),
+      button('Share', 'hs-btn is-primary', () => actions.share(dailyShareText(result.people), dailyShareUrl(result.date))),
       button('My tower', 'hs-btn', () => actions.myTower()),
     );
     body.append(buttons);
@@ -77,7 +82,7 @@ export function createDailyPanel(game: GameApi, ctx: PanelContext, actions: Dail
     el('p', 'hs-note', `Everyone gets the same start today. You have ${DAILY_DAYS} days in the game to fit in as many people as you can.`),
   );
   const buttons = el('div', 'hs-actions');
-  buttons.append(button('Start building', 'hs-btn', () => ctx.close()), button('My tower', 'hs-btn', () => actions.myTower()));
+  buttons.append(button('Start building', 'hs-btn is-primary', () => ctx.close()), button('My tower', 'hs-btn', () => actions.myTower()));
   body.append(buttons);
   return panel;
 }

@@ -38,6 +38,7 @@ import { chromeInsets, isSheetLayout, placementBoxes, viewInsets } from './layou
 import { createToasts } from './toast';
 import type { Box } from './layout';
 import {
+  applyGlassClear,
   button,
   createChroniclePanel,
   createFinancesPanel,
@@ -48,6 +49,7 @@ import {
   createSharePanel,
   createStoriesPanel,
   el,
+  readGlassClear,
 } from './panels';
 import type { PanelContext, PanelElement } from './panels';
 import { GROUPS, applyRowState, buildPalette, paintThumbnail, sameTool, toolRowState } from './palette';
@@ -438,6 +440,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   };
 
   applyReducedMotion(reducedMotion);
+  // See-through buttons, as the player left it in Settings (off by default).
+  applyGlassClear(readGlassClear());
   // The top bar wraps on a narrow screen, so nothing below it can assume one row: its measured
   // bottom goes into a variable the palette, the panel and the hint sit under, and into the
   // band the camera frames the street in. Nothing else pushes the tower: it is full bleed.
