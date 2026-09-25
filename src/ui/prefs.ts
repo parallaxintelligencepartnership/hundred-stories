@@ -13,6 +13,11 @@ export const PREF_KEYS = {
   guideDone: 'hs.guide.done',
   tips: 'hs.tips',
   goalsCollapsed: 'hs.goals.collapsed',
+  // Display (Settings): the ui reads these through onPrefChange, so a switch takes at once.
+  largeText: 'hs.largeText',
+  colorBlind: 'hs.colorBlind',
+  // Haptics on or off; on unless the player turned them off.
+  haptics: 'hs.haptics',
 } as const;
 
 export type PrefKey = (typeof PREF_KEYS)[keyof typeof PREF_KEYS];
@@ -41,12 +46,34 @@ export function getPref(key: PrefKey, store: PrefStore | null = defaultStore()):
   }
 }
 
+type PrefListener = (key: PrefKey) => void;
+const listeners = new Set<PrefListener>();
+
+/**
+ * Hear every write through setPref (and so setFlag): the Settings switches only write, and
+ * whoever acts on a choice listens here. Returns the way to stop listening.
+ */
+export function onPrefChange(listener: PrefListener): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
 export function setPref(key: PrefKey, value: string, store: PrefStore | null = defaultStore()): void {
-  if (!store) return;
-  try {
-    store.setItem(key, value);
-  } catch {
-    // Nothing to do: the choice stays for this session only.
+  if (store) {
+    try {
+      store.setItem(key, value);
+    } catch {
+      // Nothing to do: the choice stays for this session only.
+    }
+  }
+  for (const listener of [...listeners]) {
+    try {
+      listener(key);
+    } catch (error) {
+      console.warn('prefs: a listener failed', key, error);
+    }
   }
 }
 

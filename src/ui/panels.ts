@@ -1,6 +1,7 @@
 // Panel builders. Each one returns a detached element that the shell in ui.ts mounts.
 // Panels read the world through GameApi only and never reach into the sim modules.
 
+import { createHapticsRow } from './haptics';
 import type { Sound } from '../audio/audio';
 import type { GameApi } from '../game/api';
 import {
@@ -1318,6 +1319,7 @@ export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElem
   });
   themeField.append(themeLabelEl, themeButton);
   motion.append(themeField);
+  motion.append(createHapticsRow()); // Haptics, last in Display (src/ui/haptics.ts)
 
   body.append(motion);
   if (ctx.sound) body.append(soundSection(ctx.sound));

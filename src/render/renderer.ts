@@ -165,6 +165,8 @@ export interface Renderer {
    * every frame while on, outside the structure-version gate; off costs one branch a frame.
    */
   setOverlay(kind: OverlayKind | null): void;
+  /** The information views in the color-blind friendly ramp, worst step striped. Render only. */
+  setOverlayColorBlind(on: boolean): void;
   camera: Camera;
   screenToTile(sx: number, sy: number): { floor: number; x: number };
   setGhost(g: null | Ghost): void;
@@ -2336,6 +2338,9 @@ export async function createRenderer(
     })(),
     setOverlay(kind): void {
       overlayPass.set(kind);
+    },
+    setOverlayColorBlind(on): void {
+      overlayPass.setColorBlind(on);
     },
     camera,
     screenToTile,

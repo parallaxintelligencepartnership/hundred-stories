@@ -26,6 +26,72 @@ export const OVERLAY_RAMP: readonly [number, number, number, number, number] = [
 
 export type OverlayStep = 0 | 1 | 2 | 3 | 4;
 
+/**
+ * The color-blind friendly ramp (Settings, Color-blind friendly views): blue for fine, through
+ * a pale middle, to orange for trouble. Blue and orange stay apart for every common kind of
+ * color blindness, and the worst step also gets stripes, so no meaning rests on color alone.
+ */
+export const OVERLAY_RAMP_COLOR_BLIND: readonly [number, number, number, number, number] = [
+  0x2166ac, 0x67a9cf, 0xd1d5db, 0xf4a259, 0xd95f0e,
+];
+
+/** Which ramp a palette choice draws with. */
+export function overlayRamp(colorBlind: boolean): readonly [number, number, number, number, number] {
+  return colorBlind ? OVERLAY_RAMP_COLOR_BLIND : OVERLAY_RAMP;
+}
+
+/** The worst step's stripes: dark bands this wide, this far apart, at 45 degrees. */
+export const STRIPE_WIDTH = 4;
+export const STRIPE_GAP = 12;
+export const STRIPE_COLOR = 0x1a1a1a;
+export const STRIPE_ALPHA = 0.55;
+
+type Point = { x: number; y: number };
+
+/** Keep the part of a convex polygon where a*x + b*y <= c (one Sutherland-Hodgman step). */
+function clipHalf(points: Point[], a: number, b: number, c: number): Point[] {
+  const out: Point[] = [];
+  for (let i = 0; i < points.length; i += 1) {
+    const p = points[i] as Point;
+    const q = points[(i + 1) % points.length] as Point;
+    const fp = a * p.x + b * p.y - c;
+    const fq = a * q.x + b * q.y - c;
+    if (fp <= 0) out.push(p);
+    if ((fp < 0 && fq > 0) || (fp > 0 && fq < 0)) {
+      const t = fp / (fp - fq);
+      out.push({ x: p.x + (q.x - p.x) * t, y: p.y + (q.y - p.y) * t });
+    }
+  }
+  return out;
+}
+
+/**
+ * The diagonal stripes over a box, as flat point lists ready for Graphics.poly: each stripe is
+ * the band STRIPE_WIDTH wide between two 45 degree lines, cut to the box. Stripes are laid on
+ * world coordinates, so neighbouring rooms line up and a pan never makes them crawl.
+ */
+export function stripePolygons(x: number, y: number, w: number, h: number): number[][] {
+  if (!(w > 0) || !(h > 0)) return [];
+  const box: Point[] = [
+    { x, y },
+    { x: x + w, y },
+    { x: x + w, y: y + h },
+    { x, y: y + h },
+  ];
+  const out: number[][] = [];
+  // A stripe is k <= x + y <= k + width; the first one starts on the pitch at or before the box.
+  const pitch = STRIPE_WIDTH + STRIPE_GAP;
+  const lo = x + y;
+  const hi = x + w + y + h;
+  for (let k = Math.floor(lo / pitch) * pitch; k < hi; k += pitch) {
+    let poly = clipHalf(box, -1, -1, -k);
+    poly = clipHalf(poly, 1, 1, k + STRIPE_WIDTH);
+    if (poly.length < 3) continue;
+    out.push(poly.flatMap((p) => [p.x, p.y]));
+  }
+  return out;
+}
+
 /** How strongly the tint lies over the art: the room still reads through it. */
 export const OVERLAY_ALPHA = 0.5;
 
@@ -154,6 +220,8 @@ export function roomStep(world: World, room: Room, kind: OverlayKind, waits?: Re
 export interface LegendEntry {
   color: number;
   label: string;
+  /** The worst step: striped in the color-blind palette. */
+  worst?: boolean;
 }
 
 export interface Legend {
@@ -172,11 +240,11 @@ export function overlayTitle(kind: OverlayKind): string {
   return OVERLAY_TITLES[kind];
 }
 
-/** What each colour means in a view, for the status bar while the view is on. */
-export function overlayLegend(kind: OverlayKind): Legend {
-  const r = OVERLAY_RAMP;
+/** What each colour means in a view, for the chip while the view is on. */
+export function overlayLegend(kind: OverlayKind, colorBlind = false): Legend {
+  const r = overlayRamp(colorBlind);
   const title = OVERLAY_TITLES[kind];
-  if (kind === 'vacancy') return { title, entries: [{ color: r[0], label: 'Occupied' }, { color: r[4], label: 'Empty' }] };
+  if (kind === 'vacancy') return { title, entries: [{ color: r[0], label: 'Occupied' }, { color: r[4], label: 'Empty', worst: true }] };
   if (kind === 'noise') {
     return {
       title,
@@ -185,7 +253,7 @@ export function overlayLegend(kind: OverlayKind): Legend {
         { color: r[1], label: '1' },
         { color: r[2], label: '2' },
         { color: r[3], label: '3' },
-        { color: r[4], label: '4 or more noisy neighbors' },
+        { color: r[4], label: '4 or more noisy neighbors', worst: true },
       ],
     };
   }
@@ -197,7 +265,7 @@ export function overlayLegend(kind: OverlayKind): Legend {
         { color: r[1], label: '' },
         { color: r[2], label: 'Stressed' },
         { color: r[3], label: '' },
-        { color: r[4], label: 'Very stressed' },
+        { color: r[4], label: 'Very stressed', worst: true },
       ],
     };
   }
@@ -209,7 +277,7 @@ export function overlayLegend(kind: OverlayKind): Legend {
       { color: r[1], label: `Under ${calm} min` },
       { color: r[2], label: `${calm} to ${pink}` },
       { color: r[3], label: `${pink} to ${red}` },
-      { color: r[4], label: `${red} min or more` },
+      { color: r[4], label: `${red} min or more`, worst: true },
     ],
   };
 }
@@ -259,11 +327,13 @@ export interface ViewRect {
 export interface OverlayPass {
   set(kind: OverlayKind | null): void;
   get(): OverlayKind | null;
+  /** Draw with the color-blind friendly ramp and stripes on the worst step. Render only. */
+  setColorBlind(on: boolean): void;
   /** Redraw for this frame. Returns at once with no view on and no elevator ghost out. */
   draw(world: World, view: ViewRect, ghost: OverlayGhost | null): void;
 }
 
-type TintTarget = Pick<Graphics, 'clear' | 'rect' | 'fill' | 'visible'>;
+type TintTarget = Pick<Graphics, 'clear' | 'rect' | 'fill' | 'visible' | 'poly'>;
 
 /**
  * The per frame tint pass. Steps are worked out again when the world, its minute, its
@@ -272,6 +342,8 @@ type TintTarget = Pick<Graphics, 'clear' | 'rect' | 'fill' | 'visible'>;
  */
 export function createOverlayPass(g: TintTarget): OverlayPass {
   let kind: OverlayKind | null = null;
+  let colorBlind = false;
+  let ramp = overlayRamp(false);
   let drawnSomething = false;
   let stepsKey = '';
   let stepsWorld: World | null = null;
@@ -306,8 +378,15 @@ export function createOverlayPass(g: TintTarget): OverlayPass {
       const top = floorTopY(room.floor + room.height - 1);
       const h = room.height * FLOOR_PX;
       if (x > view.right || x + w < view.left || top > view.bottom || top + h < view.top) continue;
-      g.rect(x, top, w, h).fill({ color: OVERLAY_RAMP[step], alpha: OVERLAY_ALPHA });
+      tint(x, top, w, h, step);
     }
+  }
+
+  /** One box in its step's color; the worst step also striped while the color-blind ramp is on. */
+  function tint(x: number, y: number, w: number, h: number, step: OverlayStep): void {
+    g.rect(x, y, w, h).fill({ color: ramp[step], alpha: OVERLAY_ALPHA });
+    if (!colorBlind || step !== 4) return;
+    for (const points of stripePolygons(x, y, w, h)) g.poly(points).fill({ color: STRIPE_COLOR, alpha: STRIPE_ALPHA });
   }
 
   function drawShaftStops(world: World, view: ViewRect): void {
@@ -320,7 +399,7 @@ export function createOverlayPass(g: TintTarget): OverlayPass {
         const top = floorTopY(floor);
         if (top > view.bottom || top + FLOOR_PX < view.top) continue;
         const step = steps?.get(floor) ?? 0;
-        g.rect(x, top, w, FLOOR_PX).fill({ color: OVERLAY_RAMP[step], alpha: OVERLAY_ALPHA });
+        tint(x, top, w, FLOOR_PX, step);
       }
     }
   }
@@ -331,7 +410,7 @@ export function createOverlayPass(g: TintTarget): OverlayPass {
     const lowBand = floorBand(ghost.floor);
     const floorMin = ghost.floor;
     const floorMax = floorAtBand(lowBand + ghost.heightFloors - 1);
-    const color = ghost.ok ? OVERLAY_RAMP[0] : OVERLAY_RAMP[4];
+    const color = ghost.ok ? ramp[0] : ramp[4];
     const x = ghost.x * TILE_PX;
     const w = ghost.widthTiles * TILE_PX;
     const bandH = FLOOR_PX / 4;
@@ -353,6 +432,10 @@ export function createOverlayPass(g: TintTarget): OverlayPass {
       }
     },
     get: () => kind,
+    setColorBlind(on) {
+      colorBlind = on;
+      ramp = overlayRamp(on);
+    },
     draw(world, view, ghost) {
       const band = ghost?.shaft !== undefined;
       if (kind === null && !band) {

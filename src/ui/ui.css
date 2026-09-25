@@ -7,6 +7,9 @@
    theme remaps the same names. */
 
 :root {
+  /* Larger text (Settings, Display) sets this to 1.25 on the page root: every size token below
+     is multiplied by it, so the type, the touch targets and the bars built on them grow as one. */
+  --ui-scale: 1;
   --steel: #1c232e;
   --steel-2: #28313f;
   --line: #3a4556;
@@ -51,11 +54,11 @@
   --font-ui: 'Bricolage Grotesque', system-ui, -apple-system, 'Segoe UI', sans-serif;
   /* Only the clock and cash use it, always with tabular figures. */
   --font-readout: 'Share Tech Mono', ui-monospace, 'SFMono-Regular', monospace;
-  --size-12: 12px;
-  --size-14: 14px;
-  --size-16: 16px;
-  --size-20: 20px;
-  --size-28: 28px;
+  --size-12: calc(12px * var(--ui-scale));
+  --size-14: calc(14px * var(--ui-scale));
+  --size-16: calc(16px * var(--ui-scale));
+  --size-20: calc(20px * var(--ui-scale));
+  --size-28: calc(28px * var(--ui-scale));
 
   /* Motion. Sheets, cards and a button press move on a spring with a small overshoot; fades
      use the standard ease. Reduced motion (the setting or the system) turns every move into a
@@ -73,7 +76,7 @@
   --toast-rise: 8px;
 
   /* Touch and focus. */
-  --touch: 44px;
+  --touch: calc(44px * var(--ui-scale));
   --focus-width: 3px;
   --focus-color: var(--amber);
   --focus-offset: 2px;
@@ -82,15 +85,18 @@
   /* Layout. The top bar floats var(--edge) from the edges; floating things keep --gap-float. */
   --edge: 12px;
   --gap-float: 8px;
-  --status-h: 52px;
+  --status-h: calc(52px * var(--ui-scale));
   --status-gap: 4px;
-  --status-value: 16px;
-  --status-meta: 12px;
-  --star-size: 14px;
-  --clock-size: 28px;
+  --status-value: calc(16px * var(--ui-scale));
+  --status-meta: calc(12px * var(--ui-scale));
+  --star-size: calc(14px * var(--ui-scale));
+  --clock-size: calc(28px * var(--ui-scale));
   --top-h: calc(var(--status-h) + var(--edge));
-  --palette-w: 232px;
-  --panel-w: 360px;
+  --palette-w: calc(288px * var(--ui-scale));
+  /* The dock's rail of category tabs, and the phone's round Build button. */
+  --rail-w: calc(var(--touch) + 12px);
+  --fab: calc(60px * var(--ui-scale));
+  --panel-w: calc(360px * var(--ui-scale));
   --pad: 8px;
 
   /* The notch, the home indicator and a phone's rounded corners. Zero on every other screen,
@@ -107,6 +113,10 @@
   :root {
     --ease-spring: linear(0, 0.19 5%, 0.5 11%, 0.8 19%, 0.96 27%, 1.03 35%, 1.04 41%, 1.025 52%, 1.006 68%, 1);
   }
+}
+
+:root.hs-large-text {
+  --ui-scale: 1.25;
 }
 
 /* Theme is a three-way choice: system (default), light, dark. The dark tokens
@@ -241,6 +251,73 @@ body {
   outline: none;
 }
 
+/* A view is on: its chip sits under the top bar, and what hangs under the bar steps below it. */
+.hs-ui.has-view {
+  --chip-h: calc(var(--touch) + var(--gap-float));
+}
+
+/* Skip to tower: first in the tab order, out of sight until it has focus. */
+.hs-skip {
+  position: absolute;
+  z-index: 60;
+  top: calc(var(--safe-top) + 8px);
+  left: calc(var(--safe-left) + 8px);
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--touch);
+  padding: 0 16px;
+  background: var(--amber);
+  color: var(--on-amber);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-2);
+  font-weight: 600;
+  text-decoration: none;
+  pointer-events: auto;
+  transform: translateY(calc(-100% - 16px));
+}
+
+.hs-skip:focus,
+.hs-skip:focus-visible {
+  transform: none;
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* The tower view takes focus from the skip link; the ring goes round the whole view. */
+#view:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: calc(-1 * var(--focus-width));
+}
+
+/* The controller's cursor: a small ring with a dot, in the middle of the tower view. */
+.hs-pad-cursor {
+  position: absolute;
+  z-index: 2;
+  width: 28px;
+  height: 28px;
+  margin: -14px 0 0 -14px;
+  border: 3px solid var(--amber);
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px rgba(10, 14, 20, 0.6);
+  pointer-events: none;
+}
+
+.hs-pad-cursor::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  margin: -2px 0 0 -2px;
+  background: var(--amber);
+  border-radius: 50%;
+}
+
+.hs-pad-cursor.is-hidden {
+  display: none;
+}
+
 /* Words for a screen reader only. */
 .hs-ui .hs-readout-label,
 .hs-sr {
@@ -312,7 +389,6 @@ button.hs-news-toast:active,
 .hs-speed,
 .hs-round,
 .hs-speed-mode,
-.hs-top-views > .hs-status-view,
 .hs-pill-btn {
   background: var(--glass);
   -webkit-backdrop-filter: var(--glass-blur);
@@ -630,23 +706,7 @@ button.hs-readout:hover {
   overflow: hidden;
 }
 
-/* The View choice stays in the bar until it moves to its own popover: its own row under the
-   pill, so the controls on the right never move for it. */
-.hs-top-views {
-  order: 3;
-  display: flex;
-  flex: 1 1 100%;
-  pointer-events: none;
-}
-
-.hs-top-views > .hs-status-view {
-  min-height: var(--touch);
-  padding: 4px 6px 4px 16px;
-  border-radius: var(--radius-16);
-  pointer-events: auto;
-}
-
-/* Speed, My tower, Share and Menu: on the right, always in the same place. */
+/* Speed, My tower, Views, Share and Menu: on the right, always in the same place. */
 .hs-top-actions {
   position: relative;
   display: flex;
@@ -754,44 +814,59 @@ button.hs-readout:hover {
   cursor: default;
 }
 
-/* Palette: a building directory board --------------------------------- */
+/* Build: the dock on a wide screen ------------------------------------- */
 
+/* A floating toolbar on the left: the header that folds it, the category tabs down its left
+   edge, and the tiles of the one category picked beside them. Folded, it is its icons. */
 .hs-palette {
   position: absolute;
+  z-index: 3;
   /* Under the strip, whatever height it wrapped to. The fallback is the unwrapped strip. */
   top: calc(var(--top-actual, calc(var(--top-h) + var(--safe-top))) + var(--gap-float));
   bottom: calc(var(--edge) + var(--safe-bottom));
   left: calc(var(--edge) + var(--safe-left));
   width: var(--palette-w);
-  overflow-x: hidden;
-  overflow-y: auto;
+  display: grid;
+  grid-template-columns: var(--rail-w) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
   background: var(--surface);
   border-radius: var(--radius-20);
   box-shadow: var(--shadow-2);
   pointer-events: auto;
 }
 
-/* The header row: the board's name, the tool in hand, and the fold arrow. It stays put
-   while the board scrolls, and it is all that is left when the board is folded away. */
+/* The phone's grab handle and placing bar have no place on the dock. */
+.hs-build-handle,
+.hs-build-placing,
+.hs-build-fab {
+  display: none;
+}
+
+/* The header: the hammer, the word, the tool in hand and the fold arrow. */
 .hs-palette-toggle {
-  position: sticky;
-  top: 0;
-  z-index: 1;
+  grid-column: 1 / -1;
+  grid-row: 1;
   display: flex;
   align-items: center;
   gap: var(--pad);
   width: 100%;
-  padding: 6px var(--pad);
-  background: var(--steel);
+  min-height: var(--touch);
+  padding: 0 12px 0 calc((var(--rail-w) - 20px) / 2);
+  background: transparent;
   border: 0;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--hairline);
   text-align: left;
   cursor: pointer;
-  pointer-events: auto;
 }
 
 .hs-palette-toggle:hover {
   color: var(--amber);
+}
+
+.hs-palette-icon {
+  width: 20px;
+  height: 20px;
 }
 
 .hs-palette-title {
@@ -817,71 +892,204 @@ button.hs-readout:hover {
   color: var(--ink-dim);
 }
 
-.hs-palette.is-collapsed .hs-group-title,
-.hs-palette.is-collapsed .hs-tool {
-  display: none;
-}
-
-/* Folded away, the board is its header bar and nothing else. */
-.hs-palette.is-collapsed {
-  bottom: auto;
-  height: auto;
-}
-
-.hs-group-title {
-  margin: 0;
-  padding: 8px var(--pad) 4px;
-  font-size: var(--size-12);
-  font-weight: 600;
-  color: var(--ink-dim);
-  border-bottom: 1px solid var(--line);
-}
-
-/* A tool tile: the room's own art, its name and footprint, its cost, and while locked a bar of
-   stars now over stars needed. Selected is amber; locked is dim but still takes focus. */
-.hs-tool {
-  display: grid;
-  grid-template-columns: 72px minmax(0, 1fr);
-  grid-template-rows: auto auto auto;
-  column-gap: var(--pad);
-  row-gap: 4px;
+/* The category tabs: a rail of icons, the one picked in amber. The name is the tooltip and
+   the aria-label here, and the heading over the tiles. */
+.hs-build-tabs {
+  grid-column: 1;
+  grid-row: 2;
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  width: 100%;
-  max-width: 100%;
-  min-height: 88px;
-  padding: var(--pad);
+  gap: 4px;
+  padding: 6px 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--hairline);
+}
+
+.hs-build-tab {
+  --r: var(--radius-12);
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: var(--touch);
+  min-height: var(--touch);
+  padding: 0;
   background: transparent;
   border: 0;
-  border-bottom: 1px solid var(--line);
-  text-align: left;
+  border-radius: var(--r);
+  color: var(--ink);
   cursor: pointer;
 }
 
-.hs-tool-thumb {
-  grid-column: 1;
-  grid-row: 1 / span 2;
+.hs-build-tab-icon {
+  width: 20px;
+  height: 20px;
+}
+
+.hs-build-tab-label {
+  display: none;
+  font-size: var(--size-14);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.hs-build-tab:hover:not([aria-selected='true']) {
+  background: var(--press-tint);
+}
+
+.hs-build-tab[aria-selected='true'] {
+  background: var(--amber);
+  color: var(--on-amber);
+}
+
+.hs-build-tab[aria-selected='true']:focus-visible {
+  outline-color: var(--ink);
+}
+
+/* The tiles of the category picked, two to a row. */
+.hs-build-items {
+  grid-column: 2;
+  grid-row: 2;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+  gap: 6px;
+  padding: 0 8px 8px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.hs-palette .is-other {
+  display: none;
+}
+
+.hs-group-title {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 10px 2px 2px;
+  font-size: var(--size-14);
+  font-weight: 600;
+}
+
+/* Folded: the header's hammer and the rail of tabs, nothing else. A tab opens it again. */
+@media (min-width: 721px) {
+.hs-palette.is-collapsed {
+  width: var(--rail-w);
+  bottom: auto;
+  grid-template-columns: var(--rail-w);
+  max-height: calc(100% - var(--top-actual, var(--top-h)) - 2 * var(--edge));
+}
+
+.hs-palette.is-collapsed .hs-build-items,
+.hs-palette.is-collapsed .hs-palette-title,
+.hs-palette.is-collapsed .hs-palette-current,
+.hs-palette.is-collapsed .hs-palette-chevron {
+  display: none;
+}
+
+.hs-palette.is-collapsed .hs-palette-toggle {
+  justify-content: center;
+  padding: 0;
+}
+
+.hs-palette.is-collapsed .hs-build-tabs {
+  border-right: 0;
+}
+}
+
+/* A tile: the picture first, then the name, then the price. Locked, a lock and the stars it
+   needs sit on the picture and a bar says how far there is to go. Selected is amber; locked is
+   dim but still takes focus, so a keyboard can read why. */
+.hs-tool {
+  --r: var(--radius-12);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px;
+  background: transparent;
+  border: 0;
+  border-radius: var(--r);
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform var(--motion-fast) var(--ease-spring),
+    background-color var(--motion-fade) var(--ease-standard);
+}
+
+.hs-tool:active:not([aria-disabled='true']) {
+  transform: scale(var(--press-scale));
+}
+
+.hs-tool-pic {
+  position: relative;
   display: block;
-  width: 72px;
-  height: 36px;
-  image-rendering: pixelated;
+  aspect-ratio: 2 / 1;
+  margin-bottom: 4px;
+  overflow: hidden;
+  background: var(--press-tint);
+  border-radius: calc(var(--r) - 4px);
+}
+
+.hs-tool-thumb {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .hs-tool-thumb.is-icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--line);
   color: var(--ink-dim);
 }
 
 .hs-tool-icon {
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
+}
+
+/* The lock: a dark badge on the picture, the lock, the count and a star. */
+.hs-tool-lock {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  display: none;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 6px;
+  background: rgba(10, 14, 20, 0.82);
+  border-radius: var(--radius-pill);
+  color: #fff;
+  font-size: var(--size-12);
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.hs-tool.is-locked .hs-tool-lock {
+  display: inline-flex;
+}
+
+.hs-tool-lock .hs-icon {
+  width: 12px;
+  height: 12px;
+}
+
+.hs-tool-lock-star {
+  fill: var(--amber);
+  color: var(--amber);
+}
+
+.hs-tool-lock-count::before {
+  content: attr(data-stars);
 }
 
 .hs-tool-text {
-  grid-column: 2;
-  grid-row: 1;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -896,7 +1104,8 @@ button.hs-readout:hover {
 
 .hs-tool-name {
   font-size: var(--size-14);
-  line-height: 1.3;
+  font-weight: 600;
+  line-height: 1.25;
 }
 
 .hs-tool-footprint {
@@ -906,8 +1115,6 @@ button.hs-readout:hover {
 }
 
 .hs-tool-costline {
-  grid-column: 2;
-  grid-row: 2;
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
@@ -920,6 +1127,7 @@ button.hs-readout:hover {
 .hs-tool-cost {
   font-family: var(--font-ui);
   font-variant-numeric: tabular-nums;
+  font-weight: 600;
   white-space: nowrap;
 }
 
@@ -933,15 +1141,16 @@ button.hs-readout:hover {
 }
 
 .hs-tool.is-locked .hs-tool-cost {
-  font-family: var(--font-ui);
+  font-weight: 400;
 }
 
 .hs-tool-progress {
-  grid-column: 1 / -1;
-  grid-row: 3;
   display: block;
   height: 4px;
-  background: var(--steel-2);
+  margin-top: 2px;
+  overflow: hidden;
+  background: var(--press-tint);
+  border-radius: var(--radius-pill);
 }
 
 .hs-tool-progress[hidden] {
@@ -955,12 +1164,8 @@ button.hs-readout:hover {
   background: var(--amber);
 }
 
-.hs-tool:hover:not([aria-disabled='true']):not([aria-pressed='true']) .hs-tool-name {
-  color: var(--amber);
-}
-
-.hs-tool:focus-visible {
-  outline-offset: -2px;
+.hs-tool:hover:not([aria-disabled='true']):not([aria-pressed='true']) {
+  background: var(--press-tint);
 }
 
 .hs-tool[aria-pressed='true'] {
@@ -979,7 +1184,7 @@ button.hs-readout:hover {
 }
 
 .hs-tool[aria-pressed='true']:focus-visible {
-  outline-color: var(--on-amber);
+  outline-color: var(--ink);
 }
 
 .hs-tool[aria-disabled='true'] {
@@ -1488,7 +1693,7 @@ button.hs-readout:hover {
 .hs-hint {
   position: absolute;
   left: 50%;
-  top: calc(var(--top-actual, calc(var(--top-h) + var(--safe-top))) + var(--gap-float));
+  top: calc(var(--top-actual, calc(var(--top-h) + var(--safe-top))) + var(--gap-float) + var(--chip-h, 0px));
   transform: translateX(-50%);
   display: flex;
   align-items: center;
@@ -1880,87 +2085,187 @@ button.hs-news-toast {
   box-shadow: var(--shadow-2), inset 3px 0 0 var(--ink-dim);
 }
 
-/* View: the information layers (0.5.1) --------------------------------- */
+/* Views: the information layers ----------------------------------------- */
 
-/* A readout column like the others: the label, the choice as one segmented control, then the
-   legend for the view that is on. */
-.hs-status-view {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 10px;
-  min-height: 0;
-  padding: 0;
+/* The Views button: round like Share and Menu, amber edge while a view is on. */
+.hs-views-btn {
+  anchor-name: --hs-views;
 }
 
-/* The View choice keeps its visible word until it moves to its own popover. */
-.hs-ui .hs-status-view .hs-readout-label {
-  position: static;
-  width: auto;
-  height: auto;
+.hs-views-btn.is-on {
+  box-shadow: var(--shadow-1), inset 0 0 0 2px var(--amber);
+}
+
+/* The list: a small card of rows, an icon and a name each. Without anchor positioning it sits
+   under the top bar on the right, which is where the button is. */
+.hs-views-menu {
+  position: fixed;
+  inset: auto;
+  top: calc(var(--top-actual, calc(var(--top-h) + var(--safe-top))) + var(--gap-float));
+  right: calc(var(--edge) + var(--safe-right));
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 220px;
   margin: 0;
-  overflow: visible;
-  clip-path: none;
+  padding: 6px;
+  background: var(--surface);
+  border: 0;
+  border-radius: var(--radius-20);
+  box-shadow: var(--shadow-2);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--size-14);
+  pointer-events: auto;
+}
+
+.hs-views-menu[hidden],
+.hs-views-menu[popover]:not(:popover-open) {
+  display: none;
+}
+
+@supports (anchor-name: --a) {
+  .hs-views-menu {
+    position-anchor: --hs-views;
+    top: calc(anchor(bottom) + var(--gap-float));
+    right: anchor(right);
+    position-try-fallbacks: flip-inline;
+  }
+}
+
+/* It opens with a short fade and rise, a fade alone under reduced motion. */
+.hs-views-menu {
+  transition:
+    opacity var(--motion-fade) var(--ease-standard),
+    translate var(--motion-fast) var(--ease-spring);
+}
+
+@starting-style {
+  .hs-views-menu:popover-open {
+    opacity: 0;
+    translate: 0 calc(-1 * var(--toast-rise));
+  }
+}
+
+.hs-views-title {
+  margin: 4px 10px 4px;
   font-size: var(--size-12);
   font-weight: 600;
   color: var(--ink-dim);
 }
 
-.hs-view {
+.hs-views-item {
+  --r: var(--radius-12);
   display: flex;
-  gap: 2px;
-  padding: 2px;
-  width: max-content;
-  background: var(--press-tint);
-  border-radius: var(--radius-12);
-}
-
-.hs-view .hs-view-btn {
-  --r: calc(var(--radius-12) - 2px);
-  min-height: 32px;
-  border: 0;
-  padding: 0 10px;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--touch);
+  padding: 0 12px;
   background: transparent;
-  font-size: var(--size-12);
-  line-height: 1.4;
-  white-space: nowrap;
+  border: 0;
+  border-radius: var(--r);
+  color: var(--ink);
+  font-size: var(--size-14);
+  text-align: left;
+  cursor: pointer;
 }
 
-.hs-view .hs-view-btn[aria-pressed='true'] {
+.hs-views-item-icon {
+  width: 20px;
+  height: 20px;
+}
+
+.hs-views-item:hover:not([aria-pressed='true']) {
+  background: var(--press-tint);
+}
+
+.hs-views-item[aria-pressed='true'] {
   background: var(--amber);
   color: var(--on-amber);
 }
 
-.hs-view .hs-view-btn:hover:not([aria-pressed='true']) {
-  color: var(--amber);
+.hs-views-item[aria-pressed='true']:focus-visible {
+  outline-color: var(--ink);
+}
+
+/* The chip: under the top bar on the left, the view's icon and name, its legend, and the x.
+   Out of the bar's flow, so turning a view on never moves the bar or the tower. */
+.hs-view-chip {
+  position: absolute;
+  top: calc(100% + var(--gap-float));
+  left: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  max-width: min(640px, 100%);
+  min-height: var(--touch);
+  padding: 0 4px 0 14px;
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border-radius: calc(var(--touch) / 2);
+  box-shadow: var(--shadow-1);
+  pointer-events: auto;
+}
+
+.hs-view-chip.is-hidden {
+  display: none;
+}
+
+.hs-view-chip-icon {
+  display: inline-flex;
+}
+
+.hs-view-chip-icon .hs-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.hs-view-chip-title {
+  font-size: var(--size-14);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.hs-view-chip-close {
+  --r: calc(var(--touch) / 2);
+  background: transparent;
+}
+
+.hs-view-chip-close:hover {
+  background: var(--press-tint);
 }
 
 .hs-view-legend {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 2px 8px;
   font-size: var(--size-12);
   line-height: 1.2;
   color: var(--ink-dim);
-  white-space: nowrap;
-  overflow: hidden;
-}
-
-.hs-view-legend.is-hidden {
-  display: none;
 }
 
 .hs-legend-item {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  white-space: nowrap;
 }
 
 .hs-legend-swatch {
   display: inline-block;
-  width: 10px;
-  height: 10px;
-  border: 1px solid var(--line);
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px var(--hairline);
+}
+
+/* The worst step in the color-blind palette: striped here as on the tower. */
+.hs-legend-swatch.is-striped {
+  background-image: repeating-linear-gradient(135deg, rgba(26, 26, 26, 0.6) 0 2px, transparent 2px 5px);
 }
 
 /* The chip's second line: served floors, or what to do about a refusal. */
@@ -2031,8 +2336,8 @@ button.hs-news-toast {
 /* Phone width ---------------------------------------------------------- */
 
 @media (max-width: 720px) {
-  /* The top bar on a phone: the pill takes the first row, whole, so it stays one row; the
-     speed pill, Share and Menu sit on the right of the second; the View choice under them. */
+  /* The top bar on a phone is two rows: the pill takes the first, whole, so it stays one row;
+     the speed pill, Views, Share and Menu sit on the right of the second. */
   .hs-top {
     --edge: 8px;
     top: calc(var(--safe-top) + 8px);
@@ -2056,16 +2361,6 @@ button.hs-news-toast {
 
   .hs-top-actions {
     order: 2;
-  }
-
-  .hs-top-views {
-    order: 3;
-    flex: 1 1 100%;
-  }
-
-  .hs-top-views > .hs-status-view {
-    flex: 1 1 auto;
-    padding: 4px 12px;
   }
 
   /* The time stamp goes on a phone: the log keeps it. */
@@ -2116,8 +2411,10 @@ button.hs-news-toast {
     display: none;
   }
 
+  /* Row two at 390 px: the speed pill (4 x 44 + 3 x 2 + 8 = 190), Views, Share and Menu
+     (3 x 52 = 156) and three 6 px gaps make 364 of the 374 px inside the 8 px edges. */
   .hs-speed-btn {
-    min-width: 40px;
+    min-width: var(--touch);
   }
 
   /* Under 400 px the pill spends every pixel on the values: the readout icons go too, and
@@ -2152,80 +2449,256 @@ button.hs-news-toast {
     right: 0;
   }
 
-  /* The sheet lays the tiles out two to a row. */
-  .hs-palette {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    align-content: start;
+  /* The Build button: bottom right, always there, in the same place. It sits over the sheet
+     and turns into its close button while the sheet is open. */
+  .hs-build-fab {
+    --r: 50%;
+    position: absolute;
+    z-index: 5;
+    right: calc(var(--edge) + var(--safe-right));
+    bottom: calc(var(--edge) + var(--safe-bottom));
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--fab);
+    height: var(--fab);
+    padding: 0;
+    background: var(--amber);
+    color: var(--on-amber);
+    border: 0;
+    border-radius: 50%;
+    box-shadow: var(--shadow-2);
+    pointer-events: auto;
+    cursor: pointer;
+    transition: transform var(--motion-fast) var(--ease-spring);
   }
 
-  .hs-palette.is-collapsed {
-    display: block;
+  .hs-build-fab:active {
+    transform: scale(var(--press-scale));
   }
 
-  .hs-palette-toggle,
-  .hs-group-title {
-    grid-column: 1 / -1;
+  .hs-build-fab:focus-visible {
+    outline-color: var(--ink);
   }
 
-  /* A bottom sheet: it takes the lower part of the screen and scrolls inside itself, so the
-     tower is always visible above it and the list below the fold is a flick away. */
+  .hs-build-fab-icon {
+    width: 26px;
+    height: 26px;
+  }
+
+  .hs-build-fab-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  /* The build sheet: the grab handle, the category row, and a sideways row of tiles. */
   .hs-palette {
     top: auto;
     bottom: 0;
     left: 0;
     right: 0;
     width: auto;
-    max-height: 42vh;
-    padding-left: var(--safe-left);
-    padding-right: var(--safe-right);
-    padding-bottom: var(--safe-bottom);
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100% - var(--top-actual, calc(var(--top-h) * 2)) - var(--gap-float));
+    padding: 0 var(--safe-right) var(--safe-bottom) var(--safe-left);
     border-radius: var(--radius-20) var(--radius-20) 0 0;
-    overflow-y: auto;
-    /* The sheet scrolls up and down and nothing else: sideways and past the ends belong to
-       neither the page nor the tower. */
-    touch-action: pan-y;
+    box-shadow: var(--shadow-3);
+    transform: translateY(max(-24px, var(--sheet-drag, 0px)));
+    transition: transform var(--motion-med) var(--ease-spring);
     overscroll-behavior: contain;
   }
 
-  /* Folded away, the sheet is the header bar on the bottom edge. */
-  .hs-palette.is-collapsed {
-    top: auto;
-    bottom: 0;
-    max-height: none;
-    height: auto;
+  @starting-style {
+    .hs-palette.is-sheet-row {
+      transform: translateY(var(--enter-y));
+    }
   }
 
-  .hs-palette-toggle {
-    min-height: 44px;
+  .hs-palette.is-sheet-closed {
+    display: none;
   }
 
-  /* A 104 px tile: the picture and the price, then the name and footprint across the tile. */
-  .hs-tool {
-    min-height: 104px;
-    border-right: 1px solid var(--line);
+  .hs-palette-toggle,
+  .hs-group-title {
+    display: none;
   }
 
-  .hs-tool-thumb {
-    grid-row: 1;
+  .hs-build-handle {
+    position: relative;
+    display: block;
+    flex: 0 0 auto;
+    width: 100%;
+    min-height: 28px;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    cursor: grab;
+    touch-action: none;
   }
 
-  .hs-tool-costline {
-    grid-column: 2;
-    grid-row: 1;
+  .hs-build-handle::before {
+    content: '';
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    width: 40px;
+    height: 5px;
+    margin-left: -20px;
+    background: var(--line);
+    border-radius: var(--radius-pill);
+  }
+
+  .hs-build-tabs {
+    flex: 0 0 auto;
+    flex-direction: row;
+    gap: 6px;
+    padding: 0 12px 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-right: 0;
+    scrollbar-width: none;
+    touch-action: pan-x;
+  }
+
+  .hs-build-tab {
+    --r: var(--radius-pill);
+    padding: 0 14px 0 12px;
+    background: var(--press-tint);
+  }
+
+  .hs-build-tab-label {
+    display: inline;
+  }
+
+  /* One row that scrolls sideways; the Build button's corner is left clear at the end. */
+  .hs-build-items {
+    display: flex;
+    flex-direction: row;
+    gap: 8px;
+    padding: 0 calc(var(--fab) + 2 * var(--edge)) 12px 12px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    touch-action: pan-x;
+    overscroll-behavior: contain;
+    scroll-snap-type: x proximity;
+  }
+
+  .hs-build-items .hs-tool {
+    flex: 0 0 120px;
+    scroll-snap-align: start;
+    background: var(--press-tint);
+  }
+
+  /* Dragged up: every tile of the category as a grid that scrolls up and down. */
+  .hs-palette.is-sheet-full {
+    top: calc(var(--top-actual, calc(var(--top-h) * 2)) + var(--gap-float));
+  }
+
+  .hs-palette.is-sheet-full .hs-build-items {
+    flex: 1 1 auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+    align-content: start;
+    padding: 0 12px calc(var(--fab) + 2 * var(--edge));
+    overflow-x: hidden;
+    overflow-y: auto;
+    touch-action: pan-y;
+    scroll-snap-type: none;
+  }
+
+  /* While placing, the sheet is a small bar: the item, its cost and Cancel, left of the Build
+     button, so the tower above is free to aim at. */
+  .hs-palette.is-sheet-placing {
+    left: calc(var(--edge) + var(--safe-left));
+    right: calc(var(--fab) + 2 * var(--edge) + var(--safe-right));
+    bottom: calc(var(--edge) + var(--safe-bottom) + (var(--fab) - var(--touch) - 12px) / 2);
+    padding: 6px;
+    border-radius: calc(var(--touch) / 2 + 6px);
+    box-shadow: var(--shadow-2);
+  }
+
+  .hs-palette.is-sheet-placing > :not(.hs-build-placing) {
+    display: none;
+  }
+
+  .hs-palette.is-sheet-placing .hs-build-placing {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .hs-build-placing-pic {
+    flex: 0 0 auto;
+    width: 56px;
+    height: 28px;
+    border-radius: 6px;
+    background: var(--press-tint);
+  }
+
+  .hs-build-placing-text {
+    display: flex;
+    flex: 1 1 auto;
     flex-direction: column;
-    align-items: flex-end;
-    text-align: right;
+    min-width: 0;
+    line-height: 1.2;
   }
 
-  .hs-tool-text {
-    grid-column: 1 / -1;
-    grid-row: 2;
+  .hs-build-placing-name {
+    overflow: hidden;
+    font-size: var(--size-14);
+    font-weight: 600;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .hs-build-placing-cost {
+    font-size: var(--size-12);
+    font-variant-numeric: tabular-nums;
+    color: var(--ink-dim);
+  }
+
+  .hs-build-placing-cancel {
+    --r: calc(var(--touch) / 2);
+    flex: 0 0 auto;
+    min-height: var(--touch);
+    padding: 0 16px;
+    font-weight: 600;
+  }
+
+  /* The news and the side card stay clear of the Build button's corner. */
+  .hs-news {
+    bottom: calc(max(var(--chrome-bottom, 0px), var(--fab) + var(--edge)) + var(--safe-bottom) + var(--edge));
+  }
+
+  /* The chip under the bar leaves the map its corner. */
+  .hs-view-chip {
+    max-width: calc(100% - 80px);
+    padding-left: 12px;
+  }
+
+  .hs-view-legend {
+    flex-basis: 100%;
+    padding-bottom: 6px;
+  }
+
+  .hs-views-menu {
+    right: calc(8px + var(--safe-right));
+  }
+
+  /* The phone's chip carries its legend on a second line. */
+  .hs-ui.has-view {
+    --chip-h: calc(var(--touch) + 30px + var(--gap-float));
   }
 
   /* The palette owns the bottom of a phone screen, so the hint sits under the top strip. */
   .hs-hint {
-    top: calc(var(--top-actual, calc(var(--top-h) * 2 + var(--safe-top))) + var(--gap-float));
+    top: calc(var(--top-actual, calc(var(--top-h) * 2 + var(--safe-top))) + var(--gap-float) + var(--chip-h, 0px));
     bottom: auto;
   }
 
@@ -2239,7 +2712,7 @@ button.hs-news-toast {
     top: auto;
     bottom: calc(var(--chrome-bottom, var(--safe-bottom)) + var(--gap-float));
     left: calc(var(--edge) + var(--safe-left));
-    right: calc(var(--edge) + var(--safe-right));
+    right: calc(var(--fab) + 2 * var(--edge) + var(--safe-right));
     width: auto;
     max-width: none;
     max-height: 45vh;
@@ -2247,7 +2720,8 @@ button.hs-news-toast {
     overscroll-behavior: contain;
   }
 
-  .hs-palette:not(.is-collapsed) ~ .hs-card {
+  .hs-palette.is-sheet-row ~ .hs-card,
+  .hs-palette.is-sheet-full ~ .hs-card {
     display: none;
   }
 
@@ -2394,7 +2868,7 @@ button.hs-news-toast {
   /* On a phone the alerts sit under the status bar and never take more than the top quarter of
      the view; they scroll inside that band, and step left of the map in the corner. */
   .hs-toasts {
-    top: calc(var(--top-actual, calc(var(--top-h) * 2 + var(--safe-top))) + var(--gap-float));
+    top: calc(var(--top-actual, calc(var(--top-h) * 2 + var(--safe-top))) + var(--gap-float) + var(--chip-h, 0px));
     bottom: auto;
     left: calc(var(--pad) + var(--safe-left));
     right: calc(var(--pad) + var(--safe-right));
