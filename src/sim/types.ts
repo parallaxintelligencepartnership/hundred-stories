@@ -140,6 +140,28 @@ export function carRangeOf(shaft: Shaft, car: Car): { lo: number; hi: number } {
   return { lo, hi: Math.max(lo, hi) };
 }
 
+/**
+ * The floors a footprint covers, growing upward from its base floor and skipping the floor 0
+ * that does not exist: a two floor flight based at -1 covers -1 and 1 (B1 and the ground).
+ */
+export function spanFloors(floor: number, height: number): number[] {
+  const floors: number[] = [];
+  for (let f = floor; floors.length < height; f++) if (f !== 0) floors.push(f);
+  return floors;
+}
+
+/** The top floor of a footprint, skipping floor 0. */
+export function spanTop(floor: number, height: number): number {
+  const top = floor + height - 1;
+  return floor < 0 && top >= 0 ? top + 1 : top;
+}
+
+/** Floors between two floors, counting floor 1 to floor -1 as one floor apart. */
+export function floorDistance(a: number, b: number): number {
+  const d = Math.abs(a - b);
+  return (a < 0) !== (b < 0) ? d - 1 : d;
+}
+
 /** Does this car work that floor? */
 export function carCovers(shaft: Shaft, car: Car, floor: number): boolean {
   const { lo, hi } = carRangeOf(shaft, car);

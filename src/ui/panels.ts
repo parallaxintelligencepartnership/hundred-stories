@@ -32,7 +32,7 @@ import {
 import { milestoneRecap, NO_STORIES_YET } from '../sim/chronicle';
 import { centerSummary, producesWaste, recyclingCenters, wasteDayStart } from '../sim/recycling';
 import { coverageText } from '../sim/security';
-import { carRangeOf, clockOf } from '../sim/types';
+import { carRangeOf, clockOf, spanTop } from '../sim/types';
 import type {
   Car,
   Command,
@@ -253,7 +253,7 @@ function roomPanel(roomId: Id, game: GameApi, ctx: PanelContext): PanelElement {
 
   const where =
     room.height > 1
-      ? formatFloorRange(room.floor, room.floor + room.height - 1)
+      ? formatFloorRange(room.floor, spanTop(room.floor, room.height))
       : formatFloor(room.floor);
   body.append(el('p', 'hs-note', where));
   // A shop or restaurant goes by the brand on its sign, an office by its line of work: the

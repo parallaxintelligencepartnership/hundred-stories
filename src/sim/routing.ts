@@ -7,7 +7,7 @@
 // invented: costs come from the module constants below and the stair limit from LIMITS.
 
 import { LIMITS } from './rules';
-import { carRangeOf } from './types';
+import { carRangeOf, floorDistance, spanTop } from './types';
 import type { Id, Leg, RiderClass, Room, World } from './types';
 import { roomsOfKind, roomsOnFloor } from './world';
 
@@ -153,7 +153,7 @@ function buildGraph(world: World, key: GraphKey): RoutingGraph {
       kind: 'stairs',
       id: room.id,
       x: stairAccessX(room),
-      floors: [room.floor, room.floor + 1],
+      floors: [room.floor, spanTop(room.floor, 2)], // B1 to the ground skips floor 0
       staffOnly: false,
     });
   }
@@ -510,7 +510,7 @@ function runSearch(
       const firstDist = firstDistOfNext === -1 ? Math.abs(via.x - from.x) : firstDistOfNext;
       for (const floor of via.floors) {
         if (floor === node.floor) continue;
-        const stairFloors = isStairs ? Math.abs(floor - node.floor) : 0;
+        const stairFloors = isStairs ? floorDistance(floor, node.floor) : 0;
         const totalStairs = node.stairFloors + stairFloors;
         if (totalStairs > LIMITS.stairsMaxClimbFloors) continue;
         const cost = stepCost + stairFloors * STAIR_FLOOR_COST;

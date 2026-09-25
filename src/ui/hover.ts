@@ -10,7 +10,7 @@
 import type { GameApi } from '../game/api';
 import { hallQueues, type HallQueue } from '../render/overlays';
 import { ROOMS, SHAFTS, takesRent } from '../sim/rules';
-import { carRangeOf, type Car, type Id, type Room, type Shaft, type World } from '../sim/types';
+import { carRangeOf, spanTop, type Car, type Id, type Room, type Shaft, type World } from '../sim/types';
 import { roomsOnFloor, shaftAt } from '../sim/world';
 import { formatCount, formatEval, formatFloor, formatFloorRange } from './format';
 import { clampSpan, PLACE_GUTTER, type Box } from './layout';
@@ -79,7 +79,7 @@ export function shaftCard(world: World, shaft: Shaft, queues: ReadonlyMap<number
 /** Evaluation, rent and tenants, as the query panel words them. */
 export function roomCard(room: Room): CardContent {
   const rule = ROOMS[room.kind];
-  const where = room.height > 1 ? formatFloorRange(room.floor, room.floor + room.height - 1) : formatFloor(room.floor);
+  const where = room.height > 1 ? formatFloorRange(room.floor, spanTop(room.floor, room.height)) : formatFloor(room.floor);
   return {
     title: rule.label,
     rows: [

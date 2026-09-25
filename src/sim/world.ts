@@ -4,6 +4,7 @@
 import { createRng } from './rng';
 import { LIMITS } from './rules';
 import { createStoryState } from './story';
+import { spanFloors } from './types';
 import type { FloorIndex, Id, LogEntry, Room, Shaft, Sim, World } from './types';
 
 /**
@@ -147,7 +148,7 @@ export function removeSim(world: World, simId: Id): void {
 export function rebuildFloorIndex(world: World): void {
   const index: FloorIndex = { rooms: new Map(), shafts: new Map(), builtFloors: new Set() };
   for (const room of world.rooms.values()) {
-    for (let f = room.floor; f < room.floor + room.height; f++) {
+    for (const f of spanFloors(room.floor, room.height)) {
       let list = index.rooms.get(f);
       if (!list) index.rooms.set(f, (list = []));
       list.push(room);
