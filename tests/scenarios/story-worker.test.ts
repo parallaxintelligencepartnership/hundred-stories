@@ -111,6 +111,17 @@ describe('a worker story', () => {
     const chapter = card.chapter.join(' ').toLowerCase();
     expect(chapter).toContain(minutesText(waited));
     expect(chapter).toContain(minutesText(trip.value as number));
+    // Audit 2026-09-25 I S10: minutesText is the function under test, so also spell the two
+    // lengths here by hand: a wording break in minutesText must not pass.
+    const WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+      'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty'];
+    const spelled = (n: number): string => {
+      const whole = Math.round(n);
+      return `${whole <= 20 ? WORDS[whole] : String(whole)} minute${whole === 1 ? '' : 's'}`;
+    };
+    expect(Math.round(waited)).toBeGreaterThan(0);
+    expect(chapter).toContain(spelled(waited));
+    expect(chapter).toContain(spelled(trip.value as number));
     expect(chapter).not.toContain('because');
     expect(chapter).not.toContain('caused');
 

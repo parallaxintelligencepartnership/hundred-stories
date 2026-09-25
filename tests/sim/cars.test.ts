@@ -391,6 +391,43 @@ describe('commands', () => {
     expect(applyCommand(world, { kind: 'shaft.removeCar', shaftId: shaft.id })).toEqual({ ok: true });
     expect(shaft.cars).toHaveLength(1);
   });
+
+  // Audit 2026-09-25 I S2: a refused command leaves the world as it was; the car limit
+  // refusal was never checked for cash or hash.
+  it('I S2: refuses a car past the limit and changes neither cash nor hash', () => {
+    const world = createWorld(7);
+    world.cash = 10_000_000;
+    const shaft = shaftWith(world);
+    const maxCars = SHAFTS.standard.maxCars;
+    while (shaft.cars.length < maxCars) {
+      expect(applyCommand(world, { kind: 'shaft.addCar', shaftId: shaft.id })).toEqual({ ok: true });
+    }
+    const cash = world.cash;
+    const hash = hashWorld(world);
+    expect(applyCommand(world, { kind: 'shaft.addCar', shaftId: shaft.id })).toEqual({
+      ok: false,
+      reason: `This elevator already has ${maxCars} cars.`,
+    });
+    expect(shaft.cars).toHaveLength(maxCars);
+    expect(world.cash).toBe(cash);
+    expect(hashWorld(world)).toBe(hash);
+  });
+
+  // Audit 2026-09-25 I S9: the Verification table's "a car with people inside refuses a
+  // range change" had no test.
+  it('I S9a: refuses a range change while a rider is aboard and keeps the old range', () => {
+    const world = createWorld(7);
+    const shaft = buildShaft(world, { floorMax: 6 });
+    const car = carAt(shaft, 0);
+    const rider = addWaiter(world, shaft, 'diner', 1, 2);
+    run(world, 2);
+    expect(rider.state).toBe('riding');
+    expect(car.passengers).toContain(rider.id);
+    expect(
+      applyCommand(world, { kind: 'shaft.setCarRange', shaftId: shaft.id, carId: car.id, range: { lo: 1, hi: 3 } }),
+    ).toEqual({ ok: false, reason: 'People are inside.' });
+    expect(car.range).toBeNull();
+  });
 });
 
 // Audit 2026-09-25 B S2: turning a stop off under a rider bound for it would strand them.

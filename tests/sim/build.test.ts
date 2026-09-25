@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { applyCommand, canBuild, canBuildShaft, canExtendShaft } from '../../src/sim/build';
 import { LIMITS, PLURAL_LABELS, ROOMS, SHAFTS } from '../../src/sim/rules';
-import { deserialize, serialize } from '../../src/sim/save';
+import { deserialize, hashWorld, serialize } from '../../src/sim/save';
 import { addRoom, allocId, createWorld } from '../../src/sim/world';
 import type { CommandResult, Room, RoomKind, Shaft, ShaftKind, Star, World } from '../../src/sim/types';
 
@@ -101,6 +101,16 @@ describe('build: star gate and cash', () => {
     expect(refused.ok).toBe(false);
     expect(world.cash).toBe(0);
     expect(world.rooms.size).toBe(2);
+  });
+
+  // Audit 2026-09-25 I S1: nothing checked the cash after a shaft.build, so charging an
+  // elevator twice passed every test.
+  it('I S1: charges a standard elevator its price exactly once', () => {
+    const world = makeWorld(10_000_000);
+    lobby(world, 100, 41);
+    const before = world.cash;
+    expect(buildShaft(world, 'standard', 120, 1, 3)).toEqual(OK);
+    expect(before - world.cash).toBe(SHAFTS.standard.shaftCost);
   });
 });
 
@@ -685,6 +695,19 @@ describe('logging, previews and delegation', () => {
     expect(world.rooms.size).toBe(rooms);
     expect(world.shafts.size).toBe(0);
     expect(world.log).toHaveLength(logLines);
+  });
+
+  // Audit 2026-09-25 I S2: the never-mutate check above only previews a valid spot. A refused
+  // preview must leave the cash and the world hash as they were too.
+  it('I S2: canBuildShaft over an existing shaft refuses and changes neither cash nor hash', () => {
+    const world = makeWorld(10_000_000);
+    lobby(world, 100, 41);
+    expect(buildShaft(world, 'standard', 120, 1, 3)).toEqual(OK);
+    const cash = world.cash;
+    const hash = hashWorld(world);
+    expect(canBuildShaft(world, 'standard', 121, 1, 3)).toEqual({ ok: false, reason: 'An elevator is in the way.' });
+    expect(world.cash).toBe(cash);
+    expect(hashWorld(world)).toBe(hash);
   });
 
   it('hands bomb and fire commands to events.ts', () => {

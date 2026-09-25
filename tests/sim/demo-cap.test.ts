@@ -117,6 +117,22 @@ describe('the demo cap on', () => {
     expect(sim.build.canExtendShaft(world, shaft.id, 1, 20)).toEqual({ ok: true });
     refused(sim.build.applyCommand(world, { kind: 'shaft.extend', shaftId: shaft.id, floorMin: 1, floorMax: 21 }));
   });
+
+  // Audit 2026-09-25 I S8: every case above uses one-floor rooms, so a cap that checked only
+  // a room's base floor passed. A cinema on floor 20 has its top floor at 21.
+  it('I S8: refuses a two-floor cinema on floor 20, whose top floor is 21', async () => {
+    const { build, world: w } = await demoSim();
+    const world = w.createWorld(42);
+    world.cash = 1_000_000_000;
+    world.stars = 6;
+    for (let x = 140; x < 200; x += 1) expect(build.applyCommand(world, { kind: 'build', room: 'lobby', floor: 1, x })).toEqual({ ok: true });
+    for (let floor = 2; floor <= 19; floor += 1) {
+      for (const x of [150, 159, 168]) expect(build.applyCommand(world, { kind: 'build', room: 'office', floor, x })).toEqual({ ok: true });
+    }
+    const rooms = world.rooms.size;
+    refused(build.applyCommand(world, { kind: 'build', room: 'cinema', floor: 20, x: 150 }));
+    expect(world.rooms.size).toBe(rooms);
+  });
 });
 
 describe('the full edition', () => {

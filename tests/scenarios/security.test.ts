@@ -172,12 +172,19 @@ describe('the shop thief', () => {
     expect(sentStatus).toBe('Going to floor 5');
 
     const guardFloors = new Set<number>();
+    // Audit 2026-09-25 I S7: cashLessIncome sets the income ledger aside, so a loss booked in
+    // that same ledger would cancel out. No income entry may fall while the thief is caught.
+    const incomeBefore = { ...world.stats.incomeByKind };
     runTheft(world, (w) => {
       const g = w.sims.get(guardId);
       if (g) guardFloors.add(g.pos.floor);
     });
     expect(world.sims.has(thiefId)).toBe(false);
     expect(cashLessIncome(world)).toBe(cash);
+    const income = world.stats.incomeByKind;
+    for (const kind of new Set([...Object.keys(incomeBefore), ...Object.keys(income)]) as Set<keyof typeof income>) {
+      expect(income[kind] ?? 0, `I S7: ${kind} income`).toBeGreaterThanOrEqual(incomeBefore[kind] ?? 0);
+    }
     expect(shop.dirty).toBe(false);
     expect(world.log.some((l) => l.text.startsWith('Thief caught on floor 5.'))).toBe(true);
     const theftBeats = world.story.recent.filter((b) => b.code.startsWith('theft.') || b.code === 'guard.dispatched');
