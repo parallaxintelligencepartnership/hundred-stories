@@ -7,7 +7,7 @@ import { ROOMS } from './rules';
 import { clockOf, TOWER_WIDTH } from './types';
 import type { ActiveEvent, Command, CommandResult, GuardResponse, Id, Room, RoomKind, Sim, TheftEvent, VipRating, World } from './types';
 import { personName, vipArrivalHour, vipPreference } from './identity';
-import { roomMiddle, sendThiefOut, sendThiefTo, sendVipToSuite } from './people';
+import { fireBurning, roomMiddle, sendAway, sendThiefOut, sendThiefTo, sendVipToSuite } from './people';
 import { ensureRouting, entrances, findRoute } from './routing';
 import { rollWaste } from './recycling';
 import { dispatchGuard, releaseGuard, routeMinutes } from './security';
@@ -131,11 +131,10 @@ function evictInto(world: World, room: Room, reason: string): void {
       recordBeat(world.story, { code: 'room.vacated', minute: world.time.minute, simId: sim.id, roomId: room.id, value: 0 });
       if (!followed) roomBeat = true;
     }
-    sim.state = 'leaving';
-    sim.leaveReason = reason;
-    sim.route = [];
-    sim.inRoomId = null;
+    // Out of whatever room they sit in (that room gets its seat back) and, if riding, off
+    // at the car's next stop: never left aboard or seated somewhere in name only.
     if (sim.homeRoomId === room.id) sim.homeRoomId = null;
+    sendAway(world, sim, reason);
   }
   room.tenants = [];
   setOccupancy(world, room, 0);
@@ -439,15 +438,8 @@ function failVisit(world: World, event: VipEventState, reason: string): void {
       removeSim(world, sim.id);
     } else if (sim.state !== 'gone') {
       sim.exiting = true;
-      sim.state = 'leaving';
-      sim.leaveReason = `${reason}.`;
-      sim.route = [];
       sim.waitStart = null;
-      if (sim.inRoomId !== null) {
-        const room = world.rooms.get(sim.inRoomId);
-        if (room) setOccupancy(world, room, Math.max(0, room.occupancy - 1));
-        sim.inRoomId = null;
-      }
+      sendAway(world, sim, `${reason}.`);
     }
   }
   closeVisit(world, event, 'poor', reason);
@@ -478,6 +470,9 @@ export function tickVip(world: World, event: VipEventState): void {
 
   if (event.phase === 'notice') {
     if (minute < event.arrivesAt) return;
+    // Nobody walks into a burning building, the VIP included: the booking stands and they
+    // come in once the fire is out, so waiting it out is not a visit spoiled by the fire.
+    if (fireBurning(world)) return;
     if (!suite || !sim) {
       failVisit(world, event, 'The VIP left: no suite was ready');
       return;
@@ -719,7 +714,14 @@ function theftEscaped(world: World, event: TheftEvent, simId: Id): void {
 export function tickTheft(world: World, event: TheftEvent): void {
   const minute = world.time.minute;
   if (event.phase === 'notice') {
-    if (minute >= event.enterAt) thiefWalksIn(world, event);
+    if (minute < event.enterAt) return;
+    if (fireBurning(world)) {
+      // The thief waits outside with everyone else, and gives up quietly on the same clock
+      // as a thief who cannot reach the target.
+      if (minute - event.enterAt > THEFT.approachMaxMinutes) endEvent(world, event);
+      return;
+    }
+    thiefWalksIn(world, event);
     return;
   }
   const sim = event.simId === null ? undefined : world.sims.get(event.simId);
