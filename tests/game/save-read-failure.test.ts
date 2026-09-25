@@ -3,7 +3,7 @@
 // always My tower.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createGame, READ_FAILED_NOTICE } from '../../src/game/game';
-import { createFileStorage, createTauriStorage, SaveReadError, type FileSlotFs, type TauriSlotFs } from '../../src/game/storage';
+import { createFileStorage, createTauriStorage, SAVE_PRESENT_KEY, SaveReadError, type FileSlotFs, type TauriSlotFs } from '../../src/game/storage';
 
 const task = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 const settle = async (n = 20): Promise<void> => {
@@ -124,6 +124,44 @@ describe('a save that could not be read is not "no save" (probe-rd A)', () => {
       s2.newGame(12);
       await settle();
       expect(saved(idbData.get('autosave'))).toEqual({ seed: 12, rooms: 0 });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('a first visit with a broken IndexedDB and no marker starts a tower: no notice, the first autosave lands in localStorage', async () => {
+    vi.stubGlobal('indexedDB', indexedDB);
+    failOpens = 1000; // IndexedDB never opens in this browser
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const { game, second } = gameOn(555);
+      expect(await game.load()).toEqual({ ok: false, reason: 'There is no saved game yet.' });
+      expect(game.world.log.some((l) => l.text === READ_FAILED_NOTICE)).toBe(false);
+      game.world.time.minute = 360 + 1440 - 1;
+      second();
+      await settle();
+      expect(saved(ls.get('hundred-stories:autosave'))).toEqual({ seed: 555, rooms: 0 });
+      expect(ls.get(SAVE_PRESENT_KEY)).toBe('1');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('a returning visit (marker set) with a broken IndexedDB and no localStorage copy gets the notice and a protected slot', async () => {
+    vi.stubGlobal('indexedDB', indexedDB);
+    ls.set(SAVE_PRESENT_KEY, '1');
+    failOpens = 1000;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const { game, second } = gameOn(555);
+      expect(await game.load()).toEqual({ ok: false, reason: READ_FAILED_NOTICE });
+      expect(game.world.log.some((l) => l.level === 'warn' && l.text === READ_FAILED_NOTICE)).toBe(true);
+      expect(warn).toHaveBeenCalled();
+      game.world.time.minute = 360 + 1440 - 1;
+      second();
+      await settle();
+      expect(ls.get('hundred-stories:autosave')).toBeUndefined();
+      expect(idbData.size).toBe(0);
     } finally {
       warn.mockRestore();
     }

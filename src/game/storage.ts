@@ -99,6 +99,14 @@ interface StampedText {
   seq: number;
 }
 
+/**
+ * Set in localStorage beside the browser slots on every successful write of My tower, to either
+ * store, and never cleared (New game writes its new tower, so it stays). It tells a returning
+ * player from a first visit when IndexedDB will not open and there is no localStorage copy: with
+ * it, the slot is unknown and the read fails; without it, nothing was ever saved here.
+ */
+export const SAVE_PRESENT_KEY = 'hs.save.present';
+
 // Two writes in the same millisecond still stamp in the order they were made.
 let lastStamp = 0;
 function nextStamp(): number {
@@ -161,6 +169,23 @@ export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): 
     return seq;
   }
 
+  function markPresent(): void {
+    if (slot !== 'mine') return;
+    try {
+      deps.localStorage?.setItem(SAVE_PRESENT_KEY, '1');
+    } catch {
+      // no marker: a later failed IndexedDB open then reads as a first visit, as before
+    }
+  }
+
+  function markedPresent(): boolean {
+    try {
+      return deps.localStorage?.getItem(SAVE_PRESENT_KEY) === '1';
+    } catch {
+      return false;
+    }
+  }
+
   async function writeSave(text: string): Promise<void> {
     const stamp = nextStamp();
     const seq = await nextSeq();
@@ -179,6 +204,7 @@ export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): 
           // never settles, and every later save and slot switch waits on it for the session.
           tx.onabort = () => reject(tx.error ?? new Error('write aborted'));
         });
+        markPresent();
         return;
       } catch {
         // fall through to localStorage
@@ -191,6 +217,7 @@ export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): 
         deps.localStorage.setItem(localStampKey, String(stamp));
         deps.localStorage.setItem(localSeqKey, String(seq));
       }
+      markPresent();
     } catch {
       // a full quota, a private window, or no store at all: all one message to the player
       throw new Error(REFUSED_REASON);
@@ -246,10 +273,14 @@ export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): 
         fromDb = await readIndexedDb(deps.indexedDB);
       } catch (e) {
         // IndexedDB would not open or read. A localStorage copy, when there is one, is read as
-        // before (a browser whose IndexedDB never works keeps its tower there). With none, the
-        // slot is unknown, not empty: a read failure, so no fresh tower is saved over it.
+        // before (a browser whose IndexedDB never works keeps its tower there). With none, a
+        // first visit (no marker) has nothing to lose: no save, and the writes fall back to
+        // localStorage. A returning player's slot is unknown, not empty: a read failure, so no
+        // fresh tower is saved over it. Only My tower's writes set the marker; a link to Today's
+        // or a friend's tower on a first visit reads the same way, so no notice shows there either.
         const local = readLocal();
         if (local) return local.text;
+        if (!markedPresent()) return null;
         throw e;
       }
     }
