@@ -154,8 +154,14 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
   const cards: Card[] = [];
   const more = el('p', 'hs-toast-more');
   let incident: FireIncident | null = null;
-  /** The bomb threat's card: the ransom line and its button, then the outcome. */
-  let bomb: { card: Card | null; body: HTMLElement | null; closed: boolean } | null = null;
+  /** The bomb threat's card: the ransom line and its button (off while cash is short), then the outcome. */
+  let bomb: {
+    card: Card | null;
+    body: HTMLElement | null;
+    closed: boolean;
+    pay: HTMLButtonElement;
+    short: HTMLElement;
+  } | null = null;
   /** The theft's card: the response, then the outcome. */
   let theft: { card: Card | null; body: HTMLElement | null; closed: boolean } | null = null;
   /** The infestation's card, drawn from the infested rooms in the world. */
@@ -305,14 +311,29 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
   function startBomb(text: string): void {
     if (bomb && !bomb.closed) endBomb(null);
     const { card, body } = open('hs-toast is-bomb');
-    bomb = { card, body, closed: false };
     const pay = button('Pay ransom', 'hs-btn', () => {
       deps.apply({ kind: 'bomb.pay' });
     });
     pay.dataset['command'] = 'bomb.pay';
     const row = el('div', 'hs-actions');
     row.append(pay);
-    body.append(el('p', 'hs-toast-text', text), row);
+    const short = el('p', 'hs-toast-note');
+    short.hidden = true;
+    body.append(el('p', 'hs-toast-text', text), row, short);
+    bomb = { card, body, closed: false, pay, short };
+    renderRansom(deps.getWorld());
+  }
+
+  /** Like the helicopter: Pay ransom is off, with the reason, while the tower cannot afford it. */
+  function renderRansom(world: World): void {
+    if (!bomb || bomb.closed) return;
+    const event = (world.events ?? []).find((e) => e.kind === 'bomb');
+    const ransom = event && event.kind === 'bomb' ? event.ransom : EVENTS.bomb.ransom;
+    const short = world.cash < ransom;
+    if (bomb.pay.disabled !== short) bomb.pay.disabled = short;
+    const note = short ? `Not enough cash. The ransom is ${formatMoney(ransom)}.` : '';
+    if (bomb.short.textContent !== note) bomb.short.textContent = note;
+    if (bomb.short.hidden !== !short) bomb.short.hidden = !short;
   }
 
   /** The threat ended: the button goes, the outcome shows, and the card leaves after a while. */
@@ -329,6 +350,7 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
     // A save loaded mid threat still gets its card and its button.
     if (live && (!bomb || bomb.closed)) startBomb('A bomb is hidden in the tower. Pay the ransom or let security search the tower.');
     else if (!live && bomb && !bomb.closed) endBomb(null);
+    renderRansom(world);
   }
 
   // ---------------------------------------------------------------- theft

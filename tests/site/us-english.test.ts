@@ -7,6 +7,9 @@ import landing from '../../index.html?raw';
 import play from '../../play/index.html?raw';
 import privacy from '../../privacy/index.html?raw';
 import { describe, expect, it } from 'vitest';
+import { controlLines } from '../../src/ui/controls';
+import { speedModeText } from '../../src/ui/status';
+import { hintText } from '../../src/ui/ui';
 
 const SOURCES: Record<string, string> = {
   ...import.meta.glob<string>('../../src/ui/*.ts', { query: '?raw', import: 'default', eager: true }),
@@ -162,5 +165,42 @@ describe('never the word seed', () => {
       const m = SEED_RE.exec(visibleText(html));
       expect(m ? `${path}: ${m[0]}` : null).toBeNull();
     }
+  });
+});
+
+// Plain words (audit 2026-09-25, E1 S7): a reader of about ten. "Haptics", "shaft" and
+// "x16 in all" are not words that reader knows, and the touch help names the Build step that
+// confirms a parked outline (decision 2026-09-19, two step touch placement).
+describe('plain words', () => {
+  const NOT_PLAIN = /\bhaptics\b|\bshafts?\b|\bin all\b/i;
+  const NAMED = ['panels.ts', 'status.ts', 'onboarding.ts', 'controls.ts', 'ui.ts'];
+
+  it('finds a word that is not plain when it is there', () => {
+    const hits = literals("switchRow('x', 'Haptics'); button('Whole shaft'); `Night x8, x${n} in all`;").filter(
+      ({ text }) => NOT_PLAIN.test(text) && isProse(text),
+    );
+    expect(hits).toHaveLength(3);
+  });
+
+  it('are the only words in the settings, the elevator panel, the night chip, the tips and the help', () => {
+    const hits: string[] = [];
+    const files = Object.entries(UI_SOURCES).filter(([path]) => NAMED.some((name) => path.endsWith(`/src/ui/${name}`)));
+    expect(files).toHaveLength(NAMED.length);
+    for (const [path, src] of files) {
+      for (const { line, text } of literals(src)) {
+        if (NOT_PLAIN.test(text) && isProse(text)) hits.push(`${path}:${line}: "${text.slice(0, 80)}"`);
+      }
+    }
+    expect(hits).toEqual([]);
+  });
+
+  it('says the night speed in plain words', () => {
+    expect(speedModeText(2, 23 * 60 + 30)).toBe('Night: 16 times as fast');
+  });
+
+  it('names the Build step in the touch help and the touch hint', () => {
+    const build = controlLines('touch').find((line) => line.icon === 'build');
+    expect(build?.text).toMatch(/then tap Build\b/);
+    expect(hintText(true)).toMatch(/\bBuild\b/);
   });
 });

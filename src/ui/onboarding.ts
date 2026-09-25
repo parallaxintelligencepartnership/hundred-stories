@@ -333,7 +333,7 @@ export const TIP_TEXT = {
   firstRent: (income: number): string => `Rent day: the tower took in ${formatMoney(income)} last quarter. The finances panel shows the details.`,
   firstEvent: (): string => 'Big events show up as alerts. When one needs you to choose, it has a button for that.',
   nightSpeed: (mode: string): string =>
-    `${mode}: from ${clockHour(SCHEDULES.nightStart)} to ${clockHour(SCHEDULES.nightEnd)} the clock runs faster while the tower sleeps.`,
+    `${mode}. From ${clockHour(SCHEDULES.nightStart)} to ${clockHour(SCHEDULES.nightEnd)} the clock runs faster while the tower sleeps.`,
   firstPanel: (): string => 'Panels show the details, and Close puts one away while the tower keeps running.',
   meetPerson: (name: string): string =>
     `Meet ${name}, the first to work in your first office. Open the office and pick their name: the person panel keeps their story, and you are following it.`,

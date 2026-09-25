@@ -30,7 +30,9 @@ export function mountChallenge(
 ): void {
   const stats = parseChallenge(search);
   if (!stats) return;
-  el.textContent = `A friend built a ${stats.floors}-floor tower with ${formatCount(stats.people)} people${starsPhrase(stats.stars)}. Think you can do better?`;
+  const built = stats.floors === 0 ? 'just started a tower' : `built a ${formatCount(stats.floors)}-floor tower`;
+  const people = `${formatCount(stats.people)} ${stats.people === 1 ? 'person' : 'people'}`;
+  el.textContent = `A friend ${built} with ${people}${starsPhrase(stats.stars)}. Think you can do better?`;
   el.hidden = false;
   if (play && stats.start !== undefined) {
     play.href = sameTowerHref(stats.start);

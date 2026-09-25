@@ -62,7 +62,7 @@ const INT_RE = /^\d+$/;
 
 /**
  * Reads the numbers a shared link carries. Floors, people and stars must be present, integer
- * and in range. The starting number is optional: when it is missing or invalid the challenge
+ * and in range. Floors 0 is in range: a tower with nothing above ground yet shares it. The starting number is optional: when it is missing or invalid the challenge
  * still reads, just without `start`.
  */
 export function parseChallenge(search: string): ShareStats | null {
@@ -75,7 +75,7 @@ export function parseChallenge(search: string): ShareStats | null {
   const floors = Number(floorsRaw);
   const people = Number(peopleRaw);
   const stars = Number(starsRaw);
-  if (floors < 1 || floors > 200) return null;
+  if (floors < 0 || floors > 200) return null;
   if (people < 0 || people > 999_999) return null;
   if (stars < 1 || stars > 6) return null;
   const stats: ShareStats = { floors, people, stars };

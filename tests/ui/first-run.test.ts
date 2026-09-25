@@ -320,7 +320,7 @@ describe('tips', () => {
     game.notify();
     game.notify();
     expect(tipsOf(first.root)).toHaveLength(1);
-    expect(tipsOf(first.root)[0]?.textContent).toContain('Night x8, x16 in all: from 11 PM to 6 AM');
+    expect(tipsOf(first.root)[0]?.textContent).toContain('Night: 16 times as fast. From 11 PM to 6 AM');
     click(buttonNamed(first.root, 'Got it'));
     expect(tipsOf(first.root)).toHaveLength(0);
     expect(JSON.parse(store().getItem('hs.tips') ?? '[]')).toContain('nightSpeed');

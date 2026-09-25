@@ -1,6 +1,7 @@
 // The chrome's remembered choices, all through one door. Every read and write is wrapped, so
-// private browsing, a full disk or a blocked store never throws: a read answers null and a
-// write is dropped, and the choice lasts for this session only.
+// private browsing, a full disk or a blocked store never throws. A write the store refuses is
+// kept in memory and read back from there, so a choice made while storage is blocked still
+// takes effect and lasts for this session only.
 //
 // Keys live in localStorage. New ones use the `hs.` prefix; the older keys keep their names.
 
@@ -38,8 +39,27 @@ function defaultStore(): PrefStore | null {
   }
 }
 
+/**
+ * This session's copy of the writes a store refused, per store (the page's own store is one
+ * object; no store at all, or a getter that throws, is the null key). A refused write is newer
+ * than anything the store holds, so the copy answers first; a write the store takes drops it.
+ */
+const sessionCopies = new WeakMap<PrefStore, Map<string, string>>();
+const noStoreCopy = new Map<string, string>();
+
+function sessionCopy(store: PrefStore | null): Map<string, string> {
+  if (!store) return noStoreCopy;
+  let copy = sessionCopies.get(store);
+  if (!copy) {
+    copy = new Map();
+    sessionCopies.set(store, copy);
+  }
+  return copy;
+}
+
 export function getPref(key: PrefKey, store: PrefStore | null = defaultStore()): string | null {
-  if (!store) return null;
+  const copy = sessionCopy(store).get(key);
+  if (copy !== undefined || !store) return copy ?? null;
   try {
     return store.getItem(key);
   } catch {
@@ -62,13 +82,18 @@ export function onPrefChange(listener: PrefListener): () => void {
 }
 
 export function setPref(key: PrefKey, value: string, store: PrefStore | null = defaultStore()): void {
+  const copy = sessionCopy(store);
+  let stored = false;
   if (store) {
     try {
       store.setItem(key, value);
+      stored = true;
     } catch {
-      // Nothing to do: the choice stays for this session only.
+      // Kept below: the choice stays for this session only.
     }
   }
+  if (stored) copy.delete(key);
+  else copy.set(key, value);
   for (const listener of [...listeners]) {
     try {
       listener(key);

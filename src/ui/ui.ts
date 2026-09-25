@@ -8,7 +8,7 @@ import { createSound } from '../audio/audio';
 import type { GameApi, Placement, Speed, Tool } from '../game/api';
 import type { Renderer } from '../render/renderer';
 import { describeBeat, followSim, isFollowed, storyName, type StoryBeat } from '../sim/story';
-import type { Command, LogEntry, World } from '../sim/types';
+import type { Command, CommandResult, LogEntry, World } from '../sim/types';
 import { createIntroPanel, createSideCard, createStarToast, createTipToast } from './cards';
 import { unlocksText } from '../sim/chronicle';
 import { createAlertStack } from './alerts';
@@ -89,9 +89,18 @@ interface ChromeWatch {
 const HINT_LOADS = 3;
 const HINT_TEXT = 'Move: drag, scroll, or W A S D. Zoom: ctrl + scroll or pinch. Click to place.';
 /** A phone has no wheel, no keys and no cursor, so it gets the three gestures it does have. */
-const TOUCH_HINT_TEXT = 'Move: one finger. Zoom: pinch. Tap to place.';
+const TOUCH_HINT_TEXT = 'Move: one finger. Zoom: pinch. Tap a spot, then tap Build.';
 
 /** The hint speaks to the pointer in the room: a finger is told about fingers. */
+/** A button, or anything playing one (role button or switch): Space presses it. */
+function isPressable(target: unknown): boolean {
+  const node = target as { tagName?: unknown; getAttribute?: (name: string) => string | null } | null;
+  if (!node || typeof node.tagName !== 'string') return false;
+  if (node.tagName.toUpperCase() === 'BUTTON') return true;
+  const role = typeof node.getAttribute === 'function' ? node.getAttribute('role') : null;
+  return role === 'button' || role === 'switch';
+}
+
 export function hintText(coarsePointer: boolean): string {
   return coarsePointer ? TOUCH_HINT_TEXT : HINT_TEXT;
 }
@@ -198,6 +207,12 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   let storyShownAt = Number.NEGATIVE_INFINITY;
   /** The last refusal shown as a notice, so its log line does not show a second time. */
   let lastNoticeText = '';
+  /**
+   * True while a command the player gave through the chrome runs. The game logs a refusal and
+   * notifies before it returns, so the news sees the refusal line first; that line is said once,
+   * as the notice where the player acted, and never as a news toast too.
+   */
+  let acting = false;
   /** The guided first tower follows its first worker once, then leaves the cast to the player. */
   let metFirstWorker = false;
   /** The star card: the story seq it last looked at, and the card on screen, if any. */
@@ -379,8 +394,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     else game.nudgePending(0, -1);
   });
   const buildButton = placeButton('Build', 'Build it here', () => {
-    const result = game.confirmPending();
-    if (!result.ok) notice(result.reason);
+    act(() => game.confirmPending());
   });
   buildButton.classList.add('is-primary');
   const cancelButton = placeButton('Cancel', 'Put this back', () => game.cancelPending());
@@ -432,8 +446,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
 
   const ctx: PanelContext = {
     apply(cmd: Command) {
-      const result = game.apply(cmd);
-      if (!result.ok) notice(result.reason);
+      const result = act(() => game.apply(cmd));
       mountedKey = '';
       update();
       return result;
@@ -703,6 +716,12 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     starStorySeq = world.story?.seq ?? 0;
     starToast?.remove();
     starToast = null;
+    // The alert cards belong to the tower that was on screen. Its lines, and the arriving
+    // tower's old ones, are history; the arriving tower's live fire, bomb or theft still gets a
+    // card from its events.
+    lastLogTotal = world.logTotal;
+    alerts.reset();
+    alerts.sync();
     const empty = world.rooms.size === 0 && world.shafts.size === 0;
     if (empty && !introSeen) {
       introShownThisSession = true;
@@ -1051,6 +1070,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
                       update();
                     },
                     myTower: () => openMyTower(),
+                    startToday: () => void switchTower(() => game.openDaily()),
                     choose(which) {
                       void game.chooseDaily(which).then(() => {
                         syncAddress();
@@ -1100,6 +1120,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
       newsShowsAlert = newest.level === 'alert';
       // The first look is the tower as loaded: its old lines are history, not news.
       if (first || newsShowsAlert) return;
+      // A refusal of the player's own command is said as a notice where they acted.
+      if (acting && newest.level === 'warn') return;
       // A refusal was already said as a notice where the player acted.
       if (newest.text === lastNoticeText) {
         lastNoticeText = '';
@@ -1164,6 +1186,19 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     alerts.notice(text);
   }
 
+  /** Run a command the player gave; a refusal becomes one notice, not a notice and a news toast. */
+  function act(run: () => CommandResult): CommandResult {
+    acting = true;
+    let result: CommandResult;
+    try {
+      result = run();
+    } finally {
+      acting = false;
+    }
+    if (!result.ok) notice(result.reason);
+    return result;
+  }
+
   function setPanel(kind: PanelKind): void {
     // Any way out of the intro (Skip, Close, finishing, another panel) counts as seen.
     if (panelKind === 'intro' && kind !== 'intro') markIntroSeen();
@@ -1222,6 +1257,12 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     canvas.dispatchEvent(new MouseEvent('click', { clientX: x, clientY: y, button: 0, bubbles: true }));
   }
 
+  /** A modal sheet (the phone-width panel, aria-modal) is on screen. */
+  function modalSheetOpen(): boolean {
+    const node = mountedPanel?.sheet?.node as HTMLElement | undefined;
+    return node?.getAttribute?.('aria-modal') === 'true';
+  }
+
   function padHandlers(): Parameters<typeof createGamepadInput>[0] {
     return {
       pan(dx, dy) {
@@ -1235,6 +1276,13 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
       },
       a() {
         const active = typeof document !== 'undefined' ? (document.activeElement as HTMLElement | null) : null;
+        // A menu is open but focus fell out of it (a row it held was rebuilt): A goes back into
+        // the menu, never through to the tower behind it.
+        const menu = padMenu();
+        if (menu && !(active && menu.contains(active))) {
+          focusablesIn(menu)[0]?.focus?.();
+          return;
+        }
         if (active && active !== shell && shell.contains(active) && typeof active.click === 'function') {
           active.click();
           return;
@@ -1358,6 +1406,10 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     }
     const action = keyAction(event, keyGroups, activeGroup());
     if (!action) return;
+    // Space on a focused button or switch presses that control; it is not the pause key there.
+    if (action.kind === 'pause' && isPressable(event.target)) return;
+    // Behind an open modal sheet the tower is out of reach: no tool, group or pause keys.
+    if ((action.kind === 'pause' || action.kind === 'tool' || action.kind === 'group') && modalSheetOpen()) return;
     switch (action.kind) {
       case 'pause':
         event.preventDefault();

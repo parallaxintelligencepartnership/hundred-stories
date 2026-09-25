@@ -27,6 +27,7 @@ import {
   isFollowed,
   personCard,
   storyName,
+  STORY_FOLLOWED_CAP,
   unfollowSim,
   type StoryBeat,
 } from '../sim/story';
@@ -101,8 +102,16 @@ export interface PanelContext {
   setDisplay?: (name: DisplaySwitch, on: boolean) => void;
 }
 
-/** The refusal when the cast is full, in the player's words. */
-export const FOLLOW_LIMIT_TEXT = 'You can follow eight people at a time.';
+const NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];
+
+/** The refusal when the cast of `cap` is full, the number in words up to twelve. */
+export function followLimitText(cap: number): string {
+  const count = NUMBER_WORDS[cap] ?? String(cap);
+  return `You can follow ${count} ${cap === 1 ? 'person' : 'people'} at a time.`;
+}
+
+/** The refusal when the cast is full, in the player's words, from the sim's own cap. */
+export const FOLLOW_LIMIT_TEXT = followLimitText(STORY_FOLLOWED_CAP);
 
 /** How many names the room panel lists. */
 export const OCCUPANTS_SHOWN = 8;
@@ -620,7 +629,7 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
     el(
       'p',
       'hs-note',
-      `Shaft ${formatMoney(rule.shaftCost)} includes the first car. Extra cars ${formatMoney(rule.carCost)} each, up to ${rule.maxCars}.`,
+      `A new elevator costs ${formatMoney(rule.shaftCost)} with its first car. More cars cost ${formatMoney(rule.carCost)} each, up to ${rule.maxCars}.`,
     ),
   );
 
@@ -739,7 +748,7 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
         return btn;
       };
 
-      const whole = button('Whole shaft', 'hs-btn', () => {
+      const whole = button('Every floor', 'hs-btn', () => {
         ctx.apply({ kind: 'shaft.setCarRange', shaftId, carId: car.id, range: null });
       });
 
@@ -784,7 +793,7 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
         step.node.title = busy
           ? 'People are inside.'
           : outside
-            ? `This car already reaches the ${step.step === 1 ? 'top' : 'bottom'} of the shaft.`
+            ? `This car already reaches the ${step.step === 1 ? 'top' : 'bottom'} of the elevator.`
             : crossed
               ? 'A car needs at least one floor.'
               : tooNarrow
@@ -793,7 +802,7 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
       }
       row.whole.hidden = car.range === null;
       row.whole.disabled = busy;
-      row.whole.title = busy ? 'People are inside.' : 'Serve the whole shaft again';
+      row.whole.title = busy ? 'People are inside.' : 'Stop at every floor of the elevator again';
     }
   };
 
@@ -1371,6 +1380,9 @@ export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElem
   if (gameGroup.list.children.length > 0) main.append(gameGroup.node);
 
   // Saving: the tower saves itself; these are for the player who wants to be sure, or a copy.
+  // Today's tower is one try per date, so there nothing rewinds or replaces the run: no Go back
+  // to last save and no Open a saved file. Saving a copy to a file is still fine.
+  const oneTry = slot === 'daily';
   const saving = settingsGroup('Saving', 'Your tower saves by itself.');
   saving.list.append(
     actionRow('Save now', () => {
@@ -1378,16 +1390,22 @@ export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElem
         ctx.notice(result.ok ? 'Game saved.' : result.reason);
       });
     }),
-    actionRow('Go back to last save', () => {
-      void game.load().then((result) => {
-        ctx.notice(result.ok ? 'Back to your last save.' : result.reason);
-      });
-    }),
+  );
+  if (!oneTry) {
+    saving.list.append(
+      actionRow('Go back to last save', () => {
+        void game.load().then((result) => {
+          ctx.notice(result.ok ? 'Back to your last save.' : result.reason);
+        });
+      }),
+    );
+  }
+  saving.list.append(
     actionRow('Save to a file', () => {
       exportSave(game.exportSave(), ctx);
     }),
   );
-  if (savePlatform() === 'tauri') {
+  if (!oneTry && savePlatform() === 'tauri') {
     // The desktop shell: a system open dialog, not a file input.
     const pick = actionRow('Open a saved file', () => {
       void importSaveWithDialog()
@@ -1401,7 +1419,7 @@ export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElem
     pick.id = 'hs-import';
     pick.setAttribute('aria-label', 'Open a saved file');
     saving.list.append(pick);
-  } else {
+  } else if (!oneTry) {
     // The web and the phones: our own button opens a file input kept out of sight, so the
     // browser's "Choose file" and "No file chosen" never show.
     const file = importFileInput(game, ctx);
@@ -1432,8 +1450,8 @@ export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElem
       applyGlassClear(on);
       ctx.setDisplay?.('glassClear', on);
     }).row,
-    // Haptics, last: on by default (src/ui/haptics.ts).
-    switchRow('hs-haptics', 'Haptics', hapticsEnabled(), (on) => setHapticsEnabled(on)).row,
+    // Vibration (haptics), last: on by default (src/ui/haptics.ts).
+    switchRow('hs-haptics', 'Vibration', hapticsEnabled(), (on) => setHapticsEnabled(on)).row,
   );
   main.append(display.node);
 

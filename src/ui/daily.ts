@@ -3,7 +3,7 @@
 // content follows the game's state. Plain markup and the panels' shared classes only.
 
 import type { GameApi } from '../game/api';
-import { dailyResult, dailyShareText, dailyShareUrl, formatDateKey, DAILY_DAYS } from '../game/daily';
+import { dailyResult, dailyShareText, dailyShareUrl, formatDateKey, localDateKey, DAILY_DAYS } from '../game/daily';
 import { formatCount, formatMoney, starsGlyphs } from './format';
 import { button, el, panelShell, row, tile, type PanelContext, type PanelElement } from './panels';
 
@@ -16,6 +16,8 @@ export interface DailyPanelActions {
   myTower(): void;
   /** Answer the choice. */
   choose(which: 'finish' | 'today'): void;
+  /** Open today's tower, from the result card of an older one. */
+  startToday(): void;
 }
 
 /** Which card the panel shows now, or null when there is nothing daily to show. */
@@ -28,15 +30,21 @@ export function dailyCard(game: Pick<GameApi, 'getDaily' | 'getDailyChoice'>): D
   return daily.finished ? 'result' : 'start';
 }
 
-export function createDailyPanel(game: GameApi, ctx: PanelContext, actions: DailyPanelActions): PanelElement {
+/** `today` is the player's local date (YYYY-MM-DD); a daily from another date is spoken of by its date. */
+export function createDailyPanel(
+  game: GameApi,
+  ctx: PanelContext,
+  actions: DailyPanelActions,
+  today: string = localDateKey(),
+): PanelElement {
   const { panel, body } = panelShell(DAILY_TITLE, 'star', ctx);
   const card = dailyCard(game);
   panel.dataset.card = card ?? '';
 
   const choice = game.getDailyChoice();
   if (card === 'choose' && choice) {
-    const older = choice.yesterday ? "yesterday's" : `the one from ${formatDateKey(choice.savedDate)}`;
-    body.append(el('p', 'hs-note', `You did not finish ${older} tower yet. You can finish it, or start today's.`));
+    const older = choice.yesterday ? "yesterday's tower" : `the tower from ${formatDateKey(choice.savedDate)}`;
+    body.append(el('p', 'hs-note', `You did not finish ${older} yet. You can finish it, or start today's.`));
     const buttons = el('div', 'hs-actions');
     buttons.append(
       button(choice.yesterday ? "Finish yesterday's" : 'Finish the old one', 'hs-btn', () => actions.choose('finish')),
@@ -48,6 +56,8 @@ export function createDailyPanel(game: GameApi, ctx: PanelContext, actions: Dail
 
   const daily = game.getDaily();
   if (!daily) return panel;
+  // An older daily, finished after the choice: today's tower is still there to play.
+  const older = daily.date !== today;
 
   if (card === 'result') {
     const result = dailyResult(game.world, daily.date);
@@ -65,10 +75,18 @@ export function createDailyPanel(game: GameApi, ctx: PanelContext, actions: Dail
       tile('Stars', starsGlyphs(result.stars)),
       tile('Money', formatMoney(result.money), { wide: true, money: true }),
     );
-    body.append(bento, el('p', 'hs-note', 'Come back tomorrow for a new tower.'));
+    body.append(
+      bento,
+      el(
+        'p',
+        'hs-note',
+        older ? `That was the tower from ${formatDateKey(daily.date)}. Today's tower is ready for you.` : 'Come back tomorrow for a new tower.',
+      ),
+    );
     const buttons = el('div', 'hs-actions');
+    if (older) buttons.append(button("Start today's", 'hs-btn is-primary', () => actions.startToday()));
     buttons.append(
-      button('Share', 'hs-btn is-primary', () => actions.share(dailyShareText(result.people), dailyShareUrl(result.date))),
+      button('Share', older ? 'hs-btn' : 'hs-btn is-primary', () => actions.share(dailyShareText(result.people), dailyShareUrl(result.date))),
       button('My tower', 'hs-btn', () => actions.myTower()),
     );
     body.append(buttons);
@@ -79,7 +97,11 @@ export function createDailyPanel(game: GameApi, ctx: PanelContext, actions: Dail
   body.append(
     row('Twist', daily.twist.name),
     el('p', 'hs-note', daily.twist.line),
-    el('p', 'hs-note', `Everyone gets the same start today. You have ${DAILY_DAYS} days in the game to fit in as many people as you can.`),
+    el(
+      'p',
+      'hs-note',
+      `${older ? `Everyone who plays the tower from ${formatDateKey(daily.date)} gets the same start.` : 'Everyone gets the same start today.'} You have ${DAILY_DAYS} days in the game to fit in as many people as you can.`,
+    ),
   );
   const buttons = el('div', 'hs-actions');
   buttons.append(button('Start building', 'hs-btn is-primary', () => ctx.close()), button('My tower', 'hs-btn', () => actions.myTower()));
