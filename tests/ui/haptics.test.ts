@@ -4,7 +4,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   createHaptics,
-  createHapticsRow,
   DOUBLE_TAP_GAP_MS,
   hapticsEnabled,
   VIBRATE_PATTERNS,
@@ -110,19 +109,6 @@ describe('haptics in the apps', () => {
 });
 
 describe('the Haptics switch', () => {
-  it('is on by default and stores off when turned off', () => {
-    expect(hapticsEnabled()).toBe(true);
-    const row = createHapticsRow() as unknown as FakeElement;
-    const box = row.children.find((n) => n.tagName === 'INPUT') as FakeElement & { checked: boolean };
-    const label = row.children.find((n) => n.tagName === 'LABEL')!;
-    expect(label.textContent).toBe('Haptics');
-    expect(box.checked).toBe(true);
-    box.checked = false;
-    for (const fn of box.listeners.get('change') ?? []) fn({});
-    expect(getPref(PREF_KEYS.haptics)).toBe('false');
-    expect(hapticsEnabled()).toBe(false);
-  });
-
   it('is the last row of the Display section in Settings', () => {
     const game = {
       world: { cash: 1_000_000, population: 0, stars: 1, time: { minute: 0 }, log: [], logTotal: 0, rooms: new Map(), shafts: new Map(), sims: new Map(), events: [] },
@@ -142,11 +128,20 @@ describe('the Haptics switch', () => {
     createUi(root as never, game as never, {} as never);
     const menu = root.descendants().find((n) => n.getAttribute('aria-label') === 'Menu')!;
     for (const fn of menu.listeners.get('click') ?? []) fn({});
-    const box = root.descendants().find((n) => n.id === 'hs-haptics')!;
-    const field = box.parentNode!;
-    const section = field.parentNode!;
-    expect(section.textContent).toContain('Display');
-    expect(section.children.at(-1)).toBe(field);
+    const control = root.descendants().find((n) => n.id === 'hs-haptics')!;
+    const row = control.parentNode!;
+    const list = row.parentNode!;
+    expect(list.parentNode!.textContent).toContain('Display');
+    expect(list.children.at(-1)).toBe(row);
+    expect(row.textContent).toBe('Haptics');
+    // On by default; off is stored and read back.
+    expect(hapticsEnabled()).toBe(true);
+    expect(control.getAttribute('role')).toBe('switch');
+    expect(control.getAttribute('aria-checked')).toBe('true');
+    for (const fn of control.listeners.get('click') ?? []) fn({});
+    expect(control.getAttribute('aria-checked')).toBe('false');
+    expect(getPref(PREF_KEYS.haptics)).toBe('false');
+    expect(hapticsEnabled()).toBe(false);
   });
 
   it('in the shell: a build taps, a refusal double taps and a new star plays success, on a touch screen that can vibrate', () => {

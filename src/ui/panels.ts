@@ -1,7 +1,7 @@
 // Panel builders. Each one returns a detached element that the shell in ui.ts mounts.
 // Panels read the world through GameApi only and never reach into the sim modules.
 
-import { createHapticsRow } from './haptics';
+import { hapticsEnabled, setHapticsEnabled } from './haptics';
 import type { Sound } from '../audio/audio';
 import type { GameApi } from '../game/api';
 import {
@@ -17,7 +17,7 @@ import { drawPortrait, personLookCode, type Ctx2D } from '../render/figure';
 import type { Renderer } from '../render/renderer';
 import { isVenueKind, venueLine, venueOf } from '../render/venue';
 import { canvasToPng, composeListImage, composeShareImage, shareMessage, shareStats, shareText, shareUrl } from '../share/share';
-import { applyTheme, cycleTheme, readTheme, themeLabel } from '../site/theme';
+import { applyTheme, readTheme, type Theme } from '../site/theme';
 import { officeQuarterRent } from '../sim/economy';
 import { ECONOMY, EVAL, LIMITS, RENT, ROOMS, SHAFTS, takesRent, WASTE } from '../sim/rules';
 import {
@@ -63,8 +63,8 @@ import {
 import { type IconName } from './icons';
 import { createSheet, type Sheet } from './sheet';
 import { vipView, vipViewKey, type VipView } from './vip';
-import { keyHelpLines } from './keys';
-import { GROUPS } from './palette';
+import { chevron, controlsDevice, currentDeviceEnv, fillControlsPage } from './controls';
+import { getFlag, PREF_KEYS, setFlag } from './prefs';
 
 /** A panel element may expose a cheap refresh that rewrites live numbers without rebuilding. */
 export type PanelElement = HTMLDivElement & { refresh?: () => void; sheet?: Sheet };
@@ -94,6 +94,11 @@ export interface PanelContext {
   openMyTower?: () => void;
   /** Put another person or room in the query panel, closing whichever panel asked. */
   select?: (sel: Selection) => void;
+  /**
+   * A Display switch in Settings changed. The choice is already stored (prefs.ts); this is for
+   * the part of the ui that shows it (larger text, the color-blind views) to follow at once.
+   */
+  setDisplay?: (name: DisplaySwitch, on: boolean) => void;
 }
 
 /** The refusal when the cast is full, in the player's words. */
@@ -108,16 +113,6 @@ export const STORIES_TOWER_LINES = 12;
 export const HOW_TO_PLAY_HREF = '/how-to-play/';
 
 export type Selection = { roomId?: Id; simId?: Id; shaftId?: Id };
-
-/** The same lines as the guide, for the player who looks in the menu instead. */
-const CONTROL_LINES: readonly string[] = [
-  'Move around: drag with the mouse, even while you hold most build tools. The lobby and elevator tools use dragging to set their size, so while you hold one, move with the right mouse button, the scroll wheel, or the keys. Scroll the wheel to move up and down, and hold shift to move sideways. On a trackpad, scroll with two fingers to move the view.',
-  'Zoom: hold ctrl and scroll, or pinch on a trackpad. Plus and minus keys also zoom.',
-  'Keys: W A S D or the arrow keys move the view.',
-  'Touch: one finger moves the view, pinch to zoom, tap to place. While you size a lobby or an elevator, drag with two fingers to move the view.',
-  'Place a room: pick it from the build tools, then click where it goes. Click without moving to place it. Press and drag to move the view instead.',
-  ...keyHelpLines(GROUPS.length),
-];
 
 const SIM_KINDS: Record<SimKind, string> = {
   worker: 'Worker',
@@ -166,6 +161,24 @@ export function button(label: string, className: string, onClick: () => void): H
 export function row(label: string, value: string): HTMLDivElement {
   const node = el('div', 'hs-row');
   node.append(el('span', 'hs-row-label', label), el('span', 'hs-row-value', value));
+  return node;
+}
+
+/**
+ * One bento tile: a small label and a big value. The label comes first in the markup, so a
+ * screen reader says "Cash now, $120,000"; the css puts the number on top. A money value takes
+ * the money face (ui.css .hs-money); everything else stays in the ui font.
+ */
+export function tile(label: string, value: string, options: { wide?: boolean; money?: boolean; text?: boolean } = {}): HTMLDivElement {
+  const node = el('div', `hs-tile${options.wide ? ' is-wide' : ''}${options.text ? ' is-text' : ''}`);
+  node.append(el('span', 'hs-tile-label', label), el('span', `hs-tile-value${options.money ? ' hs-money' : ''}`, value));
+  return node;
+}
+
+/** A label and value row whose value is money, in the money face. */
+function moneyRow(label: string, value: string): HTMLDivElement {
+  const node = row(label, value);
+  node.lastElementChild?.classList.add('hs-money');
   return node;
 }
 
@@ -303,39 +316,50 @@ function roomPanel(roomId: Id, game: GameApi, ctx: PanelContext): PanelElement {
   if (wasteNote) body.append(wasteNote);
 
   let rentValue: HTMLSpanElement | null = null;
+  let rentMoney: HTMLSpanElement | null = null;
   let rentMinus: HTMLButtonElement | null = null;
   let rentPlus: HTMLButtonElement | null = null;
   let rentReset: HTMLButtonElement | null = null;
   if (takesRent(room.kind)) {
-    const rentRow = el('div', 'hs-row hs-rent-row');
-    rentRow.append(el('span', 'hs-row-label', 'Rent'));
-    const actions = el('div', 'hs-actions');
-    rentMinus = button('−', 'hs-btn', () => {
+    // Rent as a stepper pill: minus, the percent, plus. What it comes to in money sits under it.
+    const rent = section('Rent');
+    rent.classList.add('hs-rent');
+    const rentRow = el('div', 'hs-rent-row');
+    const stepper = el('div', 'hs-stepper');
+    stepper.setAttribute('role', 'group');
+    stepper.setAttribute('aria-label', 'Rent');
+    rentMinus = button('\u2212', 'hs-stepper-btn', () => {
       const now = game.world.rooms.get(roomId);
       if (!now) return;
       ctx.apply({ kind: 'room.setRent', roomId, rent: now.rent - RENT.step });
     });
     rentMinus.setAttribute('aria-label', 'Lower rent');
-    rentValue = el('span', 'hs-row-value', rentText(room));
-    rentPlus = button('+', 'hs-btn', () => {
+    rentValue = el('span', 'hs-stepper-value', `${room.rent}%`);
+    rentPlus = button('+', 'hs-stepper-btn', () => {
       const now = game.world.rooms.get(roomId);
       if (!now) return;
       ctx.apply({ kind: 'room.setRent', roomId, rent: now.rent + RENT.step });
     });
     rentPlus.setAttribute('aria-label', 'Raise rent');
+    stepper.append(rentMinus, rentValue, rentPlus);
     rentReset = button('Reset', 'hs-btn', () => {
       ctx.apply({ kind: 'room.setRent', roomId, rent: RENT.default });
     });
-    actions.append(rentMinus, rentValue, rentPlus, rentReset);
-    rentRow.append(actions);
-    body.append(rentRow);
-    body.append(
+    rentReset.setAttribute('aria-label', 'Reset rent');
+    rentRow.append(stepper, rentReset);
+    rentMoney = el('span', 'hs-money', rentMoneyText(room));
+    const money = el('p', 'hs-rent-money');
+    money.append(rentMoney);
+    rent.append(
+      rentRow,
+      money,
       el(
         'p',
         'hs-note',
         'Lower rent keeps tenants happier next to noise or a slow elevator. Higher rent pays more but makes them less happy.',
       ),
     );
+    body.append(rent);
   }
 
   const refresh = (): void => {
@@ -391,7 +415,8 @@ function roomPanel(roomId: Id, game: GameApi, ctx: PanelContext): PanelElement {
       const sim = game.world.sims.get(id);
       if (sim) setText(goal, goalLine(game.world, sim));
     }
-    if (rentValue) setText(rentValue, rentText(room));
+    if (rentValue) setText(rentValue, `${room.rent}%`);
+    if (rentMoney) setText(rentMoney, rentMoneyText(room));
     if (rentMinus) rentMinus.disabled = room.rent <= RENT.min;
     if (rentPlus) rentPlus.disabled = room.rent >= RENT.max;
     if (rentReset) rentReset.hidden = room.rent === RENT.default;
@@ -500,7 +525,7 @@ function portrait(game: GameApi, sim: Sim): HTMLCanvasElement {
   canvas.style.width = `${PORTRAIT_PX}px`;
   canvas.style.height = `${PORTRAIT_PX}px`;
   canvas.style.flex = '0 0 auto';
-  canvas.style.borderRadius = '4px';
+  canvas.style.borderRadius = '12px';
   canvas.setAttribute('role', 'img');
   canvas.setAttribute('aria-label', `Portrait of ${storyName(game.world, sim.id)}`);
   const context = canvas.getContext?.('2d');
@@ -844,22 +869,23 @@ function expressStopFloors(shaft: Shaft): number[] {
   return floors;
 }
 
-function rentText(room: Room): string {
+/** What the rent comes to: "$60,000 sale", "$450 per night", "$12,000 per quarter". */
+export function rentMoneyText(room: Room): string {
   const rent = room.rent;
   if (room.kind === 'condo') {
-    return `${rent}% (${formatMoney(ECONOMY.condoSalePrice * (rent / 100))} sale)`;
+    return `${formatMoney(ECONOMY.condoSalePrice * (rent / 100))} sale`;
   }
   if (room.kind === 'hotelSingle' || room.kind === 'hotelTwin' || room.kind === 'hotelSuite') {
     const rule = ROOMS[room.kind];
     const nightly = rule.incomePerQuarter * ECONOMY.hotelNightlyIncomeFraction * (rent / 100);
-    return `${rent}% (${formatMoney(nightly)} per night)`;
+    return `${formatMoney(nightly)} per night`;
   }
   if (room.kind === 'office') {
-    return `${rent}% (${formatMoney(officeQuarterRent(room))} per quarter now)`;
+    return `${formatMoney(officeQuarterRent(room))} per quarter now`;
   }
   const rule = ROOMS[room.kind];
   const quarterly = rule.incomePerQuarter * (rent / 100);
-  return `${rent}% (${formatMoney(quarterly)} per quarter)`;
+  return `${formatMoney(quarterly)} per quarter`;
 }
 
 function setRowValue(node: HTMLElement, text: string): void {
@@ -875,17 +901,14 @@ export function createFinancesPanel(game: GameApi, ctx: PanelContext): PanelElem
   const lastQuarter = (): { income: number; upkeep: number; net: number } =>
     game.world.stats.lastQuarter;
 
-  const last = section('Last quarter');
-  const income = row('Income', formatMoney(stats.lastQuarter.income));
-  const upkeep = row('Costs', formatMoney(stats.lastQuarter.upkeep));
-  const net = row('Profit', formatSignedMoney(stats.lastQuarter.net));
-  last.append(income, upkeep, net);
-  body.append(last);
-
-  const cash = section('Now');
-  const cashRow = row('Cash', formatMoney(game.world.cash));
-  cash.append(cashRow);
-  body.append(cash);
+  // The summary as a bento grid: cash now across the top, then last quarter's three numbers.
+  const bento = el('div', 'hs-bento');
+  const cashRow = tile('Cash now', formatMoney(game.world.cash), { wide: true, money: true });
+  const income = tile('Income last quarter', formatMoney(stats.lastQuarter.income), { money: true });
+  const upkeep = tile('Costs last quarter', formatMoney(stats.lastQuarter.upkeep), { money: true });
+  const net = tile('Profit last quarter', formatSignedMoney(stats.lastQuarter.net), { wide: true, money: true });
+  bento.append(cashRow, income, upkeep, net);
+  body.append(bento);
 
   const incomeSection = section('Income this quarter so far');
   const incomeList = el('div', 'hs-list');
@@ -907,7 +930,7 @@ export function createFinancesPanel(game: GameApi, ctx: PanelContext): PanelElem
       return;
     }
     list.replaceChildren(
-      ...entries.map(([kind, value]) => row(kindLabel(kind as RoomKind | ShaftKind), formatMoney(value))),
+      ...entries.map(([kind, value]) => moneyRow(kindLabel(kind as RoomKind | ShaftKind), formatMoney(value))),
     );
   };
 
@@ -915,6 +938,8 @@ export function createFinancesPanel(game: GameApi, ctx: PanelContext): PanelElem
     setRowValue(income, formatMoney(lastQuarter().income));
     setRowValue(upkeep, formatMoney(lastQuarter().upkeep));
     setRowValue(net, formatSignedMoney(lastQuarter().net));
+    net.classList.toggle('is-up', lastQuarter().net > 0);
+    net.classList.toggle('is-down', lastQuarter().net < 0);
     setRowValue(cashRow, formatMoney(game.world.cash));
     fillList(incomeList, game.world.stats.incomeByKind);
     fillList(upkeepList, game.world.stats.upkeepByKind);
@@ -1115,13 +1140,18 @@ export function createRecapPanel(game: GameApi, ctx: PanelContext): PanelElement
     return panel;
   }
   const star = Math.min(6, Math.max(1, Math.round(recap.star)));
-  const heading = section(star === 6 ? 'Tower status' : `${star} stars`);
-  heading.append(el('p', 'hs-note', recap.unlocks));
+  // The summary as a bento grid: the milestone and how much changed, then what it opened up.
+  const bento = el('div', 'hs-bento');
+  bento.append(
+    tile('Milestone', star === 6 ? 'Tower status' : `${star} stars`),
+    tile('New stories', formatCount(recap.lines.length)),
+    tile('Opened up', recap.unlocks, { wide: true, text: true }),
+  );
   const people = section('Since the last milestone');
   const list = el('ul', 'hs-story-chapter');
   setLines(list, recap.lines.length > 0 ? recap.lines : [NO_STORIES_YET], 'li', 'hs-story-item');
   people.append(list);
-  body.append(heading, people);
+  body.append(bento, people);
   return panel;
 }
 
@@ -1202,60 +1232,164 @@ function freshStart(): number {
   return Math.floor(Date.now() % 1_000_000);
 }
 
+/** The Display switches another part of the ui reads back (prefs.ts keys). */
+export type DisplaySwitch = 'largeText' | 'colorBlind' | 'glassClear';
+
+/** The class on the page root that makes the controls layer clearer (ui.css, package 1). */
+export const GLASS_CLEAR_CLASS = 'hs-glass-clear';
+
+/** See-through buttons: on or off on the page root. A page with no root does nothing. */
+export function applyGlassClear(on: boolean): void {
+  try {
+    document.documentElement?.classList.toggle(GLASS_CLEAR_CLASS, on);
+  } catch {
+    // No page root to mark: the controls keep the tinted look.
+  }
+}
+
+/** Is See-through buttons on? Off by default and when the store will not answer. */
+export function readGlassClear(): boolean {
+  return getFlag(PREF_KEYS.glassClear) === true;
+}
+
+/** A settings group: its title, a line under it when it needs one, then one rounded list of rows. */
+function settingsGroup(title: string, note?: string): { node: HTMLDivElement; list: HTMLDivElement } {
+  const node = section(title);
+  if (note) node.append(el('p', 'hs-note', note));
+  const list = el('div', 'hs-set-list');
+  node.append(list);
+  return { node, list };
+}
+
+/** A row that does one thing when tapped. Its words are the whole of its name. */
+function actionRow(label: string, onClick: () => void, title?: string): HTMLButtonElement {
+  const node = button(label, 'hs-set-row hs-set-action', onClick);
+  if (title) node.title = title;
+  return node;
+}
+
+export interface SwitchRow {
+  row: HTMLDivElement;
+  control: HTMLButtonElement;
+  set(on: boolean): void;
+}
+
+/**
+ * A real toggle switch: a button with role switch and aria-checked, named by the label beside
+ * it (a tap on the words flips it too). The whole row is at least 44 px tall and the switch
+ * itself 44 px wide.
+ */
+export function switchRow(id: string, label: string, on: boolean, onChange: (on: boolean) => void): SwitchRow {
+  const row = el('div', 'hs-set-row hs-set-switch');
+  const text = el('label', 'hs-set-label', label);
+  text.htmlFor = id;
+  const control = el('button', 'hs-switch');
+  control.type = 'button';
+  control.id = id;
+  control.setAttribute('role', 'switch');
+  control.append(el('span', 'hs-switch-thumb'));
+  const set = (next: boolean): void => {
+    control.setAttribute('aria-checked', next ? 'true' : 'false');
+  };
+  set(on);
+  control.addEventListener('click', () => {
+    const next = control.getAttribute('aria-checked') !== 'true';
+    set(next);
+    onChange(next);
+  });
+  row.append(text, control);
+  return { row, control, set };
+}
+
+const THEME_CHOICES: readonly [Theme, string][] = [
+  ['system', 'Auto'],
+  ['light', 'Light'],
+  ['dark', 'Dark'],
+];
+
+/** Theme as three joined buttons: Auto (follow the device), Light, Dark. The chosen one is pressed. */
+function themeRow(): HTMLDivElement {
+  const row = el('div', 'hs-set-row hs-set-choice');
+  const label = el('span', 'hs-set-label', 'Theme');
+  label.id = 'hs-theme-label';
+  const group = el('div', 'hs-segmented');
+  group.setAttribute('role', 'group');
+  group.setAttribute('aria-labelledby', label.id);
+  let theme = readTheme();
+  const buttons = THEME_CHOICES.map(([value, words]) => {
+    const node = button(words, 'hs-seg-btn', () => {
+      theme = value;
+      applyTheme(theme);
+      paint();
+    });
+    node.dataset['theme'] = value;
+    return node;
+  });
+  const paint = (): void => {
+    buttons.forEach((node, i) => node.setAttribute('aria-pressed', THEME_CHOICES[i]?.[0] === theme ? 'true' : 'false'));
+  };
+  paint();
+  group.append(...buttons);
+  row.append(label, group);
+  return row;
+}
+
+/** The title words in a sheet's head, to name the page the settings sheet is on. */
+function titleText(panel: PanelElement): HTMLElement | null {
+  const heading = panel.sheet?.head.firstElementChild as HTMLElement | null | undefined;
+  return (heading?.lastElementChild as HTMLElement | null | undefined) ?? null;
+}
+
 export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElement {
   const { panel, body } = panelShell('Settings', 'settings', ctx);
+  panel.classList.add('hs-settings');
+  const main = el('div', 'hs-set-main');
 
-  // Help: the intro again, the guide page, and the controls list.
-  const help = section('Help');
-  const helpActions = el('div', 'hs-actions');
-  const openIntro = ctx.openIntro;
-  if (openIntro) {
-    const intro = button('Intro', 'hs-btn', () => openIntro());
-    intro.title = 'Show the three intro screens again';
-    helpActions.append(intro);
+  // Game: Today's tower, then New game in My tower or My tower anywhere else, then Stories.
+  // A new tower always gets a fresh random start; the starting number is only in the page
+  // address (?seed=, read in main.ts) for testing, never in this panel. New game only ever
+  // replaces My tower, so outside it the row is My tower instead.
+  const gameGroup = settingsGroup('Game');
+  const slot = game.getSlot?.() ?? 'mine';
+  const openDaily = ctx.openDaily;
+  if (openDaily && slot !== 'daily') gameGroup.list.append(actionRow("Today's tower", () => openDaily()));
+  const openMine = ctx.openMyTower;
+  if (slot === 'mine') {
+    gameGroup.list.append(
+      actionRow('New game', () => {
+        game.newGame(freshStart());
+        ctx.notice('New game started.');
+      }),
+    );
+  } else if (openMine) {
+    gameGroup.list.append(actionRow('My tower', () => openMine()));
   }
-  const guide = el('a', 'hs-btn hs-link', 'How to play');
-  guide.href = HOW_TO_PLAY_HREF;
-  guide.target = '_blank';
-  guide.rel = 'noopener';
-  guide.title = 'The full guide, in a new tab';
-  helpActions.append(guide);
-  help.append(helpActions);
-  const controls = el('div', 'hs-help-controls');
-  controls.append(el('h4', 'hs-section-title', 'Controls'));
-  for (const line of CONTROL_LINES) controls.append(el('p', 'hs-note', line));
-  help.append(controls);
-  body.append(help);
+  const openStories = ctx.openStories;
+  if (openStories) {
+    gameGroup.list.append(actionRow('Stories', () => openStories(), 'The people you follow and the latest from around the tower'));
+  }
+  if (gameGroup.list.children.length > 0) main.append(gameGroup.node);
 
-  const saves = el('div', 'hs-actions');
-  saves.append(
-    button('Save now', 'hs-btn', () => {
+  // Saving: the tower saves itself; these are for the player who wants to be sure, or a copy.
+  const saving = settingsGroup('Saving', 'Your tower saves by itself.');
+  saving.list.append(
+    actionRow('Save now', () => {
       void game.save().then((result) => {
         ctx.notice(result.ok ? 'Game saved.' : result.reason);
       });
     }),
-    button('Go back to last save', 'hs-btn', () => {
+    actionRow('Go back to last save', () => {
       void game.load().then((result) => {
         ctx.notice(result.ok ? 'Back to your last save.' : result.reason);
       });
     }),
-    button('Save to a file', 'hs-btn', () => {
+    actionRow('Save to a file', () => {
       exportSave(game.exportSave(), ctx);
     }),
   );
-  const openStories = ctx.openStories;
-  if (openStories) {
-    const stories = button('Stories', 'hs-btn', () => openStories());
-    stories.title = 'The people you follow and the latest from around the tower';
-    saves.append(stories);
-  }
-  body.append(section('Saved games'), el('p', 'hs-note', 'Your tower saves by itself.'), saves);
-
-  const importField = el('div', 'hs-field');
-  const importLabel = el('label', 'hs-row-label', 'Open a saved file');
   if (savePlatform() === 'tauri') {
     // The desktop shell: a system open dialog, not a file input.
-    const pick = button('Open a saved file', 'hs-btn', () => {
+    const pick = actionRow('Open a saved file', () => {
       void importSaveWithDialog()
         .then((text) => {
           if (text === null) return;
@@ -1266,83 +1400,100 @@ export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElem
     });
     pick.id = 'hs-import';
     pick.setAttribute('aria-label', 'Open a saved file');
-    importLabel.htmlFor = pick.id;
-    importField.append(importLabel, pick);
+    saving.list.append(pick);
   } else {
-    importField.append(importLabel, importFileInput(game, ctx));
-    importLabel.htmlFor = 'hs-import';
+    // The web and the phones: our own button opens a file input kept out of sight, so the
+    // browser's "Choose file" and "No file chosen" never show.
+    const file = importFileInput(game, ctx);
+    const pick = actionRow('Open a saved file', () => file.click());
+    pick.setAttribute('aria-controls', file.id);
+    saving.list.append(pick, file);
   }
-  body.append(importField);
+  main.append(saving.node);
 
-  // A new tower always gets a fresh random start. The starting number is still reachable
-  // through the page address (?seed=, read in main.ts) for testing, never from this panel.
-  // New game only ever replaces My tower, so outside it the button is My tower instead. Today's
-  // tower sits beside it and opens in its own slot.
-  const newGame = el('div', 'hs-actions');
-  const slot = game.getSlot?.() ?? 'mine';
-  const openMine = ctx.openMyTower;
-  if (slot === 'mine') {
-    newGame.append(
-      button('New game', 'hs-btn', () => {
-        game.newGame(freshStart());
-        ctx.notice('New game started.');
-      }),
-    );
-  } else if (openMine) {
-    newGame.append(button('My tower', 'hs-btn', () => openMine()));
+  if (ctx.sound) main.append(soundSection(ctx.sound));
+
+  // Display: the theme, then the switches. Larger text and Color-blind friendly views are read
+  // back by the rest of the ui (prefs.ts); See-through buttons marks the page root here.
+  const display = settingsGroup('Display');
+  display.list.append(
+    themeRow(),
+    switchRow('hs-reduced-motion', 'Reduced motion', ctx.reducedMotion, (on) => ctx.setReducedMotion(on)).row,
+    switchRow('hs-large-text', 'Larger text', getFlag(PREF_KEYS.largeText) === true, (on) => {
+      setFlag(PREF_KEYS.largeText, on);
+      ctx.setDisplay?.('largeText', on);
+    }).row,
+    switchRow('hs-color-blind', 'Color-blind friendly views', getFlag(PREF_KEYS.colorBlind) === true, (on) => {
+      setFlag(PREF_KEYS.colorBlind, on);
+      ctx.setDisplay?.('colorBlind', on);
+    }).row,
+    switchRow('hs-glass-clear', 'See-through buttons', readGlassClear(), (on) => {
+      setFlag(PREF_KEYS.glassClear, on);
+      applyGlassClear(on);
+      ctx.setDisplay?.('glassClear', on);
+    }).row,
+    // Haptics, last: on by default (src/ui/haptics.ts).
+    switchRow('hs-haptics', 'Haptics', hapticsEnabled(), (on) => setHapticsEnabled(on)).row,
+  );
+  main.append(display.node);
+
+  // Help: the intro again, the guide page, and the Controls page.
+  const help = settingsGroup('Help');
+  const openIntro = ctx.openIntro;
+  if (openIntro) help.list.append(actionRow('Intro', () => openIntro(), 'Show the three intro screens again'));
+  const guide = el('a', 'hs-set-row hs-set-action hs-link', 'How to play');
+  guide.href = HOW_TO_PLAY_HREF;
+  guide.target = '_blank';
+  guide.rel = 'noopener';
+  guide.title = 'The full guide, in a new tab';
+  help.list.append(guide);
+  const controlsRow = actionRow('Controls', () => showControls(true));
+  controlsRow.append(chevron() as unknown as HTMLElement);
+  controlsRow.title = 'The controls for what you are playing with';
+  help.list.append(controlsRow);
+  main.append(help.node);
+
+  // The Controls page: its own page inside the sheet, with a way back. Built now for the device
+  // in hand, and again each time it opens, in case a controller was plugged in since.
+  const controlsPage = el('div', 'hs-set-page');
+  controlsPage.hidden = true;
+  const back = button('Back', 'hs-set-back', () => showControls(false));
+  back.setAttribute('aria-label', 'Back to settings');
+  const controls = el('div', 'hs-help-controls');
+  fillControlsPage(controls, controlsDevice(currentDeviceEnv()));
+  controlsPage.append(back, controls);
+  controlsPage.addEventListener('keydown', (event: Event) => {
+    const key = event as KeyboardEvent;
+    if (key.key !== 'Escape' || key.defaultPrevented) return;
+    key.preventDefault();
+    showControls(false);
+  });
+
+  function showControls(on: boolean): void {
+    if (on) fillControlsPage(controls, controlsDevice(currentDeviceEnv()));
+    main.hidden = on;
+    controlsPage.hidden = !on;
+    const title = titleText(panel);
+    if (title) title.textContent = on ? 'Controls' : 'Settings';
+    (on ? back : controlsRow).focus?.({ preventScroll: true });
   }
-  const openDaily = ctx.openDaily;
-  if (openDaily && slot !== 'daily') newGame.append(button("Today's tower", 'hs-btn', () => openDaily()));
-  body.append(section('New game'), newGame);
 
-  const motion = section('Display');
-  const motionField = el('div', 'hs-field');
-  const motionBox = el('input');
-  motionBox.type = 'checkbox';
-  motionBox.id = 'hs-reduced-motion';
-  motionBox.checked = ctx.reducedMotion;
-  motionBox.addEventListener('change', () => {
-    ctx.setReducedMotion(motionBox.checked);
-  });
-  const motionLabel = el('label', 'hs-row-label', 'Less motion');
-  motionLabel.htmlFor = motionBox.id;
-  motionField.append(motionBox, motionLabel);
-  motion.append(motionField);
-
-  let theme = readTheme();
-  const themeField = el('div', 'hs-field');
-  const themeLabelEl = el('span', 'hs-row-label', 'Theme');
-  const themeButton = button(themeLabel(theme), 'hs-btn', () => {
-    theme = cycleTheme(theme);
-    applyTheme(theme);
-    themeButton.textContent = themeLabel(theme);
-  });
-  themeField.append(themeLabelEl, themeButton);
-  motion.append(themeField);
-  motion.append(createHapticsRow()); // Haptics, last in Display (src/ui/haptics.ts)
-
-  body.append(motion);
-  if (ctx.sound) body.append(soundSection(ctx.sound));
-
+  body.append(main, controlsPage);
   return panel;
 }
 
-/** The sound switch and its levels. Off by default; nothing plays until it is on. */
+/** Sound on or off, and its three levels. Off by default; nothing plays until it is on. */
 function soundSection(sound: Sound): HTMLDivElement {
-  const node = section('Sound');
-  const field = el('div', 'hs-field');
-  const box = el('input');
-  box.type = 'checkbox';
-  box.id = 'hs-sound';
-  box.checked = sound.settings.on;
-  const label = el('label', 'hs-row-label', 'Sound');
-  label.htmlFor = box.id;
-  field.append(box, label);
-  node.append(field);
-
+  const group = settingsGroup('Sound');
   const levels: HTMLInputElement[] = [];
+  const toggle = switchRow('hs-sound', 'Sound', sound.settings.on, (on) => {
+    sound.setEnabled(on);
+    for (const input of levels) input.disabled = !on;
+  });
+  group.list.append(toggle.row);
+
   const level = (id: string, name: string, value: number, set: (n: number) => void): HTMLDivElement => {
-    const row = el('div', 'hs-field hs-level');
+    const row = el('div', 'hs-set-row hs-level');
     const input = el('input');
     input.type = 'range';
     input.id = id;
@@ -1351,29 +1502,31 @@ function soundSection(sound: Sound): HTMLDivElement {
     input.step = '5';
     input.value = String(value);
     input.disabled = !sound.settings.on;
-    const text = el('label', 'hs-row-label', name);
+    const text = el('label', 'hs-set-label', name);
     text.htmlFor = input.id;
     const readout = el('span', 'hs-level-value', String(value));
+    const paint = (): void => {
+      input.style.setProperty('--level', `${input.value}%`);
+    };
+    paint();
     input.addEventListener('input', () => {
       set(Number(input.value));
       readout.textContent = input.value;
+      paint();
     });
     levels.push(input);
     row.append(text, input, readout);
     return row;
   };
-  node.append(
+  group.list.append(
     level('hs-sound-music', 'Music', sound.settings.music ?? 60, (n) => sound.setMusic?.(n)),
     level('hs-sound-effects', 'Sound effects', sound.settings.effects, (n) => sound.setEffects(n)),
     level('hs-sound-ambient', 'Background', sound.settings.ambient, (n) => sound.setAmbient(n)),
+  );
+  group.node.append(
     el('p', 'hs-note', 'Music grows with the tower. Sound effects play for events and stars. Background sound follows the time of day and the weather.'),
   );
-
-  box.addEventListener('change', () => {
-    sound.setEnabled(box.checked);
-    for (const input of levels) input.disabled = !box.checked;
-  });
-  return node;
+  return group.node;
 }
 
 // ----------------------------------------------------------- share panel
@@ -1443,7 +1596,7 @@ export function createSharePanel(
 
   let sendButton: HTMLButtonElement | null = null;
   if (navigator.share) {
-    sendButton = button('Share…', 'hs-btn', () => {
+    sendButton = button('Share…', 'hs-btn is-primary', () => {
       if (!blob) return;
       const file = new File([blob], 'hundred-stories-tower.png', { type: 'image/png' });
       const canShareFiles = navigator.canShare?.({ files: [file] }) ?? false;
@@ -1491,12 +1644,17 @@ export function createSharePanel(
   return panel;
 }
 
-/** The web and phone import: a file input (the system picker in both native shells). */
+/**
+ * The web and phone import: a file input (the system picker in both native shells), kept out of
+ * sight and out of the Tab order. The Open a saved file row clicks it.
+ */
 function importFileInput(game: GameApi, ctx: PanelContext): HTMLInputElement {
   const file = el('input');
   file.type = 'file';
   file.accept = 'application/json,.json';
   file.className = 'hs-file';
+  file.hidden = true;
+  file.setAttribute('tabindex', '-1');
   file.setAttribute('aria-label', 'Open a saved file');
   file.addEventListener('change', () => {
     const chosen = file.files && file.files.length > 0 ? file.files[0] : null;

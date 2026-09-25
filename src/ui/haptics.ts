@@ -124,23 +124,3 @@ export function createPageHaptics(): Haptics {
     },
   });
 }
-
-/**
- * The Haptics switch for Settings, Display: one row, a checkbox and its label, the same shape
- * as the rows beside it.
- */
-export function createHapticsRow(): HTMLElement {
-  const field = document.createElement('div');
-  field.className = 'hs-field';
-  const box = document.createElement('input');
-  box.type = 'checkbox';
-  box.id = 'hs-haptics';
-  box.checked = hapticsEnabled();
-  box.addEventListener('change', () => setHapticsEnabled(box.checked));
-  const label = document.createElement('label');
-  label.className = 'hs-row-label';
-  label.textContent = 'Haptics';
-  label.htmlFor = box.id;
-  field.append(box, label);
-  return field;
-}

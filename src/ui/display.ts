@@ -42,8 +42,14 @@ export function applyDisplayPrefs(prefs: DisplayPrefs, targets: DisplayTargets):
   targets.colorBlind(prefs.colorBlind);
 }
 
-/** Apply now and after every write to either key. Returns the way to stop. */
-export function watchDisplayPrefs(targets: DisplayTargets): () => void {
+export interface DisplayWatch {
+  /** Read the switches again and apply what moved (Settings calls this through ctx.setDisplay). */
+  refresh(): void;
+  stop(): void;
+}
+
+/** Apply now and after every write to either key. */
+export function watchDisplayPrefs(targets: DisplayTargets): DisplayWatch {
   let last: DisplayPrefs | null = null;
   // Each switch is put into effect when it moves, and only then.
   const apply = (): void => {
@@ -53,9 +59,10 @@ export function watchDisplayPrefs(targets: DisplayTargets): () => void {
     last = prefs;
   };
   apply();
-  return onPrefChange((key) => {
+  const stop = onPrefChange((key) => {
     if (key === PREF_KEYS.largeText || key === PREF_KEYS.colorBlind) apply();
   });
+  return { refresh: apply, stop };
 }
 
 /** The page root, where there is one. */

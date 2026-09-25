@@ -104,14 +104,14 @@ describe('larger text', () => {
   it('puts hs-large-text on the page root from the stored switch, and follows it when Settings writes it', () => {
     const rootEl = dom.createElement('html');
     const colorBlind: boolean[] = [];
-    const stop = watchDisplayPrefs({ root: rootEl as never, colorBlind: (on) => colorBlind.push(on) });
+    const watch = watchDisplayPrefs({ root: rootEl as never, colorBlind: (on) => colorBlind.push(on) });
     expect(has(rootEl, 'hs-large-text')).toBe(false);
     setFlag(PREF_KEYS.largeText, true);
     expect(has(rootEl, 'hs-large-text')).toBe(true);
     expect(readDisplayPrefs()).toEqual({ largeText: true, colorBlind: false });
     setFlag(PREF_KEYS.largeText, false);
     expect(has(rootEl, 'hs-large-text')).toBe(false);
-    stop();
+    watch.stop();
     setFlag(PREF_KEYS.largeText, true);
     expect(has(rootEl, 'hs-large-text')).toBe(false); // stopped listening
     expect(colorBlind).toEqual([false]);
@@ -139,5 +139,26 @@ describe('color-blind friendly views in the shell', () => {
     for (const fn of first.listeners.get('click') ?? []) fn({});
     const striped = shell.descendants().filter((n) => has(n, 'is-striped'));
     expect(striped).toHaveLength(1);
+  });
+
+  it('follows the Settings switches live: Larger text on the page root, color-blind to the renderer', () => {
+    const html = dom.createElement('html');
+    (globalThis as { document: { documentElement?: unknown } }).document.documentElement = html;
+    const calls: boolean[] = [];
+    const root = dom.createElement('div');
+    const game = { ...(fakeGame() as object), getSlot: () => 'mine' };
+    createUi(root as never, game as never, { setOverlayColorBlind: (on: boolean) => calls.push(on) } as never);
+    const menu = root.descendants().find((n) => n.getAttribute('aria-label') === 'Menu')!;
+    for (const fn of menu.listeners.get('click') ?? []) fn({});
+    const press = (id: string): void => {
+      const control = root.descendants().find((n) => n.id === id)!;
+      for (const fn of control.listeners.get('click') ?? []) fn({});
+    };
+    press('hs-large-text');
+    expect(has(html, 'hs-large-text')).toBe(true);
+    press('hs-color-blind');
+    expect(calls).toEqual([false, true]);
+    press('hs-large-text');
+    expect(has(html, 'hs-large-text')).toBe(false);
   });
 });

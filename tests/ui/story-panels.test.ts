@@ -140,12 +140,16 @@ describe('room panel occupants', () => {
 });
 
 describe('stories', () => {
-  it('opens from a Stories button beside the save buttons', () => {
+  it('opens from a Stories row in the Game group, with the save rows in their own group', () => {
     const c = context();
     const panel = createSettingsPanel({ world: { seed: 1, log: [], logTotal: 0 } } as never, c.ctx);
-    const actions = node(panel).descendants().filter((n) => n.className === 'hs-actions');
-    const saves = actions.find((row) => row.children.some((b) => b.textContent === 'Save to a file'));
-    expect(saves?.children.map((b) => b.textContent)).toEqual(['Save now', 'Go back to last save', 'Save to a file', 'Stories']);
+    const lists = node(panel).descendants().filter((n) => n.className === 'hs-set-list');
+    const rows = (list: FakeElement | undefined): string[] =>
+      (list?.children ?? []).filter((b) => b.tagName === 'BUTTON').map((b) => b.textContent);
+    const saves = lists.find((list) => list.children.some((b) => b.textContent === 'Save to a file'));
+    expect(rows(saves)).toEqual(['Save now', 'Go back to last save', 'Save to a file', 'Open a saved file']);
+    const game = lists.find((list) => list.children.some((b) => b.textContent === 'New game'));
+    expect(rows(game)).toEqual(['New game', 'Stories']);
     press(buttonsNamed(panel, 'Stories')[0]);
     expect(c.stories).toBe(1);
   });

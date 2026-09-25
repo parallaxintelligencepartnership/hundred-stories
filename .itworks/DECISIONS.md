@@ -89,3 +89,4 @@
 - 2026-09-24 | UI polish spec approved as written (docs/reviews/2026-09-24-ui-polish-spec.md): foundation first by one agent, then settings/panels and build/views/accessibility in parallel | why: Matt, "go"
 - 2026-09-24 | stairs keep overlaying other rooms; a flight may start on any floor from the ground up, and underground only between B1 and the ground; escalators unchanged unless Matt says otherwise | why: Matt, "stairs should be able to rest over other items ... ground down 1 level only"
 - 2026-09-24 | escalators get the same depth limit as stairs (B1 to ground at most); stairs alone count the room they stand on as support | why: Matt, "limited to b1 too"; stairs rest over other items
+- 2026-09-24 | Matt gave the go for the combined release (audio plus tonight's work) once 2A and 2B land and the closeout passes: "this my go for release when its ready" | why: Matt's explicit in-session authorization; Claude deploys

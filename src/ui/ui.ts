@@ -38,6 +38,7 @@ import { chromeInsets, isSheetLayout, placementBoxes, viewInsets } from './layou
 import { createToasts } from './toast';
 import type { Box } from './layout';
 import {
+  applyGlassClear,
   button,
   createChroniclePanel,
   createFinancesPanel,
@@ -48,6 +49,7 @@ import {
   createSharePanel,
   createStoriesPanel,
   el,
+  readGlassClear,
 } from './panels';
 import type { PanelContext, PanelElement } from './panels';
 import { GROUPS, applyRowState, buildPalette, paintThumbnail, sameTool, toolRowState } from './palette';
@@ -467,6 +469,10 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     openMyTower() {
       openMyTower();
     },
+    setDisplay(name) {
+      // The switch is already stored; Larger text and the color-blind views follow at once.
+      if (name === 'largeText' || name === 'colorBlind') display.refresh();
+    },
     select(sel) {
       // A name in a list is a way into that person: the list's panel steps aside for theirs.
       if (panelKind !== 'none') panelKind = 'none';
@@ -476,6 +482,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   };
 
   applyReducedMotion(reducedMotion);
+  // See-through buttons, as the player left it in Settings (off by default).
+  applyGlassClear(readGlassClear());
   // The top bar wraps on a narrow screen, so nothing below it can assume one row: its measured
   // bottom goes into a variable the palette, the panel and the hint sit under, and into the
   // band the camera frames the street in. Nothing else pushes the tower: it is full bleed.
@@ -488,7 +496,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     refreshPlacement();
   });
   // Larger text and color-blind friendly views, now and whenever Settings changes them.
-  const unwatchDisplay = watchDisplayPrefs({
+  const display = watchDisplayPrefs({
     root: pageRoot(),
     colorBlind(on) {
       if (typeof renderer.setOverlayColorBlind === 'function') renderer.setOverlayColorBlind(on);
@@ -1388,7 +1396,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     update,
     destroy() {
       destroyed = true;
-      unwatchDisplay();
+      display.stop();
       unsubscribeHaptics?.();
       pad?.destroy();
       view.destroy();

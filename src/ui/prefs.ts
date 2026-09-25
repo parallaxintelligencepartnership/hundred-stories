@@ -13,9 +13,10 @@ export const PREF_KEYS = {
   guideDone: 'hs.guide.done',
   tips: 'hs.tips',
   goalsCollapsed: 'hs.goals.collapsed',
-  // Display (Settings): the ui reads these through onPrefChange, so a switch takes at once.
+  /** The Display switches in Settings. Package 2B reads largeText and colorBlind. */
   largeText: 'hs.largeText',
   colorBlind: 'hs.colorBlind',
+  glassClear: 'hs.glassClear',
   // Haptics on or off; on unless the player turned them off.
   haptics: 'hs.haptics',
 } as const;

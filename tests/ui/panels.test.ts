@@ -1,6 +1,6 @@
 // The log and room panels on a fake DOM: what a refresh builds, and what it leaves alone.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createLogPanel, createQueryPanel, createSettingsPanel, LOG_PANEL_LINES, type PanelContext } from '../../src/ui/panels';
+import { createFinancesPanel, createLogPanel, createQueryPanel, createSettingsPanel, LOG_PANEL_LINES, type PanelContext } from '../../src/ui/panels';
 import type { Sound } from '../../src/audio/audio';
 import { RENT } from '../../src/sim/rules';
 import type { LogEntry } from '../../src/sim/types';
@@ -180,15 +180,15 @@ describe('settings panel sound section', () => {
     const panel = node(createSettingsPanel(settingsGame, { ...ctx, sound }));
     const all = panel.descendants();
     expect(all.some((n) => n.className === 'hs-section-title' && n.textContent === 'Sound')).toBe(true);
-    const box = all.find((n) => n.id === 'hs-sound') as unknown as FakeElement & { checked: boolean };
+    const box = all.find((n) => n.id === 'hs-sound') as FakeElement;
     const effects = all.find((n) => n.id === 'hs-sound-effects') as unknown as FakeElement & { value: string; disabled: boolean };
     const ambient = all.find((n) => n.id === 'hs-sound-ambient') as unknown as FakeElement & { value: string; disabled: boolean };
-    expect(box.checked).toBe(false);
+    expect([box.tagName, box.getAttribute('role'), box.getAttribute('aria-checked')]).toEqual(['BUTTON', 'switch', 'false']);
     expect([effects.value, ambient.value]).toEqual(['70', '50']);
     expect([effects.disabled, ambient.disabled]).toEqual([true, true]);
 
-    box.checked = true;
-    fire(box, 'change');
+    fire(box, 'click');
+    expect(box.getAttribute('aria-checked')).toBe('true');
     expect([effects.disabled, ambient.disabled]).toEqual([false, false]);
     effects.value = '25';
     fire(effects, 'input');
@@ -248,13 +248,13 @@ describe('settings: saved games and new game', () => {
   it('says the tower saves by itself and names each save button in plain words', () => {
     const panel = createSettingsPanel({ world: { seed: 1, log: [], logTotal: 0 } } as never, ctx);
     const all = node(panel).descendants();
-    expect(all.some((n) => n.className === 'hs-section-title' && n.textContent === 'Saved games')).toBe(true);
+    expect(all.some((n) => n.className === 'hs-section-title' && n.textContent === 'Saving')).toBe(true);
     expect(all.some((n) => n.className === 'hs-note' && n.textContent === 'Your tower saves by itself.')).toBe(true);
-    for (const text of ['Save now', 'Go back to last save', 'Save to a file']) expect(named(panel, text)).toHaveLength(1);
+    for (const text of ['Save now', 'Go back to last save', 'Save to a file', 'Open a saved file']) expect(named(panel, text)).toHaveLength(1);
     for (const old of ['Save', 'Load', 'Export', 'Import']) expect(named(panel, old)).toHaveLength(0);
     const file = all.find((n) => n.id === 'hs-import') as FakeElement;
     expect(file.getAttribute('aria-label')).toBe('Open a saved file');
-    expect(all.some((n) => n.tagName === 'LABEL' && n.textContent === 'Open a saved file')).toBe(true);
+    expect(named(panel, 'Open a saved file')[0]?.getAttribute('aria-controls')).toBe('hs-import');
   });
 
   it('tells the player where they are after going back to the last save', async () => {
@@ -284,5 +284,77 @@ describe('settings: saved games and new game', () => {
     }
     expect(started).toEqual([123]);
     expect(notices).toEqual(['New game started.']);
+  });
+});
+
+describe('room panel rent stepper', () => {
+  function rentGame(rent: number = RENT.default) {
+    const room: Record<string, unknown> = {
+      id: 1, kind: 'office', floor: 2, height: 1, eval: 0.8, tenants: [], occupancy: 0,
+      vacant: false, dirty: false, infested: false, onFire: false, rent,
+    };
+    const applied: unknown[] = [];
+    const game = { world: { seed: 1, rooms: new Map([[1, room]]), shafts: new Map(), sims: new Map() } } as never;
+    const c: PanelContext = { ...ctx, apply: (cmd) => (applied.push(cmd), { ok: true }) as never };
+    return { game, room, applied, c };
+  }
+  const click = (target: FakeElement): void => {
+    for (const fn of target.listeners.get('click') ?? []) fn({});
+  };
+
+  it('is one pill: minus, the percent, plus, with the old labels, and the money under it', () => {
+    const { game, applied, c } = rentGame();
+    const panel = node(createQueryPanel(game, { roomId: 1 }, c));
+    const pill = panel.descendants().find((n) => n.className === 'hs-stepper') as FakeElement;
+    expect(pill.getAttribute('role')).toBe('group');
+    expect(pill.getAttribute('aria-label')).toBe('Rent');
+    expect(pill.children.map((n) => [n.tagName, n.getAttribute('aria-label'), n.textContent])).toEqual([
+      ['BUTTON', 'Lower rent', '−'],
+      ['SPAN', null, `${RENT.default}%`],
+      ['BUTTON', 'Raise rent', '+'],
+    ]);
+    const money = panel.descendants().find((n) => n.className === 'hs-money') as FakeElement;
+    expect(money.textContent).toMatch(/^\$[\d,]+ per quarter now$/);
+    click(pill.children[0] as FakeElement);
+    click(pill.children[2] as FakeElement);
+    expect(applied).toEqual([
+      { kind: 'room.setRent', roomId: 1, rent: RENT.default - RENT.step },
+      { kind: 'room.setRent', roomId: 1, rent: RENT.default + RENT.step },
+    ]);
+    const reset = panel.descendants().find((n) => n.getAttribute('aria-label') === 'Reset rent') as FakeElement;
+    expect(reset.hidden).toBe(true);
+  });
+
+  it('follows the room on refresh and holds at the ends', () => {
+    const { game, room, c } = rentGame(RENT.min);
+    const panel = createQueryPanel(game, { roomId: 1 }, c);
+    const pill = node(panel).descendants().find((n) => n.className === 'hs-stepper') as FakeElement;
+    const [minus, value, plus] = pill.children as [FakeElement, FakeElement, FakeElement];
+    expect([minus.disabled, plus.disabled, value.textContent]).toEqual([true, false, `${RENT.min}%`]);
+    room['rent'] = RENT.max;
+    panel.refresh?.();
+    expect([minus.disabled, plus.disabled, value.textContent]).toEqual([false, true, `${RENT.max}%`]);
+  });
+});
+
+describe('finances bento', () => {
+  it('shows cash now and last quarter as tiles, a small label over a big number in the money face', () => {
+    const stats = { lastQuarter: { income: 30_000, upkeep: 12_000, net: 18_000 }, incomeByKind: { office: 30_000 }, upkeepByKind: {} };
+    const world = { cash: 250_000, stats };
+    const panel = node(createFinancesPanel({ world } as never, ctx));
+    const bento = panel.descendants().find((n) => n.className === 'hs-bento') as FakeElement;
+    const tiles = bento.children.map((t) => [t.className, t.children[0]?.textContent, t.children[1]?.textContent, t.children[1]?.className]);
+    expect(tiles).toEqual([
+      ['hs-tile is-wide', 'Cash now', '$250,000', 'hs-tile-value hs-money'],
+      ['hs-tile', 'Income last quarter', '$30,000', 'hs-tile-value hs-money'],
+      ['hs-tile', 'Costs last quarter', '$12,000', 'hs-tile-value hs-money'],
+      ['hs-tile is-wide is-up', 'Profit last quarter', '+$18,000', 'hs-tile-value hs-money'],
+    ]);
+    world.cash = 1_000;
+    stats.lastQuarter = { income: 0, upkeep: 5_000, net: -5_000 };
+    (panel as unknown as { refresh(): void }).refresh();
+    expect(bento.children[0]?.children[1]?.textContent).toBe('$1,000');
+    expect(bento.children[3]?.className).toBe('hs-tile is-wide is-down');
+    expect(panel.descendants().some((n) => n.className === 'hs-row-value hs-money' && n.textContent === '$30,000')).toBe(true);
   });
 });

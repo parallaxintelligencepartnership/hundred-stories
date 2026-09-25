@@ -470,8 +470,10 @@ button.hs-readout:hover {
   white-space: nowrap;
 }
 
+/* The one readout face rule: cash and the clock in the top bar, and money in the panels. */
 .hs-status-cash .hs-readout-value,
-.hs-clock-digits {
+.hs-clock-digits,
+.hs-ui .hs-money {
   font-family: var(--font-readout);
   font-weight: 400;
   letter-spacing: 0.02em;
@@ -1395,14 +1397,36 @@ button.hs-readout:hover {
   padding: 12px 16px 16px;
 }
 
+/* Panel contents (package 2A). Rounded groups on the nearly solid surface, hairlines between
+   rows, no square borders. One type scale: a label at 14 in the dim ink, its value at 16. The
+   ui font everywhere; only money (.hs-money) and the clock take the readout face, always with
+   tabular figures (the one readout face rule, under the top bar). Raised fills are a little of the ink over the surface, so both themes work
+   from the same two names. */
+.hs-sheet,
+.hs-card {
+  --raise: rgba(232, 236, 242, 0.06);
+  --raise-strong: rgba(232, 236, 242, 0.11);
+  --raise-hover: rgba(232, 236, 242, 0.17);
+}
+
+@supports (color: color-mix(in srgb, red 10%, transparent)) {
+  .hs-sheet,
+  .hs-card {
+    --raise: color-mix(in srgb, var(--ink) 6%, transparent);
+    --raise-strong: color-mix(in srgb, var(--ink) 11%, transparent);
+    --raise-hover: color-mix(in srgb, var(--ink) 17%, transparent);
+  }
+}
+
 .hs-section {
-  margin: 0 0 12px;
+  margin: 0 0 16px;
 }
 
 .hs-section-title {
-  margin: 0 0 4px;
+  margin: 0 0 6px;
   font-size: var(--size-12);
   font-weight: 600;
+  letter-spacing: 0.02em;
   color: var(--ink-dim);
 }
 
@@ -1410,9 +1434,13 @@ button.hs-readout:hover {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: baseline;
-  column-gap: var(--pad);
-  padding: 3px 0;
-  border-bottom: 1px solid var(--line);
+  column-gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.hs-row:last-child {
+  border-bottom: 0;
 }
 
 .hs-row-label {
@@ -1420,58 +1448,52 @@ button.hs-readout:hover {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+  font-size: var(--size-14);
+  color: var(--ink-dim);
 }
 
 .hs-row-value {
   justify-self: end;
   font-family: var(--font-ui);
   font-variant-numeric: tabular-nums;
-  font-size: var(--size-14);
+  font-size: var(--size-16);
+  font-weight: 600;
   text-align: right;
   white-space: nowrap;
 }
 
-/* The rent row keeps its label whole; the stepper and Reset wrap to a second line when the
-   row is too narrow for all four controls, instead of squeezing the label to an ellipsis. */
-.hs-rent-row {
-  grid-template-columns: max-content minmax(0, 1fr);
-}
-
-.hs-rent-row .hs-actions {
-  min-width: 0;
-  justify-content: flex-end;
-  margin: 0;
-}
-
 .hs-note {
   margin: 0 0 8px;
-  font-size: var(--size-12);
+  font-size: var(--size-14);
   color: var(--ink-dim);
 }
 
+/* Flags on a room: soft pills, the alert one tinted red. Never a boxed label. */
 .hs-flag {
-  display: inline-block;
-  margin: 0 4px 4px 0;
-  padding: 2px 6px;
+  display: inline-flex;
+  align-items: center;
+  margin: 0 6px 6px 0;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--raise-strong);
   font-size: var(--size-12);
-  border: 1px solid var(--line);
+  font-weight: 600;
 }
 
 .hs-flag.is-alert {
   color: var(--alert);
-  border-color: var(--alert);
+  background: rgba(255, 92, 77, 0.16);
 }
 
-/* Evaluation bar: blue, yellow and red zones with a marker */
+/* Evaluation bar: blue, yellow and red zones in one rounded bar, with a marker */
 
 .hs-eval {
   position: relative;
   display: flex;
   width: 100%;
   height: 10px;
-  margin: 2px 0 6px;
-  border: 1px solid var(--line);
-  box-sizing: border-box;
+  margin: 6px 0 8px;
+  border-radius: var(--radius-pill);
 }
 
 .hs-eval-zone {
@@ -1480,6 +1502,7 @@ button.hs-readout:hover {
 
 .hs-eval-zone.is-poor {
   background: var(--eval-poor);
+  border-radius: var(--radius-pill) 0 0 var(--radius-pill);
 }
 
 .hs-eval-zone.is-fair {
@@ -1488,32 +1511,41 @@ button.hs-readout:hover {
 
 .hs-eval-zone.is-good {
   background: var(--eval-good);
+  border-radius: 0 var(--radius-pill) var(--radius-pill) 0;
 }
 
 .hs-eval-marker {
   position: absolute;
-  top: -3px;
-  bottom: -3px;
-  width: 2px;
-  margin-left: -1px;
+  top: -4px;
+  bottom: -4px;
+  width: 4px;
+  margin-left: -2px;
+  border-radius: var(--radius-pill);
   background: var(--ink);
+  box-shadow: 0 0 0 2px var(--surface);
 }
 
 .hs-stops {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 6px;
 }
 
 .hs-stop {
-  min-width: 44px;
-  padding: 3px 6px;
-  font-family: var(--font-ui);
+  min-width: var(--touch);
+  min-height: var(--touch);
+  padding: 0 12px;
   font-variant-numeric: tabular-nums;
-  font-size: var(--size-12);
-  background: var(--steel-2);
-  border: 1px solid var(--line);
+  font-size: var(--size-14);
+  font-weight: 600;
+  background: var(--raise-strong);
+  border: 0;
+  border-radius: var(--radius-pill);
   cursor: pointer;
+}
+
+.hs-stop:hover {
+  background: var(--raise-hover);
 }
 
 .hs-stop[aria-pressed='true'] {
@@ -1524,8 +1556,38 @@ button.hs-readout:hover {
 .hs-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-  margin: 4px 0 12px;
+  gap: 8px;
+  margin: 8px 0 16px;
+}
+
+/* Buttons on a sheet or card: soft pills, a touch target tall, no box and no border. */
+.hs-sheet .hs-btn {
+  --r: var(--radius-pill);
+  min-height: var(--touch);
+  padding: 0 16px;
+  background: var(--raise-strong);
+  border: 0;
+  font-weight: 600;
+}
+
+.hs-sheet .hs-btn:hover:not(:disabled) {
+  background: var(--raise-hover);
+}
+
+.hs-sheet .hs-btn.is-primary,
+.hs-sheet .hs-btn[aria-pressed='true'] {
+  background: var(--amber);
+  color: var(--on-amber);
+}
+
+.hs-sheet .hs-btn:disabled {
+  background: var(--raise);
+  color: var(--ink-dim);
+}
+
+.hs-sheet a.hs-btn {
+  display: inline-flex;
+  align-items: center;
 }
 
 /* One block per elevator car: what it works, and who it carries. */
@@ -1536,15 +1598,16 @@ button.hs-readout:hover {
 }
 
 .hs-car {
-  padding: 6px 0 0;
-  border-top: 1px solid var(--line);
+  padding: 10px 12px;
+  border-radius: var(--radius-16);
+  background: var(--raise);
 }
 
 .hs-car-label {
-  margin: 0 0 4px;
-  font-family: var(--font-ui);
+  margin: 0 0 6px;
   font-variant-numeric: tabular-nums;
-  font-size: var(--size-12);
+  font-size: var(--size-14);
+  font-weight: 600;
 }
 
 /* Thumb sized, the same reach as the stop buttons, and wrapping on a phone. */
@@ -1553,42 +1616,135 @@ button.hs-readout:hover {
 }
 
 .hs-car-actions .hs-btn {
-  min-height: 44px;
-  min-width: 44px;
+  min-height: var(--touch);
+  min-width: var(--touch);
 }
 
 .hs-field {
   display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 12px;
+}
+
+/* Rent: minus, the percent and plus in one pill, Reset beside it. */
+.hs-rent-row {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--pad);
-  margin: 0 0 8px;
+  gap: 8px;
 }
 
-.hs-field input[type='number'],
-.hs-field input[type='text'] {
-  flex: 1 1 auto;
-  min-width: 0;
-  padding: 4px 6px;
-  background: var(--steel-2);
-  border: 1px solid var(--line);
+.hs-stepper {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: var(--radius-pill);
+  background: var(--raise-strong);
 }
 
-.hs-level input[type='range'] {
-  flex: 1 1 auto;
-  min-width: 0;
-  accent-color: var(--amber);
+.hs-stepper-btn {
+  --r: var(--radius-pill);
+  width: var(--touch);
+  height: var(--touch);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  font-size: var(--size-20);
+  line-height: 1;
+  cursor: pointer;
+  transition: transform var(--motion-fast) var(--ease-spring), background-color var(--motion-fade) var(--ease-standard);
 }
 
-.hs-level .hs-row-label {
-  flex: 0 0 64px;
+.hs-stepper-btn:hover:not(:disabled) {
+  background: var(--raise-hover);
 }
 
-.hs-level-value {
-  flex: 0 0 3ch;
-  text-align: right;
-  font-family: var(--font-ui);
-  font-variant-numeric: tabular-nums;
+.hs-stepper-btn:active:not(:disabled) {
+  transform: scale(var(--press-scale));
+}
+
+.hs-stepper-btn:disabled {
   color: var(--ink-dim);
+  opacity: 0.5;
+  cursor: default;
+}
+
+.hs-stepper-value {
+  min-width: 5ch;
+  text-align: center;
+  font-size: var(--size-16);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.hs-rent-money {
+  margin: 8px 0 4px;
+  font-size: var(--size-14);
+}
+
+/* Bento: summary tiles, a small label over a big number. The label is first in the markup for
+   a screen reader; column-reverse puts the number on top. */
+.hs-bento {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 16px;
+}
+
+.hs-tile {
+  display: flex;
+  flex-direction: column-reverse;
+  justify-content: flex-end;
+  gap: 2px;
+  min-width: 0;
+  padding: 12px 14px;
+  border-radius: var(--radius-16);
+  background: var(--raise);
+}
+
+.hs-tile.is-wide {
+  grid-column: 1 / -1;
+}
+
+.hs-tile-label {
+  font-size: var(--size-12);
+  color: var(--ink-dim);
+}
+
+.hs-tile-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--size-20);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.hs-tile-value.hs-money {
+  font-weight: 400;
+}
+
+.hs-tile.is-wide .hs-tile-value {
+  font-size: var(--size-28);
+  line-height: 1.15;
+}
+
+.hs-tile.is-text .hs-tile-value {
+  font-size: var(--size-14);
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: normal;
+}
+
+.hs-tile.is-up .hs-tile-value {
+  color: var(--indicator);
+}
+
+.hs-tile.is-down .hs-tile-value {
+  color: var(--alert);
 }
 
 .hs-log-list {
@@ -1599,16 +1755,21 @@ button.hs-readout:hover {
 
 .hs-log-item {
   display: flex;
-  gap: var(--pad);
-  padding: 4px 0;
-  border-bottom: 1px solid var(--line);
-  font-size: var(--size-12);
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--hairline);
+  font-size: var(--size-14);
+}
+
+.hs-log-item:last-child {
+  border-bottom: 0;
 }
 
 .hs-log-time {
   flex: 0 0 auto;
-  font-family: var(--font-ui);
+  padding-top: 1px;
   font-variant-numeric: tabular-nums;
+  font-size: var(--size-12);
   color: var(--ink-dim);
 }
 
@@ -1624,7 +1785,7 @@ button.hs-readout:hover {
 
 .hs-story-line {
   margin: 0 0 4px;
-  font-size: var(--size-12);
+  font-size: var(--size-14);
 }
 
 .hs-story-chapter {
@@ -1634,30 +1795,58 @@ button.hs-readout:hover {
 }
 
 .hs-story-item {
-  padding: 3px 0;
-  border-bottom: 1px solid var(--line);
-  font-size: var(--size-12);
+  padding: 8px 0;
+  border-bottom: 1px solid var(--hairline);
+  font-size: var(--size-14);
 }
 
+.hs-story-item:last-child {
+  border-bottom: 0;
+}
+
+/* People as one rounded list, each row a way into their story. */
 .hs-occupants {
   display: flex;
   flex-direction: column;
+  border-radius: var(--radius-16);
+  background: var(--raise);
+  overflow: hidden;
+}
+
+.hs-occupants > .hs-note {
+  margin: 0;
+  padding: 12px 14px;
 }
 
 .hs-occupant {
   display: flex;
   flex-direction: column;
+  justify-content: center;
   align-items: flex-start;
   width: 100%;
   min-width: 0;
-  padding: 4px 0;
+  min-height: var(--touch);
+  padding: 8px 14px;
   background: none;
   border: 0;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--hairline);
   color: inherit;
   font: inherit;
   text-align: left;
   cursor: pointer;
+}
+
+.hs-occupants > .hs-occupant:last-child,
+.hs-occupants > .hs-occupant-gone:last-child .hs-occupant {
+  border-bottom: 0;
+}
+
+.hs-occupant:hover:not(:disabled) {
+  background: var(--raise);
+}
+
+.hs-occupant:focus-visible {
+  outline-offset: calc(-1 * var(--focus-width));
 }
 
 .hs-occupant:disabled {
@@ -1665,7 +1854,7 @@ button.hs-readout:hover {
 }
 
 .hs-occupant-name {
-  font-size: var(--size-12);
+  font-size: var(--size-14);
   font-weight: 600;
 }
 
@@ -1682,10 +1871,310 @@ button.hs-readout:hover {
   display: flex;
   align-items: center;
   gap: var(--pad);
+  padding-right: 8px;
+  border-bottom: 1px solid var(--hairline);
 }
 
 .hs-occupant-gone .hs-occupant {
   flex: 1 1 auto;
+  border-bottom: 0;
+}
+
+/* Share: the picture and the message, on the same soft fills. */
+.hs-share-preview {
+  margin: 0 0 12px;
+}
+
+.hs-share-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: var(--radius-16);
+}
+
+.hs-share-text {
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--radius-12);
+  background: var(--raise);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--size-14);
+  line-height: 1.4;
+  resize: none;
+}
+
+/* Settings, like a phone's settings app ------------------------------- */
+
+.hs-settings .hs-section {
+  margin: 0 0 20px;
+}
+
+.hs-settings .hs-section-title,
+.hs-settings .hs-section > .hs-note {
+  padding: 0 14px;
+}
+
+.hs-set-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-radius: var(--radius-16);
+  background: var(--raise);
+  overflow: hidden;
+}
+
+.hs-set-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: var(--touch);
+  margin: 0;
+  padding: 8px 14px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--size-16);
+  text-align: left;
+  text-decoration: none;
+}
+
+.hs-set-row + .hs-set-row {
+  border-top: 1px solid var(--hairline);
+}
+
+.hs-set-action {
+  cursor: pointer;
+  transition: background-color var(--motion-fade) var(--ease-standard);
+}
+
+.hs-set-action:hover {
+  background: var(--raise-strong);
+}
+
+.hs-set-action:active {
+  background: var(--raise-hover);
+}
+
+/* The list clips its corners, so the ring sits inside the row. */
+.hs-ui .hs-set-row:focus-visible,
+.hs-ui .hs-set-row :focus-visible {
+  outline-offset: calc(-1 * var(--focus-width));
+}
+
+.hs-set-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.hs-set-switch .hs-set-label {
+  cursor: pointer;
+}
+
+.hs-set-chevron {
+  margin-left: auto;
+  color: var(--ink-dim);
+}
+
+/* A toggle switch: a 44 px target around a 30 px track, the thumb slides right when on. */
+.hs-switch {
+  position: relative;
+  flex: 0 0 auto;
+  width: 52px;
+  height: var(--touch);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  cursor: pointer;
+}
+
+.hs-switch::before {
+  content: '';
+  position: absolute;
+  inset: 7px 0;
+  border-radius: var(--radius-pill);
+  background: var(--raise-hover);
+  transition: background-color var(--motion-fade) var(--ease-standard);
+}
+
+.hs-switch-thumb {
+  position: absolute;
+  top: 10px;
+  left: 3px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  transition: transform var(--motion-fast) var(--ease-spring);
+}
+
+.hs-switch[aria-checked='true']::before {
+  background: var(--amber);
+}
+
+.hs-switch[aria-checked='true'] .hs-switch-thumb {
+  transform: translateX(22px);
+}
+
+.hs-ui.is-reduced .hs-switch-thumb {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hs-switch-thumb {
+    transition: none;
+  }
+}
+
+/* Theme: Auto, Light and Dark joined in one pill. */
+.hs-segmented {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius-pill);
+  background: var(--raise-strong);
+}
+
+.hs-seg-btn {
+  --r: var(--radius-pill);
+  min-width: 56px;
+  min-height: var(--touch);
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  font-size: var(--size-14);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color var(--motion-fade) var(--ease-standard);
+}
+
+.hs-seg-btn:hover:not([aria-pressed='true']) {
+  background: var(--raise-hover);
+}
+
+.hs-seg-btn[aria-pressed='true'] {
+  background: var(--amber);
+  color: var(--on-amber);
+}
+
+/* The sound levels: a rounded track that fills in amber up to the thumb. */
+.hs-level .hs-set-label {
+  flex: 0 0 7.5em;
+}
+
+.hs-level input[type='range'] {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: var(--touch);
+  margin: 0;
+  background: transparent;
+  accent-color: var(--amber);
+  -webkit-appearance: none;
+  appearance: none;
+  cursor: pointer;
+}
+
+.hs-level input[type='range']::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(to right, var(--amber) var(--level, 50%), var(--raise-hover) var(--level, 50%));
+}
+
+.hs-level input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 22px;
+  height: 22px;
+  margin-top: -8px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+
+.hs-level input[type='range']::-moz-range-track {
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--raise-hover);
+}
+
+.hs-level input[type='range']::-moz-range-progress {
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--amber);
+}
+
+.hs-level input[type='range']::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+
+.hs-level input[type='range']:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.hs-level-value {
+  flex: 0 0 3ch;
+  text-align: right;
+  font-size: var(--size-14);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-dim);
+}
+
+/* The Controls page: a way back, then one row per control with its picture. */
+.hs-set-back {
+  --r: var(--radius-pill);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: var(--touch);
+  margin: 0 0 16px;
+  padding: 0 16px 0 10px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--raise-strong);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.hs-set-back::before {
+  content: '\2039';
+  font-size: var(--size-20);
+  line-height: 1;
+}
+
+.hs-set-back:hover {
+  background: var(--raise-hover);
+}
+
+.hs-controls-row {
+  align-items: flex-start;
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+
+.hs-controls-icon {
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  color: var(--amber);
+}
+
+.hs-controls-text {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 /* Controls hint -------------------------------------------------------- */
@@ -2901,14 +3390,11 @@ button.hs-news-toast {
   }
 }
 
-/* Today's tower result card: the score, big. */
-.hs-daily-people {
-  margin: 8px 0;
-}
-
+/* Today's tower result card: the people, big, across the top of the bento grid. */
 .hs-daily-people-count {
   font-family: var(--font-ui);
   font-variant-numeric: tabular-nums;
   font-size: var(--size-28);
   font-weight: 600;
+  line-height: 1.15;
 }
