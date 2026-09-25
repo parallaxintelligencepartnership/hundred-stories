@@ -9,7 +9,9 @@ import {
   recordVisit,
   spend,
 } from '../../src/sim/economy';
+import { applyCommand } from '../../src/sim/build';
 import { deserialize, serialize } from '../../src/sim/save';
+import { tick } from '../../src/sim/tick';
 import type { Room, RoomKind, Shaft, ShaftKind, World } from '../../src/sim/types';
 
 let idCounter = 1;
@@ -78,6 +80,19 @@ describe('economy: spend', () => {
     const result = spend(world, 40_000, 'Offices');
     expect(result).toEqual({ ok: true });
     expect(world.cash).toBe(0);
+  });
+});
+
+describe('economy: officeRentEvalScale is read (audit A S9)', () => {
+  it('pays the full rate at any eval when the flag is off', () => {
+    const room = makeRoom({ kind: 'office', floor: 2, x: 100, eval: 0 });
+    expect(officeQuarterRent(room)).toBe(ROOMS.office.incomePerQuarter * 0.5);
+    ECONOMY.officeRentEvalScale = false;
+    try {
+      expect(officeQuarterRent(room)).toBe(ROOMS.office.incomePerQuarter);
+    } finally {
+      ECONOMY.officeRentEvalScale = true;
+    }
   });
 });
 
@@ -314,5 +329,21 @@ describe('economy: record functions', () => {
     recordCondoSale(world, room);
     expect(room.vacant).toBe(false);
     expect(world.cash).toBe(LIMITS.startingCash + ECONOMY.condoSalePrice);
+  });
+});
+
+describe('economy: quarter summary money (audit A S8)', () => {
+  it('writes a loss as -$30,000, through the real tick', () => {
+    const world = createWorld(3);
+    world.stars = 2;
+    for (let x = 100; x < 120; x++) expect(applyCommand(world, { kind: 'build', room: 'lobby', floor: 1, x }).ok).toBe(true);
+    expect(applyCommand(world, { kind: 'build', room: 'security', floor: 2, x: 100 }).ok).toBe(true);
+    expect(applyCommand(world, { kind: 'shaft.build', shaft: 'standard', x: 110, floorMin: 1, floorMax: 3 }).ok).toBe(true);
+    world.cash = 10_000; // below the upkeep: $20,000 for security plus $10,000 for the car
+    let guard = 0;
+    while (!world.log.some((l) => l.text.startsWith('The quarter is over')) && guard++ < 5 * 1440) tick(world);
+    const summary = world.log.find((l) => l.text.startsWith('The quarter is over'))?.text ?? '';
+    expect(summary).toBe('The quarter is over. Earned $0, spent $30,000, profit -$30,000. Cash: -$20,000.');
+    expect(summary).not.toContain('$-');
   });
 });

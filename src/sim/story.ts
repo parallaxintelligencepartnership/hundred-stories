@@ -60,6 +60,19 @@ export interface Chronicle {
   minute: number;
 }
 
+/**
+ * Whole-game tallies the chronicle states, counted as each beat is recorded so they outlive the
+ * capped recent list. movedOut counts room.vacated beats with value 1 or more only: a hotel
+ * checkout, an eviction by fire or bomb, and a demolition carry value 0 and are not move-outs.
+ */
+export interface StoryTotals {
+  movedOut: number;
+  theftsCaught: number;
+  theftsEscaped: number;
+  wasteBacklogs: number;
+  wasteCleared: number;
+}
+
 export interface StoryState {
   seq: number;
   recent: StoryBeat[];
@@ -67,14 +80,43 @@ export interface StoryState {
   threads: Record<number, StoryBeat[]>;
   /** Null until the tower first reaches Tower status. */
   chronicle: Chronicle | null;
+  totals: StoryTotals;
+}
+
+export function createStoryTotals(): StoryTotals {
+  return { movedOut: 0, theftsCaught: 0, theftsEscaped: 0, wasteBacklogs: 0, wasteCleared: 0 };
 }
 
 export function createStoryState(): StoryState {
-  return { seq: 0, recent: [], followed: [], threads: {}, chronicle: null };
+  return { seq: 0, recent: [], followed: [], threads: {}, chronicle: null, totals: createStoryTotals() };
+}
+
+/** Add one beat to the running totals. */
+function countBeat(totals: StoryTotals, beat: StoryBeat): void {
+  switch (beat.code) {
+    case 'room.vacated':
+      if ((beat.value ?? 0) >= 1) totals.movedOut += 1;
+      break;
+    case 'theft.caught':
+      totals.theftsCaught += 1;
+      break;
+    case 'theft.escaped':
+      totals.theftsEscaped += 1;
+      break;
+    case 'waste.backlog':
+      totals.wasteBacklogs += 1;
+      break;
+    case 'waste.cleared':
+      totals.wasteCleared += 1;
+      break;
+    default:
+      break;
+  }
 }
 
 export function recordBeat(story: StoryState, beat: StoryBeat): void {
   story.seq += 1;
+  countBeat(story.totals, beat);
   story.recent.push(beat);
   if (story.recent.length > STORY_RECENT_CAP) {
     story.recent.shift();
@@ -240,6 +282,31 @@ export function sanitizeStory(raw: unknown): StoryState {
     followed,
     threads,
     chronicle: cleanChronicle(r.chronicle),
+    totals: cleanTotals(r.totals, recent),
+  };
+}
+
+/**
+ * Saved totals, each a whole number of at least 0. A story saved before the totals existed has
+ * none: it counts what its recent list still holds, the same figures the chronicle gave then.
+ */
+function cleanTotals(raw: unknown, recent: readonly StoryBeat[]): StoryTotals {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    const totals = createStoryTotals();
+    for (const beat of recent) countBeat(totals, beat);
+    return totals;
+  }
+  const r = raw as Record<string, unknown>;
+  const count = (value: unknown): number => {
+    const n = finiteOrUndefined(value);
+    return n === undefined || n < 0 ? 0 : Math.floor(n);
+  };
+  return {
+    movedOut: count(r.movedOut),
+    theftsCaught: count(r.theftsCaught),
+    theftsEscaped: count(r.theftsEscaped),
+    wasteBacklogs: count(r.wasteBacklogs),
+    wasteCleared: count(r.wasteCleared),
   };
 }
 
@@ -320,6 +387,12 @@ function personLine(beat: StoryBeat, voice: number, room: Room | undefined): str
       if (voice === 2) return `${cap(m)} at the doors${to ? `, going${to}` : ''}. Noted.`;
       return `${cap(m)} waiting for a car${to}.`;
     case 'trip.arrived': {
+      // No room on the beat: the trip ended outside. A room that has since gone drops out.
+      if (!room && beat.roomId !== undefined) {
+        if (voice === 1) return `I made it in ${m} today.`;
+        if (voice === 2) return `Made it in ${m}.`;
+        return `${cap(m)} to get there today.`;
+      }
       const dest = room ? to.trim() : 'out to the street';
       if (voice === 1) return `I made it ${dest} in ${m} today.`;
       if (voice === 2) return `${cap(room ? dest.replace(/^to /, '') : dest)} in ${m}.`;

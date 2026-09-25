@@ -1,6 +1,6 @@
 // Cash, quarterly income and upkeep, and bankruptcy. See docs/BRIEF-AGENTS.md.
 
-import { ECONOMY, LIMITS, ROOMS, SHAFTS } from './rules';
+import { ECONOMY, LIMITS, RENT, ROOMS, SHAFTS } from './rules';
 import { log } from './world';
 import type { CommandResult, Room, RoomKind, ShaftKind, World } from './types';
 
@@ -15,6 +15,12 @@ function debitUpkeep(world: World, kind: RoomKind | ShaftKind, amount: number): 
   world.stats.upkeepByKind[kind] = (world.stats.upkeepByKind[kind] ?? 0) + amount;
 }
 
+/** 30000 -> "$30,000", -30000 -> "-$30,000": the sign goes before the dollar sign. */
+function dollars(amount: number): string {
+  const sign = amount < 0 ? '-' : '';
+  return `${sign}$${Math.round(Math.abs(amount)).toLocaleString('en-US')}`;
+}
+
 export function spend(world: World, amount: number, what: string): CommandResult {
   if (world.cash < amount) {
     return { ok: false, reason: `Not enough cash. ${what} costs $${amount.toLocaleString('en-US')}.` };
@@ -23,9 +29,10 @@ export function spend(world: World, amount: number, what: string): CommandResult
   return { ok: true };
 }
 
-/** Rounded office rent for one quarter, scaled by how well the office is doing. */
+/** Rounded office rent for one quarter, scaled by how well the office is doing (ECONOMY.officeRentEvalScale). */
 export function officeQuarterRent(room: Room): number {
-  return Math.round(ROOMS.office.incomePerQuarter * (0.5 + room.eval / 2) * (room.rent / 100));
+  const evalScale = ECONOMY.officeRentEvalScale ? 0.5 + room.eval / 2 : 1;
+  return Math.round(ROOMS.office.incomePerQuarter * evalScale * (room.rent / RENT.default));
 }
 
 export function onQuarterStart(world: World): void {
@@ -61,7 +68,7 @@ export function onQuarterStart(world: World): void {
 
   log(
     world,
-    `The quarter is over. Earned $${income.toLocaleString('en-US')}, spent $${upkeep.toLocaleString('en-US')}, profit $${net.toLocaleString('en-US')}. Cash: $${world.cash.toLocaleString('en-US')}.`,
+    `The quarter is over. Earned ${dollars(income)}, spent ${dollars(upkeep)}, profit ${dollars(net)}. Cash: ${dollars(world.cash)}.`,
   );
 
   if (world.cash < ECONOMY.bankruptAtCash) {
@@ -107,11 +114,11 @@ export function recordVisit(world: World, room: Room): void {
 }
 
 export function recordHotelNight(world: World, room: Room): void {
-  const income = Math.round(ROOMS[room.kind].incomePerQuarter * ECONOMY.hotelNightlyIncomeFraction * (room.rent / 100));
+  const income = Math.round(ROOMS[room.kind].incomePerQuarter * ECONOMY.hotelNightlyIncomeFraction * (room.rent / RENT.default));
   credit(world, room.kind, income);
 }
 
 export function recordCondoSale(world: World, room: Room): void {
   room.vacant = false;
-  credit(world, 'condo', Math.round(ECONOMY.condoSalePrice * (room.rent / 100)));
+  credit(world, 'condo', Math.round(ECONOMY.condoSalePrice * (room.rent / RENT.default)));
 }

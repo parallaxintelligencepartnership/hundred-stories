@@ -38,7 +38,7 @@ describe('event tap', () => {
     world.log.push({ minute: 0, text: 'Fire broke out.', level: 'alert' });
     world.logTotal += 1;
     world.stars = 2;
-    world.time.minute = 3 * 1440; // day one of the second quarter
+    world.time.minute = 3 * 1440 + 301; // 05:01 on day one of the second quarter: rent was just paid
     car.state = 'doorsOpen';
     drainTap(tap, world, emit);
     expect(seen.map((e) => e.kind)).toEqual(['log', 'rentDay', 'stars', 'car.arrive']);
@@ -122,16 +122,26 @@ describe('subscribeEvents on the game shell', () => {
     expect(seen.map((e) => e.kind)).toEqual(['refused', 'log']); // the swap to a new world is not news
   });
 
-  it('hears rent day from a tick batch that crosses into a new quarter', () => {
-    const clock = { ms: 0 };
-    const game = createGame(5, { now: () => clock.ms, scheduleIdle: () => () => {} });
-    const seen: GameEvent[] = [];
-    game.subscribeEvents((e) => seen.push(e));
-    game.setSpeed(1);
-    game.world.time.minute = 3 * 1440 - 1; // 23:59 on the last day of the first quarter
-    clock.ms += 100;
-    game.stepOnce();
-    expect(game.world.time.minute).toBeGreaterThanOrEqual(3 * 1440);
-    expect(seen.filter((e) => e.kind === 'rentDay')).toHaveLength(1);
+  it('hears rent day from the tick batch that pays the rent at 05:00, not at midnight (audit D S10 / I S11)', () => {
+    const run = (startMinute: number): { seen: GameEvent[]; minute: number } => {
+      const clock = { ms: 0 };
+      const game = createGame(5, { now: () => clock.ms, scheduleIdle: () => () => {} });
+      const seen: GameEvent[] = [];
+      game.subscribeEvents((e) => seen.push(e));
+      game.setSpeed(1);
+      game.world.time.minute = startMinute;
+      clock.ms += 100;
+      game.stepOnce();
+      return { seen, minute: game.world.time.minute };
+    };
+    // 04:59 on the first day of the second quarter: the batch runs the 05:00 settlement
+    const paid = run(3 * 1440 + 299);
+    expect(paid.minute).toBeGreaterThan(3 * 1440 + 300);
+    expect(paid.seen.filter((e) => e.kind === 'rentDay')).toHaveLength(1);
+    // 23:59 on the last day of the first quarter: midnight passes, no rent is paid yet
+    const midnight = run(3 * 1440 - 1);
+    expect(midnight.minute).toBeGreaterThanOrEqual(3 * 1440);
+    expect(midnight.minute).toBeLessThanOrEqual(3 * 1440 + 300);
+    expect(midnight.seen.filter((e) => e.kind === 'rentDay')).toHaveLength(0);
   });
 });
