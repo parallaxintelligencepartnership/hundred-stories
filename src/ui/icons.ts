@@ -1,6 +1,7 @@
 // The chrome's one icon set: inline SVG symbols defined once in the DOM and referenced by
-// <use>. No icon font. Every icon sits beside a visible label (docs/VISUAL.md principle 2),
-// so each one is aria-hidden: the words carry the meaning, the drawing only helps find it.
+// <use>. No icon font. Each icon is aria-hidden: the words carry the meaning, the drawing only
+// helps find it. The words are a visible label beside it, or, on an icon-only button (phones,
+// the speed pill), the button's aria-label and its title tooltip.
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -15,7 +16,17 @@ export type IconName =
   | 'star'
   | 'demolish'
   | 'query'
-  | 'help';
+  | 'help'
+  | 'pause'
+  | 'play'
+  | 'fast'
+  | 'faster'
+  | 'menu'
+  | 'close'
+  | 'clear'
+  | 'cloudy'
+  | 'rain'
+  | 'storm';
 
 /** A 16 by 16 drawing per icon, 1.5 px lines in the current text color. */
 const LINE = 'fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"';
@@ -33,6 +44,18 @@ const SYMBOLS: Record<IconName, string> = {
   demolish: `<rect x="1.75" y="1.75" width="12.5" height="12.5" ${LINE}/><path d="M5 5l6 6M11 5l-6 6" ${LINE}/>`,
   query: `<circle cx="7" cy="7" r="4.5" ${LINE}/><path d="M10.5 10.5l3.75 3.75" ${LINE}/>`,
   help: `<circle cx="8" cy="8" r="6.25" ${LINE}/><path d="M6.25 6.25a1.75 1.75 0 1 1 2.5 1.6c-.5.25-.75.6-.75 1.15v.5M8 11.5v.25" ${LINE}/>`,
+  // The speed pill: two bars, one triangle, two and three triangles.
+  pause: `<path d="M5.5 3v10M10.5 3v10" ${LINE} stroke-width="2"/>`,
+  play: `<path d="M5 2.75v10.5L13 8z" ${LINE}/>`,
+  fast: `<path d="M2 3.5v9L8 8zM8 3.5v9L14 8z" ${LINE}/>`,
+  faster: `<path d="M1.25 4v8L5.5 8zM5.75 4v8L10 8zM10.25 4v8L14.5 8z" ${LINE}/>`,
+  menu: `<path d="M2.5 4h11M2.5 8h11M2.5 12h11" ${LINE}/>`,
+  close: `<path d="M4 4l8 8M12 4l-8 8" ${LINE}/>`,
+  // The weather beside the clock (src/game/weather.ts kinds).
+  clear: `<circle cx="8" cy="8" r="3" ${LINE}/><path d="M8 1.5v1.5M8 13v1.5M1.5 8H3M13 8h1.5M3.4 3.4l1 1M11.6 11.6l1 1M3.4 12.6l1-1M11.6 4.4l1-1" ${LINE}/>`,
+  cloudy: `<path d="M4.5 12.5h7a2.75 2.75 0 0 0 .3-5.5 3.75 3.75 0 0 0-7.2-.9A3.2 3.2 0 0 0 4.5 12.5z" ${LINE}/>`,
+  rain: `<path d="M4.5 9.5h7a2.5 2.5 0 0 0 .3-5 3.5 3.5 0 0 0-6.7-.8A2.9 2.9 0 0 0 4.5 9.5z" ${LINE}/><path d="M5.5 11.5l-.75 2M8.5 11.5l-.75 2M11.5 11.5l-.75 2" ${LINE}/>`,
+  storm: `<path d="M4.5 9.5h7a2.5 2.5 0 0 0 .3-5 3.5 3.5 0 0 0-6.7-.8A2.9 2.9 0 0 0 4.5 9.5z" ${LINE}/><path d="M8.75 10.5l-1.75 2.5h2.25l-1.5 2.25" ${LINE}/>`,
 };
 
 export const ICON_NAMES = Object.keys(SYMBOLS) as IconName[];

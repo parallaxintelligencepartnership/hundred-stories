@@ -10,7 +10,7 @@ import { ROOMS, SCHEDULES, STARS } from '../sim/rules';
 import { clockOf } from '../sim/types';
 import type { Star, World } from '../sim/types';
 import { formatClock, formatCount, formatDate, formatMoney, formatSignedMoney, starsTitle } from './format';
-import { icon } from './icons';
+import { icon, type IconName } from './icons';
 
 /** Shown where a baseline is not known yet (a save from before v3, until the next boundary). */
 export const UNKNOWN = '–';
@@ -165,7 +165,21 @@ export function speedModeText(speed: Speed, minute: number): string {
 
 // --------------------------------------------------------------- weather
 
-/** The weather word's two letter form, shown under 400 px where the word does not fit. */
+/** The weather's icon beside the clock. The word goes in its label and tooltip. */
+export function weatherIcon(kind: WeatherKind): IconName {
+  switch (kind) {
+    case 'clear':
+      return 'clear';
+    case 'overcast':
+      return 'cloudy';
+    case 'rain':
+      return 'rain';
+    case 'storm':
+      return 'storm';
+  }
+}
+
+/** The weather word's two letter form, for a place with no room for the word or the icon. */
 export function weatherShort(kind: WeatherKind): string {
   switch (kind) {
     case 'clear':
@@ -187,7 +201,7 @@ export interface StatusBar {
   population: HTMLDivElement;
   stars: HTMLDivElement;
   clock: HTMLDivElement;
-  /** The weather word inside the clock readout. */
+  /** The weather icon beside the time, with its word for a screen reader and the tooltip. */
   weather: HTMLSpanElement;
   /** The night mode chip that sits beside the speed buttons. */
   mode: HTMLSpanElement;
@@ -221,19 +235,23 @@ function setAttr(node: Element, name: string, value: string): void {
 let tooltipIds = 0;
 
 export function createStatusBar(): StatusBar {
+  // Each readout leads with its icon, so a player who does not read yet can still tell cash
+  // from people; the word stays in the label, which ui.css keeps for screen readers only.
+  const lead = (name: IconName): HTMLElement => icon(name, 'hs-icon hs-readout-icon') as unknown as HTMLElement;
+
   // Cash
   const cash = h('button', 'hs-readout hs-status-cash');
   cash.type = 'button';
   cash.title = 'Open finances';
   const cashValue = h('span', 'hs-readout-value');
   const cashMeta = h('span', 'hs-readout-meta');
-  cash.append(h('span', 'hs-readout-label', 'Cash'), cashValue, cashMeta);
+  cash.append(lead('finance'), h('span', 'hs-readout-label', 'Cash'), cashValue, cashMeta);
 
   // Population
   const population = h('div', 'hs-readout hs-status-pop');
   const popValue = h('span', 'hs-readout-value');
   const popMeta = h('span', 'hs-readout-meta');
-  population.append(h('span', 'hs-readout-label', 'Population'), popValue, popMeta);
+  population.append(lead('population'), h('span', 'hs-readout-label', 'Population'), popValue, popMeta);
 
   // Stars: a button so a keyboard can reach the tooltip and a finger can open it.
   const stars = h('div', 'hs-readout hs-status-stars');
@@ -249,8 +267,14 @@ export function createStatusBar(): StatusBar {
     starIcons.push(star);
     starRow.append(star as unknown as HTMLElement);
   }
+  // A phone has no room for six stars: one star and the count stand in (ui.css).
+  const starsCount = h('span', 'hs-stars-count');
+  starsCount.setAttribute('aria-hidden', 'true');
+  starsCount.append(icon('star', 'hs-icon hs-count-glyph') as unknown as HTMLElement);
+  const starsCountText = h('span', 'hs-stars-count-text');
+  starsCount.append(starsCountText);
   const starsMeta = h('span', 'hs-readout-meta');
-  starsButton.append(h('span', 'hs-readout-label', 'Stars'), starRow, starsMeta);
+  starsButton.append(h('span', 'hs-readout-label', 'Stars'), starRow, starsCount, starsMeta);
   const tip = h('div', 'hs-tip');
   tip.id = tipId;
   tip.setAttribute('role', 'tooltip');
@@ -290,14 +314,13 @@ export function createStatusBar(): StatusBar {
   const clockAmPm = h('span', 'hs-clock-ampm');
   clockValue.append(clockDigits, clockAmPm);
   const dateValue = h('span', 'hs-readout-meta');
-  // The weather beside the time: the word, or its two letters under 400 px (ui.css).
+  // The weather beside the time: an icon, with the word for a screen reader and the tooltip.
   const weather = h('span', 'hs-weather');
   const weatherWord = h('span', 'hs-weather-word');
-  const weatherAbbr = h('span', 'hs-weather-short');
-  weatherAbbr.setAttribute('aria-hidden', 'true');
-  weather.append(weatherWord, weatherAbbr);
-  clockText.append(clockValue, dateValue, weather);
-  clock.append(dial as unknown as HTMLElement, clockText);
+  let weatherGlyph: HTMLElement | null = null;
+  weather.append(weatherWord);
+  clockText.append(clockValue, dateValue);
+  clock.append(dial as unknown as HTMLElement, clockText, weather);
 
   const mode = h('span', 'hs-speed-mode is-hidden');
 
@@ -327,6 +350,7 @@ export function createStatusBar(): StatusBar {
     if (earnedShown !== world.stars) {
       earnedShown = world.stars;
       starIcons.forEach((star, i) => star.classList.toggle('is-earned', i < world.stars));
+      setText(starsCountText, String(world.stars));
       setAttr(starsButton, 'aria-label', `Stars: ${starsTitle(world.stars)}. What the next star needs.`);
     }
     const need = nextStarNeeds(world);
@@ -365,7 +389,10 @@ export function createStatusBar(): StatusBar {
     if (kind !== weatherShown) {
       weatherShown = kind;
       setText(weatherWord, weatherLabel(kind));
-      setText(weatherAbbr, weatherShort(kind));
+      const glyph = icon(weatherIcon(kind), 'hs-icon hs-weather-icon') as unknown as HTMLElement;
+      if (weatherGlyph) weatherGlyph.remove();
+      weatherGlyph = glyph;
+      weather.prepend(glyph);
       setAttr(weather, 'title', `Weather: ${weatherLabel(kind)}`);
     }
     setAttr(clock, 'title', date); // a phone hides the date line; the tooltip keeps it

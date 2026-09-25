@@ -5,7 +5,7 @@
 import { DEMO_CAP_REASON, DEMO_MAX_FLOOR, DEMO_MAX_WIDTH_TILES, DEMO_MIN_FLOOR, LIMITS } from '../sim/rules';
 import type { LogEntry } from '../sim/types';
 import { storeLinkNodes, storeNamesText, type StoreDoc } from '../site/stores';
-import { button, el, panelShell } from './panels';
+import { button, el, panelShell, type PanelElement } from './panels';
 
 export interface DemoCapCard {
   /** Show the card if it has not been shown this session. True when it opened. */
@@ -34,10 +34,10 @@ export function demoCapLines(): string[] {
 /** One card per ui, so once per session: the ui is built once per page load. */
 export function createDemoCapCard(host: { append(node: HTMLElement): void }): DemoCapCard {
   let offered = false;
-  let node: HTMLElement | null = null;
+  let node: PanelElement | null = null;
 
   const close = (): void => {
-    node?.remove();
+    node?.sheet?.unmount();
     node = null;
   };
 
@@ -64,7 +64,7 @@ export function createDemoCapCard(host: { append(node: HTMLElement): void }): De
       actions.append(button('Keep building', 'hs-btn is-primary', close));
       body.append(stores, actions);
       node = panel;
-      host.append(panel);
+      panel.sheet?.mount(host);
       return true;
     },
     close,
