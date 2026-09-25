@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { createWorld, addRoom, addShaft, addSim, log } from '../../src/sim/world';
 import { serialize, deserialize, hashWorld, SAVE_VERSION } from '../../src/sim/save';
-import type { Car, RiderClass, Room, Shaft, Sim, World } from '../../src/sim/types';
+import { applyCommand } from '../../src/sim/build';
+import { ROOMS } from '../../src/sim/rules';
+import { tick } from '../../src/sim/tick';
+import type { Car, CollectorState, Command, GuardState, RiderClass, Room, Shaft, Sim, World } from '../../src/sim/types';
 
 function buildRoom(overrides: Partial<Room> = {}): Room {
   return {
@@ -474,12 +477,12 @@ describe('hashWorld covers every field in types.ts', () => {
 
 describe('status bar baselines (save v3)', () => {
   it('writes the current version and round trips both baselines, set or not yet known', () => {
-    expect(SAVE_VERSION).toBe(5);
+    expect(SAVE_VERSION).toBe(6);
     const world = richWorld();
     world.quarterStartCash = 100_000;
     world.dayStartPopulation = 42;
     const text = serialize(world);
-    expect(JSON.parse(text).version).toBe(5);
+    expect(JSON.parse(text).version).toBe(6);
     const result = deserialize(text);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -525,5 +528,175 @@ describe('status bar baselines (save v3)', () => {
     expect(hashWorld(world)).toBe(before);
     world.cash += 1; // and the hash still sees real state
     expect(hashWorld(world)).not.toBe(before);
+  });
+});
+
+// Audit 2026-09-25, lane D S5: a save with the right outer shape but bad insides used to load,
+// then hang the tick loop or throw. Each mutation below is one from the verifier's s5.ts, run
+// on the same kind of tower (seed 4242, five office floors, about 390 people, day 1 09:00).
+describe('damaged insides are refused at load (audit D S5)', () => {
+  const DAMAGED = 'This save is damaged and was not loaded.';
+  let baseText = '';
+  function baseSave(): Record<string, any> {
+    if (!baseText) {
+      const world = createWorld(4242);
+      world.cash = 50_000_000;
+      const ok = (c: Command) => {
+        const result = applyCommand(world, c);
+        if (!result.ok) throw new Error(result.reason);
+      };
+      for (let x = 0; x < 120; x++) ok({ kind: 'build', room: 'lobby', floor: 1, x });
+      ok({ kind: 'shaft.build', shaft: 'standard', x: 20, floorMin: 1, floorMax: 6 });
+      for (let f = 2; f <= 6; f++) {
+        for (let x = 0; x + ROOMS.office.width <= 120; x += ROOMS.office.width) {
+          const blocked = x < 24 && x + ROOMS.office.width > 20;
+          if (!blocked) ok({ kind: 'build', room: 'office', floor: f, x });
+        }
+      }
+      while (world.time.minute < 1440 + 9 * 60) tick(world);
+      expect(world.sims.size).toBeGreaterThan(200);
+      baseText = serialize(world);
+    }
+    return JSON.parse(baseText) as Record<string, any>;
+  }
+  function refusal(breakIt: (d: Record<string, any>) => void): string {
+    const data = baseSave();
+    breakIt(data);
+    const result = deserialize(JSON.stringify(data));
+    return result.ok ? 'loaded' : result.reason;
+  }
+
+  it('loads the base save untouched, so each refusal below is for its field', () => {
+    expect(refusal(() => {})).toBe('loaded');
+  });
+
+  it('shaftWidth: a shaft with no width (the tick loop hung on it)', () => {
+    expect(refusal((d) => delete d.shafts[0].width)).toBe(`${DAMAGED} (shafts[0].width)`);
+  });
+
+  it('statsIncomeByKind: stats with one table missing (threw at the quarter start)', () => {
+    expect(refusal((d) => delete d.stats.incomeByKind)).toBe(`${DAMAGED} (stats.incomeByKind)`);
+  });
+
+  it('statsEmpty: stats with nothing in them', () => {
+    expect(refusal((d) => (d.stats = {}))).toBe(`${DAMAGED} (stats.incomeByKind)`);
+  });
+
+  it('tenants: a room with no tenant list (threw at the evaluation)', () => {
+    const d = baseSave();
+    const last = d.rooms.length - 1;
+    expect(refusal((data) => delete data.rooms[last].tenants)).toBe(`${DAMAGED} (rooms[${last}].tenants)`);
+  });
+
+  it('schedule: a person with no schedule (threw in the people pass)', () => {
+    expect(refusal((d) => delete d.sims[0].schedule)).toBe(`${DAMAGED} (sims[0].schedule)`);
+  });
+
+  it('route: a person with no route (threw in the people pass)', () => {
+    expect(refusal((d) => delete d.sims[0].route)).toBe(`${DAMAGED} (sims[0].route)`);
+  });
+
+  it('roomHeightBig: a room a billion floors tall is refused fast, for its height', () => {
+    const d = baseSave();
+    d.rooms[0].height = 1e9;
+    const text = JSON.stringify(d);
+    const started = performance.now();
+    const result = deserialize(text);
+    const took = performance.now() - started;
+    expect(result.ok ? 'loaded' : result.reason).toBe(`${DAMAGED} (rooms[0].height)`);
+    expect(took).toBeLessThan(250);
+  });
+
+  it('refuses a room wider than the lot', () => {
+    expect(refusal((d) => (d.rooms[0].width = 1e9))).toBe(`${DAMAGED} (rooms[0].width)`);
+  });
+
+  it('refuses a leg or a schedule entry that is junk, and a guard or collector with no task', () => {
+    expect(refusal((d) => (d.sims[0].route = [{ kind: 'fly' }]))).toBe(`${DAMAGED} (sims[0].route)`);
+    expect(refusal((d) => (d.sims[0].schedule = [{ minuteOfDay: 'noon' }]))).toBe(`${DAMAGED} (sims[0].schedule)`);
+    expect(refusal((d) => (d.sims[0].guard = { shift: 0 }))).toBe(`${DAMAGED} (sims[0].guard)`);
+    expect(refusal((d) => (d.sims[0].collector = { load: 1 }))).toBe(`${DAMAGED} (sims[0].collector)`);
+  });
+
+  it('refuses an event of an unknown kind or with its numbers missing', () => {
+    expect(refusal((d) => d.events.push({ kind: 'meteor' }))).toBe(`${DAMAGED} (events[0])`);
+    expect(refusal((d) => d.events.push({ kind: 'fire', roomIds: [], startedAt: 0 }))).toBe(`${DAMAGED} (events[0])`);
+  });
+});
+
+// Audit 2026-09-25, lane I S6: the hash sorts rooms by id, so a save with its rooms array
+// reordered hashed equal at load and then diverged. deserialize now puts rooms in id order.
+describe('room order, guards, collectors and fire events (audit I S6)', () => {
+  function officeTower(): World {
+    const world = createWorld(12345);
+    world.cash = 50_000_000;
+    const script: Command[] = [];
+    for (let x = 0; x <= 60; x++) script.push({ kind: 'build', room: 'lobby', floor: 1, x });
+    script.push({ kind: 'shaft.build', shaft: 'standard', x: 56, floorMin: 1, floorMax: 10 });
+    for (let f = 2; f <= 8; f++) for (let i = 0; i < 6; i++) script.push({ kind: 'build', room: 'office', floor: f, x: i * 9 });
+    for (let i = 0; i < 3; i++) script.push({ kind: 'build', room: 'fastFood', floor: 9, x: i * 16 });
+    for (let i = 0; i < 3; i++) script.push({ kind: 'build', room: 'condo', floor: 10, x: i * 16 });
+    for (const cmd of script) {
+      const result = applyCommand(world, cmd);
+      if (!result.ok) throw new Error(`${JSON.stringify(cmd)}: ${result.reason}`);
+    }
+    return world;
+  }
+
+  it('a save with the rooms array reversed runs the same as the tower it came from for 2 days', () => {
+    const world = officeTower();
+    while (world.time.minute < 1440 + 12 * 60 + 30) tick(world);
+    const data = JSON.parse(serialize(world)) as Record<string, any>;
+    data.rooms.reverse();
+    const loaded = deserialize(JSON.stringify(data));
+    if (!loaded.ok) throw new Error(loaded.reason);
+    const reversed = loaded.world;
+    expect(hashWorld(reversed)).toBe(hashWorld(world));
+    for (let i = 0; i < 2 * 1440; i++) {
+      tick(world);
+      tick(reversed);
+    }
+    expect(hashWorld(reversed)).toBe(hashWorld(world));
+  });
+
+  it("keeps a guard's state and a collector's round across serialize and deserialize", () => {
+    const world = richWorld();
+    const guard: GuardState = { shift: 1, task: 'respond', floor: 2, pauseUntil: null, respond: { kind: 'fire', roomId: 1, floor: 2, x: 105 }, routed: true };
+    const collector: CollectorState = { task: 'toCenter', roomId: 1, load: 3, until: null };
+    addSim(world, buildSim({ id: 21, kind: 'guard', homeRoomId: null, guard }));
+    addSim(world, buildSim({ id: 22, kind: 'collector', homeRoomId: null, collector }));
+    world.nextId = 23;
+    const result = deserialize(serialize(world));
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.world.sims.get(21)?.guard).toEqual(guard);
+    expect(result.world.sims.get(22)?.collector).toEqual(collector);
+    expect(hashWorld(result.world)).toBe(hashWorld(world));
+  });
+
+  it('moves the hash when a fire event is removed from the world', () => {
+    const world = richWorld();
+    world.events.push({ kind: 'fire', roomIds: [1], startedAt: 500, spreadAt: 530 });
+    const withFire = hashWorld(world);
+    world.events = world.events.filter((e) => e.kind !== 'fire');
+    expect(hashWorld(world)).not.toBe(withFire);
+  });
+});
+
+// Audit 2026-09-25, lane A S6 (the save validator half): a car range may not start or end on
+// floor 0, which does not exist, and must span two real floors.
+describe('car range on a shaft through the ground floor (audit A S6)', () => {
+  function withRange(range: { lo: number; hi: number }): string {
+    const data = JSON.parse(serialize(richWorld())) as Record<string, any>;
+    data.shafts[0].floorMin = -1;
+    data.shafts[0].cars[0].range = range;
+    const result = deserialize(JSON.stringify(data));
+    return result.ok ? 'loaded' : result.reason;
+  }
+
+  it('refuses {lo 0, hi 1} and a one-floor range, and accepts {lo -1, hi 1}', () => {
+    expect(withRange({ lo: 0, hi: 1 })).toBe('This save is damaged and was not loaded. (shafts[0].cars[0].range)');
+    expect(withRange({ lo: -1, hi: 0 })).toBe('This save is damaged and was not loaded. (shafts[0].cars[0].range)');
+    expect(withRange({ lo: 2, hi: 2 })).toBe('This save is damaged and was not loaded. (shafts[0].cars[0].range)');
+    expect(withRange({ lo: -1, hi: 1 })).toBe('loaded');
   });
 });
