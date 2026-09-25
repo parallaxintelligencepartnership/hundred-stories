@@ -87,3 +87,4 @@
 - 2026-09-24 | the Look tool (was Query) moves its shortcut from Q to L | why: plain names for young players
 - 2026-09-24 | Today's tower ships with two twists (Normal day, Tight money at half the starting cash) and lasts 8 in-game days, about 14 minutes; Narrow lot is left out because a per-tower build box would be a new sim rule; one try per date | why: one quarter was only about 5 minutes, and the twist had to use existing rules
 - 2026-09-24 | UI polish spec approved as written (docs/reviews/2026-09-24-ui-polish-spec.md): foundation first by one agent, then settings/panels and build/views/accessibility in parallel | why: Matt, "go"
+- 2026-09-24 | stairs keep overlaying other rooms; a flight may start on any floor from the ground up, and underground only between B1 and the ground; escalators unchanged unless Matt says otherwise | why: Matt, "stairs should be able to rest over other items ... ground down 1 level only"
