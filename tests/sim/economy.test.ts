@@ -227,7 +227,7 @@ describe('economy: bankruptcy', () => {
     const world = createWorld(1);
     world.cash = ECONOMY.bankruptAtCash - 1;
     for (let i = 0; i < ECONOMY.bankruptAfterQuarters; i++) onQuarterStart(world);
-    expect(world.gameOver).toEqual({ at: world.time.minute, reason: 'The bank has foreclosed on the tower.' });
+    expect(world.gameOver).toEqual({ at: world.time.minute, reason: 'The bank took the tower back.' });
   });
 
   it('resets the bad quarter streak after a good quarter', () => {
@@ -254,7 +254,7 @@ describe('economy: bankruptcy', () => {
 
     loaded.cash = ECONOMY.bankruptAtCash - 1;
     onQuarterStart(loaded); // bad quarter 2, after reload
-    expect(loaded.gameOver).toEqual({ at: loaded.time.minute, reason: 'The bank has foreclosed on the tower.' });
+    expect(loaded.gameOver).toEqual({ at: loaded.time.minute, reason: 'The bank took the tower back.' });
   });
 });
 

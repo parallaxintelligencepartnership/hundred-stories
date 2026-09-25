@@ -14,6 +14,7 @@
 import { applyCommand } from './build';
 import { EDITION, ROOMS, SHAFTS, type Edition } from './rules';
 import type { Car, Command, CommandKind, CommandResult, RoomKind, ShaftKind, World } from './types';
+import type { TowerStart } from './world';
 
 /** One accepted command and the minute it was applied at, before that minute's tick ran. */
 export interface BuildLogEntry {
@@ -41,6 +42,13 @@ export interface BuildLog {
   edition: Edition;
   entries: BuildLogEntry[];
   checks: Checkpoint[];
+  /** What the tower started with besides its number, when that was not the standard start. */
+  start?: TowerStart;
+  /**
+   * A game-layer note on how the tower began, carried with the save and never read by the sim:
+   * the daily tower writes `daily:YYYY-MM-DD` (src/game/daily.ts).
+   */
+  mode?: string;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -189,8 +197,10 @@ export function decodeEntries(encoded: unknown): BuildLogEntry[] {
 const logs = new WeakMap<World, BuildLog>();
 
 /** A fresh, replayable log for a world that has just been created and not touched. */
-export function startBuildLog(world: World, edition: Edition = EDITION): BuildLog {
+export function startBuildLog(world: World, edition: Edition = EDITION, begin: { start?: TowerStart; mode?: string } = {}): BuildLog {
   const log: BuildLog = { unavailable: null, edition, entries: [], checks: [] };
+  if (begin.start && Object.keys(begin.start).length > 0) log.start = { ...begin.start };
+  if (begin.mode !== undefined) log.mode = begin.mode;
   logs.set(world, log);
   return log;
 }
@@ -241,6 +251,9 @@ export interface SavedBuildLog {
   unavailable: ReplayUnavailable | null;
   entries: EncodedEntry[];
   checks: [number, number, string][];
+  /** Only written when the tower did not have the standard start, so older saves read the same. */
+  start?: TowerStart;
+  mode?: string;
 }
 
 export function buildLogToSave(world: World): SavedBuildLog {
@@ -251,7 +264,23 @@ export function buildLogToSave(world: World): SavedBuildLog {
     unavailable: log.unavailable,
     entries: encodeEntries(log.entries),
     checks: log.checks.map((c) => [c.t, c.n, c.h]),
+    ...(log.start ? { start: { ...log.start } } : {}),
+    ...(log.mode !== undefined ? { mode: log.mode } : {}),
   };
+}
+
+/** A saved start, or throws: every field optional, every field that is there a whole number of dollars. */
+function startFromSave(raw: unknown): TowerStart | undefined {
+  if (raw === undefined) return undefined;
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) throw new BadEntry();
+  const r = raw as Record<string, unknown>;
+  const start: TowerStart = {};
+  if (r.cash !== undefined) {
+    const cash = int(r.cash);
+    if (cash < 0) throw new BadEntry();
+    start.cash = cash;
+  }
+  return start;
 }
 
 const EDITIONS = { web: true, demo: true, full: true } satisfies Record<Edition, true>;
@@ -279,7 +308,12 @@ export function buildLogFromSave(raw: unknown): BuildLog {
       if (n < 0 || n > entries.length) throw new BadEntry();
       return { t: int(c[0]), n, h: c[2] };
     });
-    return { unavailable, edition, entries, checks };
+    const start = startFromSave(r.start);
+    if (r.mode !== undefined && typeof r.mode !== 'string') throw new BadEntry();
+    const log: BuildLog = { unavailable, edition, entries, checks };
+    if (start) log.start = start;
+    if (typeof r.mode === 'string') log.mode = r.mode;
+    return log;
   } catch {
     return { ...damaged, edition };
   }

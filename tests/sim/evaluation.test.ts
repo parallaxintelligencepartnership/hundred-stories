@@ -249,10 +249,10 @@ describe('tenants leaving', () => {
     expect(office.lowEvalSinceMinute).toBeNull();
     for (const sim of leavers) {
       expect(sim.state).toBe('leaving');
-      expect(sim.leaveReason).toBe('Too noisy next to the fast food on floor 3.');
+      expect(sim.leaveReason).toBe('It was too loud next to the fast food on floor 3.');
     }
-    expect(world.stats.tenantsLeftReasons['Too noisy next to the fast food on floor 3.']).toBe(2);
-    expect(world.log.some((entry) => entry.text === 'Too noisy next to the fast food on floor 3.')).toBe(true);
+    expect(world.stats.tenantsLeftReasons['It was too loud next to the fast food on floor 3.']).toBe(2);
+    expect(world.log.some((entry) => entry.text === 'It was too loud next to the fast food on floor 3.')).toBe(true);
   });
 
   it('a condo goes back on sale when its residents leave', () => {
@@ -274,7 +274,7 @@ describe('tenants leaving', () => {
     tickEvaluation(world);
     expect(room.vacant).toBe(false);
     expect(room.tenants).toHaveLength(0);
-    expect(guest.leaveReason).toBe('Cockroaches in the single room on floor 6.');
+    expect(guest.leaveReason).toBe('There were cockroaches in the single room on floor 6.');
   });
 
   it('the biggest penalty writes the reason, so a filthy room blames housekeeping', () => {
@@ -296,7 +296,7 @@ describe('tenants leaving', () => {
     tickEvaluation(world);
     world.time.minute = (office.lowEvalSinceMinute as number) + EVAL.leaveAfterMinutes;
     tickEvaluation(world);
-    expect(world.stats.tenantsLeftReasons['Too long waiting for an elevator on floor 9.']).toBe(1);
+    expect(world.stats.tenantsLeftReasons['People waited too long for an elevator on floor 9.']).toBe(1);
   });
 
   it('names the rent when the rent is 150% and nothing else is wrong', () => {

@@ -64,7 +64,7 @@ describe('view control', () => {
     const swatches = legend.descendants().filter((n) => n.className === 'hs-legend-swatch');
     expect(swatches.map((s) => s.style['background'])).toEqual(OVERLAY_RAMP.map((c) => `#${c.toString(16).padStart(6, '0')}`));
     control.set('vacancy');
-    expect(legend.textContent).toBe('OccupiedVacant');
+    expect(legend.textContent).toBe('OccupiedEmpty');
     control.set(null);
     expect(legend.classList.contains('is-hidden')).toBe(true);
     expect(legend.children).toHaveLength(0);

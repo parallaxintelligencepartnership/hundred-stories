@@ -1,4 +1,9 @@
-// Save slot. In the browser: IndexedDB first, localStorage as the fallback, both wrapped so a
+// Save slots. There are three, the same on every platform: "My tower" (slot `mine`, the one
+// slot there ever was, under its old key and file name so no player loses a tower), "Today's
+// tower" (`daily`) and "Friend's tower" (`friend`). Each slot holds one whole save, build log
+// included, and writing one never touches another.
+//
+// In the browser: IndexedDB first, localStorage as the fallback, both wrapped so a
 // private window never throws. In the iOS and Android shells: one file, autosave.json, in the
 // app data directory through Capacitor Filesystem (saves run 0.7 to 3.3 MB, past what
 // Preferences is comfortable with on iOS). In the desktop shell for Steam (Tauri): the same one
@@ -12,7 +17,22 @@
 
 const DB = 'hundred-stories';
 const STORE = 'saves';
-const KEY = 'autosave';
+
+export type SlotName = 'mine' | 'daily' | 'friend';
+export const SLOT_NAMES: readonly SlotName[] = ['mine', 'daily', 'friend'];
+
+/** The player's names for the slots. */
+export const SLOT_LABELS: Record<SlotName, string> = {
+  mine: 'My tower',
+  daily: "Today's tower",
+  friend: "Friend's tower",
+};
+
+/** The IndexedDB key (and, after `hundred-stories:`, the localStorage key) per slot. `autosave` is the original. */
+export const SLOT_KEYS: Record<SlotName, string> = { mine: 'autosave', daily: 'daily', friend: 'friend' };
+
+/** The file per slot in the app data directory of the phone and desktop shells. */
+export const SLOT_FILES: Record<SlotName, string> = { mine: 'autosave.json', daily: 'daily.json', friend: 'friend.json' };
 
 const REFUSED_REASON = 'This browser would not let the game save.';
 
@@ -35,7 +55,8 @@ function openDb(factory: IDBFactory): Promise<IDBDatabase> {
   });
 }
 
-export function createStorage(deps: StorageDeps = {}): SaveStorage {
+export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): SaveStorage {
+  const KEY = SLOT_KEYS[slot];
   const localKey = `${DB}:${KEY}`;
 
   async function writeSave(text: string): Promise<void> {
@@ -93,7 +114,7 @@ export interface FileSlotFs {
   readFile(options: { path: string; directory: string; encoding: string }): Promise<{ data: string | Blob }>;
 }
 
-export const FILE_SLOT_NAME = 'autosave.json';
+export const FILE_SLOT_NAME = SLOT_FILES.mine;
 // The string values of the plugin's Directory.Data and Encoding.UTF8 enums, written out so this
 // module never imports the plugin on the web path.
 const DATA_DIRECTORY = 'DATA';
@@ -104,8 +125,8 @@ const DEVICE_REFUSED_REASON = 'This device would not let the game save.';
  * The native save slot: one file in the app data directory, the same interface as the browser
  * slot. `fs` may be a promise so the plugin can be loaded lazily on first use.
  */
-export function createFileStorage(fs: FileSlotFs | Promise<FileSlotFs>): SaveStorage {
-  const opts = { path: FILE_SLOT_NAME, directory: DATA_DIRECTORY, encoding: UTF8 };
+export function createFileStorage(fs: FileSlotFs | Promise<FileSlotFs>, slot: SlotName = 'mine'): SaveStorage {
+  const opts = { path: SLOT_FILES[slot], directory: DATA_DIRECTORY, encoding: UTF8 };
 
   async function writeSave(text: string): Promise<void> {
     try {
@@ -172,13 +193,13 @@ async function loadCapacitorFs(): Promise<FileSlotFs> {
  * and localStorage off globalThis on every call, as it always has). Tauri is asked first so a
  * stray Capacitor global can never send a desktop save to a plugin that is not there.
  */
-export function selectStorage(deps: SelectDeps = {}): SaveStorage {
+export function selectStorage(deps: SelectDeps = {}, slot: SlotName = 'mine'): SaveStorage {
   const platform = savePlatform(deps.global);
-  if (platform === 'tauri') return createTauriStorage((deps.loadTauriFs ?? loadTauriFs)());
-  if (platform === 'capacitor') return createFileStorage((deps.loadFs ?? loadCapacitorFs)());
+  if (platform === 'tauri') return createTauriStorage((deps.loadTauriFs ?? loadTauriFs)(), slot);
+  if (platform === 'capacitor') return createFileStorage((deps.loadFs ?? loadCapacitorFs)(), slot);
   return {
-    writeSave: (text: string) => createStorage(globalDeps()).writeSave(text),
-    readSave: () => createStorage(globalDeps()).readSave(),
+    writeSave: (text: string) => createStorage(globalDeps(), slot).writeSave(text),
+    readSave: () => createStorage(globalDeps(), slot).readSave(),
   };
 }
 
@@ -235,7 +256,8 @@ const TEMP_SUFFIX = '.tmp';
  * or a full disk mid-write (saves run to 3.3 MB) leaves the last good save in place. `fs` may be
  * a promise so the plugin can be loaded lazily on first use.
  */
-export function createTauriStorage(fs: TauriSlotFs | Promise<TauriSlotFs>): SaveStorage {
+export function createTauriStorage(fs: TauriSlotFs | Promise<TauriSlotFs>, slot: SlotName = 'mine'): SaveStorage {
+  const FILE_SLOT_NAME = SLOT_FILES[slot];
   let dirReady: Promise<void> | null = null;
 
   async function writeSave(text: string): Promise<void> {
@@ -415,20 +437,30 @@ export async function shareImage(base64: string, deps?: ImageShareDeps): Promise
   await share.share({ title: 'Hundred Stories chronicle', files: [uri] });
 }
 
-// Chosen once, on the first save or load at boot, then kept: the platform cannot change
-// under a running page.
-let selected: SaveStorage | null = null;
-function active(): SaveStorage {
-  return (selected ??= selectStorage());
+// Chosen once per slot, on the first save or load, then kept: the platform cannot change under
+// a running page.
+const selected = new Map<SlotName, SaveStorage>();
+function active(slot: SlotName): SaveStorage {
+  let found = selected.get(slot);
+  if (!found) {
+    found = selectStorage({}, slot);
+    selected.set(slot, found);
+  }
+  return found;
 }
 
+/** My tower, the original slot. */
 export const storage: SaveStorage = {
-  writeSave: (text: string) => active().writeSave(text),
-  readSave: () => active().readSave(),
+  writeSave: (text: string) => active('mine').writeSave(text),
+  readSave: () => active('mine').readSave(),
 };
 
 export const writeSave = (text: string): Promise<void> => storage.writeSave(text);
 export const readSave = (): Promise<string | null> => storage.readSave();
+
+/** Any slot by name. The game writes My tower through writeSave and the other two through this. */
+export const writeSlot = (slot: SlotName, text: string): Promise<void> => active(slot).writeSave(text);
+export const readSlot = (slot: SlotName): Promise<string | null> => active(slot).readSave();
 
 const UNREADABLE_KEY = 'hs.save.unreadable';
 

@@ -176,7 +176,7 @@ export function overlayTitle(kind: OverlayKind): string {
 export function overlayLegend(kind: OverlayKind): Legend {
   const r = OVERLAY_RAMP;
   const title = OVERLAY_TITLES[kind];
-  if (kind === 'vacancy') return { title, entries: [{ color: r[0], label: 'Occupied' }, { color: r[4], label: 'Vacant' }] };
+  if (kind === 'vacancy') return { title, entries: [{ color: r[0], label: 'Occupied' }, { color: r[4], label: 'Empty' }] };
   if (kind === 'noise') {
     return {
       title,

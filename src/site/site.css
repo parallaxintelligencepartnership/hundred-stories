@@ -375,6 +375,12 @@ p {
   color: var(--w-text);
 }
 
+/* The hero's Play today's tower sits on its own line under Play in your browser. */
+.hero-panel .button-secondary {
+  display: table;
+  margin-top: 12px;
+}
+
 /* Underground: concrete with floor lines ------------------------------ */
 
 .underground {

@@ -176,7 +176,7 @@ describe('legend', () => {
     for (const kind of ['stress', 'noise', 'wait'] as const) {
       expect(overlayLegend(kind).entries.map((e) => e.color)).toEqual([...OVERLAY_RAMP]);
     }
-    expect(overlayLegend('vacancy').entries.map((e) => e.label)).toEqual(['Occupied', 'Vacant']);
+    expect(overlayLegend('vacancy').entries.map((e) => e.label)).toEqual(['Occupied', 'Empty']);
     expect(overlayLegend('wait').entries.map((e) => e.label)).toEqual([
       'Nobody',
       'Under 5 min',

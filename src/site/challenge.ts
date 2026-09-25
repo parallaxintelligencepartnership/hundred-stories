@@ -2,8 +2,8 @@
 // numbers in the query string, this line greets the visitor with them. Pure textContent,
 // no innerHTML, and it stays hidden when the link carries nothing or something invalid.
 // When the link also carries the sharer's starting number, a second button starts the same
-// tower: /play/?seed=N, the address main.ts already reads. Without ?new, a visitor who has a
-// tower of their own resumes it instead, so the button can never replace someone's save.
+// tower: /play/?seed=N, which main.ts opens in the Friend's tower save slot, so it starts the
+// same tower and never replaces the visitor's own (My tower).
 
 import { parseChallenge } from '../share/share';
 import { formatCount } from '../ui/format';

@@ -410,6 +410,11 @@ button.hs-readout:hover .hs-readout-label {
   cursor: pointer;
 }
 
+/* The top strip's My tower button shows only outside My tower. */
+.hs-btn[hidden] {
+  display: none;
+}
+
 .hs-speed .hs-btn {
   border: 0;
   min-width: 44px;
@@ -1886,4 +1891,15 @@ a.hs-btn {
   .hs-group-key {
     display: none;
   }
+}
+
+/* Today's tower result card: the score, big. */
+.hs-daily-people {
+  margin: 8px 0;
+}
+
+.hs-daily-people-count {
+  font-family: var(--font-readout);
+  font-size: var(--size-28);
+  font-weight: 600;
 }

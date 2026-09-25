@@ -61,6 +61,25 @@ export async function applyDevAudio(search: string, dev: boolean, load: () => Pr
   return armDevAudio(name, params.get('render'));
 }
 
+/**
+ * Which tower the page address asks for. `?daily` (any value: `today`, or the date a friend
+ * shared) is today's tower in its own slot. `?seed=N` is a friend's link: the same tower they
+ * started, in the Friend's tower slot, never over My tower. Anything else is My tower, fresh
+ * with `?new`. The number can sit in the address; the player never sees it.
+ */
+export type BootTarget = { kind: 'daily' } | { kind: 'friend'; seed: number } | { kind: 'mine'; fresh: boolean };
+
+export function bootTarget(search: string): BootTarget {
+  const params = new URLSearchParams(search);
+  if (params.has('daily')) return { kind: 'daily' };
+  const seedParam = params.get('seed');
+  if (seedParam !== null && seedParam.trim() !== '') {
+    const seed = Number(seedParam);
+    if (Number.isSafeInteger(seed) && seed >= 0) return { kind: 'friend', seed };
+  }
+  return { kind: 'mine', fresh: params.has('new') };
+}
+
 const defaultDeps: BootDeps = {
   createRenderer,
   createGame,
@@ -91,12 +110,12 @@ export async function boot(app: HTMLElement, deps: BootDeps = defaultDeps): Prom
   uiRoot.id = 'ui';
   app.append(view, uiRoot);
 
-  const params = new URLSearchParams(deps.search());
-  const seedParam = params.get('seed');
-  const seed = seedParam !== null && Number.isFinite(Number(seedParam)) ? Number(seedParam) : Math.floor(Date.now() % 1_000_000);
-  const game = deps.createGame(seed);
-  // Resume the autosave unless the player asked for a fresh tower with ?new. The seed only applies to new games.
-  if (!params.has('new')) {
+  const target = bootTarget(deps.search());
+  const game = deps.createGame(target.kind === 'friend' ? target.seed : Math.floor(Date.now() % 1_000_000));
+  if (target.kind === 'daily') await game.openDaily();
+  else if (target.kind === 'friend') await game.openFriend(target.seed);
+  else if (!target.fresh) {
+    // Resume My tower unless the player asked for a fresh one with ?new.
     const resumed = await game.load();
     if (resumed.ok) game.world.log.push({ minute: game.world.time.minute, text: 'Welcome back. Your tower is just as it was when it last saved.', level: 'info' });
   }

@@ -1,8 +1,27 @@
 // The surface the UI talks to. Implemented by game/game.ts; the UI never touches the sim modules directly.
 import type { Command, CommandResult, Id, RoomKind, ShaftKind, World } from '../sim/types';
 import type { GameEvent, GameEventListener } from './events';
+import type { SlotName } from './storage';
 
-export type { GameEvent, GameEventListener };
+export type { GameEvent, GameEventListener, SlotName };
+
+/** Today's tower as the ui sees it. */
+export interface DailyInfo {
+  /** YYYY-MM-DD, the player's local date it was started on. */
+  date: string;
+  twist: { name: string; line: string };
+  /** The game minute it ends on. */
+  endMinute: number;
+  finished: boolean;
+}
+
+/** The choice when the daily slot holds an unfinished tower from an earlier date. */
+export interface DailyChoice {
+  savedDate: string;
+  today: string;
+  /** The saved one is from the day before today. */
+  yesterday: boolean;
+}
 
 export type Tool =
   | { kind: 'none' }
@@ -82,6 +101,24 @@ export interface GameApi {
   exportSave(): string;
   importSave(text: string): CommandResult;
   newGame(seed: number): void;
+  /** Which save slot the tower in hand lives in: My tower, Today's tower or Friend's tower. */
+  getSlot(): SlotName;
+  /** Today's tower in hand, or null in the other slots. */
+  getDaily(): DailyInfo | null;
+  /** Set while an unfinished daily from an earlier date waits for the player to pick. */
+  getDailyChoice(): DailyChoice | null;
+  /**
+   * Open the daily slot on today's date: go on with today's tower, start it fresh, or, when the
+   * slot holds an unfinished tower from an earlier date, show that one stopped and set the choice.
+   * The slot being left is saved only if it moved; My tower is never rewritten by the daily.
+   */
+  openDaily(): Promise<void>;
+  /** Answer the choice: finish the older daily, or start today's fresh. */
+  chooseDaily(which: 'finish' | 'today'): Promise<void>;
+  /** A friend's link: the same tower they started, in the Friend's tower slot. */
+  openFriend(seed: number): Promise<void>;
+  /** Back to My tower, one call: its save, or a fresh tower when there is none. */
+  openMyTower(): Promise<void>;
   setReducedMotion(on: boolean): void;
   /**
    * How many screen pixels the chrome covers at the top and the bottom of the view.

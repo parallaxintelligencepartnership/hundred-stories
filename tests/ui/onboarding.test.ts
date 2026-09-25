@@ -182,7 +182,7 @@ describe('tips', () => {
     expect(newLeaveReason({ a: 1 }, { a: 1, b: 1 })).toBe('b');
     expect(newLeaveReason({ a: 1 }, { a: 2 })).toBe('a');
     expect(newLeaveReason({ a: 1 }, { a: 1 })).toBe(null);
-    expect(TIP_TEXT.tenantLeft('Too noisy next to the Fast food on floor 3.')).toBe('A tenant moved out: too noisy next to the Fast food on floor 3.');
+    expect(TIP_TEXT.tenantLeft('It was too loud next to the Fast food on floor 3.')).toBe('A tenant moved out: it was too loud next to the Fast food on floor 3.');
   });
 
   it('names the night mode the status bar shows', () => {
