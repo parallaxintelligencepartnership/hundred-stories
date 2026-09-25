@@ -145,9 +145,9 @@ describe('replay', () => {
   });
 
   it('writes save v5 with the log beside the world, and leaves the hash alone', () => {
-    expect(SAVE_VERSION).toBe(5);
+    expect(SAVE_VERSION).toBe(6);
     const data = JSON.parse(text);
-    expect(data.version).toBe(5);
+    expect(data.version).toBe(6);
     expect(data.buildLog.unavailable).toBe(null);
     expect(data.buildLog.entries.length).toBe(70);
     expect(data.buildLog.checks.length).toBe(3);

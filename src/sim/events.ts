@@ -51,23 +51,9 @@ export function resetEventTestHooks(): void {
   EVENT_TEST_HOOKS.target = { fire: null, bomb: null };
 }
 
-// The dirty-since timer lives on room.dirtySinceMinute so it survives save and
-// load. Only the spread cadence (a cosmetic pacing, not part of the save
-// contract) still lives here, keyed by world, and is rebuilt from scratch
-// after a load.
-interface RoachSpreadState {
-  lastSpread: number | null;
-}
-const roachSpread = new WeakMap<World, RoachSpreadState>();
-
-function roachSpreadOf(world: World): RoachSpreadState {
-  let state = roachSpread.get(world);
-  if (!state) {
-    state = { lastSpread: null };
-    roachSpread.set(world, state);
-  }
-  return state;
-}
+// The dirty-since timer lives on room.dirtySinceMinute and the spread cadence on
+// world.roachLastSpread, so both survive save and load (save v6) and a reloaded tower
+// spreads on the same day as one that never stopped.
 
 export function formatDollars(amount: number): string {
   const sign = amount < 0 ? '-' : '';
@@ -773,7 +759,6 @@ function isHotelRoom(kind: RoomKind): boolean {
 
 /** Runs once a day. Dirty hotel rooms breed cockroaches, and cockroaches travel. */
 export function tickCockroaches(world: World): void {
-  const state = roachSpreadOf(world);
   const minute = world.time.minute;
 
   for (const room of sortedRooms(world)) {
@@ -798,18 +783,18 @@ export function tickCockroaches(world: World): void {
     if (room.infested) continue;
     if (minute - room.dirtySinceMinute < EVENTS.cockroaches.dirtyDaysBeforeInfested * MINUTES_PER_DAY) continue;
     room.infested = true;
-    if (state.lastSpread === null) state.lastSpread = minute;
+    if (world.roachLastSpread == null) world.roachLastSpread = minute;
     log(world, `Cockroaches moved into the ${describe(room)}.`, 'alert', { roomId: room.id });
   }
 
   const infested = sortedRooms(world).filter((r) => r.infested && isHotelRoom(r.kind));
   if (infested.length === 0) {
-    state.lastSpread = null;
+    world.roachLastSpread = null;
     return;
   }
-  if (state.lastSpread === null) state.lastSpread = minute;
-  if (minute - state.lastSpread < EVENTS.cockroaches.spreadDays * MINUTES_PER_DAY) return;
-  state.lastSpread = minute;
+  if (world.roachLastSpread == null) world.roachLastSpread = minute;
+  if (minute - world.roachLastSpread < EVENTS.cockroaches.spreadDays * MINUTES_PER_DAY) return;
+  world.roachLastSpread = minute;
   for (const source of infested) {
     for (let f = source.floor; f < source.floor + source.height; f++) {
       for (const other of world.floorIndex.rooms.get(f) ?? []) {
