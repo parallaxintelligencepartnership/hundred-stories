@@ -24,8 +24,13 @@ remains the fallback.
 npm run deploy
 ```
 
-This runs `npm run build` then `npx wrangler deploy`, which uploads `dist/`
-as static assets and attaches the custom domains from `wrangler.jsonc`.
+This runs `npm run build`, then `scripts/predeploy-check.mjs`, then `npx wrangler deploy`,
+which uploads `dist/` as static assets and attaches the custom domains from `wrangler.jsonc`.
+The predeploy check is a static gate on the `dist/` output: it fails the build before
+anything is uploaded if `dist/_headers` no longer sends a `script-src 'self'` CSP with no
+`unsafe-eval` for `/play/`, if `dist/play/index.html` is missing, or if the PixiJS
+`unsafe-eval` shim is missing from the built JS (that shim is required because the CSP has
+no `unsafe-eval`).
 
 ## Verification
 
