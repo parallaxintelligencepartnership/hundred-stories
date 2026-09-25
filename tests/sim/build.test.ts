@@ -863,3 +863,59 @@ describe('structural support', () => {
     expect(applyCommand(loaded.world, { kind: 'demolish', roomId: floating.id })).toEqual(OK);
   });
 });
+
+describe('stairs and escalators: overlay, depth and support', () => {
+  const AIR = 'Nothing is holding this up. Build under it first.';
+
+  it('lays stairs over offices and condos, and lets a room go where stairs already are', () => {
+    const world = makeWorld();
+    lobby(world, 100, 30); // floor 1 tiles 100 to 129
+    expect(build(world, 'office', 2, 100)).toEqual(OK); // 100 to 108
+    expect(build(world, 'condo', 2, 109)).toEqual(OK); // 109 to 124
+    expect(build(world, 'stairs', 2, 104)).toEqual(OK); // 104 to 111, across both
+    expect(build(world, 'stairs', 1, 116)).toEqual(OK); // over the lobby, under the condo
+    // an office on floor 3, where the flight from floor 2 reaches, over the flight's tiles
+    expect(build(world, 'office', 3, 104)).toEqual(OK);
+    expect(world.rooms.size).toBe(30 + 5);
+  });
+
+  it('lets a flight stand on an overhanging office, but not an escalator', () => {
+    const world = makeWorld(8_000_000, 3);
+    lobby(world, 100, 6); // floor 1 tiles 100 to 105
+    expect(build(world, 'office', 2, 104)).toEqual(OK); // 104 to 112, overhangs from 106
+    // 106 to 113 has nothing under it on floor 1, but stands on the office's floor
+    expect(canBuild(world, 'escalator', 2, 106)).toEqual({ ok: false, reason: AIR });
+    expect(canBuild(world, 'stairs', 2, 106)).toEqual(OK);
+    expect(build(world, 'stairs', 2, 106)).toEqual(OK);
+    // off the office's end there is still nothing to stand on
+    expect(canBuild(world, 'stairs', 3, 200)).toEqual({ ok: false, reason: AIR });
+  });
+
+  for (const kind of ['stairs', 'escalator'] as const) {
+    it(`joins B1 to the ground with ${kind}, and refuses them any deeper`, () => {
+      const world = makeWorld(8_000_000, 3);
+      const deep = `${kind === 'stairs' ? 'Stairs' : 'Escalators'} can only go down one level, to B1.`;
+      expect(canBuild(world, kind, -1, 100)).toEqual({ ok: false, reason: 'Build a floor below this one first.' });
+      lobby(world, 100, 6);
+      expect(build(world, kind, -1, 100)).toEqual(OK);
+      const flight = [...world.rooms.values()].find((r) => r.kind === kind) as Room;
+      expect(flight.floor).toBe(-1);
+      expect(world.floorIndex.rooms.get(1)).toContain(flight);
+      expect(world.floorIndex.rooms.has(0)).toBe(false);
+      // B1 and B2 built out, still no deeper flight
+      expect(build(world, 'parkingSpace', -1, 200)).toEqual(OK);
+      expect(build(world, 'parkingSpace', -2, 200)).toEqual(OK);
+      expect(canBuild(world, kind, -2, 200)).toEqual({ ok: false, reason: deep });
+      expect(canBuild(world, kind, -3, 200)).toEqual({ ok: false, reason: deep });
+      // and every floor from the ground up is fine
+      expect(build(world, kind, 1, 102)).toEqual(OK);
+      expect(build(world, kind, 2, 102)).toEqual(OK);
+    });
+  }
+
+  it('keeps other rooms off floor 0: a two floor room from B1 still does not fit', () => {
+    const world = makeWorld(8_000_000, 3);
+    lobby(world, 100, 40);
+    expect(canBuild(world, 'cinema', -1, 100)).toEqual({ ok: false, reason: 'That does not fit inside the tower.' });
+  });
+});

@@ -5,7 +5,7 @@ import { spend } from './economy';
 import { handleEventCommand } from './events';
 import { isFollowed, recordBeat } from './story';
 import { DEMO_CAP_REASON, EDITION, insideDemoCap, LIMITS, RENT, ROOMS, SHAFTS, takesRent } from './rules';
-import { MAX_FLOOR, MIN_FLOOR, TOWER_WIDTH } from './types';
+import { MAX_FLOOR, MIN_FLOOR, spanFloors, spanTop, TOWER_WIDTH } from './types';
 import type {
   Car,
   Command,
@@ -208,22 +208,25 @@ interface Without {
 
 /**
  * The floor a footprint rests on: the one under its bottom floor above ground, the one over its
- * top floor underground. Null when it stands on the ground (floor 1) or hangs from the ground
- * lobby (a basement whose top floor is -1), which the lobby rule covers instead.
+ * top floor underground. Null when it stands on the ground (floor 1), reaches it (a flight from
+ * B1 to the ground), or hangs from the ground lobby (a basement whose top floor is -1), which the
+ * lobby rule covers instead.
  */
 function restingFloor(floor: number, height: number): number | null {
   if (floor >= 1) return floor === 1 ? null : floor - 1;
-  const top = floor + height - 1;
-  return top === -1 ? null : top + 1;
+  const top = spanTop(floor, height);
+  return top === -1 || top >= 1 ? null : top + 1;
 }
 
 /**
  * Structure directly under (or, underground, directly over) at least one tile of this footprint:
  * a room of any kind, a lobby segment, or an elevator shaft passing that floor. A one-room
- * overhang is fine; a room with nothing at all beneath it is not.
+ * overhang is fine; a room with nothing at all beneath it is not. Stairs also rest on the rooms
+ * they stand over on their own bottom floor: a flight laid over an office stands on its floor.
  */
 function restsOnStructure(
   world: World,
+  kind: RoomKind,
   floor: number,
   height: number,
   x: number,
@@ -231,12 +234,18 @@ function restsOnStructure(
   without: Without = {},
 ): boolean {
   if (floor === 1) return true;
-  const top = floor + height - 1;
+  const top = spanTop(floor, height);
   if (floor < 0 && top === -1) {
     return roomsOnFloor(world, 1).some((r) => r.kind === 'lobby' && r.id !== without.roomId);
   }
   const under = restingFloor(floor, height);
   if (under === null) return true;
+  if (kind === 'stairs' && floor > 1) {
+    for (const room of roomsOnFloor(world, floor)) {
+      if (room.id === without.roomId || isConnector(room.kind)) continue;
+      if (overlapsX(x, width, room.x, room.width)) return true;
+    }
+  }
   for (const room of roomsOnFloor(world, under)) {
     if (room.id === without.roomId) continue;
     if (overlapsX(x, width, room.x, room.width)) return true;
@@ -251,7 +260,7 @@ function restsOnStructure(
 
 /** Does this room rest on structure today? The same test a new build must pass. */
 export function isHeldUp(world: World, room: Room): boolean {
-  return restsOnStructure(world, room.floor, room.height, room.x, room.width);
+  return restsOnStructure(world, room.kind, room.floor, room.height, room.x, room.width);
 }
 
 /**
@@ -262,8 +271,8 @@ export function isHeldUp(world: World, room: Room): boolean {
 function strandsSomething(world: World, without: Without): CommandResult | null {
   for (const room of world.rooms.values()) {
     if (room.id === without.roomId) continue;
-    if (!restsOnStructure(world, room.floor, room.height, room.x, room.width)) continue;
-    if (restsOnStructure(world, room.floor, room.height, room.x, room.width, without)) continue;
+    if (!restsOnStructure(world, room.kind, room.floor, room.height, room.x, room.width)) continue;
+    if (restsOnStructure(world, room.kind, room.floor, room.height, room.x, room.width, without)) continue;
     const side = room.floor > 0 ? 'above' : 'below';
     return no(`Something ${side} rests on this. Remove that first.`);
   }
@@ -339,8 +348,11 @@ export function canBuild(world: World, kind: RoomKind, floor: number, x: number)
 
   if (!Number.isInteger(x)) return no('That spot is not on the grid.');
   if (!floorExists(floor)) return no('That floor does not exist.');
-
-  const floors = floorsCovered(floor, rule.height);
+  // Stairs and escalators go down one level only, and only they may cross the ground (B1 up to
+  // floor 1); every other room stops short of it. Deeper flights in older towers are kept.
+  const connector = isConnector(kind);
+  if (connector && floor < -1) return no(`${plural(rule.label)} can only go down one level, to B1.`);
+  const floors = connector ? spanFloors(floor, rule.height) : floorsCovered(floor, rule.height);
   if (floors.some((f) => !floorExists(f))) return no('That does not fit inside the tower.');
   if (x < 0 || x + rule.width > TOWER_WIDTH) return no('That does not fit inside the tower.');
   const capped = demoCapRefusal(floors[0] ?? floor, floors[floors.length - 1] ?? floor, x, rule.width);
@@ -365,7 +377,7 @@ export function canBuild(world: World, kind: RoomKind, floor: number, x: number)
   }
 
   if (!hasSupport(world, floor)) return no('Build a floor below this one first.');
-  if (!restsOnStructure(world, floor, rule.height, x, rule.width)) {
+  if (!restsOnStructure(world, kind, floor, rule.height, x, rule.width)) {
     return no('Nothing is holding this up. Build under it first.');
   }
 

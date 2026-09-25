@@ -605,3 +605,69 @@ describe('goal picked from the per floor index', () => {
     expect(most).toBeGreaterThanOrEqual(4); // several arrival states compete on one floor
   }, 30_000); // a brute force scan over about 700 trips; slow when the machine is loaded
 });
+
+describe('connectors that join B1 to the ground', () => {
+  function builtWorld(kind: 'stairs' | 'escalator'): { world: World; flight: Room } {
+    const world = createWorld(7);
+    world.cash = 10_000_000;
+    world.stars = 3;
+    for (let x = 100; x <= 140; x++) {
+      expect(applyCommand(world, { kind: 'build', room: 'lobby', floor: 1, x })).toEqual({ ok: true });
+    }
+    // a shop on B1 that nothing but this flight reaches: no elevator anywhere
+    expect(applyCommand(world, { kind: 'build', room: 'fastFood', floor: -1, x: 200 })).toEqual({ ok: true });
+    expect(applyCommand(world, { kind: 'build', room: kind, floor: -1, x: 120 })).toEqual({ ok: true });
+    const flight = [...world.rooms.values()].find((r) => r.kind === kind) as Room;
+    return { world, flight };
+  }
+
+  for (const kind of ['stairs', 'escalator'] as const) {
+    it(`routes people from the ground lobby down ${kind} to a B1 room`, () => {
+      const { world, flight } = builtWorld(kind);
+      // the flight stands on B1 and on the ground floor, never on a floor 0
+      expect(world.floorIndex.rooms.get(1)).toContain(flight);
+      expect(world.floorIndex.rooms.get(-1)).toContain(flight);
+      expect(world.floorIndex.rooms.has(0)).toBe(false);
+      ensureRouting(world);
+      expect(isReachableFromLobby(world, -1, 205)).toBe(true);
+      const down = findRoute(world, { floor: 1, x: 100 }, { floor: -1, x: 205 });
+      expect(down).not.toBeNull();
+      expect(kinds(down as Leg[])).toEqual(['walk', 'stairs', 'walk']);
+      expect(down?.[1]).toEqual({ kind: 'stairs', roomId: flight.id, toFloor: -1 });
+      const up = findRoute(world, { floor: -1, x: 205 }, { floor: 1, x: 100 });
+      expect(up?.[1]).toEqual({ kind: 'stairs', roomId: flight.id, toFloor: 1 });
+    });
+  }
+
+  it('keeps a deeper flight from an older save: it loads, routes and can be taken down', () => {
+    const world = createWorld(7);
+    makeLobby(world, 100, 140);
+    // placed directly, as a build from before the one level rule would have left them
+    const shaft = makeShaft(world, 'standard', 150, -3, 1);
+    shaft.cars.push(makeCar(world, shaft.id, 1));
+    const stairs = makeRoom(world, 'stairs', -3, 200); // B3 to B2
+    const escalator = makeRoom(world, 'escalator', -5, 200); // B5 to B4
+    makeStairs(world, 220, -4, -3); // B4 to B3
+    const loaded = deserialize(serialize(world));
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) return;
+    const w = loaded.world;
+    expect(w.rooms.get(stairs.id)?.floor).toBe(-3);
+    expect(w.rooms.get(escalator.id)?.floor).toBe(-5);
+    // down the elevator to B3, then the old flights on to B5
+    const legs = findRoute(w, { floor: 1, x: 100 }, { floor: -5, x: 205 });
+    expect(legs).not.toBeNull();
+    expect((legs as Leg[]).filter((l) => l.kind === 'stairs').map((l) => l.kind === 'stairs' && l.toFloor)).toEqual([-4, -5]);
+    const upToB2 = findRoute(w, { floor: -3, x: 205 }, { floor: -2, x: 205 });
+    expect(upToB2?.some((l) => l.kind === 'stairs' && l.roomId === stairs.id)).toBe(true);
+    expect(applyCommand(w, { kind: 'demolish', roomId: escalator.id })).toEqual({ ok: true });
+  });
+
+  it('counts B1 to the ground as one floor of climbing', () => {
+    const { world } = builtWorld('stairs');
+    // B1 to floor 1 is one floor, then four flights up: the most a sim will climb in all
+    makeStairs(world, 160, 1, LIMITS.stairsMaxClimbFloors);
+    const legs = findRoute(world, { floor: -1, x: 205 }, { floor: LIMITS.stairsMaxClimbFloors, x: 165 });
+    expect(legs).not.toBeNull();
+  });
+});

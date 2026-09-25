@@ -13,7 +13,7 @@ import { ECONOMY, ROOMS, SCHEDULES, STORY, STRESS } from './rules';
 import { collectorLostRoute, inWasteBacklog, runCollectors } from './recycling';
 import { guardLostRoute, runGuards } from './security';
 import { isFollowed, recordBeat, recordSimBeat, type StoryBeat, type StoryState } from './story';
-import { clockOf, riderClassOf } from './types';
+import { clockOf, floorDistance, riderClassOf } from './types';
 import type {
   Clock,
   Id,
@@ -479,7 +479,7 @@ function withoutStandingRides(legs: Leg[]): Leg[] {
 }
 
 function climbStairs(world: World, sim: Sim, leg: Extract<Leg, { kind: 'stairs' }>): void {
-  const floors = Math.abs(leg.toFloor - sim.pos.floor);
+  const floors = floorDistance(leg.toFloor, sim.pos.floor);
   sim.stress = Math.min(STRESS.giveUp, sim.stress + STRESS.perStairFloor * floors);
   const stairs = world.rooms.get(leg.roomId);
   sim.pos = { floor: leg.toFloor, x: stairs ? roomCenter(stairs) : sim.pos.x };
