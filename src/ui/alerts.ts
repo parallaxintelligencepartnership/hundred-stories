@@ -3,7 +3,9 @@
 // many rooms catch, and that card always carries the player's response. Every card closes, and
 // the stack shows at most three cards with the rest folded into one "and N more" line. A bomb
 // threat is one card that trades its ransom button for the outcome; an infestation is one card too.
-// A theft is one card that says whether a guard is on the way, then how it ended.
+// A theft is one card that says whether a guard is on the way, then how it ended. A tower the
+// bank took is one card, read from world.gameOver, with the ways on and no close control: it
+// stands, first in the stack, for as long as the game is over.
 //
 // The sim logs one line per burning room and has no incident id, so the incident is derived here
 // from the log lines (their text and roomId) and from the fire event in world.events.
@@ -32,6 +34,27 @@ export interface AlertStackDeps {
   apply(cmd: Command): CommandResult;
   /** Run `fn` after `ms` real milliseconds; the ui owns the timers so destroy clears them. */
   later(fn: () => void, ms: number): void;
+  /** The ways on from a tower the bank took, as the menu offers them. None when omitted. */
+  gameOverActions?(): readonly GameOverAction[];
+}
+
+/** One button on the game over card: a new tower, back to My tower, or open a saved file. */
+export interface GameOverAction {
+  kind: 'newTower' | 'myTower' | 'openFile';
+  run(): void;
+}
+
+export const GAME_OVER_LABELS: Record<GameOverAction['kind'], string> = {
+  newTower: 'New tower',
+  myTower: 'My tower',
+  openFile: 'Open a saved file',
+};
+
+/** The game over card's words under the reason, by the ways on it offers. */
+export function gameOverBody(newTower: boolean): string {
+  return newTower
+    ? 'You ran out of money. Start a new tower, or open a saved file.'
+    : 'You ran out of money. Go back to My tower, or open a saved file.';
 }
 
 export interface AlertStack {
@@ -166,6 +189,8 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
   let theft: { card: Card | null; body: HTMLElement | null; closed: boolean } | null = null;
   /** The infestation's card, drawn from the infested rooms in the world. */
   let roaches: { card: Card | null; body: HTMLElement | null; closed: boolean; shown: string } | null = null;
+  /** The game over card. Kept out of `cards`: nothing closes it, folds it or lets it linger. */
+  let ending: { node: HTMLElement; key: string } | null = null;
 
   function layout(): void {
     for (let i = cards.length - 1; i >= 0; i -= 1) if (cards[i]?.gone) cards.splice(i, 1);
@@ -175,6 +200,8 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
       more.textContent = `and ${hidden} more`;
       if (more.parentNode !== host) host.prepend(more);
     } else more.remove();
+    // The game over card stays first, above the fold line.
+    if (ending && host.firstElementChild !== ending.node) host.prepend(ending.node);
   }
 
   function close(card: Card): void {
@@ -302,6 +329,38 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
     syncTheft(world);
     syncRoaches(world, roachHeard);
     roachHeard = false;
+    syncGameOver(world);
+  }
+
+  // ---------------------------------------------------------------- game over
+
+  /** The bank took the tower: the reason, what that means, and the ways on, until a new world. */
+  function syncGameOver(world: World): void {
+    const over = world.gameOver ?? null;
+    if (!over) {
+      ending?.node.remove();
+      ending = null;
+      return;
+    }
+    const actions = deps.gameOverActions?.() ?? [];
+    const key = `${over.at}|${over.reason}|${actions.map((a) => a.kind).join('|')}`;
+    if (ending?.key === key) {
+      if (ending.node.parentNode !== host) host.prepend(ending.node);
+      return;
+    }
+    ending?.node.remove();
+    const node = el('div', 'hs-toast is-over');
+    const body = el('div', 'hs-toast-body');
+    const newTower = !actions.some((a) => a.kind === 'myTower');
+    body.append(el('p', 'hs-toast-text', over.reason), el('p', 'hs-toast-note', gameOverBody(newTower)));
+    if (actions.length > 0) {
+      const row = el('div', 'hs-actions');
+      for (const action of actions) row.append(button(GAME_OVER_LABELS[action.kind], 'hs-btn', () => action.run()));
+      body.append(row);
+    }
+    node.append(body);
+    host.prepend(node);
+    ending = { node, key };
   }
 
   // ---------------------------------------------------------------- other alerts
@@ -438,7 +497,10 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
       endTheftCard(theftLine.headline);
       return;
     }
-    // Any other alert line (the bank taking the tower, say) stays until the player closes it.
+    // The game over card speaks for the tower from the minute the game ended.
+    const over = deps.getWorld().gameOver ?? null;
+    if (over && entry.minute >= over.at) return;
+    // Any other alert line stays until the player closes it.
     const { body } = open('hs-toast');
     body.append(el('p', 'hs-toast-text', entry.text));
   }
@@ -463,6 +525,8 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
     theft = null;
     roaches = null;
     roachHeard = false;
+    ending?.node.remove();
+    ending = null;
   }
 
   return { onAlert, notice, sync, dismissNewest, reset };

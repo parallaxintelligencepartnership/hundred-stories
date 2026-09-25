@@ -4,7 +4,8 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EVENT_TEST_HOOKS, handleEventCommand, resetEventTestHooks, startBomb, tickCockroaches, tickEvents } from '../../src/sim/events';
-import { EVENTS, ROOMS } from '../../src/sim/rules';
+import { onQuarterStart } from '../../src/sim/economy';
+import { ECONOMY, EVENTS, ROOMS } from '../../src/sim/rules';
 import type { Command, CommandResult, LogEntry, Room, RoomKind, Star, World } from '../../src/sim/types';
 import { addRoom, allocId, createWorld, log } from '../../src/sim/world';
 import { ALERT_LINGER_MS, ROACHES_GONE, SECURITY_LESSON, SECURITY_RESPONDING, fireHeadline, fireOutText, roachHeadline } from '../../src/ui/alerts';
@@ -62,7 +63,7 @@ interface Harness {
 }
 
 /** A real world behind just enough GameApi; apply runs the sim's own event command. */
-function mount(world: World): Harness {
+function mount(world: World, extra: Record<string, unknown> = {}): Harness {
   const subscribers = new Set<() => void>();
   const applied: Command[] = [];
   const notify = (): void => subscribers.forEach((cb) => cb());
@@ -90,6 +91,7 @@ function mount(world: World): Harness {
     select: () => {},
     setChrome: () => {},
     setReducedMotion: () => {},
+    ...extra,
   } as never;
   const root = dom.createElement('div');
   createUi(root as never, api, {} as never);
@@ -399,5 +401,40 @@ describe('the alert stack', () => {
     expect(rule).toContain('bottom: auto;');
     expect(rule).toContain('max-height: 25vh;');
     expect(rule).toContain('overflow-y: auto;');
+  });
+});
+
+describe('the game over card', () => {
+  it('tells the player the bank took the tower, offers New tower and Open a saved file, and cannot be closed', () => {
+    const world = createWorld(7);
+    const started: number[] = [];
+    const h = mount(world, { getSlot: () => 'mine', newGame: (seed: number) => started.push(seed) });
+    h.notify();
+    world.cash = ECONOMY.bankruptAtCash - 1;
+    for (let i = 0; i < ECONOMY.bankruptAfterQuarters; i += 1) onQuarterStart(world);
+    expect(world.gameOver).not.toBeNull();
+    h.notify();
+
+    const cards = shown(h.root);
+    expect(cards.map((n) => n.textContent)).toEqual([
+      'The bank took the tower back.You ran out of money. Start a new tower, or open a saved file.New towerOpen a saved file',
+    ]);
+    const card = cards[0]!;
+    expect(card.descendants().some((n) => has(n, 'hs-toast-close'))).toBe(false);
+    expect((card.parentNode as FakeElement).getAttribute('aria-live')).toBe('assertive');
+
+    // Escape leaves it standing.
+    press('Escape');
+    h.notify();
+    expect(shown(h.root)).toEqual([card]);
+
+    const newTower = card.descendants().find((n) => n.tagName === 'BUTTON' && n.textContent === 'New tower')!;
+    click(newTower);
+    expect(started).toHaveLength(1);
+
+    // A new world with no game over: the card goes.
+    world.gameOver = null;
+    h.notify();
+    expect(toastsOf(h.root).some((n) => has(n, 'is-over'))).toBe(false);
   });
 });

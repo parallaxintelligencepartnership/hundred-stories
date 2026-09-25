@@ -11,7 +11,8 @@ import { describeBeat, followSim, isFollowed, storyName, type StoryBeat } from '
 import type { Command, CommandResult, LogEntry, World } from '../sim/types';
 import { createIntroPanel, createSideCard, createStarToast, createTipToast } from './cards';
 import { unlocksText } from '../sim/chronicle';
-import { createAlertStack } from './alerts';
+import { createAlertStack, type GameOverAction } from './alerts';
+import { importSaveWithDialog, savePlatform } from '../game/storage';
 import { createDemoCapCard, isDemoCapEntry } from './demo';
 import { formatFloorShort, formatMoney, formatTimestamp } from './format';
 import {
@@ -419,7 +420,67 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
       }, ms);
       timers.add(timer);
     },
+    gameOverActions,
   });
+  // The game over card's Open a saved file, off the desktop shell: a file input kept out of sight.
+  const gameOverFile = el('input');
+  gameOverFile.type = 'file';
+  gameOverFile.accept = 'application/json,.json';
+  gameOverFile.className = 'hs-file';
+  gameOverFile.hidden = true;
+  gameOverFile.setAttribute('tabindex', '-1');
+  gameOverFile.setAttribute('aria-label', 'Open a saved file');
+  gameOverFile.addEventListener('change', () => {
+    const chosen = gameOverFile.files && gameOverFile.files.length > 0 ? gameOverFile.files[0] : null;
+    if (!chosen) return;
+    void chosen
+      .text()
+      .then((text) => openSavedText(text))
+      .catch(() => notice('That file could not be read.'))
+      .finally(() => {
+        gameOverFile.value = '';
+      });
+  });
+  toasts.append(gameOverFile);
+
+  /** A saved file's text, opened as the menu opens it. */
+  function openSavedText(text: string): void {
+    const result = game.importSave(text);
+    notice(result.ok ? 'Tower opened.' : result.reason);
+  }
+
+  /**
+   * The ways on from a tower the bank took, as the menu offers them: New tower in My tower (a
+   * new game only ever replaces My tower, so elsewhere it is My tower), and Open a saved file.
+   */
+  function gameOverActions(): GameOverAction[] {
+    const slot = game.getSlot?.() ?? 'mine';
+    const first: GameOverAction =
+      slot === 'mine'
+        ? {
+            kind: 'newTower',
+            run() {
+              game.newGame(Math.floor(Date.now() % 1_000_000));
+              notice('New game started.');
+            },
+          }
+        : { kind: 'myTower', run: () => openMyTower() };
+    const open: GameOverAction = {
+      kind: 'openFile',
+      run() {
+        if (savePlatform() !== 'tauri') {
+          gameOverFile.click();
+          return;
+        }
+        void importSaveWithDialog()
+          .then((text) => {
+            if (text !== null) openSavedText(text);
+          })
+          .catch(() => notice('That file could not be read.'));
+      },
+    };
+    return [first, open];
+  }
 
   // The card follows the palette in the tree: on a phone the open sheet hides it by selector.
   // The minimap reads the camera the renderer already exposes; a renderer without one (tests,
