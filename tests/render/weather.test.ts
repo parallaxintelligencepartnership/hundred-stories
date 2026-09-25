@@ -158,8 +158,10 @@ describe('lightning', () => {
       originX: 400,
       originY: 400,
       zoom: 1,
-      tower: null,
+      floors: [],
       basement: null,
+      doors: null,
+      skyColor: 0x9fb3c9,
       dtMs: FRAME_MS,
       reducedMotion,
     });
