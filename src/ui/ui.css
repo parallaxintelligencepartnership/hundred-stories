@@ -501,6 +501,7 @@ button.hs-readout:hover {
   flex-direction: column;
   justify-content: center;
   min-height: var(--touch);
+  min-width: var(--touch);
   padding: 2px 12px;
   background: transparent;
   border: 0;
