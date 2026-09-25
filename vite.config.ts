@@ -98,7 +98,7 @@ export default defineConfig(({ mode }) => {
               name: 'Hundred Stories',
               short_name: 'Hundred Stories',
               description:
-                'Hundred Stories is a tower-building simulation for the browser, coming to the App Store, Google Play and Steam. Place offices, condos, shops and elevators, keep your tenants happy, and climb from one star to TOWER. Plays offline, saves in your browser, nothing uploaded.',
+                'Hundred Stories is a tower-building simulation for the browser, coming to the App Store and Google Play. Place offices, condos, shops and elevators, keep your tenants happy, and climb from one star to TOWER. Plays offline, saves in your browser, nothing uploaded.',
               theme_color: '#0b1020',
               background_color: '#0b1020',
               display: 'standalone',
@@ -118,8 +118,23 @@ export default defineConfig(({ mode }) => {
             workbox: {
               navigateFallback: '/play/index.html',
               globPatterns: ['**/*.{js,css,html,png,svg,woff2}'],
-              // App-only chunks (nativeChunk above): the web never loads them.
-              globIgnores: ['**/node_modules/**', 'assets/native-*'],
+              // App-only chunks (nativeChunk above): the web never loads them. The rest of this
+              // list is the landing site: pages, assets and images only index.html, 404.html,
+              // privacy/ and how-to-play/ reference. The worker's scope is /play/, so it never
+              // gets a fetch event for any of them and precaching them only wastes bandwidth.
+              globIgnores: [
+                '**/node_modules/**',
+                'assets/native-*',
+                'index.html',
+                '404.html',
+                'privacy/**',
+                'how-to-play/**',
+                'og.png',
+                'wordmark-*',
+                'assets/site-*',
+                'assets/main-*',
+                'assets/theme-init-*',
+              ],
             },
           }),
         ],

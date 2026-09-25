@@ -19,7 +19,7 @@ import {
   weatherShort,
 } from '../../src/ui/status';
 import { weatherAt, weatherLabel, type WeatherKind } from '../../src/game/weather';
-import { setForcedWeather } from '../../src/render/weather';
+import { easeView, publishWeatherView, rainFalling, settledView, setForcedWeather, weatherNow } from '../../src/render/weather';
 import { FakeDom, type FakeElement } from './fake-dom';
 
 let dom: FakeDom;
@@ -114,8 +114,8 @@ describe('clock dial', () => {
 
 describe('night speed mode', () => {
   it('names the night multiplier and the effective speed, and nothing by day', () => {
-    expect(speedModeText(2, 23 * 60 + 30)).toBe(`Night x${NIGHT_MULTIPLIER}, x${2 * NIGHT_MULTIPLIER} in all`);
-    expect(speedModeText(2, 23 * 60 + 30)).toBe('Night x8, x16 in all');
+    expect(speedModeText(2, 23 * 60 + 30)).toBe(`Night: ${2 * NIGHT_MULTIPLIER} times as fast`);
+    expect(speedModeText(2, 23 * 60 + 30)).toBe('Night: 16 times as fast');
     expect(speedModeText(0, 2 * 60)).toBe('Paused, night x8');
     expect(speedModeText(4, 12 * 60)).toBe('');
   });
@@ -144,7 +144,7 @@ describe('status bar on the page', () => {
     const mode = bar.mode as unknown as FakeElement;
     expect(mode.classList.contains('is-hidden')).toBe(true);
     bar.update(stubWorld({ time: { minute: 23 * 60 } }), 2);
-    expect([mode.textContent, mode.classList.contains('is-hidden')]).toEqual(['Night x8, x16 in all', false]);
+    expect([mode.textContent, mode.classList.contains('is-hidden')]).toEqual(['Night: 16 times as fast', false]);
   });
 
   it('builds nothing on an update that changes nothing', () => {
@@ -191,5 +191,53 @@ describe('weather readout beside the clock', () => {
     const world = stubWorld();
     bar.update(world, 1);
     expect(find(clock, 'hs-weather-word').textContent).toBe(weatherLabel(weatherAt(world.seed, world.time.minute).kind));
+  });
+});
+
+describe('the weather word follows the weather drawn (audit 2026-09-25 F3 S3)', () => {
+  afterEach(() => publishWeatherView(0, null));
+  const find = (root: FakeElement, c: string): FakeElement => {
+    const node = [root, ...root.descendants()].find((n) => n.className.split(' ').includes(c));
+    if (!node) throw new Error(`no ${c}`);
+    return node;
+  };
+
+  it('at 320 game minutes a second (4x at night) says Rain only while rain is falling on screen', () => {
+    // A tower whose forecast rains within its first twenty blocks, so the old readout had a Rain to show.
+    let seed = 1;
+    const rainsWithin = (s: number): boolean => {
+      for (let b = 0; b < 20; b++) if (['rain', 'storm'].includes(weatherAt(s, b * 360).kind)) return true;
+      return false;
+    };
+    while (!rainsWithin(seed)) seed++;
+    const bar = createStatusBar();
+    const clock = bar.clock as unknown as FakeElement;
+    const world = stubWorld({ seed, time: { minute: 0 } } as Partial<World>);
+    const perFrame = (320 * 16) / 1000; // game minutes per 16 ms frame at 320 minutes a second
+    let view = settledView(weatherNow(seed, 0));
+    let forecastRain = 0;
+    let mismatches = 0;
+    for (let minute = 0; minute < 20 * 360; minute += perFrame) {
+      // What the renderer does every frame: ease in real time, then hand the view over.
+      view = easeView(view, weatherNow(seed, minute), 16);
+      publishWeatherView(seed, view);
+      world.time.minute = minute;
+      bar.update(world, 1);
+      const word = find(clock, 'hs-weather-word').textContent;
+      const says = word === 'Rain' || word === 'Storm';
+      if (['rain', 'storm'].includes(weatherAt(seed, minute).kind)) forecastRain++;
+      if (says !== rainFalling(view) > 0) mismatches++;
+    }
+    expect(forecastRain).toBeGreaterThan(0);
+    expect(mismatches).toBe(0);
+  });
+
+  it('falls back to the forecast when no view has been drawn for the tower', () => {
+    const bar = createStatusBar();
+    const clock = bar.clock as unknown as FakeElement;
+    const world = stubWorld({ seed: 5 } as Partial<World>);
+    publishWeatherView(6, settledView({ kind: 'storm', from: 'storm', blend: 1, intensity: 1 })); // another tower's
+    bar.update(world, 1);
+    expect(find(clock, 'hs-weather-word').textContent).toBe(weatherLabel(weatherAt(5, world.time.minute).kind));
   });
 });

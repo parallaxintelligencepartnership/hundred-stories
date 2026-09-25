@@ -11,7 +11,7 @@ import { SCHEDULES } from '../sim/rules';
 import { classifyPress, isTap, PRESS_SLOP_PX, TOUCH_SLOP_PX } from '../render/input';
 import type { Renderer } from '../render/renderer';
 import { NIGHT_MULTIPLIER, type DailyChoice, type DailyInfo, type GameApi, type Placement, type PlacementRect, type Speed, type Tool } from './api';
-import { readSave, readSlot, stashUnreadable, writeSave, writeSlot, type SlotName } from './storage';
+import { keepDailyCopy, readDailyCopy, readSave, readSlot, readUnreadable, stashUnreadable, writeSave, writeSlot, type SlotName } from './storage';
 import {
   DAILY_END_MINUTE,
   dailyFinished,
@@ -28,6 +28,49 @@ import { createTap, drainTap, isBuildCommand, primeTap, type GameEvent, type Gam
 const TICKS_PER_SECOND_AT_1X = 10;
 /** The refusal for a build after today's tower has ended, in the player's words. */
 export const DAILY_OVER_REASON = "Today's tower is over. Come back tomorrow for a new one.";
+/** Said once per session, the first time a save the player did not ask for fails. */
+export const NOT_SAVING_NOTICE = 'This device is not saving your tower right now.';
+/**
+ * Said when a slot's save could not be read (the store failed, not an empty slot). The tower in
+ * hand is then not saved over that slot until a later read works or the player picks New game.
+ */
+export const READ_FAILED_NOTICE = 'We could not read your saved tower. Reload the page to try again.';
+/** Said when "Start today's tower instead" cannot keep a copy of the later tower first. */
+export const DAILY_COPY_FAILED = 'We could not keep a copy of that tower, so it stays for now.';
+
+/**
+ * The loader's reason without the field it tripped on: a damaged save's reason ends in the field
+ * path in brackets, e.g. "(sims[3].route)", which is code and never shown to a player. The path
+ * goes to the console on one line, so a developer can still find it.
+ */
+function plainReason(reason: string): string {
+  const found = /^(.*?)\s*\(([^()]*)\)$/.exec(reason);
+  if (!found) return reason;
+  console.warn(`Unreadable save field: ${found[2]}`);
+  return found[1] ?? reason;
+}
+
+/**
+ * deserialize with the reason in the player's words: every route a save or a file is opened by
+ * (My tower, Today's tower, Friend's tower, Open a saved file) comes through here, so a field
+ * path never reaches a player.
+ */
+function openSaveText(text: string): ReturnType<typeof deserialize> {
+  const res = deserialize(text);
+  return res.ok ? res : { ok: false, reason: plainReason(res.reason) };
+}
+
+/** What the player is told when their My tower save cannot be opened, at boot or on the My tower tap. */
+export function unreadableMessage(reason: string, copied: boolean): string {
+  reason = plainReason(reason);
+  const kept = copied
+    ? 'We kept a copy of it.'
+    : 'We could not keep a copy, so we left it where it is.';
+  const after = copied
+    ? 'It is not saved until you press Save now.'
+    : 'It is not saved until you press Save now, and that will replace the old one.';
+  return `We could not open your saved tower. ${reason} ${kept} You are playing a new tower. ${after}`;
+}
 /** The largest interpolation alpha while the clock runs: the frame never reaches the next tick's position early. */
 const ALPHA_MAX = 1 - 1e-9;
 const MAX_TICKS_PER_FRAME = 240;
@@ -191,9 +234,33 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
   // Moved since it was last saved or loaded: leaving a slot saves it only then, so opening
   // another slot never rewrites a tower that did not change.
   let dirty = false;
-  // Set while the daily slot holds an unfinished tower from an earlier date and the player
-  // has not yet chosen between finishing it and starting today's.
+  // Counts every change, so a save that finishes after the tower moved again leaves it dirty.
+  let edits = 0;
+  // Slot switches in flight. While any is, the clock holds and nothing autosaves: the slot and
+  // the world in hand change together, only once the new tower has been read.
+  let holds = 0;
+  let switchChain: Promise<unknown> = Promise.resolve();
+  // My tower's save could not be opened and nothing was chosen in its place yet: no save the
+  // player did not ask for writes over it (Save now, New game or Open a saved file lift this).
+  let mineHeld = false;
+  // The unreadable text itself, for Save to a file this session even when no copy could be kept.
+  let unreadableText: string | null = null;
+  // Slots whose save could not be read (the store failed, which is not "empty"): the tower in
+  // hand is a stand-in, and nothing writes it over the slot. A later read of the slot that works,
+  // or New game there, lifts it. Save now is refused meanwhile, with the same words.
+  const unread = new Set<SlotName>();
+  // The world in hand is the one createGame made, and its slot has not been read yet.
+  let standIn = true;
+  // The failed-save notice goes out once per session; the last save's outcome decides whether
+  // Open a saved file may leave an unsaved daily behind.
+  let notSavingShown = false;
+  let lastSaveFailed = false;
+  // Set while the daily slot holds an unfinished tower from an earlier date, or any tower dated
+  // after today, and the player has not yet chosen between it and starting today's.
   let dailyChoice: DailyChoice | null = null;
+  // The daily slot's text when it holds a tower dated after today, kept aside before today's
+  // tower takes the slot.
+  let aheadText: string | null = null;
   let tool: Tool = { kind: 'none' };
   let speed: Speed = 1;
   let speedBeforePause: Speed = 1;
@@ -285,7 +352,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     const now = time.now();
     const dt = Math.min(1, (now - last) / 1000 || 0);
     last = now;
-    if (speed === 0 || world.gameOver || dailyOver()) return 0;
+    if (holds > 0 || speed === 0 || world.gameOver || dailyOver()) return 0;
     const rate = TICKS_PER_SECOND_AT_1X * speed * (isNight() ? NIGHT_MULTIPLIER : 1);
     loop.accumulator += dt * rate;
     // A daily never runs past its last minute, however many ticks a night burst earned.
@@ -293,7 +360,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     const minuteBefore = world.time.minute;
     const n = drainTicks(loop, runTick, time.now, drainLimits);
     if (n > 0) {
-      dirty = true;
+      markDirty();
       drainEvents();
       if (dailyOver()) {
         endDaily();
@@ -319,10 +386,14 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
   function endDaily(): void {
     speed = 0;
     loop.accumulator = 0;
-    cancelAutosave?.();
-    cancelAutosave = null;
+    cancelScheduledSave();
     notify();
-    void saveWorld(true);
+    void saveWorld('background');
+  }
+
+  function markDirty(): void {
+    dirty = true;
+    edits++;
   }
 
   // While the tab is visible the frame loop drives the sim, so ticks land on frame boundaries and
@@ -334,40 +405,103 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
   }
 
   function onVisibilityChange(): void {
+    // Going away, save what moved: a hidden tab may never come back.
+    if (time.hidden()) saveNow();
     // Coming back, start the clock from now: the frame loop must not earn the hidden gap again.
-    if (!time.hidden()) last = time.now();
+    else last = time.now();
+  }
+
+  /** The page is going away (closed, reloaded, or put in the back-forward cache). */
+  function onPageHide(): void {
+    saveNow();
   }
 
   // One save per batch of ticks, and never two at once: a burst of ticks that crosses several
   // boundaries, or a slow write still in flight, must not pile up writes.
   let autosaveInFlight = false;
+  // A save was asked for while one was writing: one more runs when that one settles.
+  let saveAgain = false;
   // The autosave stringifies the whole tower, several MB on a big one. It runs in an idle slot,
   // not inside the timer step, so it never stacks on top of a rush-hour tick.
   let cancelAutosave: (() => void) | null = null;
   function maybeAutosave(prevMinute: number, nextMinute: number): void {
-    if (autosaveInFlight) return;
     if (!shouldAutosave(prevMinute, nextMinute)) return;
+    saveWhenIdle();
+  }
+
+  /**
+   * Save the tower in hand in the next idle slot. The slot and the world are taken now, so a
+   * save that runs after a switch still writes the tower it was meant for, where it belongs.
+   */
+  function saveWhenIdle(): void {
+    if (holds > 0) return;
+    if (autosaveInFlight) {
+      // A write already started may have taken the tower before this change. Remember the ask
+      // and save once more when it settles; any number of asks meanwhile make one follow-up.
+      if (!cancelAutosave) saveAgain = true;
+      return;
+    }
     autosaveInFlight = true;
-    // An autosave is silent, success or failure: the player did not ask for it.
+    const name = slot;
+    const w = world;
     cancelAutosave = time.scheduleIdle(() => {
       cancelAutosave = null;
-      void saveWorld(true).finally(() => {
+      void saveWorld('background', name, w).finally(() => {
         autosaveInFlight = false;
+        if (!saveAgain) return;
+        saveAgain = false;
+        if (dirty) saveWhenIdle();
       });
     });
   }
 
-  async function saveWorld(quiet: boolean): Promise<CommandResult> {
+  /** Drop an idle save that has not started yet. One already writing finishes on its own. */
+  function cancelScheduledSave(): void {
+    if (!cancelAutosave) return;
+    cancelAutosave();
+    cancelAutosave = null;
+    autosaveInFlight = false;
+  }
+
+  /** Save now, fire and forget, if the tower moved: the page is hiding or closing. */
+  function saveNow(): void {
+    if (!dirty || holds > 0) return;
+    cancelScheduledSave();
+    void saveWorld('background');
+  }
+
+  /** The first failed save the player did not ask for says so, once per session. */
+  function noteSaveFailed(): void {
+    if (notSavingShown) return;
+    notSavingShown = true;
+    logEvent(world, NOT_SAVING_NOTICE, 'warn');
+    drainEvents();
+    notify();
+  }
+
+  /**
+   * Write a tower to a slot. 'player' is Save now: it logs, and its failure goes back to the
+   * button. 'quiet' and 'background' are the game's own saves: a failure tells the player once
+   * per session. A held My tower (an unreadable save the player has not replaced) is never
+   * written by any save but the player's.
+   */
+  async function saveWorld(kind: 'player' | 'quiet' | 'background', name: SlotName = slot, w: World = world): Promise<CommandResult> {
+    if (kind !== 'player' && name === 'mine' && mineHeld) return { ok: true };
+    if (unread.has(name)) return kind === 'player' ? { ok: false, reason: READ_FAILED_NOTICE } : { ok: true };
+    const at = edits;
     try {
-      markCheckpoint(world); // the hash here lets a replay find where it drifted
-      await writeTo(slot, serialize(world));
-      dirty = false;
-      if (!quiet) {
+      markCheckpoint(w); // the hash here lets a replay find where it drifted
+      await writeTo(name, serialize(w));
+      lastSaveFailed = false;
+      if (w === world && edits === at) dirty = false;
+      if (kind === 'player') {
         logEvent(world, 'Game saved.', 'info');
         notify();
       }
       return { ok: true };
     } catch (e) {
+      lastSaveFailed = true;
+      if (kind !== 'player') noteSaveFailed();
       return { ok: false, reason: e instanceof Error ? e.message : 'Could not save.' };
     }
   }
@@ -381,14 +515,40 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     return name === 'mine' ? readSave() : readSlot(name);
   }
 
+  /**
+   * A slot's text, null when nothing is stored, or failed when the store could not be read. A
+   * read that works lifts the slot's protection: its caller puts that slot's own tower in hand.
+   */
+  async function tryRead(name: SlotName): Promise<{ failed: false; text: string | null } | { failed: true }> {
+    try {
+      const text = await readFrom(name);
+      unread.delete(name);
+      return { failed: false, text };
+    } catch (e) {
+      console.warn('The save could not be read', e);
+      return { failed: true };
+    }
+  }
+
+  /** A slot's save could not be read: protect it and tell the player. */
+  function readFailed(name: SlotName): void {
+    unread.add(name);
+    logEvent(world, READ_FAILED_NOTICE, 'warn');
+    drainEvents();
+    notify();
+  }
+
   /** Put a world in hand: the same reset importSave and newGame do. */
   function swapWorld(next: World): void {
     world = next;
+    standIn = false;
     dirty = false;
     primeTap(tap, world);
     selection = null;
     tool = { kind: 'none' };
     pending = null;
+    drag = null;
+    press = null;
     loop.accumulator = 0;
     renderer?.resetMotion(); // no sprite may lerp from the old tower into the new one
     renderer?.setSelection(null);
@@ -404,23 +564,62 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
   }
 
   /**
-   * Move to another slot. The slot being left is saved first, but only when its tower moved
-   * since it was last saved or loaded, so a slot nobody played in is never rewritten.
+   * Run a slot switch. The clock holds and no autosave runs until it is done, and switches run
+   * one after another, so the slot and the world in hand only ever change together.
    */
-  async function enterSlot(next: SlotName): Promise<void> {
-    dailyChoice = null;
-    if (next === slot) return;
-    if (dirty) await saveWorld(true);
-    slot = next;
-    dirty = false;
+  function switching(run: () => Promise<void>): Promise<void> {
+    holds++;
+    cancelScheduledSave();
+    const done = switchChain.then(run).finally(() => {
+      holds--;
+      last = time.now(); // the held time is not earned again
+    });
+    switchChain = done.catch(() => {});
+    return done;
   }
 
-  /** A slot's save as a world. Null when there is none or it does not read. */
-  async function readWorld(name: SlotName): Promise<World | null> {
-    const text = await readFrom(name);
-    if (!text) return null;
-    const res = deserialize(text);
-    return res.ok ? res.world : null;
+  /**
+   * Get ready to leave the slot in hand for another. The slot being left is saved first, but
+   * only when its tower moved since it was last saved or loaded, so a slot nobody played in is
+   * never rewritten. False when that save failed: the switch is refused, so the unsaved tower
+   * stays in hand (the failure has told the player). A held My tower is not written; the new
+   * tower in it was never saved, as the player was told.
+   */
+  async function readyToLeave(next: SlotName): Promise<boolean> {
+    if (next === slot || !dirty) return true;
+    if (slot === 'mine' && mineHeld) return true;
+    const res = await saveWorld('quiet', slot, world);
+    return res.ok;
+  }
+
+  /** Make the slot just read the one in hand. Called in the same step as the world swap. */
+  function takeSlot(next: SlotName): void {
+    slot = next;
+    dailyChoice = null;
+    aheadText = null;
+  }
+
+  /** A slot's save as a world, with the text when it is there but does not read. */
+  async function readWorld(name: SlotName): Promise<{ world: World | null; text: string | null; reason: string; failed: boolean }> {
+    const read = await tryRead(name);
+    if (read.failed) return { world: null, text: null, reason: READ_FAILED_NOTICE, failed: true };
+    const text = read.text;
+    if (!text) return { world: null, text: null, reason: '', failed: false };
+    const res = openSaveText(text);
+    return res.ok ? { world: res.world, text, reason: '', failed: false } : { world: null, text, reason: res.reason, failed: false };
+  }
+
+  /**
+   * My tower's save does not open. Keep a copy, hold the slot so nothing the player did not
+   * ask for writes over it, and say so: the same words at boot and on the My tower tap.
+   */
+  function keepUnreadable(text: string, reason: string): void {
+    const copied = stashUnreadable(text) === true;
+    unreadableText = text;
+    mineHeld = true;
+    logEvent(world, unreadableMessage(reason, copied), 'warn');
+    drainEvents();
+    notify();
   }
 
   function startSpeed(): void {
@@ -433,7 +632,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     freshTower(dailyStart(today), { start: dailyTwist(today).start, mode: dailyMode(today) });
     startSpeed();
     notify();
-    await saveWorld(true);
+    await saveWorld('quiet');
   }
 
   function frame(): void {
@@ -621,7 +820,8 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
       const res = canBuildShaft(world, tool.shaft, sx, floorMin, floorMax);
       renderer.setGhost({
         widthTiles: rule.width,
-        heightFloors: floorMax - floorMin + 1,
+        // Floors the span covers, not counting the floor 0 that does not exist.
+        heightFloors: bandOf(floorMax) - bandOf(floorMin) + 1,
         floor: floorMin,
         x: sx,
         ok: res.ok,
@@ -752,7 +952,11 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     apply(cmd: Command): CommandResult {
       if (dailyOver()) return { ok: false, reason: DAILY_OVER_REASON };
       const res = applyAndRecord(world, cmd);
-      if (res.ok) dirty = true;
+      if (res.ok) {
+        markDirty();
+        // A paused clock crosses no autosave boundary, so a build while paused saves on its own.
+        if (speed === 0) saveWhenIdle();
+      }
       if (!res.ok) logEvent(world, res.reason, 'warn');
       else followBuild(cmd);
       if (res.ok && eventListeners.size > 0 && isBuildCommand(cmd.kind)) emit({ kind: 'build', command: cmd.kind });
@@ -779,6 +983,8 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     getTool: () => tool,
     setSpeed(s) {
       if (dailyOver() || (dailyChoice && s > 0)) return; // the result card or the choice stands
+      // Pausing is a natural moment to step away: save what moved.
+      if (s === 0 && speed !== 0 && dirty) saveWhenIdle();
       speed = s;
       if (s > 0) speedBeforePause = s;
       notify();
@@ -875,39 +1081,64 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
       clearPending();
     },
     save() {
-      return saveWorld(false); // the player pressed Save, so this one logs
+      // The player pressed Save, so this one logs; in a held My tower it is also the player
+      // choosing the new tower over the save that would not open.
+      if (slot === 'mine') mineHeld = false;
+      return saveWorld('player');
     },
     async load() {
-      const text = await readFrom(slot);
-      if (!text) return { ok: false, reason: 'There is no saved game yet.' };
-      const res = deserialize(text);
+      const name = slot;
+      const read = await tryRead(name);
+      if (read.failed) {
+        // Not "no save": the slot may hold a tower this read could not get at. The tower in
+        // hand, when it is only the stand-in createGame made, is never saved over it.
+        if (standIn) readFailed(name);
+        return { ok: false, reason: READ_FAILED_NOTICE };
+      }
+      const text = read.text;
+      if (!text) {
+        standIn = false; // the slot is empty: the tower in hand is now its tower
+        return { ok: false, reason: 'There is no saved game yet.' };
+      }
+      const res = openSaveText(text);
       if (!res.ok) {
-        stashUnreadable(text);
-        logEvent(
-          world,
-          `We could not open your saved tower. ${res.reason} We kept a copy of it. You are starting a new tower.`,
-          'warn'
-        );
-        notify();
+        if (name === 'mine') keepUnreadable(text, res.reason);
+        else {
+          // Only My tower's save is copied aside: one copy slot, kept for the tower that matters.
+          logEvent(world, `We could not open this saved tower. ${res.reason}`, 'warn');
+          notify();
+        }
         return { ok: false, reason: res.reason };
       }
-      const loaded = api.importSave(text);
-      if (loaded.ok) dirty = false; // what is in hand is what the slot holds
-      return loaded;
+      swapWorld(res.world); // what is in hand is what the slot holds
+      if (name === 'mine') mineHeld = false;
+      notify();
+      return { ok: true };
     },
     exportSave() {
       markCheckpoint(world);
       return serialize(world);
     },
+    getKeptCopy: () => readUnreadable() ?? unreadableText,
+    getKeptDailyCopy: () => readDailyCopy(),
     importSave(text) {
-      const res = deserialize(text);
+      const res = openSaveText(text);
       if (!res.ok) return res;
-      world = res.world;
-      dirty = true; // an opened file is not in the slot until the next save
-      primeTap(tap, world);
-      selection = null;
-      renderer?.resetMotion(); // no sprite may lerp from the old tower into the new one
-      renderer?.setSelection(null);
+      // My tower could not be read: an opened file would be saved over it, so not yet.
+      if (unread.has('mine')) return { ok: false, reason: READ_FAILED_NOTICE };
+      if (slot !== 'mine') {
+        // An opened file is always My tower. Today's tower stays today's and a friend's tower
+        // stays theirs: that slot is left first (saved if it moved) and the file opens as My
+        // tower, with a running clock, so it is there at /play/ and no friend link replaces it.
+        if (dirty && lastSaveFailed) return { ok: false, reason: NOT_SAVING_NOTICE };
+        if (dirty) void saveWorld('quiet', slot, world);
+        cancelScheduledSave();
+        takeSlot('mine');
+        startSpeed();
+      }
+      swapWorld(res.world);
+      markDirty(); // an opened file is not in the slot until the next save
+      if (slot === 'mine') mineHeld = false; // the player chose this tower over a held save
       notify();
       return { ok: true };
     },
@@ -919,61 +1150,106 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
       return { date, twist: { name: twist.name, line: twist.line }, endMinute: DAILY_END_MINUTE, finished: dailyFinished(world) };
     },
     getDailyChoice: () => dailyChoice,
-    async openDaily() {
-      const today = time.today();
-      if (slot === 'daily' && dailyDate() === today && !dailyChoice) return;
-      await enterSlot('daily');
-      const saved = await readWorld('daily');
-      const savedDate = saved ? dateOfMode(buildLogOf(saved).mode) : null;
-      const opening = dailyOpening(saved && savedDate !== null ? { date: savedDate, finished: dailyFinished(saved) } : null, today);
-      if (opening === 'fresh' || !saved || savedDate === null) {
-        await beginToday(today);
-        return;
-      }
-      swapWorld(saved);
-      if (opening === 'choose') {
-        // The older tower stands, stopped, behind the choice.
-        speed = 0;
-        dailyChoice = { savedDate, today, yesterday: previousDateKey(today) === savedDate };
-      } else if (dailyFinished(saved)) speed = 0;
-      else startSpeed();
-      notify();
-    },
+    openDaily: () =>
+      switching(async () => {
+        const today = time.today();
+        if (slot === 'daily' && dailyDate() === today && !dailyChoice) return;
+        if (!(await readyToLeave('daily'))) return;
+        const read = await readWorld('daily');
+        const saved = read.world;
+        takeSlot('daily');
+        if (read.failed) {
+          // Today's tower in hand, never saved over the slot that would not read.
+          freshTower(dailyStart(today), { start: dailyTwist(today).start, mode: dailyMode(today) });
+          startSpeed();
+          readFailed('daily');
+          return;
+        }
+        const savedDate = saved ? dateOfMode(buildLogOf(saved).mode) : null;
+        const opening = dailyOpening(saved && savedDate !== null ? { date: savedDate, finished: dailyFinished(saved) } : null, today);
+        if (opening === 'fresh' || !saved || savedDate === null) {
+          await beginToday(today);
+          return;
+        }
+        swapWorld(saved);
+        if (opening === 'choose' || opening === 'ahead') {
+          // The saved tower stands, stopped, behind the choice. One dated after today (the
+          // device's date moved back) is never replaced without the player's say.
+          speed = 0;
+          const ahead = opening === 'ahead';
+          if (ahead) aheadText = read.text;
+          dailyChoice = { savedDate, today, yesterday: !ahead && previousDateKey(today) === savedDate, ahead };
+        } else if (dailyFinished(saved)) speed = 0;
+        else startSpeed();
+        notify();
+      }),
     async chooseDaily(which) {
       const choice = dailyChoice;
       if (!choice) return;
-      dailyChoice = null;
       if (which === 'finish') {
-        startSpeed();
+        dailyChoice = null;
+        aheadText = null;
+        if (dailyFinished(world)) speed = 0; // a finished one stays on its result
+        else startSpeed();
         notify();
         return;
       }
+      // Start today's instead: a tower dated after today is copied aside first, or it stays.
+      if (choice.ahead && (aheadText === null || !keepDailyCopy(aheadText))) {
+        logEvent(world, DAILY_COPY_FAILED, 'warn');
+        drainEvents();
+        notify();
+        return;
+      }
+      dailyChoice = null;
+      aheadText = null;
       await beginToday(choice.today);
     },
-    async openFriend(friendSeed) {
-      await enterSlot('friend');
-      // The same link opened again goes on with the tower it started; another link starts over.
-      const saved = await readWorld('friend');
-      if (saved && saved.seed === friendSeed) swapWorld(saved);
-      else {
-        freshTower(friendSeed);
-        await saveWorld(true);
-      }
-      startSpeed();
-      notify();
-    },
-    async openMyTower() {
-      await enterSlot('mine');
-      const saved = await readWorld('mine');
-      if (saved) swapWorld(saved);
-      else {
-        freshTower(time.freshSeed());
-        await saveWorld(true);
-      }
-      startSpeed();
-      notify();
-    },
+    openFriend: (friendSeed) =>
+      switching(async () => {
+        if (!(await readyToLeave('friend'))) return;
+        // The same link opened again goes on with the tower it started; another link starts over.
+        const read = await readWorld('friend');
+        const saved = read.world;
+        takeSlot('friend');
+        if (read.failed) {
+          freshTower(friendSeed);
+          readFailed('friend');
+        } else if (saved && saved.seed === friendSeed) swapWorld(saved);
+        else {
+          freshTower(friendSeed);
+          await saveWorld('quiet');
+        }
+        startSpeed();
+        notify();
+      }),
+    openMyTower: () =>
+      switching(async () => {
+        if (!(await readyToLeave('mine'))) return;
+        const read = await readWorld('mine');
+        takeSlot('mine');
+        if (read.failed) {
+          freshTower(time.freshSeed());
+          readFailed('mine');
+        } else if (read.world) {
+          swapWorld(read.world);
+          mineHeld = false;
+        } else {
+          freshTower(time.freshSeed());
+          // A save that is there but will not open is kept, never written over: the same as boot.
+          if (read.text !== null) keepUnreadable(read.text, read.reason);
+          else {
+            mineHeld = false; // nothing there any more to keep
+            await saveWorld('quiet');
+          }
+        }
+        startSpeed();
+        notify();
+      }),
     newGame(newSeed) {
+      // New game on purpose: this tower replaces whatever the slot holds, read or not.
+      unread.delete(slot);
+      standIn = false;
       world = createWorld(newSeed);
       startBuildLog(world);
       dailyChoice = null;
@@ -1058,13 +1334,14 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
       timer = window.setInterval(step, 50);
       raf = requestAnimationFrame(frame);
       document.addEventListener('visibilitychange', onVisibilityChange);
+      if (typeof window.addEventListener === 'function') window.addEventListener('pagehide', onPageHide);
     },
     stop() {
       document.removeEventListener('visibilitychange', onVisibilityChange);
+      if (typeof window.removeEventListener === 'function') window.removeEventListener('pagehide', onPageHide);
       cancelAnimationFrame(raf);
       window.clearInterval(timer);
-      cancelAutosave?.();
-      cancelAutosave = null;
+      cancelScheduledSave();
       raf = 0;
       timer = 0;
     },

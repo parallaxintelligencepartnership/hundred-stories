@@ -21,7 +21,7 @@ import {
   type SoundStore,
 } from '../../src/audio/audio';
 import type { GameEvent, GameEventListener } from '../../src/game/api';
-import { isNight, chapterFor } from '../../src/audio/score';
+import { isNight, chapterFor, tempoFor } from '../../src/audio/score';
 import { CHAPTER_SCALES, CHAPTER_VOICES, chordColourFor, inChapterScale, scaleMidi, VOICES, type Chapter } from '../../src/audio/score';
 import { phraseFor, progressionFor, voicesFor } from '../../src/audio/phrase';
 import { vipRatingCue, cueDuration, beatCue } from '../../src/audio/cues';
@@ -108,7 +108,10 @@ class StubContext {
     const data = new Float32Array(length);
     return { getChannelData: () => data };
   }
+  deferResume = false;
+  pendingResumes: Array<() => void> = [];
   resume(): Promise<void> {
+    if (this.deferResume) return new Promise<void>((done) => this.pendingResumes.push(() => { this.state = 'running'; done(); }));
     this.state = 'running';
     return Promise.resolve();
   }
@@ -372,13 +375,14 @@ describe('the AudioContext and the master toggle', () => {
 });
 
 describe('adaptive score', () => {
-  it('keeps the highest chapter and changes night colour without changing tempo', () => {
+  // Audit 2026-09-25 decision 4: the chapter follows current stars, down as well as up.
+  it('follows the current stars and changes night colour without changing tempo', () => {
     const game = fakeGame(); const target = fakeTarget(); const ctx = new StubContext();
     const sound = createSound(game, { target, store: memoryStore(), createContext: () => asCtx(ctx), setInterval: () => 1, clearInterval: () => {} });
     target.fire('pointerdown'); sound.setEnabled(true);
     expect(sound.chapter).toBe(1);
     game.emit({ kind: 'stars', from: 1, to: 3 }); expect(sound.chapter).toBe(3);
-    game.emit({ kind: 'stars', from: 3, to: 2 }); expect(sound.chapter).toBe(3);
+    game.emit({ kind: 'stars', from: 3, to: 2 }); expect(sound.chapter).toBe(2);
     expect(isNight(23 * 60 + 30)).toBe(true);
     expect(chapterFor(4)).toBe(4);
     expect(sound.tempo).toBeGreaterThanOrEqual(72);
@@ -630,5 +634,102 @@ describe('hostile encounter cues and priority', () => {
     second.game.emit(beat('theft.caught'));
     expect(second.sound.tensionLevel).toBe(1); // theft's late outcome cannot clear the fire
     second.sound.destroy();
+  });
+});
+
+describe('audit 2026-09-25: incidents, tower switches and the sound toggle', () => {
+  const fireBeat = (code: 'fire.started' | 'fire.resolved'): GameEvent => ({ kind: 'beat', beat: { code, minute: 0 } });
+  function rig(stars = 1) {
+    const game = fakeGame(); game.state.stars = stars;
+    const target = fakeTarget(); const ctx = new StubContext();
+    let t = 1000; const timers = new Map<number, () => void>(); let id = 0;
+    const sound = createSound(game, { target, store: memoryStore(), createContext: () => asCtx(ctx), now: () => t,
+      setInterval: fn => { timers.set(++id, fn); return id; }, clearInterval: i => void timers.delete(i) });
+    target.fire('pointerdown'); sound.setAmbient(0); sound.setEnabled(true);
+    const bar = (seconds = 3) => { t += seconds * 1000; ctx.currentTime += seconds; for (const fn of [...timers.values()]) fn(); };
+    return { game, ctx, sound, bar };
+  }
+  /** Oscillators feeding the music bus through one gain: the incident drone, not a score note. */
+  const drones = (ctx: StubContext, hz: number) => ctx.oscillators.filter(o => o.frequency.value === hz && o.started > 0
+    && ((o.connections[0] as StubNode | undefined)?.connections.includes(ctx.gains[1]) ?? false));
+
+  it('G S1a: a fire that ends while sound is off leaves no tension once sound is back', () => {
+    const { game, ctx, sound } = rig();
+    game.emit(fireBeat('fire.started'));
+    expect(sound.tension).toBe(true);
+    sound.setEnabled(false);
+    game.emit(fireBeat('fire.resolved')); // unheard: no listener while off, and the world has no fire now
+    sound.setEnabled(true);
+    expect(sound.tension).toBe(false);
+    expect(sound.tensionLevel).toBe(0);
+    const before = ctx.oscillators.length;
+    game.emit({ kind: 'car.arrive', shaftId: 1, carId: 1 });
+    expect(ctx.oscillators.length - before).toBe(4);
+    sound.destroy();
+  });
+
+  it('G S1b: switching towers mid-fire lets the kit back in on the next bar', () => {
+    const { game, ctx, sound, bar } = rig();
+    game.emit(fireBeat('fire.started'));
+    expect(ctx.gains[7]!.gain.value).toBe(0);
+    game.world = { seed: 2, stars: 1, time: { minute: 12 * 60 }, rooms: new Map() } as never;
+    bar();
+    expect(sound.tension).toBe(false);
+    expect(sound.tensionLevel).toBe(0);
+    expect(ctx.gains[7]!.gain.value).toBeGreaterThan(0);
+    expect(ctx.gains[8]!.gain.value).toBeGreaterThan(0);
+    sound.destroy();
+  });
+
+  it('G S1c / new S6: sound off and on while the fire still burns brings the drone back', () => {
+    const { game, ctx, sound } = rig();
+    (game.state as Record<string, unknown>)['events'] = [{ kind: 'fire', roomIds: [1], startedAt: 0, spreadAt: 60 }];
+    game.emit(fireBeat('fire.started'));
+    expect(drones(ctx, 110)).toHaveLength(1);
+    sound.setEnabled(false);
+    const before = ctx.oscillators.length;
+    sound.setEnabled(true);
+    expect(sound.tensionLevel).toBe(1);
+    expect(drones(ctx, 110).filter(o => ctx.oscillators.indexOf(o) >= before)).toHaveLength(1);
+    expect(ctx.gains[7]!.gain.value).toBe(0);
+    expect(ctx.gains[8]!.gain.value).toBe(0);
+    sound.destroy();
+  });
+
+  it('G S2: a tower switch takes the new tower\'s chapter, tempo and key; the chapter follows its stars', () => {
+    const { game, ctx, sound } = rig(5);
+    expect(sound.chapter).toBe(5);
+    expect(tempoFor(1)).not.toBe(tempoFor(2));
+    game.world = { seed: 2, stars: 1, time: { minute: 12 * 60 }, rooms: new Map() } as never;
+    game.tick();
+    expect(sound.chapter).toBe(1);
+    expect(sound.tempo).toBe(tempoFor(2));
+    expect(ctx.delays[0]!.delayTime.value).toBeCloseTo(30 / tempoFor(2));
+    game.emit({ kind: 'stars', from: 1, to: 2 });
+    expect(sound.chapter).toBe(2);
+    sound.destroy();
+  });
+
+  it('G S3: stars gained while sound is off set the chapter when it comes back on', () => {
+    const { game, sound } = rig(1);
+    sound.setEnabled(false);
+    game.state.stars = 3;
+    sound.setEnabled(true);
+    expect(sound.chapter).toBe(3);
+    sound.destroy();
+  });
+
+  it('G S4: sound on then off before the resume settles leaves the context suspended', async () => {
+    const game = fakeGame(); const target = fakeTarget(); const ctx = new StubContext();
+    ctx.deferResume = true;
+    const sound = createSound(game, { target, store: memoryStore(), createContext: () => asCtx(ctx), setInterval: () => 1, clearInterval: () => {} });
+    target.fire('pointerdown');
+    sound.setEnabled(true);
+    expect(ctx.pendingResumes).toHaveLength(1);
+    sound.setEnabled(false);
+    ctx.pendingResumes.splice(0).forEach(settle => settle());
+    await new Promise(done => setTimeout(done, 0));
+    expect(ctx.state).toBe('suspended');
+    sound.destroy();
   });
 });

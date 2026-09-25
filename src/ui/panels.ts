@@ -27,6 +27,7 @@ import {
   isFollowed,
   personCard,
   storyName,
+  STORY_FOLLOWED_CAP,
   unfollowSim,
   type StoryBeat,
 } from '../sim/story';
@@ -56,7 +57,6 @@ import {
   formatMoney,
   formatPercent,
   formatSignedMoney,
-  formatTimestamp,
   stressBandLabel,
   stressBandOf,
 } from './format';
@@ -101,8 +101,16 @@ export interface PanelContext {
   setDisplay?: (name: DisplaySwitch, on: boolean) => void;
 }
 
-/** The refusal when the cast is full, in the player's words. */
-export const FOLLOW_LIMIT_TEXT = 'You can follow eight people at a time.';
+const NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];
+
+/** The refusal when the cast of `cap` is full, the number in words up to twelve. */
+export function followLimitText(cap: number): string {
+  const count = NUMBER_WORDS[cap] ?? String(cap);
+  return `You can follow ${count} ${cap === 1 ? 'person' : 'people'} at a time.`;
+}
+
+/** The refusal when the cast is full, in the player's words, from the sim's own cap. */
+export const FOLLOW_LIMIT_TEXT = followLimitText(STORY_FOLLOWED_CAP);
 
 /** How many names the room panel lists. */
 export const OCCUPANTS_SHOWN = 8;
@@ -620,7 +628,7 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
     el(
       'p',
       'hs-note',
-      `Shaft ${formatMoney(rule.shaftCost)} includes the first car. Extra cars ${formatMoney(rule.carCost)} each, up to ${rule.maxCars}.`,
+      `A new elevator costs ${formatMoney(rule.shaftCost)} with its first car. More cars cost ${formatMoney(rule.carCost)} each, up to ${rule.maxCars}.`,
     ),
   );
 
@@ -739,7 +747,7 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
         return btn;
       };
 
-      const whole = button('Whole shaft', 'hs-btn', () => {
+      const whole = button('Every floor', 'hs-btn', () => {
         ctx.apply({ kind: 'shaft.setCarRange', shaftId, carId: car.id, range: null });
       });
 
@@ -784,7 +792,7 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
         step.node.title = busy
           ? 'People are inside.'
           : outside
-            ? `This car already reaches the ${step.step === 1 ? 'top' : 'bottom'} of the shaft.`
+            ? `This car already reaches the ${step.step === 1 ? 'top' : 'bottom'} of the elevator.`
             : crossed
               ? 'A car needs at least one floor.'
               : tooNarrow
@@ -793,7 +801,7 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
       }
       row.whole.hidden = car.range === null;
       row.whole.disabled = busy;
-      row.whole.title = busy ? 'People are inside.' : 'Serve the whole shaft again';
+      row.whole.title = busy ? 'People are inside.' : 'Stop at every floor of the elevator again';
     }
   };
 
@@ -949,17 +957,45 @@ export function createFinancesPanel(game: GameApi, ctx: PanelContext): PanelElem
   return panel;
 }
 
-// -------------------------------------------------------------- log panel
+// ------------------------------------------------------------- news panel
 
-/** The log panel shows this many of the newest lines, newest on top. */
-export const LOG_PANEL_LINES = 200;
+/** News shows this many of the newest lines at first, newest on top. */
+export const NEWS_LINES = 10;
+/** Each tap on Show older adds this many more. */
+export const NEWS_OLDER_STEP = 50;
 
+/**
+ * When a line happened, in words, from the game clock: "just now", "an hour ago", "5 hours ago",
+ * "yesterday", "3 days ago". Days are the game's calendar days, so last night is yesterday.
+ */
+export function newsTime(now: number, minute: number): string {
+  const ago = Math.max(0, Math.floor(now) - Math.floor(minute));
+  if (ago < 60) return 'just now';
+  if (ago < 120) return 'an hour ago';
+  const days = Math.floor(Math.max(0, now) / 1440) - Math.floor(Math.max(0, minute) / 1440);
+  if (days <= 0 || ago < 6 * 60) return `${Math.floor(ago / 60)} hours ago`;
+  if (days === 1) return 'yesterday';
+  return `${days} days ago`;
+}
+
+/**
+ * News: what has happened in the tower lately, in plain sentences, newest first, each with when
+ * it happened in words. The newest ten at first; Show older adds fifty at a time. The VIP card
+ * sits on top while there is a visit to talk about.
+ */
 export function createLogPanel(game: GameApi, ctx: PanelContext): PanelElement {
-  const { panel, body } = panelShell('Event log', 'log', ctx);
+  const { panel, body } = panelShell('News', 'log', ctx);
+  panel.classList.add('hs-news');
   const list = el('ul', 'hs-log-list');
-  body.append(list);
+  let limit = NEWS_LINES;
+  const older = button('Show older', 'hs-news-older', () => {
+    limit += NEWS_OLDER_STEP;
+    refresh();
+  });
+  older.hidden = true;
+  body.append(list, older);
 
-  // The VIP card sits above the log, built only while there is something to say about a visit.
+  // The VIP card sits above the news, built only while there is something to say about a visit.
   let vipNode: HTMLDivElement | null = null;
   let vipKey = '';
   const refreshVip = (): void => {
@@ -977,43 +1013,41 @@ export function createLogPanel(game: GameApi, ctx: PanelContext): PanelElement {
     body.prepend(vipNode);
   };
 
-  const item = (entry: LogEntry): HTMLLIElement => {
+  /** The time span of each line on show, newest first, with the minute it stands for. */
+  let stamps: { node: HTMLElement; minute: number }[] = [];
+  const item = (entry: LogEntry, now: number): HTMLLIElement => {
     const node = el('li', `hs-log-item is-${entry.level}`);
-    node.append(el('span', 'hs-log-time', formatTimestamp(entry.minute)), el('span', 'hs-log-text', entry.text));
+    const time = el('span', 'hs-log-time', newsTime(now, entry.minute));
+    node.append(el('span', 'hs-log-text', entry.text), time);
+    stamps.push({ node: time, minute: entry.minute });
     return node;
   };
 
-  let shown = -1;
-  /** The log array the list was built from. A load swaps it, and then the old lines are not ours. */
+  /** What the list was built from: the log array, its total and the limit. A load swaps the array. */
   let shownLog: readonly LogEntry[] | null = null;
-  let empty = false;
+  let shownKey = '';
   const refresh = (): void => {
     refreshVip();
-    const log = game.world.log;
-    const total = game.world.logTotal;
-    if (shown === total && shownLog === log) return;
-    const fresh = total - shown;
-    const rebuild = shownLog !== log || shown < 0 || fresh < 0 || fresh >= LOG_PANEL_LINES || fresh > log.length;
-    shown = total;
-    shownLog = log;
-    if (rebuild) {
-      const items = log.slice(-LOG_PANEL_LINES).reverse().map(item);
-      empty = items.length === 0;
-      list.replaceChildren(...(empty ? [el('li', 'hs-log-item', 'Nothing has happened yet.')] : items));
+    const world = game.world;
+    const log = world.log;
+    const now = world.time?.minute ?? 0;
+    const key = `${world.logTotal}:${limit}`;
+    if (shownLog !== log || key !== shownKey) {
+      shownLog = log;
+      shownKey = key;
+      stamps = [];
+      const lines = log.slice(-limit).reverse();
+      list.replaceChildren(
+        ...(lines.length === 0 ? [el('li', 'hs-log-item', 'Nothing has happened yet.')] : lines.map((entry) => item(entry, now))),
+      );
+      older.hidden = log.length <= limit;
       return;
     }
-    // Only the lines that landed since the last refresh are built. Oldest first, each on
-    // top, so the newest ends up first; the oldest past the cap drop off the bottom.
-    if (fresh === 0) return;
-    if (empty) {
-      list.replaceChildren();
-      empty = false;
+    // No new line: only the words for when move on with the clock.
+    for (const stamp of stamps) {
+      const words = newsTime(now, stamp.minute);
+      if (stamp.node.textContent !== words) stamp.node.textContent = words;
     }
-    for (let i = log.length - fresh; i < log.length; i += 1) {
-      const entry = log[i];
-      if (entry) list.prepend(item(entry));
-    }
-    while (list.children.length > LOG_PANEL_LINES) list.lastElementChild?.remove();
   };
   refresh();
   panel.refresh = refresh;
@@ -1371,6 +1405,9 @@ export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElem
   if (gameGroup.list.children.length > 0) main.append(gameGroup.node);
 
   // Saving: the tower saves itself; these are for the player who wants to be sure, or a copy.
+  // Today's tower is one try per date, so there nothing rewinds or replaces the run: no Go back
+  // to last save and no Open a saved file. Saving a copy to a file is still fine.
+  const oneTry = slot === 'daily';
   const saving = settingsGroup('Saving', 'Your tower saves by itself.');
   saving.list.append(
     actionRow('Save now', () => {
@@ -1378,16 +1415,31 @@ export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElem
         ctx.notice(result.ok ? 'Game saved.' : result.reason);
       });
     }),
-    actionRow('Go back to last save', () => {
-      void game.load().then((result) => {
-        ctx.notice(result.ok ? 'Back to your last save.' : result.reason);
-      });
-    }),
+  );
+  if (!oneTry) {
+    saving.list.append(
+      actionRow('Go back to last save', () => {
+        void game.load().then((result) => {
+          ctx.notice(result.ok ? 'Back to your last save.' : result.reason);
+        });
+      }),
+    );
+  }
+  saving.list.append(
     actionRow('Save to a file', () => {
       exportSave(game.exportSave(), ctx);
     }),
   );
-  if (savePlatform() === 'tauri') {
+  // A My tower save that could not be opened was kept aside: this is the way to get it back out.
+  const kept = game.getKeptCopy?.() ?? null;
+  if (kept !== null) {
+    saving.list.append(
+      actionRow('Save the old tower to a file', () => {
+        exportSave(game.getKeptCopy?.() ?? kept, ctx);
+      }),
+    );
+  }
+  if (!oneTry && savePlatform() === 'tauri') {
     // The desktop shell: a system open dialog, not a file input.
     const pick = actionRow('Open a saved file', () => {
       void importSaveWithDialog()
@@ -1401,7 +1453,7 @@ export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElem
     pick.id = 'hs-import';
     pick.setAttribute('aria-label', 'Open a saved file');
     saving.list.append(pick);
-  } else {
+  } else if (!oneTry) {
     // The web and the phones: our own button opens a file input kept out of sight, so the
     // browser's "Choose file" and "No file chosen" never show.
     const file = importFileInput(game, ctx);
@@ -1432,8 +1484,8 @@ export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElem
       applyGlassClear(on);
       ctx.setDisplay?.('glassClear', on);
     }).row,
-    // Haptics, last: on by default (src/ui/haptics.ts).
-    switchRow('hs-haptics', 'Haptics', hapticsEnabled(), (on) => setHapticsEnabled(on)).row,
+    // Vibration (haptics), last: on by default (src/ui/haptics.ts).
+    switchRow('hs-haptics', 'Vibration', hapticsEnabled(), (on) => setHapticsEnabled(on)).row,
   );
   main.append(display.node);
 
@@ -1678,7 +1730,7 @@ function importFileInput(game: GameApi, ctx: PanelContext): HTMLInputElement {
  * Export by platform (storage.ts decides which): the desktop save dialog, the phone share sheet,
  * or the browser download. A cancelled dialog or share sheet says nothing.
  */
-function exportSave(text: string, ctx: PanelContext): void {
+export function exportSave(text: string, ctx: PanelContext): void {
   const platform = savePlatform();
   if (platform === 'tauri') {
     void exportSaveWithDialog(text)

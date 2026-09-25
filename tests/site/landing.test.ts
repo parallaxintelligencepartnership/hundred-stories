@@ -64,7 +64,7 @@ describe('landing page', () => {
     expect(landing).toContain('<h2 id="platforms">Phone, tablet or desktop</h2>');
     expect(landing).toContain('aria-labelledby="platforms"');
     expect(flat(landing)).toContain(
-      'Play in a desktop browser with a mouse, or on a phone or tablet with touch: one finger moves, pinch zooms, tap to place. Install it from the browser menu and it opens like an app.',
+      'Play in a desktop browser with a mouse, or on a phone or tablet with touch: one finger moves, pinch zooms, tap to place, then tap Build. Install it from the browser menu and it opens like an app.',
     );
     expect(landing).not.toContain('Best on a desktop');
     expect(landing).not.toContain('desktop-note');
@@ -174,7 +174,7 @@ describe('guide page', () => {
 
   it('tells a player with a touch screen what their fingers do', () => {
     expect(flat(guide)).toContain(
-      'Touch: one finger moves the view, pinch to zoom, tap to place. While you size a lobby or an elevator, drag with two fingers to move the view.',
+      'Touch: one finger moves the view, pinch to zoom, tap to place, then tap Build. While you size a lobby or an elevator, drag with two fingers to move the view.',
     );
   });
 

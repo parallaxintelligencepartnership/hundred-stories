@@ -2,10 +2,22 @@
 // Every number comes from rules.ts; every refusal reason is plain English shown to the player verbatim.
 
 import { spend } from './economy';
+import { stopOffRefusal } from './elevators';
 import { handleEventCommand } from './events';
 import { isFollowed, recordBeat } from './story';
-import { DEMO_CAP_REASON, EDITION, insideDemoCap, LIMITS, RENT, ROOMS, SHAFTS, takesRent } from './rules';
-import { MAX_FLOOR, MIN_FLOOR, spanFloors, spanTop, TOWER_WIDTH } from './types';
+import {
+  DEMO_CAP_REASON,
+  EDITION,
+  insideDemoCap,
+  LIMITS,
+  PLURAL_LABELS,
+  RENT,
+  ROOMS,
+  SHAFTS,
+  takesRent,
+  UNCOUNTED_LABELS,
+} from './rules';
+import { floorDistance, MAX_FLOOR, MIN_FLOOR, spanFloors, spanTop, TOWER_WIDTH } from './types';
 import type {
   Car,
   Command,
@@ -14,6 +26,7 @@ import type {
   RoomKind,
   Shaft,
   ShaftKind,
+  Sim,
   World,
 } from './types';
 import {
@@ -29,6 +42,7 @@ import {
   removeSim,
   roomsOfKind,
   roomsOnFloor,
+  setOccupancy,
 } from './world';
 
 const OK: CommandResult = { ok: true };
@@ -58,8 +72,10 @@ function money(amount: number): string {
   return `${amount < 0 ? '-' : ''}$${grouped}`;
 }
 
-/** "Office" -> "Offices", "Stairs" -> "Stairs" */
+/** "Office" -> "Offices", "Lobby" -> "Lobbies", "Housekeeping" -> "Housekeeping" (rules.ts table) */
 function plural(label: string): string {
+  const known = PLURAL_LABELS[label];
+  if (known !== undefined) return known;
   return label.endsWith('s') ? label : `${label}s`;
 }
 
@@ -74,7 +90,8 @@ function starText(star: number): string {
 }
 
 function cannotAfford(label: string, cost: number): string {
-  return `Not enough cash. ${plural(label)} cost ${money(cost)}.`;
+  const verb = UNCOUNTED_LABELS.includes(label) ? 'costs' : 'cost';
+  return `Not enough cash. ${plural(label)} ${verb} ${money(cost)}.`;
 }
 
 function floorName(floor: number): string {
@@ -192,12 +209,31 @@ function floorIsBuilt(world: World, floor: number): boolean {
   return false;
 }
 
-/** A floor may only be built on when the floor nearer the ground already exists. */
-function hasSupport(world: World, floor: number): boolean {
+/**
+ * A floor may only be built on when the floor nearer the ground already exists. Above ground
+ * that is the floor under the base; underground it is the floor over the footprint's top, so a
+ * room two or three floors tall hangs from the floor above its highest floor, and one whose top
+ * is B1 hangs from the ground lobby.
+ */
+function hasSupport(world: World, floor: number, height: number): boolean {
   if (floor === 1) return true;
   if (floor > 1) return floorIsBuilt(world, floor - 1);
   if (floor === -1) return groundLobby(world) !== undefined;
-  return floorIsBuilt(world, floor + 1);
+  const top = spanTop(floor, height);
+  if (top >= 1) return true; // reaches the ground floor itself; the depth rules cover this
+  if (top === -1) return groundLobby(world) !== undefined;
+  return floorIsBuilt(world, top + 1);
+}
+
+/**
+ * Why hasSupport said no, in the direction the support lies: below above ground, above
+ * underground, where B1 hangs from the lobby (audit 2026-09-25 A S4). src/ui/explain.ts reads
+ * these three sentences back.
+ */
+function noSupportReason(floor: number): string {
+  if (floor >= 1) return 'Build a floor below this one first.';
+  if (floor === -1) return 'Build a lobby first.';
+  return 'Build the floor above this one first.';
 }
 
 /** Leave these out when asking what holds a footprint up: the room or shaft about to go. */
@@ -376,7 +412,7 @@ export function canBuild(world: World, kind: RoomKind, floor: number, x: number)
     return no(`You can build ${countText(rule.maxCount, rule.label)}.`);
   }
 
-  if (!hasSupport(world, floor)) return no('Build a floor below this one first.');
+  if (!hasSupport(world, floor, rule.height)) return no(noSupportReason(floor));
   if (!restsOnStructure(world, kind, floor, rule.height, x, rule.width)) {
     return no('Nothing is holding this up. Build under it first.');
   }
@@ -444,9 +480,49 @@ function doBuild(world: World, kind: RoomKind, floor: number, x: number): Comman
   return OK;
 }
 
+/**
+ * A tenant taken out with its room may sit in another room or ride a car. Give that room its
+ * seat back (as sendAway in people.ts does; guards and collectors never counted) and take the
+ * rider off the car, with its car call when no other rider still wants that floor
+ * (audit 2026-09-25 B S4). sendAway itself keeps a rider aboard to the next stop, which does
+ * not fit a sim that is removed at once.
+ */
+function freeSeatAndCar(world: World, sim: Sim, homeId: number): void {
+  if (sim.inRoomId !== null && sim.inRoomId !== homeId) {
+    const seat = world.rooms.get(sim.inRoomId);
+    if (seat && sim.kind !== 'guard' && sim.kind !== 'collector') {
+      setOccupancy(world, seat, Math.max(0, seat.occupancy - 1));
+    }
+  }
+  if (sim.inCarId === null) return;
+  const leg = sim.route[0];
+  const dest = leg && leg.kind === 'ride' ? leg.toFloor : null;
+  for (const shaft of world.shafts.values()) {
+    for (const car of shaft.cars) {
+      if (!car.passengers.includes(sim.id)) continue;
+      car.passengers = car.passengers.filter((id) => id !== sim.id);
+      if (dest === null) continue;
+      const stillWanted = car.passengers.some((id) => {
+        const other = world.sims.get(id)?.route[0];
+        return other !== undefined && other.kind === 'ride' && other.toFloor === dest;
+      });
+      if (!stillWanted) car.calls.delete(dest);
+    }
+  }
+  sim.inCarId = null;
+}
+
 function doDemolish(world: World, roomId: number): CommandResult {
   const room = world.rooms.get(roomId);
   if (!room) return no('There is nothing to demolish.');
+  // A fire or a bomb is tied to its room: taking the room away would leave the threat with
+  // nowhere to end (decision 2026-09-25: refuse, the player deals with the threat first).
+  if (room.onFire || world.events.some((e) => e.kind === 'fire' && e.roomIds.includes(room.id))) {
+    return no('Put the fire out first.');
+  }
+  if (world.events.some((e) => e.kind === 'bomb' && e.roomId === room.id)) {
+    return no('Deal with the bomb first.');
+  }
   if (room.occupancy > 0) return no('People are inside.');
   const stranded = strandsSomething(world, { roomId: room.id });
   if (stranded) return stranded;
@@ -461,6 +537,7 @@ function doDemolish(world: World, roomId: number): CommandResult {
       recordBeat(world.story, { code: 'room.vacated', minute: world.time.minute, simId, roomId: room.id, value: 0 });
       if (!followed) roomBeat = true;
     }
+    freeSeatAndCar(world, sim, room.id);
     sim.state = 'gone';
     sim.inRoomId = null;
     sim.homeRoomId = null;
@@ -657,6 +734,9 @@ function doSetStop(world: World, shaftId: number, floor: number, stops: boolean)
 
   if (stops) shaft.stops.add(floor);
   else {
+    // A rider aboard bound for this floor would have nowhere to get off (audit 2026-09-25 B S2).
+    const refusal = stopOffRefusal(world, shaft, floor);
+    if (refusal) return no(refusal);
     shaft.stops.delete(floor);
     // The home floor must stay a floor the elevator actually serves.
     if (shaft.homeFloor === floor) shaft.homeFloor = pickHomeFloor(shaft.stops, shaft.floorMin, shaft.floorMax);
@@ -720,14 +800,15 @@ function doSetCarRange(
   const car = shaft.cars.find((c) => c.id === carId);
   if (!car) return no('That car is gone.');
   if (range !== null) {
-    if (!Number.isInteger(range.lo) || !Number.isInteger(range.hi)) {
+    // floorExists also refuses floor 0, which no shaft has.
+    if (!floorExists(range.lo) || !floorExists(range.hi)) {
       return no('That floor is not on this elevator.');
     }
     if (range.lo < shaft.floorMin || range.hi > shaft.floorMax) {
       return no('That floor is not on this elevator.');
     }
     if (range.lo > range.hi) return no('The bottom floor cannot be above the top floor.');
-    if (range.hi - range.lo < 1) return no('A car must serve at least two floors.');
+    if (floorDistance(range.lo, range.hi) < 1) return no('A car must serve at least two floors.');
   }
   // Changing the floors under a rider aboard would strand them: the car may not leave
   // its range, so a destination outside it would never come.

@@ -65,7 +65,7 @@ export function controlLines(device: ControlsDevice, groupCount: number = GROUPS
     return [
       { icon: 'move', text: 'Slide one finger to look around.' },
       { icon: 'zoom', text: 'Pinch with two fingers to zoom in and out.' },
-      { icon: 'build', text: 'Tap Build, pick a room, then tap where it goes.' },
+      { icon: 'build', text: 'Tap Build and pick a room. Tap where it goes, then tap Build to place it.' },
       { icon: 'size', text: 'For a lobby or an elevator, drag to make it bigger. Use two fingers to move while you do.' },
       { icon: 'look', text: 'Tap a room or a person to see how they are doing.' },
     ];

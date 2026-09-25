@@ -25,7 +25,7 @@ import {
 } from 'pixi.js';
 import { stressBand } from '../sim/people';
 import { ROOMS, STORY } from '../sim/rules';
-import { clockOf, TOWER_WIDTH, type Car, type Id, type Room, type RoomKind, type Shaft, type ShaftKind, type Sim, type SimKind, type StressBand, type World } from '../sim/types';
+import { clockOf, spanFloors, spanTop, TOWER_WIDTH, type Car, type Id, type Room, type RoomKind, type Shaft, type ShaftKind, type Sim, type SimKind, type StressBand, type World } from '../sim/types';
 import { roomsOnFloor, shaftAt } from '../sim/world';
 import {
   bakeResolution,
@@ -34,6 +34,7 @@ import {
   FLOOR_PX,
   LINE_PX,
   OVERLAY_KINDS,
+  shaftPieces,
   SIM_H,
   SIM_W,
   SLAB_PX,
@@ -117,7 +118,7 @@ import { Motion, TELEPORT_TILES } from './interpolate';
 import { floorsWithPeople, LIGHT_ALPHA, lerpColor, lightBand, lightTintAt, windowStateOf, windowStatesFor, type WindowState } from './light';
 import { createOverlayPass, type OverlayKind, type ViewRect } from './overlays';
 import { createSky, isNight, nightness, skyBackground, type Sky } from './sky';
-import { easeView, settledView, weatherLightTint, weatherNow, weatherSkyColor, type Rect as WeatherRect } from './weather';
+import { easeView, publishWeatherView, settledView, weatherLightTint, weatherNow, weatherSkyColor, type Rect as WeatherRect } from './weather';
 import { basementSpanOf, createWeatherFx, floorRectsOf } from './weatherfx';
 import { createThumbnails, type ThumbnailKind } from './thumbnail';
 
@@ -211,13 +212,21 @@ export function drawsOverRooms(kind: RoomKind): boolean {
 /**
  * The room a click lands on. Where a connector overlays another room both cover the
  * tile, so the pick follows the picture: the connector is on top, so it is the one the
- * player means.
+ * player means. Two flights may cover one tile (a flight based on floor 2 and one based on
+ * floor 3 share floor 3); their sprites are made in id order, so the highest id is drawn on
+ * top and is the one picked.
  */
 export function pickRoomAt(world: World, floor: number, x: number): Room | undefined {
   let found: Room | undefined;
   for (const room of roomsOnFloor(world, floor)) {
     if (x < room.x || x >= room.x + room.width) continue;
-    if (!found || drawsOverRooms(room.kind)) found = room;
+    if (!found) {
+      found = room;
+      continue;
+    }
+    const over = drawsOverRooms(room.kind);
+    const foundOver = drawsOverRooms(found.kind);
+    if (over && (!foundOver || room.id > found.id)) found = room;
   }
   return found;
 }
@@ -369,7 +378,8 @@ interface SlabEntry {
 }
 
 interface ShaftEntry {
-  node: Sprite;
+  /** The shaft as a stack of pieces, top first (art.ts shaftPieces), so no texture passes the GPU limit. */
+  parts: Sprite[];
   kind: ShaftKind;
   floors: number;
 }
@@ -633,6 +643,7 @@ function guardArt(primary: Art, backup: Art): Art {
   }
   if (p.stats) guarded.stats = p.stats;
   if (p.sweep) guarded.sweep = p.sweep;
+  if (p.dropGhosts) guarded.dropGhosts = p.dropGhosts;
   return guarded;
 }
 
@@ -659,7 +670,8 @@ export function builtFloorExtents(world: World): Map<number, { min: number; max:
     }
   };
   for (const room of world.rooms.values()) {
-    for (let f = room.floor; f < room.floor + room.height; f++) cover(f, room.x, room.x + room.width);
+    // spanFloors skips the floor that does not exist: a flight based at B1 covers B1 and 1.
+    for (const f of spanFloors(room.floor, room.height)) cover(f, room.x, room.x + room.width);
   }
   for (const shaft of world.shafts.values()) {
     for (let f = shaft.floorMin; f <= shaft.floorMax; f++) cover(f, shaft.x, shaft.x + shaft.width);
@@ -698,21 +710,41 @@ export const PICK_RADIUS_TILES = 1.5;
  * a tap must never select someone the crowd sample left out, or the panel would open on
  * a person who is not there. On a floor, within the pick radius, newest wins because the
  * newest sim draws on top. Pure and exported so the rule is testable without a GPU.
+ *
+ * `drawnAt`, when given, is where the last frame drew each person (renderer: recorded in
+ * reconcileSims): only a sim in it can be picked, and it is picked where it is drawn, so a
+ * person at a desk is picked at the desk and not at the middle of the room (sim.pos.x).
  */
 export function pickSimAt(
   sims: Iterable<Sim>,
   floor: number,
   tileFloat: number,
   sample = true,
+  drawnAt?: ReadonlyMap<Id, DrawPoint>,
 ): Sim | null {
   let best: Sim | null = null;
   for (const sim of sims) {
     if (!simIsVisible(sim) || (sample && !inCrowd(sim))) continue;
-    if (sim.pos.floor !== floor) continue;
-    if (Math.abs(sim.pos.x - tileFloat) > PICK_RADIUS_TILES) continue;
+    let simFloor = sim.pos.floor;
+    let simX = sim.pos.x;
+    if (drawnAt) {
+      const at = drawnAt.get(sim.id);
+      if (!at) continue;
+      simFloor = at.floor;
+      simX = at.x / TILE_PX;
+    }
+    if (simFloor !== floor) continue;
+    if (Math.abs(simX - tileFloat) > PICK_RADIUS_TILES) continue;
     if (!best || sim.id > best.id) best = sim;
   }
   return best;
+}
+
+/** Where a person was drawn: feet at (x, y) in world px, standing on `floor`. */
+export interface DrawPoint {
+  x: number;
+  y: number;
+  floor: number;
 }
 
 /** Only these states move across the floor, so only these interpolate and animate. */
@@ -970,6 +1002,13 @@ export async function createRenderer(
   const seenFires = new Set<Id>();
   const simSlots = new Map<Id, number>();
   const drawnSims: Sim[] = [];
+  /**
+   * Where the last frame drew each person (sprite or particle), feet point. A tap picks a
+   * person here and the selection ring goes here, so both follow the picture: a person at a
+   * desk is picked at the desk, and one nobody drew (outside the sample, riding, far zoom)
+   * can be neither picked nor ringed.
+   */
+  const drawnAt = new Map<Id, DrawPoint>();
 
   const ghostSprite = new Sprite();
   ghostSprite.visible = false;
@@ -1508,17 +1547,35 @@ export async function createRenderer(
     }
   }
 
-  /** At far zoom only the selected person is drawn, standing where the selection ring is. */
+  /**
+   * Where a person stands in the picture: a walker at its position, a person in a room at the
+   * slot the full frame gives them (the same slot order reconcileSims walks). For the one
+   * person drawn at far zoom, so it stands where it stood a zoom step closer.
+   */
+  function restingPoint(w: World, sim: Sim): [number, number] {
+    if (simMoves(sim) || sim.inRoomId === null) return [sim.pos.x * TILE_PX, simFeetY(sim.pos.floor)];
+    simSlots.clear();
+    for (const other of w.sims.values()) {
+      if (other.inRoomId !== sim.inRoomId || simMoves(other) || !drawn(other)) continue;
+      const p = inRoomSlot(w, other, simSlots);
+      if (other.id === sim.id) return p;
+    }
+    return inRoomSlot(w, sim, new Map());
+  }
+
+  /** At far zoom only the selected person is drawn, and the selection ring goes round it. */
   function drawSolo(w: World): void {
     const sim = selection?.simId !== undefined ? w.sims.get(selection.simId) : undefined;
     if (!sim || !simIsVisible(sim)) {
       soloSprite.visible = false;
       return;
     }
+    const [x, y] = restingPoint(w, sim);
     soloSprite.texture = art.sim(sim.kind, stressBand(sim.stress), FRAME.stand, lookOf(w, sim));
     soloSprite.setSize(SIM_WIDTH_PX, SIM_HEIGHT_PX);
-    soloSprite.position.set(sim.pos.x * TILE_PX, simFeetY(sim.pos.floor));
+    soloSprite.position.set(x, y);
     soloSprite.visible = true;
+    drawnAt.set(sim.id, { x, y, floor: yToFloor(y - 1) });
   }
 
   // The static tower (floor strips, rooms, slabs, shafts, fire markers) is reconciled only
@@ -1551,24 +1608,43 @@ export async function createRenderer(
     for (const shaft of w.shafts.values()) {
       seenShafts.add(shaft.id);
       const floors = shaftFloorSpan(shaft);
+      const pieces = shaftPieces(floors);
       let entry = shaftSprites.get(shaft.id);
-      if (!entry) {
-        const sprite = new Sprite(art.shaft(shaft.kind, floors));
-        shaftLayer.addChild(sprite);
-        entry = { node: sprite, kind: shaft.kind, floors };
-        shaftSprites.set(shaft.id, entry);
-      } else if (entry.kind !== shaft.kind || entry.floors !== floors) {
-        entry.node.texture = art.shaft(shaft.kind, floors);
+      if (!entry || entry.kind !== shaft.kind || entry.floors !== floors) {
+        const parts = entry?.parts ?? [];
+        while (parts.length > pieces.length) parts.pop()?.destroy();
+        pieces.forEach((n, i) => {
+          const texture = art.shaft(shaft.kind, n);
+          const part = parts[i];
+          if (part) part.texture = texture;
+          else {
+            const sprite = new Sprite(texture);
+            shaftLayer.addChild(sprite);
+            parts.push(sprite);
+          }
+        });
+        if (!entry) {
+          entry = { parts, kind: shaft.kind, floors };
+          shaftSprites.set(shaft.id, entry);
+        }
+        entry.parts = parts;
         entry.kind = shaft.kind;
         entry.floors = floors;
       }
-      entry.node.position.set(shaft.x * TILE_PX, floorTopY(shaft.floorMax));
-      entry.node.setSize(shaft.width * TILE_PX, floors * FLOOR_PX);
+      // Stacked from the top of the shaft down, each piece exactly its floors tall.
+      let y = floorTopY(shaft.floorMax);
+      for (let i = 0; i < entry.parts.length; i++) {
+        const part = entry.parts[i] as Sprite;
+        const n = pieces[i] ?? 0;
+        part.position.set(shaft.x * TILE_PX, y);
+        part.setSize(shaft.width * TILE_PX, n * FLOOR_PX);
+        y += n * FLOOR_PX;
+      }
     }
 
     for (const [id, entry] of shaftSprites) {
       if (seenShafts.has(id)) continue;
-      entry.node.destroy();
+      for (const part of entry.parts) part.destroy();
       shaftSprites.delete(id);
     }
   }
@@ -1668,6 +1744,7 @@ export async function createRenderer(
   }
 
   function reconcileSims(w: World, alpha: number): void {
+    drawnAt.clear();
     // Far zoom: nobody but the selected person, so the blocks read as the tower.
     const solo = plan.people === 'selected';
     simSpriteLayer.visible = !solo;
@@ -1728,6 +1805,9 @@ export async function createRenderer(
         : parked(simMotion, sim.id, ...inRoomSlot(w, sim, simSlots));
       const drawX = point.x + pose.dx;
       const drawY = point.y + pose.dy;
+      // Where the person stands, before the pose's small shift, so the ring does not bob. The
+      // floor is the one the feet stand on: a slot in a two floor room sits on its base floor.
+      drawnAt.set(sim.id, { x: point.x, y: point.y, floor: yToFloor(point.y - 1) });
 
       const atlasTile = particleMode && particles && crowdAtlas ? crowdAtlas.frameOf(kind, look, frame) : undefined;
       if (particles && atlasTile) {
@@ -1833,7 +1913,7 @@ export async function createRenderer(
       const texture = art.ghost(ghost.widthTiles, ghost.heightFloors, ghost.ok);
       ghostSprite.texture = texture;
       ghostSprite.visible = true;
-      ghostSprite.position.set(ghost.x * TILE_PX, floorTopY(ghost.floor + ghost.heightFloors - 1));
+      ghostSprite.position.set(ghost.x * TILE_PX, floorTopY(spanTop(ghost.floor, ghost.heightFloors)));
       ghostSprite.setSize(ghost.widthTiles * TILE_PX, ghost.heightFloors * FLOOR_PX);
     } else {
       ghostSprite.visible = false;
@@ -1864,11 +1944,13 @@ export async function createRenderer(
         };
       }
     } else if (selection.simId !== undefined) {
-      const sim = w.sims.get(selection.simId);
-      if (sim) {
+      // Round the person where this frame drew them, and only if it did: nobody is ringed at
+      // the middle of a room, on the hall floor under a car, or outside the one in four sample.
+      const at = w.sims.has(selection.simId) ? drawnAt.get(selection.simId) : undefined;
+      if (at) {
         box = {
-          x: sim.pos.x * TILE_PX - SIM_WIDTH_PX / 2 - SELECT_PAD_PX,
-          y: simFeetY(sim.pos.floor) - SIM_HEIGHT_PX - SELECT_PAD_PX,
+          x: at.x - SIM_WIDTH_PX / 2 - SELECT_PAD_PX,
+          y: at.y - SIM_HEIGHT_PX - SELECT_PAD_PX,
           w: SIM_WIDTH_PX + 2 * SELECT_PAD_PX,
           h: SIM_HEIGHT_PX + 2 * SELECT_PAD_PX,
         };
@@ -1895,7 +1977,9 @@ export async function createRenderer(
     const tile = xToTile(point.x);
     const tileFloat = point.x / TILE_PX;
 
-    const best = pickSimAt(lastWorld.sims.values(), floor, tileFloat, sampleCrowd);
+    // A person is picked where the last frame drew them, and only if it did: at far zoom
+    // nobody is drawn but the selected person, so a tap there picks the room under it.
+    const best = plan.people === 'selected' ? null : pickSimAt(lastWorld.sims.values(), floor, tileFloat, sampleCrowd, drawnAt);
 
     let hit: PickHit;
     if (best) hit = { simId: best.id, floor, x: tile };
@@ -2129,6 +2213,9 @@ export async function createRenderer(
         return;
       }
     }
+    // A key pressed with Cmd, Ctrl or Alt is a shortcut (Cmd+A, Ctrl+S), never a pan: the
+    // browser may not deliver its keyup, and a held pan key would drift the view for good.
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
     if (event.code.startsWith('Key') || event.code.startsWith('Arrow')) userMoved = true;
     camera.setKey(event.code, true);
   };
@@ -2190,6 +2277,8 @@ export async function createRenderer(
     const clock = clockOf(lastWorld.time.minute);
     // One weather snapshot a frame, eased in real time: the fade runs under reduced motion too.
     weatherView = easeView(weatherView, weatherNow(lastWorld.seed, lastWorld.time.minute), dt);
+    // The status bar names the weather this view draws (F3: never Rain over a dry street).
+    publishWeatherView(lastWorld.seed, weatherView);
     sky.update(clock.minuteOfDay, camera, width, height, reducedMotion ? 0 : dt, { view: weatherView, seed: lastWorld.seed });
     const background = weatherSkyColor(skyBackground(clock.minuteOfDay), weatherView);
     weatherFx.update({
@@ -2234,6 +2323,7 @@ export async function createRenderer(
       people: plan.ambient,
       viewLeft: camera.x - width / 2 / camera.zoom,
       viewRight: camera.x + width / 2 / camera.zoom,
+      inTower: drawn,
     });
     const lightMinute = Math.floor(clock.minuteOfDay);
     const lightTint = weatherLightTint(lightTintAt(lightMinute), weatherView);
@@ -2277,10 +2367,59 @@ export async function createRenderer(
   };
   app.ticker.add(onFrame);
 
+  /**
+   * A different world object is a different tower (a load, a new game, Today's tower, a
+   * friend's link). Ids restart at 1 in every world, so nothing kept by id (room, slab, venue,
+   * shaft, car and person sprites), by the built signature (floor strips, curb doors, weather
+   * boxes) or by real time (the eased weather, the wet street, the street's sample) may carry
+   * over: all of it is dropped here, and the next pass builds the new tower as a fresh
+   * renderer would, with no build feedback, under the new tower's weather settled.
+   */
+  function worldReplaced(w: World): void {
+    for (const entry of roomSprites.values()) entry.node.destroy();
+    roomSprites.clear();
+    for (const entry of slabSprites.values()) entry.node.destroy();
+    slabSprites.clear();
+    for (const [id, entry] of [...venueSprites]) dropVenue(id, entry);
+    for (const entry of shaftSprites.values()) for (const part of entry.parts) part.destroy();
+    shaftSprites.clear();
+    for (const entry of carSprites.values()) {
+      entry.node.destroy();
+      entry.cable.destroy();
+      entry.indicator.destroy();
+    }
+    carSprites.clear();
+    for (const [id, entry] of [...simSprites]) dropSimEntry(id, entry);
+    leaveParticleMode();
+    for (const g of fireGraphics.values()) g.destroy();
+    fireGraphics.clear();
+    drawnAt.clear();
+    carMotion.reset();
+    simMotion.reset();
+    simSteps.clear();
+    lookCodes.clear();
+    buildFx.clear();
+    stripSignature = -1;
+    curbDoors = null;
+    weatherFloors = [];
+    weatherBasement = null;
+    reconciledWorld = null;
+    reconciledVersion = -1;
+    lastLitState = -1;
+    venueClock = -1;
+    veilDirty = true;
+    blocksDirty = true;
+    weatherView = settledView(weatherNow(w.seed, w.time.minute));
+    publishWeatherView(w.seed, weatherView);
+    weatherFx.reset();
+    curb.reset();
+  }
+
   frameInitial();
 
   const renderer: Renderer = {
     render(w: World, alpha: number): void {
+      if (w !== lastWorld) worldReplaced(w);
       lastWorld = w;
       const clock = clockOf(w.time.minute);
       const night = isNight(clock.minuteOfDay);
@@ -2345,13 +2484,19 @@ export async function createRenderer(
     camera,
     screenToTile,
     setGhost(g): void {
+      if (!g && ghost && art.dropGhosts) {
+        // The placement ended: let go of the sprite's texture, then free every ghost bake.
+        ghostSprite.texture = Texture.EMPTY;
+        ghostSprite.visible = false;
+        art.dropGhosts();
+      }
       ghost = g;
     },
     ghostScreenRect(): { x: number; y: number; w: number; h: number } | null {
       if (!ghost) return null;
       // The same two corners drawOverlay places the sprite between, put through the camera.
       const left = ghost.x * TILE_PX;
-      const top = floorTopY(ghost.floor + ghost.heightFloors - 1);
+      const top = floorTopY(spanTop(ghost.floor, ghost.heightFloors));
       const near = camera.worldToScreen(left, top);
       const far = camera.worldToScreen(
         left + ghost.widthTiles * TILE_PX,
@@ -2401,6 +2546,7 @@ export async function createRenderer(
       pickListeners.length = 0;
       sky.destroy();
       weatherFx.destroy();
+      publishWeatherView(0, null);
       curb.destroy();
       leaveParticleMode();
       crowdAtlas = null;

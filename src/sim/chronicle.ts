@@ -172,21 +172,18 @@ export function assembleChronicle(world: World): Chronicle {
     lines.push(`${storyName(world, id)}: ${latest ? describeBeat(latest, world) : 'Nothing recorded yet.'}`);
   }
 
-  const departures = recent.filter((beat) => beat.code === 'room.vacated');
-  lines.push(departures.length === 1 ? '1 tenant moved out.' : `${countText(departures.length)} tenants moved out.`);
+  // Tallies come from the running totals, which outlive the capped recent list.
+  const totals = story.totals;
+  lines.push(totals.movedOut === 1 ? '1 tenant moved out.' : `${countText(totals.movedOut)} tenants moved out.`);
+  const departures = recent.filter((beat) => beat.code === 'room.vacated' && (beat.value ?? 0) >= 1);
   for (const beat of departures.slice(-3)) lines.push(beatLine(world, beat));
 
   const ratings = recent.filter((beat) => beat.code === 'vip.rated');
   const rating = ratings[ratings.length - 1];
   if (rating) lines.push(describeBeat(rating, world));
 
-  const caught = recent.filter((beat) => beat.code === 'theft.caught').length;
-  const escaped = recent.filter((beat) => beat.code === 'theft.escaped').length;
-  lines.push(`Thieves: ${countText(caught)} caught, ${countText(escaped)} got away.`);
-
-  const backlogs = recent.filter((beat) => beat.code === 'waste.backlog').length;
-  const cleared = recent.filter((beat) => beat.code === 'waste.cleared').length;
-  lines.push(`Times waste piled up: ${countText(backlogs)}, cleaned up: ${countText(cleared)}.`);
+  lines.push(`Thieves: ${countText(totals.theftsCaught)} caught, ${countText(totals.theftsEscaped)} got away.`);
+  lines.push(`Times waste piled up: ${countText(totals.wasteBacklogs)}, cleaned up: ${countText(totals.wasteCleared)}.`);
 
   const weddings = world.stats.weddingsHeld;
   if (weddings > 0) lines.push(weddings === 1 ? 'The cathedral held a wedding.' : `The cathedral held ${countText(weddings)} weddings.`);

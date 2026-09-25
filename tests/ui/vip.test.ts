@@ -54,7 +54,7 @@ describe('VIP card', () => {
     expect(ticks(world)).toEqual({
       'A suite is ready for them': true,
       'The suite is clean': true,
-      'An elevator stops at floor 3': true,
+      'The VIP can get to floor 3': true,
       'No fire or bomb in the tower': true,
     });
 
@@ -64,8 +64,10 @@ describe('VIP card', () => {
 
     const shaft = onlyShaft(world);
     shaft.stops.delete(3);
-    expect(ticks(world)['An elevator stops at floor 3']).toBe(false);
+    world.routingDirty = true; // what the stop command sets
+    expect(ticks(world)['The VIP can get to floor 3']).toBe(false);
     shaft.stops.add(3);
+    world.routingDirty = true;
 
     EVENT_TEST_HOOKS.target.fire = roomsMatching(world, 'office')[0]?.id ?? null;
     startFire(world);
@@ -132,7 +134,7 @@ describe('VIP card', () => {
   });
 });
 
-describe('VIP card in the event log', () => {
+describe('VIP card in News', () => {
   let dom: FakeDom;
   let uninstall: () => void;
   beforeEach(() => {

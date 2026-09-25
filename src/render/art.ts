@@ -16,8 +16,9 @@
 //
 // Every drawer is native to this grid: the shell of every room, the structure pieces, all
 // twenty two room interiors (the last fourteen re-authored in ship L3, which removed the 2x
-// scale they were drawn through), cars with five baked door positions, people with three
-// walk frames and outfits, shafts, the ghost.
+// scale they were drawn through), cars with three baked door positions (closed, half and open;
+// the door tween runs on five frames and maps them to these three), people with three walk
+// frames and outfits, shafts, the ghost.
 
 import { CanvasSource, Container, Graphics, Rectangle, Texture } from 'pixi.js';
 import type { Renderer } from 'pixi.js';
@@ -154,7 +155,43 @@ export interface Art {
    * many were freed.
    */
   sweep?(live: ReadonlySet<Texture>, idleMs: number): number;
+  /** Free every ghost texture: the placement ended, and a drag's spans should not stay baked. */
+  dropGhosts?(): void;
 }
+
+/**
+ * The tallest or widest texture any bake may make, in device px: the common MAX_TEXTURE_SIZE
+ * of a phone GPU. A structural bake past it draws blank or loses the context on those devices.
+ */
+export const MAX_TEXTURE_PX = 8192;
+
+/** The most floors one structural texture may span at a bake resolution: 113 at 1, 56 at 2. */
+export function maxBakeFloors(resolution: number): number {
+  return Math.max(1, Math.floor(MAX_TEXTURE_PX / Math.max(1, resolution) / FLOOR_PX));
+}
+
+/**
+ * A shaft is baked in pieces of at most this many floors and drawn as a stack of them. Its
+ * drawing repeats every floor (drawShaft), so the stack reads as one shaft, and a shaft of up
+ * to this many floors is one texture exactly as before. 32 floors is 4608 device px at 2.
+ */
+export const SHAFT_PIECE_FLOORS = 32;
+
+/** The piece heights, in floors, a shaft of `floors` floors is drawn with, top piece first. */
+export function shaftPieces(floors: number): number[] {
+  const n = Math.max(1, Math.round(floors));
+  const pieces: number[] = [];
+  let left = n;
+  while (left > SHAFT_PIECE_FLOORS) {
+    pieces.push(SHAFT_PIECE_FLOORS);
+    left -= SHAFT_PIECE_FLOORS;
+  }
+  pieces.push(left);
+  return pieces;
+}
+
+/** Ghost textures kept baked at once: the one showing and the one before it (ok and refused). */
+export const GHOST_KEEP = 2;
 
 export interface CrowdAtlas {
   /** The atlas cell for a person: walk frames show the stride, every other frame stands. */
@@ -1853,6 +1890,32 @@ export function createArt(renderer: Renderer, options: { createCanvas?: CanvasFa
     byFamily[family] = (byFamily[family] ?? 0) + bytes;
   };
   let crowdAtlas: CrowdAtlas | null | undefined;
+  let noContextWarned = false;
+  /** The ghost keys baked now, oldest first; at most GHOST_KEEP stay (ghost()). */
+  const ghostKeys: string[] = [];
+
+  /** Free one structural texture and take it off the counts. */
+  function freeStructural(key: string, w: number, h: number): void {
+    const texture = cache.get(key);
+    if (!texture) return;
+    cache.delete(key);
+    try {
+      texture.destroy(true);
+    } catch (error) {
+      console.warn('render: freeing a texture failed', error);
+    }
+    const bytes = Math.ceil(w * resolution) * Math.ceil(h * resolution) * 4;
+    counts.structural.textures -= 1;
+    counts.structural.bytes -= bytes;
+    count(key, -bytes);
+  }
+
+  /** Free a ghost key; its size is in the key (ghost:tiles:floors:ok). */
+  function freeGhost(key: string): void {
+    const [, tiles, floors] = key.split(':');
+    const { width: w, height: h } = TEXTURE_SIZE.ghost(Number(tiles), Number(floors));
+    freeStructural(key, w, h);
+  }
 
   function bakeTarget(key: string, w: number, h: number, make: () => Container): Texture {
     const hit = cache.get(key);
@@ -1894,11 +1957,18 @@ export function createArt(renderer: Renderer, options: { createCanvas?: CanvasFa
     const ph = Math.max(1, Math.ceil(h * scale));
     const canvas = makeCanvas(pw, ph);
     const ctx = canvas.getContext('2d') as CanvasRenderingContext2D | null;
-    if (ctx) {
-      ctx.scale(scale, scale);
-      ctx.translate(-originX, -originY);
-      draw(ctx);
+    if (!ctx) {
+      // No 2D context (the browser is out of canvases, or a context was lost): draw nothing
+      // this time and cache nothing, so the next ask tries again. Said once, not every frame.
+      if (!noContextWarned) {
+        noContextWarned = true;
+        console.warn(`render: no 2D canvas context for ${key}; drawing it blank until one is available`);
+      }
+      return Texture.EMPTY;
     }
+    ctx.scale(scale, scale);
+    ctx.translate(-originX, -originY);
+    draw(ctx);
     const texture = new Texture({
       source: new CanvasSource({ resource: canvas as HTMLCanvasElement, resolution: scale, scaleMode: TEXTURE_CLASS.illustrated.scaleMode }),
       label: key,
@@ -1944,7 +2014,10 @@ export function createArt(renderer: Renderer, options: { createCanvas?: CanvasFa
     },
 
     shaft(kind, floors) {
-      const n = Math.max(1, Math.round(floors));
+      // One piece of at most SHAFT_PIECE_FLOORS: a taller shaft is a stack of pieces (the
+      // renderer draws shaftPieces), so no shaft texture passes MAX_TEXTURE_PX and a shaft
+      // extended floor by floor leaves at most SHAFT_PIECE_FLOORS keys per kind behind.
+      const n = Math.min(SHAFT_PIECE_FLOORS, Math.max(1, Math.round(floors)));
       const { width: w, height: h } = TEXTURE_SIZE.shaft(kind, n);
       return bake(`shaft:${kind}:${n}`, w, h, (g) => drawShaft(g, kind, w, h));
     },
@@ -1969,9 +2042,24 @@ export function createArt(renderer: Renderer, options: { createCanvas?: CanvasFa
 
     ghost(widthTiles, heightFloors, ok) {
       const tiles = Math.max(1, Math.round(widthTiles));
-      const floors = Math.max(1, Math.round(heightFloors));
+      // Capped at the GPU limit: a taller ghost (an express past 56 floors at a device pixel
+      // ratio of 2) is the capped one stretched by the renderer, its fill and tile guides
+      // unchanged, its top and bottom edge a little thicker.
+      const floors = Math.min(maxBakeFloors(resolution), Math.max(1, Math.round(heightFloors)));
       const { width: w, height: h } = TEXTURE_SIZE.ghost(tiles, floors);
-      return bake(`ghost:${tiles}:${floors}:${ok ? 1 : 0}`, w, h, (g) => drawGhost(g, w, h, ok));
+      const key = `ghost:${tiles}:${floors}:${ok ? 1 : 0}`;
+      // A drag changes the span every few frames: keep only the newest GHOST_KEEP, so a drag
+      // from floor 1 to 100 holds two textures, not a hundred.
+      const at = ghostKeys.indexOf(key);
+      if (at >= 0) ghostKeys.splice(at, 1);
+      ghostKeys.push(key);
+      while (ghostKeys.length > GHOST_KEEP) freeGhost(ghostKeys.shift() as string);
+      return bake(key, w, h, (g) => drawGhost(g, w, h, ok));
+    },
+
+    dropGhosts() {
+      for (const key of ghostKeys) freeGhost(key);
+      ghostKeys.length = 0;
     },
 
     venue: venueTexture,
@@ -2089,6 +2177,11 @@ export function createArt(renderer: Renderer, options: { createCanvas?: CanvasFa
           },
           resolution,
         );
+        if (atlas === Texture.EMPTY) {
+          // No canvas context this time (paint warned): stay on sprites, and try again later.
+          crowdAtlas = undefined;
+          return null;
+        }
         const stripCell = (i: number, w: number, h: number): Texture =>
           new Texture({ source: atlas.source, frame: new Rectangle(i * cellW, stripY, w, h) });
         const propCells = new Map<PropKind, Texture>(PROP_KINDS.map((prop, i) => [prop, stripCell(i, PROP_SIZE[prop].w, PROP_SIZE[prop].h)]));

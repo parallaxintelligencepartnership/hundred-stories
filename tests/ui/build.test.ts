@@ -3,7 +3,8 @@
 // pick tiles. On the fake DOM; the phone is a window 390 px wide.
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { Tool } from '../../src/game/api';
+import type { Placement, Tool } from '../../src/game/api';
+import { createWorld } from '../../src/sim/world';
 import {
   createBuildDock,
   isPhoneWidth,
@@ -262,6 +263,46 @@ describe('build in the shell', () => {
     const five = g.tools.at(-1) as { kind: string; room?: string };
     expect(five.kind).toBe('room');
     expect(tabs[4]!.getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('disables Build on a refused spot, with the reason in the chip, and enables it on a good one', () => {
+    setWidth(390);
+    const listeners = new Set<() => void>();
+    const office: Placement = { floor: 2, x: 100, floorMin: 2, floorMax: 2, ok: true, label: 'Office', cost: 40_000, pending: true };
+    let placement: Placement = { ...office, ok: false, reason: 'Build a floor below this one first.' };
+    const api = {
+      world: createWorld(7),
+      subscribe(cb: () => void) {
+        listeners.add(cb);
+        return () => listeners.delete(cb);
+      },
+      subscribeEvents: () => () => {},
+      getHover: () => null,
+      getSpeed: () => 1,
+      getTool: (): Tool => ({ kind: 'room', room: 'office' }),
+      setTool: () => {},
+      getPlacement: () => placement,
+      getPlacementRect: () => null,
+      getSelection: () => null,
+      cancelPending: () => {},
+      setChrome: () => {},
+      setReducedMotion: () => {},
+    } as never;
+    const root = dom.createElement('div');
+    createUi(root as never, api, {} as never);
+    const notify = (): void => listeners.forEach((cb) => cb());
+    const buildButton = (): FakeElement => find(root, 'hs-place-bar').descendants().find((n) => has(n, 'is-primary'))!;
+
+    notify();
+    expect(has(find(root, 'hs-place-bar'), 'is-hidden')).toBe(false);
+    expect(find(root, 'hs-place-chip-text').textContent).toBe('Build a floor below this one first.');
+    expect(has(find(root, 'hs-place-chip'), 'is-alert')).toBe(true);
+    expect(buildButton().disabled).toBe(true);
+
+    placement = office;
+    notify();
+    expect(find(root, 'hs-place-chip-text').textContent).toBe('Office · $40,000');
+    expect(buildButton().disabled).toBe(false);
   });
 
   it('keeps every build control a 44 px target in the css', () => {

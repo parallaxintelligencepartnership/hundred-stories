@@ -631,6 +631,8 @@ describe('stress', () => {
     expect(sim.state).toBe('leaving');
     expect(sim.leaveReason).toBe('Gave up waiting for an elevator on floor 3.');
     expect(sim.leaveReason).toContain('floor 3');
+    // Audit 2026-09-25 I S9: the give-up is logged once, not only set on the sim.
+    expect(world.log.filter((e) => e.text === 'Gave up waiting for an elevator on floor 3.')).toHaveLength(1);
 
     run(world, walkMinutes(SHAFT_X - ENTRANCE.x));
     expect(world.sims.has(id)).toBe(false);
@@ -721,6 +723,8 @@ describe('leaving', () => {
     run(world, 1);
     expect(sim.state).toBe('leaving');
     expect(sim.leaveReason).toBe('Gave up waiting for an elevator on floor 3.');
+    // Audit 2026-09-25 I S9: a visitor who gives up gets a log line too, not only the tenant.
+    expect(world.log.filter((e) => e.text === 'Gave up waiting for an elevator on floor 3.')).toHaveLength(1);
 
     run(world, walkMinutes(SHAFT_X - ENTRANCE.x));
     expect(world.sims.has(id)).toBe(false);

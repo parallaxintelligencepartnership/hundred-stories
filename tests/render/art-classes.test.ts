@@ -3,9 +3,9 @@
 // bake on an anti-aliased canvas at twice that, with linear sampling. And the budget's tools:
 // the byte count, and the sweep that frees poses nobody shows.
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Rectangle, Texture, type Renderer as PixiRenderer } from 'pixi.js';
-import { createArt, CROWD_COLS, CROWD_KINDS, CROWD_ROWS, CROWD_STRIP_H, TEXTURE_CLASS, TEXTURE_SIZE, VENUE_SHELL } from '../../src/render/art';
+import { createArt, FLOOR_PX, GHOST_KEEP, SHAFT_PIECE_FLOORS, CROWD_COLS, CROWD_KINDS, CROWD_ROWS, CROWD_STRIP_H, TEXTURE_CLASS, TEXTURE_SIZE, VENUE_SHELL } from '../../src/render/art';
 import { FRAME } from '../../src/render/anim';
 import { MARK_H, MARK_W, PROP_KINDS, PROP_SIZE } from '../../src/render/figure';
 import { SIM_H, SIM_W } from '../../src/render/grid';
@@ -179,5 +179,88 @@ describe('the crowd atlas', () => {
 
   it('draws them at three quarters of their size in crowd mode', () => {
     expect(CROWD_EXTRA_SCALE).toBe(0.75);
+  });
+});
+
+describe('tall spans stay inside the GPU limit (audit 2026-09-25 F2 S1, new S4)', () => {
+  /** A generateTexture that records each bake's family, device px height, and whether it was freed. */
+  function recording(resolution: 1 | 2): {
+    art: ReturnType<typeof createArt>;
+    bakes: { family: string; key: string; deviceH: number; freed: boolean }[];
+    family: { now: string; key: string };
+  } {
+    const bakes: { family: string; key: string; deviceH: number; freed: boolean }[] = [];
+    const family = { now: '', key: '' };
+    const renderer = {
+      generateTexture(options: { frame: Rectangle; resolution: number }): Texture {
+        const texture = new Texture();
+        const bake = { family: family.now, key: family.key, deviceH: options.frame.height * options.resolution, freed: false };
+        bakes.push(bake);
+        const destroy = texture.destroy.bind(texture);
+        texture.destroy = (options?: boolean): void => {
+          bake.freed = true;
+          destroy(options);
+        };
+        return texture;
+      },
+    } as unknown as PixiRenderer;
+    const createCanvas = (width: number, height: number): HTMLCanvasElement => ({ width, height, getContext: () => null }) as unknown as HTMLCanvasElement;
+    return { art: createArt(renderer, { createCanvas, resolution }), bakes, family };
+  }
+
+  it('a drag from floor 1 to 110 and built shafts of 1 to 110 floors bake nothing past 8192 device px', () => {
+    for (const resolution of [1, 2] as const) {
+      const { art, bakes, family } = recording(resolution);
+      family.now = 'ghost';
+      for (let floors = 1; floors <= 110; floors++) {
+        family.key = `ghost ${floors}`;
+        art.ghost(4, floors, floors % 7 !== 0); // the outline turns red and back as the drag passes a refusal
+      }
+      family.now = 'shaft';
+      for (const kind of ['standard', 'express', 'service'] as const) {
+        for (let floors = 1; floors <= 110; floors++) {
+          family.key = `${kind} ${floors}`;
+          art.shaft(kind, floors);
+        }
+      }
+      const tallest = Math.max(...bakes.map((b) => b.deviceH));
+      expect(tallest, `resolution ${resolution}`).toBeLessThanOrEqual(8192);
+      // The drag keeps only the newest ghosts baked, and lets go of them all when it ends.
+      const liveGhosts = bakes.filter((b) => b.family === 'ghost' && !b.freed);
+      expect(liveGhosts.length).toBeLessThanOrEqual(GHOST_KEEP);
+      art.dropGhosts?.();
+      expect(bakes.filter((b) => b.family === 'ghost' && !b.freed)).toHaveLength(0);
+      // A shaft is a stack of pieces: at most SHAFT_PIECE_FLOORS bakes per kind, however it grew.
+      expect(bakes.filter((b) => b.family === 'shaft').length).toBeLessThanOrEqual(3 * SHAFT_PIECE_FLOORS);
+    }
+  });
+
+  it('keeps the look of a ghost and a shaft of up to 30 floors: one texture, full height', () => {
+    const { art, bakes, family } = recording(2);
+    family.now = 'ghost';
+    art.ghost(4, 30, true);
+    family.now = 'shaft';
+    art.shaft('standard', 30);
+    expect(bakes.map((b) => b.deviceH)).toEqual([30 * FLOOR_PX * 2, 30 * FLOOR_PX * 2]);
+  });
+});
+
+describe('a canvas with no 2D context (audit 2026-09-25 F2 S3)', () => {
+  it('is not cached as a blank texture: the next ask tries again, and it warns once', () => {
+    let asked = 0;
+    const renderer = { generateTexture: (): Texture => new Texture() } as unknown as PixiRenderer;
+    const createCanvas = (width: number, height: number): HTMLCanvasElement =>
+      ({ width, height, getContext: () => { asked++; return null; } }) as unknown as HTMLCanvasElement;
+    const art = createArt(renderer, { createCanvas, resolution: 1 });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      art.umbrella!(0xff0000);
+      art.umbrella!(0xff0000);
+      expect(asked).toBe(2);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(art.stats!().illustrated.textures).toBe(0);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

@@ -1755,12 +1755,14 @@ button.hs-readout:hover {
   list-style: none;
 }
 
+/* News: a sentence, then when it happened in small dim words on the same line, so a short
+   line takes one row and ten lines fit a phone's sheet. */
 .hs-log-item {
-  display: flex;
-  gap: 12px;
-  padding: 8px 0;
+  display: block;
+  padding: 6px 0;
   border-bottom: 1px solid var(--hairline);
   font-size: var(--size-14);
+  line-height: 1.35;
 }
 
 .hs-log-item:last-child {
@@ -1768,11 +1770,37 @@ button.hs-readout:hover {
 }
 
 .hs-log-time {
-  flex: 0 0 auto;
-  padding-top: 1px;
-  font-variant-numeric: tabular-nums;
+  margin-left: 6px;
   font-size: var(--size-12);
   color: var(--ink-dim);
+  white-space: nowrap;
+}
+
+/* Show older: a plain link under the list. */
+.hs-news-older {
+  display: block;
+  min-height: var(--touch);
+  margin: 4px auto 0;
+  padding: 0 12px;
+  background: transparent;
+  border: 0;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--size-14);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.hs-news-older[hidden] {
+  display: none;
+}
+
+/* On a phone the News sheet opens tall enough for the VIP card and the ten newest lines. */
+@media (max-width: 899px) {
+  .hs-sheet.hs-news[data-snap='half'] {
+    --sheet-h: 75vh;
+    --sheet-h: 75dvh;
+  }
 }
 
 .hs-log-item.is-warn .hs-log-text {

@@ -141,8 +141,25 @@ export function dailyShareUrl(date: string): string {
   return `${SITE_URL}play/?daily=${date}`;
 }
 
-export function dailyShareText(people: number): string {
-  return `I got ${formatCount(people)} ${people === 1 ? 'person' : 'people'} in today's tower. Can you beat it?`;
+/**
+ * The share message. A daily from another date than `today` (finished after the choice) is named
+ * by its date, the same words the result card uses, never "today's tower".
+ */
+export function dailyShareText(people: number, date?: string, today?: string): string {
+  const which = date !== undefined && today !== undefined && date !== today ? `the tower from ${formatDateKey(date)}` : "today's tower";
+  return `I got ${formatCount(people)} ${people === 1 ? 'person' : 'people'} in ${which}. Can you beat it?`;
+}
+
+/** The twist's line for a daily from another date than `today`: the same news, without "today". */
+const OTHER_DAY_LINES: Record<TwistId, string> = {
+  normal: 'No twist on that day. Build the best tower you can.',
+  tightMoney: 'This tower starts with less money, so spend it with care.',
+};
+
+/** The twist's one sentence for the start card: its own line on its own date, date-free words on another. */
+export function dailyTwistLine(date: string, today: string): string {
+  const twist = dailyTwist(date);
+  return date === today ? twist.line : OTHER_DAY_LINES[twist.id];
 }
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -156,14 +173,17 @@ export function formatDateKey(date: string): string {
 
 /**
  * What opening today's tower does, given the daily slot's save: resume it (it is today's),
- * offer the choice (an unfinished tower from an earlier date), or start today's fresh (no save,
- * a finished earlier one, or one that cannot be read). A fresh start is only ever today's date.
+ * offer the choice (an unfinished tower from an earlier date), show a tower dated after today
+ * (the device's date moved back) with the choice to start today's instead, or start today's
+ * fresh (no save, a finished earlier one, or one that cannot be read). A fresh start is only
+ * ever today's date, and never replaces a tower dated after today.
  */
-export type DailyOpening = 'resume' | 'choose' | 'fresh';
+export type DailyOpening = 'resume' | 'choose' | 'ahead' | 'fresh';
 
 export function dailyOpening(saved: { date: string | null; finished: boolean } | null, today: string): DailyOpening {
   if (!saved || saved.date === null) return 'fresh';
   if (saved.date === today) return 'resume';
-  if (saved.date < today && !saved.finished) return 'choose';
+  if (saved.date > today) return 'ahead';
+  if (!saved.finished) return 'choose';
   return 'fresh';
 }

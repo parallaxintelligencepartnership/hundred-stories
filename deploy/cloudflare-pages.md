@@ -24,8 +24,13 @@ remains the fallback.
 npm run deploy
 ```
 
-This runs `npm run build` then `npx wrangler deploy`, which uploads `dist/`
-as static assets and attaches the custom domains from `wrangler.jsonc`.
+This runs `npm run build`, then `scripts/predeploy-check.mjs`, then `npx wrangler deploy`,
+which uploads `dist/` as static assets and attaches the custom domains from `wrangler.jsonc`.
+The predeploy check is a static gate on the `dist/` output: it fails the build before
+anything is uploaded if `dist/_headers` no longer sends a `script-src 'self'` CSP with no
+`unsafe-eval` for `/play/`, if `dist/play/index.html` is missing, or if the PixiJS
+`unsafe-eval` shim is missing from the built JS (that shim is required because the CSP has
+no `unsafe-eval`).
 
 ## Verification
 
@@ -60,6 +65,12 @@ npx wrangler rollback
 ```
 
 `wrangler rollback` reverts to the previous version.
+
+Save format (checked at the 0.5.0 closeout, 2026-09-25): 0.5.0 still writes save format 5, with one
+optional field (the cockroach spread timer) that older builds ignore, so a rollback to 0.4.10 loads
+every tower; only that timer resets. Keep it that way: a release that raises the format number
+must not ship until the rollback target reads the new format, or players who are rolled back lose
+their tower.
 
 ## Where the headers live
 

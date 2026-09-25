@@ -1,7 +1,8 @@
 // The game's event stream: what just happened, for listeners that react to moments rather than
 // state (the sound module). Fed from the tick batches and command results the shell already
 // runs; it only reads the world, and only while someone is listening.
-import { clockOf, type Command, type Id, type LogEntry, type World } from '../sim/types';
+import { SCHEDULES } from '../sim/rules';
+import type { Command, Id, LogEntry, World } from '../sim/types';
 import type { StoryBeat } from '../sim/story';
 
 export type GameEvent =
@@ -11,7 +12,7 @@ export type GameEvent =
   | { kind: 'build'; command: Command['kind'] }
   /** A command the sim refused (the haptics' double tap). */
   | { kind: 'refused'; command: Command['kind'] }
-  /** The clock crossed into a new quarter, when office rent is paid. */
+  /** The quarter was settled at 05:00 on its first day, when office rent is paid. */
   | { kind: 'rentDay' }
   /** The star rating moved. */
   | { kind: 'stars'; from: number; to: number }
@@ -35,6 +36,7 @@ export function isBuildCommand(kind: Command['kind']): boolean {
 export interface EventTap {
   logTotal: number;
   stars: number;
+  /** Quarters settled so far (settledQuarters), so rent day is heard once per settlement. */
   quarter: number;
   /** Car id to whether its doors were open. */
   doors: Map<Id, boolean>;
@@ -42,9 +44,15 @@ export interface EventTap {
   storySeq: number;
 }
 
-function absoluteQuarter(minute: number): number {
-  const clock = clockOf(minute);
-  return (clock.year - 1) * 4 + clock.quarter;
+const MINUTES_PER_QUARTER = 3 * 1440;
+
+/**
+ * How many quarters have been settled by this minute. The tick settles a quarter at
+ * quarterStartMinuteOfDay (05:00) on its first day, and the clock reads one minute later once
+ * that tick is done, so rent day is heard with the cash, not at midnight.
+ */
+function settledQuarters(minute: number): number {
+  return Math.floor((minute - (SCHEDULES.quarterStartMinuteOfDay + 1)) / MINUTES_PER_QUARTER);
 }
 
 /** A tap primed on this world: nothing that is already true counts as news. */
@@ -58,7 +66,7 @@ export function createTap(world: World): EventTap {
 export function primeTap(tap: EventTap, world: World): void {
   tap.logTotal = world.logTotal;
   tap.stars = world.stars;
-  tap.quarter = absoluteQuarter(world.time.minute);
+  tap.quarter = settledQuarters(world.time.minute);
   tap.storySeq = world.story?.seq ?? 0;
   tap.doors.clear();
   for (const shaft of world.shafts.values()) {
@@ -93,7 +101,7 @@ export function drainTap(tap: EventTap, world: World, emit: GameEventListener): 
     tap.storySeq = story.seq;
   }
 
-  const quarter = absoluteQuarter(world.time.minute);
+  const quarter = settledQuarters(world.time.minute);
   if (quarter > tap.quarter) emit({ kind: 'rentDay' });
   tap.quarter = quarter;
 

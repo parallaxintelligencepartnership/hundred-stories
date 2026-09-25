@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { applyCommand } from '../../src/sim/build';
-import { isLeftoverCar, requestHallCall, tickElevators } from '../../src/sim/elevators';
+import { isLeftoverCar, requestHallCall, stopOffRefusal, tickElevators } from '../../src/sim/elevators';
 import { findRoute } from '../../src/sim/routing';
 import { SHAFTS } from '../../src/sim/rules';
 import { deserialize, hashWorld, serialize, SAVE_VERSION } from '../../src/sim/save';
@@ -390,6 +390,88 @@ describe('commands', () => {
     applyCommand(world, { kind: 'shaft.setCarServes', shaftId: shaft.id, carId: second.id, serves: 'office' });
     expect(applyCommand(world, { kind: 'shaft.removeCar', shaftId: shaft.id })).toEqual({ ok: true });
     expect(shaft.cars).toHaveLength(1);
+  });
+
+  // Audit 2026-09-25 I S2: a refused command leaves the world as it was; the car limit
+  // refusal was never checked for cash or hash.
+  it('I S2: refuses a car past the limit and changes neither cash nor hash', () => {
+    const world = createWorld(7);
+    world.cash = 10_000_000;
+    const shaft = shaftWith(world);
+    const maxCars = SHAFTS.standard.maxCars;
+    while (shaft.cars.length < maxCars) {
+      expect(applyCommand(world, { kind: 'shaft.addCar', shaftId: shaft.id })).toEqual({ ok: true });
+    }
+    const cash = world.cash;
+    const hash = hashWorld(world);
+    expect(applyCommand(world, { kind: 'shaft.addCar', shaftId: shaft.id })).toEqual({
+      ok: false,
+      reason: `This elevator already has ${maxCars} cars.`,
+    });
+    expect(shaft.cars).toHaveLength(maxCars);
+    expect(world.cash).toBe(cash);
+    expect(hashWorld(world)).toBe(hash);
+  });
+
+  // Audit 2026-09-25 I S9: the Verification table's "a car with people inside refuses a
+  // range change" had no test.
+  it('I S9a: refuses a range change while a rider is aboard and keeps the old range', () => {
+    const world = createWorld(7);
+    const shaft = buildShaft(world, { floorMax: 6 });
+    const car = carAt(shaft, 0);
+    const rider = addWaiter(world, shaft, 'diner', 1, 2);
+    run(world, 2);
+    expect(rider.state).toBe('riding');
+    expect(car.passengers).toContain(rider.id);
+    expect(
+      applyCommand(world, { kind: 'shaft.setCarRange', shaftId: shaft.id, carId: car.id, range: { lo: 1, hi: 3 } }),
+    ).toEqual({ ok: false, reason: 'People are inside.' });
+    expect(car.range).toBeNull();
+  });
+});
+
+// Audit 2026-09-25 B S2: turning a stop off under a rider bound for it would strand them.
+// The refusal lives in elevators.ts; build.ts's shaft.setStop handler returns it.
+describe('turning off a stop someone is riding to', () => {
+  it('is refused in plain words while a rider aboard is bound for that floor', () => {
+    const world = createWorld(7);
+    const shaft = buildShaft(world, { floorMax: 6 });
+    const rider = addWaiter(world, shaft, 'diner', 1, 4);
+    run(world, 2);
+    expect(rider.state).toBe('riding');
+    expect(stopOffRefusal(world, shaft, 4)).toBe('Someone is riding to that floor.');
+  });
+
+  it('is allowed for a floor no rider aboard is bound for', () => {
+    const world = createWorld(7);
+    const shaft = buildShaft(world, { floorMax: 6 });
+    const rider = addWaiter(world, shaft, 'diner', 1, 4);
+    run(world, 2);
+    expect(rider.state).toBe('riding');
+    expect(stopOffRefusal(world, shaft, 5)).toBeNull();
+  });
+
+  it('refuses the setStop off command and keeps the stop', () => {
+    const world = createWorld(7);
+    const shaft = buildShaft(world, { floorMax: 6 });
+    const rider = addWaiter(world, shaft, 'diner', 1, 4);
+    run(world, 2);
+    expect(rider.state).toBe('riding');
+    expect(applyCommand(world, { kind: 'shaft.setStop', shaftId: shaft.id, floor: 4, stops: false })).toEqual({
+      ok: false,
+      reason: 'Someone is riding to that floor.',
+    });
+    expect(shaft.stops.has(4)).toBe(true);
+  });
+
+  it('still takes the setStop off command for a floor no rider is bound for', () => {
+    const world = createWorld(7);
+    const shaft = buildShaft(world, { floorMax: 6 });
+    const rider = addWaiter(world, shaft, 'diner', 1, 4);
+    run(world, 2);
+    expect(rider.state).toBe('riding');
+    expect(applyCommand(world, { kind: 'shaft.setStop', shaftId: shaft.id, floor: 5, stops: false })).toEqual({ ok: true });
+    expect(shaft.stops.has(5)).toBe(false);
   });
 });
 

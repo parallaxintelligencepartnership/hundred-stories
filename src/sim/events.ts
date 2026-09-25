@@ -7,7 +7,7 @@ import { ROOMS } from './rules';
 import { clockOf, TOWER_WIDTH } from './types';
 import type { ActiveEvent, Command, CommandResult, GuardResponse, Id, Room, RoomKind, Sim, TheftEvent, VipRating, World } from './types';
 import { personName, vipArrivalHour, vipPreference } from './identity';
-import { roomMiddle, sendThiefOut, sendThiefTo, sendVipToSuite } from './people';
+import { fireBurning, roomMiddle, sendAway, sendThiefOut, sendThiefTo, sendVipToSuite } from './people';
 import { ensureRouting, entrances, findRoute } from './routing';
 import { rollWaste } from './recycling';
 import { dispatchGuard, releaseGuard, routeMinutes } from './security';
@@ -51,23 +51,9 @@ export function resetEventTestHooks(): void {
   EVENT_TEST_HOOKS.target = { fire: null, bomb: null };
 }
 
-// The dirty-since timer lives on room.dirtySinceMinute so it survives save and
-// load. Only the spread cadence (a cosmetic pacing, not part of the save
-// contract) still lives here, keyed by world, and is rebuilt from scratch
-// after a load.
-interface RoachSpreadState {
-  lastSpread: number | null;
-}
-const roachSpread = new WeakMap<World, RoachSpreadState>();
-
-function roachSpreadOf(world: World): RoachSpreadState {
-  let state = roachSpread.get(world);
-  if (!state) {
-    state = { lastSpread: null };
-    roachSpread.set(world, state);
-  }
-  return state;
-}
+// The dirty-since timer lives on room.dirtySinceMinute and the spread cadence on
+// world.roachLastSpread, so both survive save and load (optional in save format 5 since 0.5.0) and a reloaded tower
+// spreads on the same day as one that never stopped.
 
 export function formatDollars(amount: number): string {
   const sign = amount < 0 ? '-' : '';
@@ -131,11 +117,10 @@ function evictInto(world: World, room: Room, reason: string): void {
       recordBeat(world.story, { code: 'room.vacated', minute: world.time.minute, simId: sim.id, roomId: room.id, value: 0 });
       if (!followed) roomBeat = true;
     }
-    sim.state = 'leaving';
-    sim.leaveReason = reason;
-    sim.route = [];
-    sim.inRoomId = null;
+    // Out of whatever room they sit in (that room gets its seat back) and, if riding, off
+    // at the car's next stop: never left aboard or seated somewhere in name only.
     if (sim.homeRoomId === room.id) sim.homeRoomId = null;
+    sendAway(world, sim, reason);
   }
   room.tenants = [];
   setOccupancy(world, room, 0);
@@ -439,15 +424,8 @@ function failVisit(world: World, event: VipEventState, reason: string): void {
       removeSim(world, sim.id);
     } else if (sim.state !== 'gone') {
       sim.exiting = true;
-      sim.state = 'leaving';
-      sim.leaveReason = `${reason}.`;
-      sim.route = [];
       sim.waitStart = null;
-      if (sim.inRoomId !== null) {
-        const room = world.rooms.get(sim.inRoomId);
-        if (room) setOccupancy(world, room, Math.max(0, room.occupancy - 1));
-        sim.inRoomId = null;
-      }
+      sendAway(world, sim, `${reason}.`);
     }
   }
   closeVisit(world, event, 'poor', reason);
@@ -478,6 +456,9 @@ export function tickVip(world: World, event: VipEventState): void {
 
   if (event.phase === 'notice') {
     if (minute < event.arrivesAt) return;
+    // Nobody walks into a burning building, the VIP included: the booking stands and they
+    // come in once the fire is out, so waiting it out is not a visit spoiled by the fire.
+    if (fireBurning(world)) return;
     if (!suite || !sim) {
       failVisit(world, event, 'The VIP left: no suite was ready');
       return;
@@ -719,7 +700,14 @@ function theftEscaped(world: World, event: TheftEvent, simId: Id): void {
 export function tickTheft(world: World, event: TheftEvent): void {
   const minute = world.time.minute;
   if (event.phase === 'notice') {
-    if (minute >= event.enterAt) thiefWalksIn(world, event);
+    if (minute < event.enterAt) return;
+    if (fireBurning(world)) {
+      // The thief waits outside with everyone else, and gives up quietly on the same clock
+      // as a thief who cannot reach the target.
+      if (minute - event.enterAt > THEFT.approachMaxMinutes) endEvent(world, event);
+      return;
+    }
+    thiefWalksIn(world, event);
     return;
   }
   const sim = event.simId === null ? undefined : world.sims.get(event.simId);
@@ -771,7 +759,6 @@ function isHotelRoom(kind: RoomKind): boolean {
 
 /** Runs once a day. Dirty hotel rooms breed cockroaches, and cockroaches travel. */
 export function tickCockroaches(world: World): void {
-  const state = roachSpreadOf(world);
   const minute = world.time.minute;
 
   for (const room of sortedRooms(world)) {
@@ -796,18 +783,18 @@ export function tickCockroaches(world: World): void {
     if (room.infested) continue;
     if (minute - room.dirtySinceMinute < EVENTS.cockroaches.dirtyDaysBeforeInfested * MINUTES_PER_DAY) continue;
     room.infested = true;
-    if (state.lastSpread === null) state.lastSpread = minute;
+    if (world.roachLastSpread == null) world.roachLastSpread = minute;
     log(world, `Cockroaches moved into the ${describe(room)}.`, 'alert', { roomId: room.id });
   }
 
   const infested = sortedRooms(world).filter((r) => r.infested && isHotelRoom(r.kind));
   if (infested.length === 0) {
-    state.lastSpread = null;
+    world.roachLastSpread = null;
     return;
   }
-  if (state.lastSpread === null) state.lastSpread = minute;
-  if (minute - state.lastSpread < EVENTS.cockroaches.spreadDays * MINUTES_PER_DAY) return;
-  state.lastSpread = minute;
+  if (world.roachLastSpread == null) world.roachLastSpread = minute;
+  if (minute - world.roachLastSpread < EVENTS.cockroaches.spreadDays * MINUTES_PER_DAY) return;
+  world.roachLastSpread = minute;
   for (const source of infested) {
     for (let f = source.floor; f < source.floor + source.height; f++) {
       for (const other of world.floorIndex.rooms.get(f) ?? []) {

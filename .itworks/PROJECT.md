@@ -24,7 +24,7 @@ PWA: web manifest plus service worker (vite-plugin-pwa)
 Hosting target: static files on Cloudflare Pages (primary); pi3 (x86_64 Ubuntu 24.04) behind Traefik as the fallback; domain hundredstories.xyz, not bought yet
 
 ## Data
-Real data: none server side | Sample data: scripted tower builds under tests/scenarios (helpers.ts plus the scripted runs) used by the headless simulation tests | Sensitive: no; save games live only in the player's browser (IndexedDB) and in files they export themselves
+Real data: none server side | Sample data: scripted tower builds under tests/scenarios (helpers.ts plus the scripted runs) used by the headless simulation tests | Sensitive: no; save games live only in the player's browser (IndexedDB, localStorage fallback), in the desktop and phone shells' own app data file, and in files they export themselves
 
 ## Where it will live
 internet - exposure notes: live at https://hundredstories.xyz since 2026-09-19 as Cloudflare Workers static assets (the Pages successor; asset requests are free and unlimited, no Worker code) with the security headers from public/_headers, custom domains from wrangler.jsonc, workers.dev copy switched off (pi3 behind Traefik is the fallback, same headers via deploy/nginx.conf); no backend, no ports of its own; also installable offline as a PWA - paid services: none (no LLM calls, no payments, no maps)
@@ -51,5 +51,5 @@ internet - exposure notes: live at https://hundredstories.xyz since 2026-09-19 a
 | PWA offline | build served, installed, network cut, game still loads and plays | with no cache yet, the page says it needs one online load first |
 | Rendering | real browser check via claude-in-chrome: tower, sims, HUD legible at 1x and 2x, reduced-motion mode verified | WebGL unavailable shows a plain message, no blank page |
 | Placement (touch) | a touch tap parks an outline and builds nothing; Build applies the command once; pointer tests cover tap, nudge, extend and confirm | a refused spot shows the reason in the chip and Build is disabled; confirm on a refusal keeps the outline |
-| Share | share.ts tests: stats, text, link and parse round trip; the panel shows a preview and the message in a browser | snapshot or compose failure shows "Could not capture the tower." and the text still shares; junk in the link leaves the greeting hidden |
+| Share | share.ts tests: stats, text, link and parse round trip; the panel shows a preview and the message in a browser | snapshot or compose failure shows "Could not take a picture of the tower." and the text still shares; junk in the link leaves the greeting hidden |
 | Theme | theme.ts tests: read, apply, cycle, label, toggle; the stored choice survives reload on all four pages | storage that throws falls back to system and never breaks the page |

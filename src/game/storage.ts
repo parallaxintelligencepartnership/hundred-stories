@@ -43,7 +43,40 @@ export interface StorageDeps {
 
 export interface SaveStorage {
   writeSave(text: string): Promise<void>;
+  /** The slot's text, null when nothing is stored. Throws a SaveReadError when the store could not be read. */
   readSave(): Promise<string | null>;
+}
+
+/**
+ * A slot that could not be read: the store failed, which is not the same as holding nothing.
+ * The game must never start a tower over a slot that threw this (src/game/game.ts). `cause`
+ * carries the store's own error for the console.
+ */
+export class SaveReadError extends Error {
+  constructor(cause: unknown) {
+    super(`The save could not be read: ${describeError(cause)}`, { cause });
+    this.name = 'SaveReadError';
+  }
+}
+
+function describeError(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof e === 'object' && e !== null && 'message' in e) return String((e as { message: unknown }).message);
+  return String(e);
+}
+
+/**
+ * A native read that failed only because the file is not there yet (first launch, or a slot
+ * never used). The Capacitor Filesystem plugin says "... does not exist." with the code
+ * OS-PLUG-FILE-0008 on both phones (and "File does not exist." on the web); the Tauri fs plugin
+ * passes on the OS error: "No such file or directory (os error 2)" on macOS and Linux, "The
+ * system cannot find the file specified. (os error 2)" or "... the path specified. (os error 3)"
+ * on Windows. Anything else (a locked file, an I/O error, a denied permission) is a read failure.
+ */
+function isMissingFile(e: unknown): boolean {
+  const code = typeof e === 'object' && e !== null && 'code' in e ? String((e as { code: unknown }).code) : '';
+  if (code === 'OS-PLUG-FILE-0008' || code === 'ENOENT') return true;
+  return /does not exist|no such file or directory|cannot find the (file|path) specified|\(os error 2\)|\bENOENT\b/i.test(describeError(e));
 }
 
 function openDb(factory: IDBFactory): Promise<IDBDatabase> {
@@ -55,20 +88,123 @@ function openDb(factory: IDBFactory): Promise<IDBDatabase> {
   });
 }
 
+/** Beside each browser copy, under its key plus this: when it was written (ms since 1970). */
+const STAMP_SUFFIX = ':written';
+/** Beside each browser copy, under its key plus this: its save sequence number. */
+const SEQ_SUFFIX = ':seq';
+
+interface StampedText {
+  text: string;
+  stamp: number;
+  seq: number;
+}
+
+/**
+ * Set in localStorage beside the browser slots on every successful write of My tower, to either
+ * store, and never cleared (New game writes its new tower, so it stays). It tells a returning
+ * player from a first visit when IndexedDB will not open and there is no localStorage copy: with
+ * it, the slot is unknown and the read fails; without it, nothing was ever saved here.
+ */
+export const SAVE_PRESENT_KEY = 'hs.save.present';
+
+// Two writes in the same millisecond still stamp in the order they were made.
+let lastStamp = 0;
+function nextStamp(): number {
+  lastStamp = Math.max(Date.now(), lastStamp + 1);
+  return lastStamp;
+}
+
+// The last sequence number this page wrote, per slot key. A reload starts it at 0 again, which is
+// why each write also asks both stores for the highest number already there.
+const lastSeq = new Map<string, number>();
+
+function stampOf(raw: unknown): number {
+  const n = Number(raw ?? 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
 export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): SaveStorage {
   const KEY = SLOT_KEYS[slot];
   const localKey = `${DB}:${KEY}`;
+  // When IndexedDB is in play each copy carries a save sequence number beside it, under its own
+  // key (the save text itself is untouched, so an older build still reads it). Each write takes
+  // one more than the highest number in either store or in memory, so the number never goes
+  // backwards, not across a reload and not when the device clock is set back. A write that fell
+  // back to localStorage is then newer than the IndexedDB copy it could not replace, and the read
+  // takes it. A copy without a number (written before sequence numbers) counts as 0. The wall
+  // clock stamp is still written and decides only between equal numbers; a copy with no stamp
+  // counts as 0 too, so two old copies still read IndexedDB first, as they always did. Not the game minute: a new tower
+  // or an opened file starts at an earlier minute and is still the newer save.
+  const idbStampKey = `${KEY}${STAMP_SUFFIX}`;
+  const localStampKey = `${localKey}${STAMP_SUFFIX}`;
+  const idbSeqKey = `${KEY}${SEQ_SUFFIX}`;
+  const localSeqKey = `${localKey}${SEQ_SUFFIX}`;
+
+  async function readIndexedDbSeq(factory: IDBFactory): Promise<number> {
+    try {
+      const db = await openDb(factory);
+      return await new Promise<number>((resolve, reject) => {
+        const req = db.transaction(STORE, 'readonly').objectStore(STORE).get(idbSeqKey);
+        req.onsuccess = () => resolve(stampOf(req.result));
+        req.onerror = () => reject(req.error);
+      });
+    } catch {
+      return 0;
+    }
+  }
+
+  function readLocalSeq(): number {
+    try {
+      return stampOf(deps.localStorage?.getItem(localSeqKey));
+    } catch {
+      return 0;
+    }
+  }
+
+  async function nextSeq(): Promise<number> {
+    const found = deps.indexedDB ? Math.max(await readIndexedDbSeq(deps.indexedDB), readLocalSeq()) : 0;
+    // No await between reading lastSeq and setting it, so two writes at once still get two numbers.
+    const seq = Math.max(found, lastSeq.get(KEY) ?? 0) + 1;
+    lastSeq.set(KEY, seq);
+    return seq;
+  }
+
+  function markPresent(): void {
+    if (slot !== 'mine') return;
+    try {
+      deps.localStorage?.setItem(SAVE_PRESENT_KEY, '1');
+    } catch {
+      // no marker: a later failed IndexedDB open then reads as a first visit, as before
+    }
+  }
+
+  function markedPresent(): boolean {
+    try {
+      return deps.localStorage?.getItem(SAVE_PRESENT_KEY) === '1';
+    } catch {
+      return false;
+    }
+  }
 
   async function writeSave(text: string): Promise<void> {
+    const stamp = nextStamp();
+    const seq = await nextSeq();
     if (deps.indexedDB) {
       try {
         const db = await openDb(deps.indexedDB);
         await new Promise<void>((resolve, reject) => {
           const tx = db.transaction(STORE, 'readwrite');
-          tx.objectStore(STORE).put(text, KEY);
+          const store = tx.objectStore(STORE);
+          store.put(text, KEY);
+          store.put(stamp, idbStampKey);
+          store.put(seq, idbSeqKey);
           tx.oncomplete = () => resolve();
-          tx.onerror = () => reject(tx.error);
+          tx.onerror = () => reject(tx.error ?? new Error('write failed'));
+          // A quota failure at commit can abort with no error event. Without this the write
+          // never settles, and every later save and slot switch waits on it for the session.
+          tx.onabort = () => reject(tx.error ?? new Error('write aborted'));
         });
+        markPresent();
         return;
       } catch {
         // fall through to localStorage
@@ -77,32 +213,85 @@ export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): 
     try {
       if (!deps.localStorage) throw new Error('no localStorage');
       deps.localStorage.setItem(localKey, text);
+      if (deps.indexedDB) {
+        deps.localStorage.setItem(localStampKey, String(stamp));
+        deps.localStorage.setItem(localSeqKey, String(seq));
+      }
+      markPresent();
     } catch {
       // a full quota, a private window, or no store at all: all one message to the player
       throw new Error(REFUSED_REASON);
     }
   }
 
-  async function readSave(): Promise<string | null> {
-    if (deps.indexedDB) {
-      try {
-        const db = await openDb(deps.indexedDB);
-        const text = await new Promise<string | null>((resolve, reject) => {
-          const tx = db.transaction(STORE, 'readonly');
-          const req = tx.objectStore(STORE).get(KEY);
-          req.onsuccess = () => resolve((req.result as string | undefined) ?? null);
-          req.onerror = () => reject(req.error);
-        });
-        if (text) return text;
-      } catch {
-        // fall through to localStorage
-      }
-    }
+  async function readIndexedDb(factory: IDBFactory): Promise<StampedText | null> {
     try {
-      return deps.localStorage?.getItem(localKey) ?? null;
+      const db = await openDb(factory);
+      return await new Promise<StampedText | null>((resolve, reject) => {
+        const tx = db.transaction(STORE, 'readonly');
+        const store = tx.objectStore(STORE);
+        const req = store.get(KEY);
+        const stampReq = store.get(idbStampKey);
+        const seqReq = store.get(idbSeqKey);
+        let text: string | null = null;
+        let stamp = 0;
+        // Requests in one transaction succeed in the order they were made.
+        req.onsuccess = () => {
+          text = (req.result as string | undefined) ?? null;
+        };
+        req.onerror = () => reject(req.error);
+        stampReq.onsuccess = () => {
+          stamp = stampOf(stampReq.result);
+        };
+        stampReq.onerror = () => reject(stampReq.error);
+        seqReq.onsuccess = () => resolve(text ? { text, stamp, seq: stampOf(seqReq.result) } : null);
+        seqReq.onerror = () => reject(seqReq.error);
+      });
+    } catch (e) {
+      throw new SaveReadError(e);
+    }
+  }
+
+  function readLocal(): StampedText | null {
+    try {
+      const text = deps.localStorage?.getItem(localKey) ?? null;
+      if (!text) return null;
+      return {
+        text,
+        stamp: stampOf(deps.localStorage?.getItem(localStampKey)),
+        seq: stampOf(deps.localStorage?.getItem(localSeqKey)),
+      };
     } catch {
       return null;
     }
+  }
+
+  async function readSave(): Promise<string | null> {
+    let fromDb: StampedText | null = null;
+    if (deps.indexedDB) {
+      try {
+        fromDb = await readIndexedDb(deps.indexedDB);
+      } catch (e) {
+        // IndexedDB would not open or read. A localStorage copy, when there is one, is read as
+        // before (a browser whose IndexedDB never works keeps its tower there). With none, a
+        // first visit (no marker) has nothing to lose: no save, and the writes fall back to
+        // localStorage. A returning player's slot is unknown, not empty: a read failure, so no
+        // fresh tower is saved over it. Only My tower's writes set the marker; a link to Today's
+        // or a friend's tower on a first visit reads the same way, so no notice shows there either.
+        const local = readLocal();
+        if (local) return local.text;
+        if (!markedPresent()) return null;
+        throw e;
+      }
+    }
+    const fromLocal = readLocal();
+    if (fromDb && fromLocal) {
+      // A copy with no number was written by a build before sequence numbers, so any numbered
+      // copy is newer. The stamp decides only between equal numbers (two copies without one).
+      if (fromLocal.seq !== fromDb.seq) return fromLocal.seq > fromDb.seq ? fromLocal.text : fromDb.text;
+      return fromLocal.stamp > fromDb.stamp ? fromLocal.text : fromDb.text;
+    }
+    return fromDb?.text ?? fromLocal?.text ?? null;
   }
 
   return { writeSave, readSave };
@@ -142,9 +331,11 @@ export function createFileStorage(fs: FileSlotFs | Promise<FileSlotFs>, slot: Sl
       // With an encoding the plugin always returns a string; a Blob only comes back without one.
       const text = typeof data === 'string' ? data : await data.text();
       return text ? text : null;
-    } catch {
-      // no file yet (first launch) reads as no save, same as an empty browser slot
-      return null;
+    } catch (e) {
+      // No file yet (first launch) reads as no save, same as an empty browser slot. Any other
+      // failure is not "no save": the file may hold a tower this read could not get at.
+      if (isMissingFile(e)) return null;
+      throw new SaveReadError(e);
     }
   }
 
@@ -259,8 +450,17 @@ const TEMP_SUFFIX = '.tmp';
 export function createTauriStorage(fs: TauriSlotFs | Promise<TauriSlotFs>, slot: SlotName = 'mine'): SaveStorage {
   const FILE_SLOT_NAME = SLOT_FILES[slot];
   let dirReady: Promise<void> | null = null;
+  // Writes of this slot run one after another: two at once (an autosave and Save now) would
+  // share the one .tmp file, and the second rename would find it gone.
+  let queue: Promise<void> = Promise.resolve();
 
-  async function writeSave(text: string): Promise<void> {
+  function writeSave(text: string): Promise<void> {
+    const run = queue.then(() => writeNow(text));
+    queue = run.catch(() => {});
+    return run;
+  }
+
+  async function writeNow(text: string): Promise<void> {
     try {
       const f = await fs;
       await (dirReady ??= f.ensureDir().catch((e: unknown) => {
@@ -278,9 +478,11 @@ export function createTauriStorage(fs: TauriSlotFs | Promise<TauriSlotFs>, slot:
     try {
       const text = await (await fs).readTextFile(FILE_SLOT_NAME);
       return text ? text : null;
-    } catch {
-      // no file yet (first launch) reads as no save, same as an empty browser slot
-      return null;
+    } catch (e) {
+      // No file yet (first launch) reads as no save, same as an empty browser slot. A locked
+      // file or any other failure is a read failure, never "no save".
+      if (isMissingFile(e)) return null;
+      throw new SaveReadError(e);
     }
   }
 
@@ -463,16 +665,51 @@ export const writeSlot = (slot: SlotName, text: string): Promise<void> => active
 export const readSlot = (slot: SlotName): Promise<string | null> => active(slot).readSave();
 
 const UNREADABLE_KEY = 'hs.save.unreadable';
+const DAILY_KEPT_KEY = 'hs.save.daily-kept';
 
-// Stashes a save the deserializer refused, so the player isn't left with nothing after a
-// corrupt or foreign-version save. Silent on failure, same as the rest of this module: a full
-// quota or missing store just means no backup, not a crash.
-export function stashUnreadable(text: string): void {
+function keep(key: string, text: string): boolean {
   try {
     const ls = (globalThis as { localStorage?: Storage }).localStorage;
-    if (!ls) return;
-    ls.setItem(UNREADABLE_KEY, text);
+    if (!ls) return false;
+    ls.setItem(key, text);
+    return ls.getItem(key) === text;
   } catch {
-    // a full quota, a private window, or no store at all: silent, same as writeSave
+    // a full quota, a private window, or no store at all: no copy, and the caller says so
+    return false;
   }
+}
+
+function kept(key: string): string | null {
+  try {
+    return (globalThis as { localStorage?: Storage }).localStorage?.getItem(key) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Keeps a copy of a My tower save the deserializer refused, so the player isn't left with
+ * nothing after a corrupt or foreign-version save. True only when the copy is really there: the
+ * game tells the player it kept a copy only then.
+ */
+export function stashUnreadable(text: string): boolean {
+  return keep(UNREADABLE_KEY, text);
+}
+
+/** The copy stashUnreadable kept, for Save to a file; null when there is none. */
+export function readUnreadable(): string | null {
+  return kept(UNREADABLE_KEY);
+}
+
+/**
+ * Keeps a copy of a daily dated after today (the device's date moved back) before today's
+ * tower takes the daily slot. True only when the copy is there.
+ */
+export function keepDailyCopy(text: string): boolean {
+  return keep(DAILY_KEPT_KEY, text);
+}
+
+/** The daily keepDailyCopy kept, or null. */
+export function readDailyCopy(): string | null {
+  return kept(DAILY_KEPT_KEY);
 }

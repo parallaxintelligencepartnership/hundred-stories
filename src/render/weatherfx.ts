@@ -186,6 +186,11 @@ export interface WeatherFx {
   street(): { wet: number; alpha: number };
   /** For the tests: the world px centres of the ripples showing now. */
   ripplePoints(): { x: number; y: number }[];
+  /**
+   * Forget the street's state for a different tower: the next frame settles it on that
+   * frame's weather (soaked in rain, dry otherwise), as on load, with no ripples carried over.
+   */
+  reset(): void;
   destroy(): void;
 }
 
@@ -208,6 +213,7 @@ export function createWeatherFx(layers: { sky: Container; sheet: Container; grou
   layers.sheet.addChild(sheet);
 
   const street = new Container();
+  street.label = 'wet street';
   street.visible = false;
   const dark = new Graphics();
   const skyMirror = new Graphics();
@@ -506,6 +512,13 @@ export function createWeatherFx(layers: { sky: Container; sheet: Container; grou
       const out: { x: number; y: number }[] = [];
       for (const g of ripples) if (g.visible && street.visible) out.push({ x: g.position.x, y: g.position.y });
       return out;
+    },
+    reset() {
+      wet = -1;
+      for (let i = 0; i < RIPPLE_MAX; i++) {
+        rippleLife[i] = 0;
+        (ripples[i] as Graphics).visible = false;
+      }
     },
     destroy() {
       sun.destroy();

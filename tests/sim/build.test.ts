@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { applyCommand, canBuild, canBuildShaft, canExtendShaft } from '../../src/sim/build';
-import { LIMITS, ROOMS, SHAFTS } from '../../src/sim/rules';
-import { deserialize, serialize } from '../../src/sim/save';
+import { LIMITS, PLURAL_LABELS, ROOMS, SHAFTS } from '../../src/sim/rules';
+import { deserialize, hashWorld, serialize } from '../../src/sim/save';
 import { addRoom, allocId, createWorld } from '../../src/sim/world';
 import type { CommandResult, Room, RoomKind, Shaft, ShaftKind, Star, World } from '../../src/sim/types';
 
@@ -101,6 +101,16 @@ describe('build: star gate and cash', () => {
     expect(refused.ok).toBe(false);
     expect(world.cash).toBe(0);
     expect(world.rooms.size).toBe(2);
+  });
+
+  // Audit 2026-09-25 I S1: nothing checked the cash after a shaft.build, so charging an
+  // elevator twice passed every test.
+  it('I S1: charges a standard elevator its price exactly once', () => {
+    const world = makeWorld(10_000_000);
+    lobby(world, 100, 41);
+    const before = world.cash;
+    expect(buildShaft(world, 'standard', 120, 1, 3)).toEqual(OK);
+    expect(before - world.cash).toBe(SHAFTS.standard.shaftCost);
   });
 });
 
@@ -278,17 +288,37 @@ describe('build: overlap and support', () => {
     expect(build(world, 'office', 3, 100)).toEqual(OK);
   });
 
+  // Audit 2026-09-25 A S4: a basement hangs from the floor above it, and the reason says so.
   it('needs the ground lobby for floor -1 and a room above for deeper floors', () => {
     const world = makeWorld(8_000_000, 3);
     expect(canBuild(world, 'parkingSpace', -1, 100)).toEqual({
       ok: false,
-      reason: 'Build a floor below this one first.',
+      reason: 'Build a lobby first.',
     });
     lobby(world);
+    expect(canBuild(world, 'parkingSpace', -2, 100)).toEqual({
+      ok: false,
+      reason: 'Build the floor above this one first.',
+    });
     expect(build(world, 'parkingSpace', -1, 100)).toEqual(OK);
     expect(canBuild(world, 'parkingSpace', -3, 100).ok).toBe(false);
     expect(build(world, 'parkingSpace', -2, 100)).toEqual(OK);
     expect(build(world, 'parkingSpace', -3, 100)).toEqual(OK);
+  });
+
+  it('hangs a tall basement from the floor over its top, not its own top floor (audit A S3)', () => {
+    const world = makeWorld(50_000_000, 5);
+    lobby(world, 100, 60);
+    for (const x of [100, 116, 132]) expect(build(world, 'parkingRamp', -1, x)).toEqual(OK);
+    // recycling at B3 covers B3 and B2 and hangs from the ramps on B1
+    expect(canBuild(world, 'recycling', -3, 100)).toEqual(OK);
+    // the metro at B4 covers B4 to B2 and hangs from the same ramps
+    expect(canBuild(world, 'metro', -4, 100)).toEqual(OK);
+    // a one floor parking space at B3 still needs B2 built over it
+    expect(canBuild(world, 'parkingSpace', -3, 100)).toEqual({
+      ok: false,
+      reason: 'Build the floor above this one first.',
+    });
   });
 
   it('refuses a multi floor underground room that would cross floor 0', () => {
@@ -667,6 +697,19 @@ describe('logging, previews and delegation', () => {
     expect(world.log).toHaveLength(logLines);
   });
 
+  // Audit 2026-09-25 I S2: the never-mutate check above only previews a valid spot. A refused
+  // preview must leave the cash and the world hash as they were too.
+  it('I S2: canBuildShaft over an existing shaft refuses and changes neither cash nor hash', () => {
+    const world = makeWorld(10_000_000);
+    lobby(world, 100, 41);
+    expect(buildShaft(world, 'standard', 120, 1, 3)).toEqual(OK);
+    const cash = world.cash;
+    const hash = hashWorld(world);
+    expect(canBuildShaft(world, 'standard', 121, 1, 3)).toEqual({ ok: false, reason: 'An elevator is in the way.' });
+    expect(world.cash).toBe(cash);
+    expect(hashWorld(world)).toBe(hash);
+  });
+
   it('hands bomb and fire commands to events.ts', () => {
     const world = makeWorld();
     mocks.handleEventCommand.mockClear();
@@ -895,7 +938,7 @@ describe('stairs and escalators: overlay, depth and support', () => {
     it(`joins B1 to the ground with ${kind}, and refuses them any deeper`, () => {
       const world = makeWorld(8_000_000, 3);
       const deep = `${kind === 'stairs' ? 'Stairs' : 'Escalators'} can only go down one level, to B1.`;
-      expect(canBuild(world, kind, -1, 100)).toEqual({ ok: false, reason: 'Build a floor below this one first.' });
+      expect(canBuild(world, kind, -1, 100)).toEqual({ ok: false, reason: 'Build a lobby first.' });
       lobby(world, 100, 6);
       expect(build(world, kind, -1, 100)).toEqual(OK);
       const flight = [...world.rooms.values()].find((r) => r.kind === kind) as Room;
@@ -917,5 +960,96 @@ describe('stairs and escalators: overlay, depth and support', () => {
     const world = makeWorld(8_000_000, 3);
     lobby(world, 100, 40);
     expect(canBuild(world, 'cinema', -1, 100)).toEqual({ ok: false, reason: 'That does not fit inside the tower.' });
+  });
+});
+
+describe('car range across the ground (audit A S6)', () => {
+  it('refuses a range that names floor 0 and accepts B1 to floor 1', () => {
+    const world = makeWorld();
+    lobby(world);
+    expect(buildShaft(world, 'standard', 100, -1, 5)).toEqual(OK);
+    const shaft = onlyShaft(world);
+    const car = shaft.cars[0] as Shaft['cars'][number];
+    const setRange = (lo: number, hi: number): CommandResult =>
+      applyCommand(world, { kind: 'shaft.setCarRange', shaftId: shaft.id, carId: car.id, range: { lo, hi } });
+    expect(setRange(0, 1)).toEqual({ ok: false, reason: 'That floor is not on this elevator.' });
+    expect(setRange(-1, 0)).toEqual({ ok: false, reason: 'That floor is not on this elevator.' });
+    expect(car.range).toBeNull();
+    expect(setRange(-1, 1)).toEqual(OK);
+    expect(car.range).toEqual({ lo: -1, hi: 1 });
+  });
+});
+
+describe('refusal wording: plurals (audit A S7)', () => {
+  const underBase = (kind: RoomKind): number => -ROOMS[kind].height;
+
+  function refusalStrings(): string[] {
+    const world = makeWorld(20_000_000, 6);
+    lobby(world, 0, 300);
+    expect(buildShaft(world, 'standard', 348, 1, 15)).toEqual(OK);
+    expect(buildShaft(world, 'standard', 360, 1, 5)).toEqual(OK);
+    const shaft = [...world.shafts.values()].find((s) => s.x === 360) as Shaft;
+    const out: string[] = [];
+    const push = (r: CommandResult): void => {
+      expect(r.ok).toBe(false);
+      if (!r.ok) out.push(r.reason);
+    };
+    // the placement refusals, with cash in hand
+    for (const kind of Object.keys(ROOMS) as RoomKind[]) {
+      const rule = ROOMS[kind];
+      if (rule.placement === 'aboveGround') push(canBuild(world, kind, underBase(kind), 0));
+      if (rule.placement === 'underground') push(canBuild(world, kind, 2, 0));
+    }
+    push(canBuild(world, 'stairs', -3, 0));
+    push(canBuild(world, 'escalator', -3, 0));
+    push(canBuildShaft(world, 'standard', 200, 1, 40));
+    push(canBuildShaft(world, 'service', 200, 1, 40));
+    // one of a kind: a second one is refused
+    const other = makeWorld(20_000_000, 6);
+    lobby(other, 0, 200);
+    expect(build(other, 'recycling', -2, 0)).toEqual(OK);
+    push(canBuild(other, 'recycling', -2, 100));
+    // the cash refusals, with nothing in hand
+    world.cash = 0;
+    for (const kind of Object.keys(ROOMS) as RoomKind[]) {
+      const rule = ROOMS[kind];
+      let r: CommandResult;
+      if (kind === 'lobby') r = canBuild(world, kind, 1, 300);
+      else if (kind === 'skyLobby') r = canBuild(world, kind, 15, 350);
+      else if (rule.placement === 'underground') r = canBuild(world, kind, underBase(kind), 100);
+      else r = canBuild(world, kind, 2, 0);
+      expect(r).toMatchObject({ ok: false, reason: expect.stringMatching(/^Not enough cash\. /) });
+      push(r);
+    }
+    for (const kind of Object.keys(SHAFTS) as ShaftKind[]) {
+      const r = canBuildShaft(world, kind, 200, 1, 5);
+      expect(r).toMatchObject({ ok: false, reason: expect.stringMatching(/^Not enough cash\. /) });
+      push(r);
+    }
+    push(applyCommand(world, { kind: 'shaft.addCar', shaftId: shaft.id }));
+    return out;
+  }
+
+  it('says Lobbies, Housekeeping and Fast food, never "ys " or a doubled plural', () => {
+    const reasons = refusalStrings();
+    expect(reasons.length).toBeGreaterThan(40);
+    for (const reason of reasons) {
+      expect(reason).not.toMatch(/ys /);
+      expect(reason).not.toMatch(/Housekeepings|Fast foods|Stairss|lobbys/i);
+    }
+    expect(reasons).toContain('Not enough cash. Lobbies cost $5,000.');
+    expect(reasons).toContain('Not enough cash. Sky lobbies cost $5,000.');
+    expect(reasons).toContain('Lobbies must go above ground.');
+    expect(reasons).toContain('Not enough cash. Housekeeping costs $50,000.');
+    expect(reasons).toContain('Not enough cash. Fast food costs $100,000.');
+    expect(reasons).toContain('Not enough cash. Offices cost $40,000.');
+    expect(reasons).toContain('Not enough cash. Elevator cars cost $80,000.');
+  });
+
+  it('has a plural for every room and elevator label', () => {
+    for (const rule of [...Object.values(ROOMS), ...Object.values(SHAFTS)]) {
+      expect(PLURAL_LABELS[rule.label], rule.label).toBeDefined();
+      if ('carCost' in rule) expect(PLURAL_LABELS[`${rule.label} car`], rule.label).toBeDefined();
+    }
   });
 });

@@ -81,6 +81,60 @@ function carServesClass(car: Car, cls: RiderClass, leftover: boolean): boolean {
   return car.serves === 'any' || car.serves === cls || leftover;
 }
 
+/**
+ * Why this shaft may not stop serving `floor` right now, or null when it may. A rider aboard
+ * bound for that floor would never get off (cars stop only at stops), so the change waits
+ * until they are off. The shaft.setStop command returns this reason to the player.
+ */
+export function stopOffRefusal(world: World, shaft: Shaft, floor: number): string | null {
+  for (const car of shaft.cars) {
+    for (const id of car.passengers) {
+      const leg = world.sims.get(id)?.route[0];
+      if (leg && leg.kind === 'ride' && leg.toFloor === floor) return 'Someone is riding to that floor.';
+    }
+  }
+  return null;
+}
+
+/**
+ * A rider whose trip no longer has a point (its room burned or was bombed) gets off at the
+ * car's next door opening: the floor the doors are open on, else the nearest stop this car
+ * works ahead of it, else the nearest one behind. The ride leg is cut to that floor and the
+ * car is asked to stop there, so the rider stays `riding` until alighting takes it off.
+ * False when the car is gone; the caller then puts the sim back on its feet.
+ */
+export function letOffAtNextStop(world: World, sim: Sim): boolean {
+  if (sim.inCarId === null) return false;
+  for (const shaft of world.shafts.values()) {
+    const car = shaft.cars.find((c) => c.id === sim.inCarId);
+    if (!car) continue;
+    const floor = nextStopOf(shaft, car);
+    if (floor === null) return false;
+    const leg = sim.route[0];
+    const fromFloor = leg && leg.kind === 'ride' ? leg.fromFloor : Math.round(car.y);
+    sim.route = [{ kind: 'ride', shaftId: shaft.id, fromFloor, toFloor: floor }];
+    sim.state = 'riding';
+    sim.waitStart = null;
+    car.calls.add(floor);
+    return true;
+  }
+  return false;
+}
+
+function nextStopOf(shaft: Shaft, car: Car): number | null {
+  const floors = [...shaft.stops].filter((f) => carCovers(shaft, car, f)).sort((a, b) => a - b);
+  if (car.state === 'doorsOpen' && floors.includes(car.y)) return car.y;
+  const dir = car.dir === 0 ? 1 : car.dir;
+  let best: number | null = null;
+  for (const f of floors) {
+    if (dir === 1 ? f < car.y : f > car.y) continue;
+    if (best === null || Math.abs(f - car.y) < Math.abs(best - car.y)) best = f;
+  }
+  if (best !== null) return best;
+  for (const f of floors) if (best === null || Math.abs(f - car.y) < Math.abs(best - car.y)) best = f;
+  return best;
+}
+
 /** Advance every car by one game minute. */
 export function tickElevators(world: World): void {
   const waiting = indexWaitingSims(world);
@@ -193,18 +247,24 @@ function stepCar(
   waiting: WaitIndex,
 ): number {
   const rule = SHAFTS[shaft.kind];
+  const span = carRangeOf(shaft, car);
 
   if (car.state === 'doorsOpen') {
-    // Keep serving the floor for the whole door cycle, so a sim that starts waiting
-    // while the doors are open still gets on.
-    serveFloor(world, shaft, car, waiting);
-    car.doorTimer -= 1;
-    if (car.doorTimer > 0) return car.y;
-    car.state = 'idle';
+    if (car.y < span.lo || car.y > span.hi) {
+      // Its floors changed while the doors stood open: shut them, nobody boards out here.
+      car.state = 'idle';
+      car.doorTimer = 0;
+    } else {
+      // Keep serving the floor for the whole door cycle, so a sim that starts waiting
+      // while the doors are open still gets on.
+      serveFloor(world, shaft, car, waiting);
+      car.doorTimer -= 1;
+      if (car.doorTimer > 0) return car.y;
+      car.state = 'idle';
+    }
   }
 
   // A car whose range moved out from under it walks back into it before doing anything else.
-  const span = carRangeOf(shaft, car);
   if (car.y < span.lo) return driveTo(car, 1, span.lo, rule);
   if (car.y > span.hi) return driveTo(car, -1, span.hi, rule);
 

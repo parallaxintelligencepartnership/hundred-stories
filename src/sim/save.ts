@@ -15,12 +15,35 @@ import { EVENTS, RENT, ROOMS, SHAFTS, WASTE } from './rules';
 import { VIP_PREFERENCES, vipPreference } from './identity';
 import { createStoryState, sanitizeStory } from './story';
 import { createWorld, rebuildFloorIndex } from './world';
-import { MAX_FLOOR, MIN_FLOOR, TOWER_WIDTH } from './types';
-import type { ActiveEvent, Car, LogEntry, RiderClass, Room, Shaft, Sim, SimKind, VipPhase, VipPreference, World } from './types';
+import { MAX_FLOOR, MIN_FLOOR, TOWER_WIDTH, floorDistance, spanTop } from './types';
+import type {
+  ActiveEvent,
+  Car,
+  CollectorState,
+  GuardResponse,
+  GuardState,
+  LogEntry,
+  RiderClass,
+  Room,
+  ScheduleEntry,
+  Shaft,
+  Sim,
+  SimKind,
+  Stats,
+  TheftPhase,
+  VipPhase,
+  VipPreference,
+  World,
+} from './types';
 
 /** v1 and pre-rent v2 saves have no `rent`; it is normalized to RENT.default on load. */
 type SaveRoom = Omit<Room, 'rent'> & { rent?: number };
 
+/**
+ * The format number stays at 5. Since 0.5.0 a save may also carry the optional cockroach spread
+ * timer (roachLastSpread); it is read by presence, never by number, so a build that reads 1 to 5
+ * (0.4.10 and older ignore keys they do not know) still opens a tower this build wrote.
+ */
 export const SAVE_VERSION = 5;
 
 /**
@@ -34,13 +57,17 @@ export const SAVE_VERSION = 5;
  * recycling center in an older save hires its collectors on the first tick, as guards are hired.
  * v5 adds the build log (src/sim/buildlog.ts). v1 to v4 load with an empty one marked
  * startedBeforeLog: the tower plays on, only replay is unavailable for it.
+ * Format 5 with the optional roach timer since 0.5.0: world.roachLastSpread is written as an
+ * optional field. A save without it (every build before 0.5.0) loads it as null, which is what
+ * those builds rebuilt it as after a load: the timer starts again at the next 06:00 roll.
  */
 const READABLE_VERSIONS = [1, 2, 3, 4, 5];
 
 /**
  * The version the hash projection names. It stays at 2 because v3 only added the two display
- * baselines, v4 only the story and v5 only the build log, which the hash leaves out, so a v5
- * world hashes exactly as it did under v2.
+ * baselines, v4 only the story and v5 only the build log, which the hash leaves out, and the
+ * optional roach timer (format 5 since 0.5.0) hashes as absent while it is null, so a tower without cockroaches hashes exactly
+ * as it did under v2.
  */
 const HASH_VERSION = 2;
 
@@ -94,6 +121,7 @@ interface SaveData {
   shafts: SaveShaft[];
   sims: Sim[];
   events: World['events'];
+  roachLastSpread?: number | null; // optional in format 5 since 0.5.0; absent before
   stats: World['stats'];
   gameOver: World['gameOver'];
   log: LogEntry[];
@@ -153,6 +181,7 @@ function buildSaveData(world: World): SaveData {
     shafts: Array.from(world.shafts.values()).map(shaftToSave),
     sims: Array.from(world.sims.values()),
     events: world.events,
+    roachLastSpread: world.roachLastSpread ?? null,
     stats: world.stats,
     gameOver: world.gameOver,
     log: world.log.slice(-LOG_LIMIT),
@@ -255,6 +284,9 @@ function firstInvalidField(d: SaveData): string | null {
   if (!isInteger(d.nextId)) return 'nextId';
   if (d.quarterStartCash != null && !isFiniteNumber(d.quarterStartCash)) return 'quarterStartCash';
   if (d.dayStartPopulation != null && !isFiniteNumber(d.dayStartPopulation)) return 'dayStartPopulation';
+  if (d.roachLastSpread != null && (!isInteger(d.roachLastSpread) || d.roachLastSpread < 0)) return 'roachLastSpread';
+  const badStats = firstInvalidStat(d.stats as unknown);
+  if (badStats) return badStats;
 
   // Ids come from one counter in world.ts, so they are unique across rooms, shafts,
   // cars and sims alike, and nextId is always past the highest one handed out.
@@ -276,8 +308,11 @@ function firstInvalidField(d: SaveData): string | null {
     if (typeof room.kind !== 'string' || !Object.hasOwn(ROOMS, room.kind)) return `${at}.kind`;
     if (!isInteger(room.floor) || room.floor === 0 || room.floor < MIN_FLOOR || room.floor > MAX_FLOOR) return `${at}.floor`;
     if (!isFiniteNumber(room.x) || room.x < 0 || room.x >= TOWER_WIDTH) return `${at}.x`;
-    if (!isFiniteNumber(room.width) || room.width <= 0) return `${at}.width`;
-    if (!isFiniteNumber(room.height) || room.height <= 0) return `${at}.height`;
+    // Whole tiles and whole floors that fit the lot: a room a billion floors tall used to be
+    // walked floor by floor before it was refused, for the wrong reason.
+    if (!isInteger(room.width) || room.width <= 0 || room.x + room.width > TOWER_WIDTH) return `${at}.width`;
+    if (!isInteger(room.height) || room.height <= 0 || spanTop(room.floor, room.height) > MAX_FLOOR) return `${at}.height`;
+    if (!Array.isArray(room.tenants) || !room.tenants.every((id) => isInteger(id) && id >= 1)) return `${at}.tenants`;
     if (!inRange(room.eval, 0, 1)) return `${at}.eval`;
     if (
       room.rent !== undefined &&
@@ -310,6 +345,9 @@ function firstInvalidField(d: SaveData): string | null {
     if (!isInteger(shaft.floorMax) || shaft.floorMax < MIN_FLOOR || shaft.floorMax > MAX_FLOOR) return `${at}.floorMax`;
     if (shaft.floorMin > shaft.floorMax) return `${at}.floorMin`;
     if (!isFiniteNumber(shaft.x) || shaft.x < 0 || shaft.x >= TOWER_WIDTH) return `${at}.x`;
+    // A shaft with no width made every reach test compare against NaN and hung the tick loop.
+    if (!isInteger(shaft.width) || shaft.width <= 0 || shaft.x + shaft.width > TOWER_WIDTH) return `${at}.width`;
+    if (!isInteger(shaft.homeFloor) || shaft.homeFloor < MIN_FLOOR || shaft.homeFloor > MAX_FLOOR) return `${at}.homeFloor`;
     if (!Array.isArray(shaft.stops)) return `${at}.stops`;
     for (const stop of shaft.stops) {
       if (!isInteger(stop) || stop < shaft.floorMin || stop > shaft.floorMax) return `${at}.stops`;
@@ -335,6 +373,8 @@ function firstInvalidField(d: SaveData): string | null {
         if (!isInteger(span.lo) || !isInteger(span.hi)) return `${carAt}.range`;
         if (span.lo > span.hi) return `${carAt}.range`;
         if (span.lo < shaft.floorMin || span.hi > shaft.floorMax) return `${carAt}.range`;
+        // Floor 0 does not exist, and a car works at least two real floors (build.ts setCarRange).
+        if (span.lo === 0 || span.hi === 0 || floorDistance(span.lo, span.hi) < 1) return `${carAt}.range`;
       }
     }
     if (!Array.isArray(shaft.hallCalls)) return `${at}.hallCalls`;
@@ -367,8 +407,160 @@ function firstInvalidField(d: SaveData): string | null {
     if (!isPlainObject(sim.pos)) return `${at}.pos`;
     if (!isFiniteNumber(sim.pos.floor)) return `${at}.pos.floor`;
     if (!isFiniteNumber(sim.pos.x)) return `${at}.pos.x`;
+    if (!isIdOrNull(sim.homeRoomId)) return `${at}.homeRoomId`;
+    if (!isIdOrNull(sim.inCarId)) return `${at}.inCarId`;
+    if (!isIdOrNull(sim.inRoomId)) return `${at}.inRoomId`;
+    if (!Array.isArray(sim.route) || !sim.route.every(isLeg)) return `${at}.route`;
+    if (!isNumberOrNull(sim.waitStart)) return `${at}.waitStart`;
+    if (!Array.isArray(sim.schedule) || !sim.schedule.every(isScheduleEntry)) return `${at}.schedule`;
+    if (!isInteger(sim.nextScheduleIndex) || sim.nextScheduleIndex < 0) return `${at}.nextScheduleIndex`;
+    if (!isNumberOrNull(sim.stayUntil)) return `${at}.stayUntil`;
+    if (!isFiniteNumber(sim.wallet)) return `${at}.wallet`;
+    if (sim.leaveReason !== null && typeof sim.leaveReason !== 'string') return `${at}.leaveReason`;
+    if (sim.exiting !== undefined && typeof sim.exiting !== 'boolean') return `${at}.exiting`;
+    if (sim.guard != null && !isGuardState(sim.guard)) return `${at}.guard`;
+    if (sim.collector != null && !isCollectorState(sim.collector)) return `${at}.collector`;
   }
 
+  for (let i = 0; i < d.events.length; i++) {
+    if (!isEvent(d.events[i] as unknown)) return `events[${i}]`;
+  }
+
+  return null;
+}
+
+function isIdOrNull(value: unknown): boolean {
+  return value === null || (isInteger(value) && value >= 1);
+}
+
+function isNumberOrNull(value: unknown): boolean {
+  return value === null || isFiniteNumber(value);
+}
+
+function isId(value: unknown): boolean {
+  return isInteger(value) && value >= 1;
+}
+
+function isLeg(value: unknown): boolean {
+  if (!isPlainObject(value)) return false;
+  switch (value.kind) {
+    case 'walk':
+      return isFiniteNumber(value.toX);
+    case 'ride':
+      return isId(value.shaftId) && isInteger(value.fromFloor) && isInteger(value.toFloor);
+    case 'stairs':
+      return isId(value.roomId) && isInteger(value.toFloor);
+    case 'enter':
+      return isId(value.roomId);
+    default:
+      return false;
+  }
+}
+
+const SCHEDULE_DAYS = { weekday: true, weekend: true } satisfies Record<ScheduleEntry['days'][number], true>;
+
+function isScheduleEntry(value: unknown): boolean {
+  if (!isPlainObject(value)) return false;
+  if (!isFiniteNumber(value.minuteOfDay) || !isFiniteNumber(value.stayMinutes)) return false;
+  if (!Array.isArray(value.days) || !value.days.every((day) => typeof day === 'string' && Object.hasOwn(SCHEDULE_DAYS, day))) return false;
+  const goal = value.goal;
+  if (!isPlainObject(goal)) return false;
+  if (goal.kind === 'room') return isId(goal.roomId);
+  if (goal.kind === 'roomKind') return typeof goal.roomKind === 'string' && Object.hasOwn(ROOMS, goal.roomKind);
+  return goal.kind === 'exit';
+}
+
+const GUARD_TASKS = { office: true, return: true, patrol: true, respond: true } satisfies Record<GuardState['task'], true>;
+const GUARD_RESPONSES = { fire: true, bomb: true, theft: true } satisfies Record<GuardResponse['kind'], true>;
+const COLLECTOR_TASKS = {
+  center: true,
+  toRoom: true,
+  collecting: true,
+  toCenter: true,
+  unloading: true,
+} satisfies Record<CollectorState['task'], true>;
+
+function isGuardState(value: unknown): boolean {
+  if (!isPlainObject(value)) return false;
+  if (!isInteger(value.shift) || value.shift < 0) return false;
+  if (typeof value.task !== 'string' || !Object.hasOwn(GUARD_TASKS, value.task)) return false;
+  if (value.floor !== null && !isInteger(value.floor)) return false;
+  if (!isNumberOrNull(value.pauseUntil)) return false;
+  if (typeof value.routed !== 'boolean') return false;
+  const respond = value.respond;
+  if (respond === null) return true;
+  return (
+    isPlainObject(respond) &&
+    typeof respond.kind === 'string' &&
+    Object.hasOwn(GUARD_RESPONSES, respond.kind) &&
+    isId(respond.roomId) &&
+    isFiniteNumber(respond.floor) &&
+    isFiniteNumber(respond.x)
+  );
+}
+
+function isCollectorState(value: unknown): boolean {
+  if (!isPlainObject(value)) return false;
+  if (typeof value.task !== 'string' || !Object.hasOwn(COLLECTOR_TASKS, value.task)) return false;
+  return isIdOrNull(value.roomId) && isFiniteNumber(value.load) && value.load >= 0 && isNumberOrNull(value.until);
+}
+
+const THEFT_PHASES = { notice: true, approach: true, acting: true, leaving: true } satisfies Record<TheftPhase, true>;
+
+/** Every event by kind, with the fields the tick reads. A VIP's other fields are filled in by loadVipEvent. */
+function isEvent(value: unknown): boolean {
+  if (!isPlainObject(value)) return false;
+  const e = value;
+  switch (e.kind) {
+    case 'fire':
+      return Array.isArray(e.roomIds) && e.roomIds.every(isId) && isFiniteNumber(e.startedAt) && isFiniteNumber(e.spreadAt);
+    case 'bomb':
+      return isId(e.roomId) && isFiniteNumber(e.ransom) && isFiniteNumber(e.detonateAt) && typeof e.found === 'boolean';
+    case 'vip':
+      return isId(e.simId);
+    case 'theft':
+      return (
+        typeof e.phase === 'string' &&
+        Object.hasOwn(THEFT_PHASES, e.phase) &&
+        isFiniteNumber(e.enterAt) &&
+        isIdOrNull(e.simId) &&
+        isIdOrNull(e.targetId) &&
+        isNumberOrNull(e.floor) &&
+        isNumberOrNull(e.actUntil) &&
+        isIdOrNull(e.guardId) &&
+        (e.noGuard === null || typeof e.noGuard === 'string')
+      );
+    case 'santa':
+      return isFiniteNumber(e.startedAt) && isFiniteNumber(e.x);
+    case 'wedding':
+      return isFiniteNumber(e.startedAt);
+    default:
+      return false;
+  }
+}
+
+const VIP_RATINGS = { none: true, poor: true, fair: true, good: true } satisfies Record<Stats['vipRating'], true>;
+
+function isNumberTable(value: unknown): boolean {
+  return isPlainObject(value) && Object.values(value).every(isFiniteNumber);
+}
+
+/** Every stats key with its type. A missing table threw at the next quarter start. */
+function firstInvalidStat(stats: unknown): string | null {
+  if (!isPlainObject(stats)) return 'stats';
+  if (!isNumberTable(stats.incomeByKind)) return 'stats.incomeByKind';
+  if (!isNumberTable(stats.upkeepByKind)) return 'stats.upkeepByKind';
+  const last = stats.lastQuarter;
+  if (!isPlainObject(last) || !isFiniteNumber(last.income) || !isFiniteNumber(last.upkeep) || !isFiniteNumber(last.net)) {
+    return 'stats.lastQuarter';
+  }
+  if (typeof stats.vipRating !== 'string' || !Object.hasOwn(VIP_RATINGS, stats.vipRating)) return 'stats.vipRating';
+  if (!isFiniteNumber(stats.weddingsHeld)) return 'stats.weddingsHeld';
+  if (!isFiniteNumber(stats.avgWaitMinutes)) return 'stats.avgWaitMinutes';
+  if (!isNumberTable(stats.tenantsLeftReasons)) return 'stats.tenantsLeftReasons';
+  if (stats.badQuarterStreak !== undefined && (!isInteger(stats.badQuarterStreak) || stats.badQuarterStreak < 0)) return 'stats.badQuarterStreak';
+  if (stats.lastVip !== undefined && !isPlainObject(stats.lastVip)) return 'stats.lastVip';
+  if (stats.lastTheftAt !== undefined && !isFiniteNumber(stats.lastTheftAt)) return 'stats.lastTheftAt';
   return null;
 }
 
@@ -459,8 +651,12 @@ export function deserialize(text: string): { ok: true; world: World } | { ok: fa
     world.nextId = parsed.nextId;
     world.rng = createRng(parsed.rngState);
 
+    // Rooms go back in id order, the order a live tower holds them in (ids only grow), so a file
+    // whose rooms were reordered by hand plays exactly as the tower it came from (audit I S6).
     world.rooms = new Map(
-      parsed.rooms.map((room): [number, Room] => [room.id, { ...room, rent: room.rent ?? RENT.default }]),
+      [...parsed.rooms]
+        .sort((a, b) => a.id - b.id)
+        .map((room): [number, Room] => [room.id, { ...room, rent: room.rent ?? RENT.default }]),
     );
 
     world.shafts = new Map(
@@ -504,6 +700,8 @@ export function deserialize(text: string): { ok: true; world: World } | { ok: fa
     // The build log sits beside the world, not in it, and not in the hash.
     setBuildLog(world, buildLogFromSave(parsed.version >= 5 ? (parsed.buildLog ?? null) : undefined));
     world.events = parsed.events.map((event) => (event.kind === 'vip' ? loadVipEvent(world, event) : event));
+    // Read by presence, not by version: format 5 carries it as an optional field since 0.5.0.
+    world.roachLastSpread = parsed.roachLastSpread ?? null;
     world.stats = parsed.stats;
     world.gameOver = parsed.gameOver;
     world.log = parsed.log.slice(-LOG_LIMIT);
@@ -686,6 +884,9 @@ export function hashWorld(world: World): string {
     shafts: byId(world.shafts.values()).map(shaftForHash),
     sims: byId(world.sims.values()).map(simForHash),
     events: world.events.map((event) => ({ ...event })),
+    // null and absent hash alike (undefined drops out of the JSON), so a tower that never had
+    // cockroaches, or has none now, hashes exactly as before 0.5.0 added the optional timer.
+    roachLastSpread: world.roachLastSpread ?? undefined,
     stats: world.stats,
     gameOver: world.gameOver,
   } satisfies Record<HashedWorldKey | 'version', unknown>;

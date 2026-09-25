@@ -386,6 +386,12 @@ export interface World {
   log: LogEntry[];
   logTotal: number; // entries ever logged, so the UI can tell new lines from old after the log is trimmed
   events: ActiveEvent[];
+  /**
+   * The minute cockroaches last spread (or the first infestation of the current run was seen),
+   * null or absent while no hotel room is infested. Saved (optional in format 5 since 0.5.0) and hashed; absent and null
+   * hash alike, so a tower without roaches hashes as before.
+   */
+  roachLastSpread?: number | null;
   stats: Stats;
   floorIndex: FloorIndex;
   routingDirty: boolean;

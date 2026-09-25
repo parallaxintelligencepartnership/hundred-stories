@@ -320,7 +320,7 @@ describe('tips', () => {
     game.notify();
     game.notify();
     expect(tipsOf(first.root)).toHaveLength(1);
-    expect(tipsOf(first.root)[0]?.textContent).toContain('Night x8, x16 in all: from 11 PM to 6 AM');
+    expect(tipsOf(first.root)[0]?.textContent).toContain('Night: 16 times as fast. From 11 PM to 6 AM');
     click(buttonNamed(first.root, 'Got it'));
     expect(tipsOf(first.root)).toHaveLength(0);
     expect(JSON.parse(store().getItem('hs.tips') ?? '[]')).toContain('nightSpeed');
@@ -451,7 +451,7 @@ describe('news toasts and story lines', () => {
     }
   });
 
-  it('opens the event log from a news toast', () => {
+  it('opens News from a news toast', () => {
     const game = stubGame();
     addRoom(game, { kind: 'lobby', floor: 1, x: 180, width: 20 });
     const { root } = mount(game);
@@ -460,8 +460,8 @@ describe('news toasts and story lines', () => {
     game.notify();
     const toast = byClass(root, 'hs-news-toast')[0] as FakeElement;
     expect(toast.tagName).toBe('BUTTON');
-    expect(toast.title).toBe('Open the event log');
+    expect(toast.title).toBe('Open the news');
     click(toast);
-    expect(root.descendants().some((n) => n.className === 'hs-panel-title-text' && n.textContent === 'Event log')).toBe(true);
+    expect(root.descendants().some((n) => n.className === 'hs-panel-title-text' && n.textContent === 'News')).toBe(true);
   });
 });

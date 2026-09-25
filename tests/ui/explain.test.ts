@@ -42,8 +42,27 @@ describe('refusal explainer', () => {
     expect(reason).toBe('Build a floor below this one first.');
     expect(refusalExplainer(refused(reason, { floorMin: 5 }), world)).toBe('Floor 5 needs floor 4 built under it.');
     const deep = reasonOf(canBuild(world, 'fastFood', -3, 0));
-    expect(refusalExplainer(refused(deep, { floorMin: -3 }), world)).toBe('Basement 3 needs basement 2 built above it.');
-    expect(refusalExplainer(refused(deep, { floorMin: -1 }), world)).toBe('Basement 1 needs the lobby on floor 1 above it.');
+    expect(deep).toBe('Build the floor above this one first.');
+    expect(refusalKind(deep)).toEqual({ kind: 'noFloorBelow' });
+    expect(refusalExplainer(refused(deep, { floorMin: -3, floorMax: -3 }), world)).toBe('Basement 3 needs basement 2 built above it.');
+    const noLobby = reasonOf(canBuild(createWorld(5), 'fastFood', -1, 0));
+    expect(noLobby).toBe('Build a lobby first.');
+    expect(refusalKind(noLobby)).toEqual({ kind: 'noFloorBelow' });
+    expect(refusalExplainer(refused(noLobby, { floorMin: -1, floorMax: -1 }), world)).toBe('Basement 1 needs the lobby on floor 1 above it.');
+  });
+
+  it('names the floor over the top of a tall basement room, not a floor inside it', () => {
+    const world = lobbyWorld();
+    const reason = 'Build the floor above this one first.';
+    // A recycling center at B3 covers B3 and B2 and hangs from B1.
+    const placement = refused(reason, { floor: -3, floorMin: -3, floorMax: -3, label: 'Recycling center' });
+    expect(placementNote(placement, { kind: 'room', room: 'recycling' }, world)).toBe(
+      'Basement 3 needs basement 1 built above it.',
+    );
+    // A span that already carries its top uses it.
+    expect(refusalExplainer(refused(reason, { floorMin: -4, floorMax: -2 }), world)).toBe(
+      'Basement 4 needs basement 1 built above it.',
+    );
   });
 
   it('says what it overlaps', () => {
@@ -55,7 +74,7 @@ describe('refusal explainer', () => {
     applyCommand(world, { kind: 'shaft.build', shaft: 'standard', x: 20, floorMin: 1, floorMax: 2 });
     const shaft = reasonOf(canBuildShaft(world, 'standard', 22, 1, 2));
     expect(shaft).toBe('An elevator is in the way.');
-    expect(refusalExplainer(refused(shaft), world)).toBe('It overlaps an elevator. Move it clear of the shaft.');
+    expect(refusalExplainer(refused(shaft), world)).toBe('It overlaps an elevator. Move it away from the elevator.');
   });
 
   it('gives the size of the tower for a spot outside it', () => {

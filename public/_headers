@@ -20,11 +20,14 @@
 /manifest.webmanifest
   Cache-Control: no-cache, must-revalidate
 
-/index.html
+/
   Cache-Control: no-cache, must-revalidate
 
-/play/index.html
+/play/
   Cache-Control: no-cache, must-revalidate
 
-/how-to-play/index.html
+/how-to-play/
+  Cache-Control: no-cache, must-revalidate
+
+/privacy/
   Cache-Control: no-cache, must-revalidate

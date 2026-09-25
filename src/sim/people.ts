@@ -6,7 +6,7 @@
  * world.rng, so a seed plus a command list always replays the same day.
  */
 
-import { hallCallPending, requestHallCall } from './elevators';
+import { hallCallPending, letOffAtNextStop, requestHallCall } from './elevators';
 import { recordCondoSale, recordHotelNight, recordVisit } from './economy';
 import { ensureRouting, entrances, findRoute, isReachableFromLobby } from './routing';
 import { ECONOMY, ROOMS, SCHEDULES, STORY, STRESS } from './rules';
@@ -18,6 +18,7 @@ import type {
   Clock,
   Id,
   Leg,
+  RiderClass,
   Room,
   Shaft,
   RoomKind,
@@ -42,9 +43,9 @@ function routeOpts(sim: Sim): { staff: boolean; riderClass: ReturnType<typeof ri
 
 // Local rules: rules.ts has no entry for these, so they live here and are marked as our call.
 /** A waiting sim re-registers its hall call this often if the call is no longer pending. */
-const HALL_CALL_RETRY_MINUTES = 6;
+export const HALL_CALL_RETRY_MINUTES = 6;
 /** After this many silent retries the sim stops trusting the shaft and asks routing again. */
-const RETRIES_BEFORE_REROUTE = 3;
+export const RETRIES_BEFORE_REROUTE = 3;
 /** Housekeepers stop taking new rooms after this minute of day. */
 const HOUSEKEEPING_END_MINUTE = 20 * 60;
 /** Share of a commerce room's seats that the crowd aims to fill, tuned to ROOMS[kind].incomePerQuarter. */
@@ -71,13 +72,31 @@ function directedKind(sim: Sim): boolean {
 
 /**
  * The people a fire keeps out of the tower and moves out of a burning room. Guards, staff,
- * collectors, the VIP and the thief run on their own plans and are left to them.
+ * collectors, the VIP and the thief run on their own plans and are left to them (events.ts
+ * holds the VIP's and the thief's way in until the fire is out).
  */
 const FIRE_HELD_KINDS = new Set<SimKind>(['worker', 'resident', 'guest', 'shopper', 'diner', 'visitor']);
 
 /** While any fire burns, nobody new comes in from the street. */
 export function fireBurning(world: World): boolean {
   return world.events.some((e) => e.kind === 'fire');
+}
+
+/**
+ * Once an hour every room's occupancy is set to the people really inside it (guards and
+ * collectors never count). Nothing should ever leave the two apart; this heals a tower that
+ * already carries a phantom from an older build or from a room removed elsewhere.
+ */
+export function recountOccupancy(world: World): void {
+  const inside = new Map<Id, number>();
+  for (const sim of world.sims.values()) {
+    if (sim.inRoomId === null || sim.kind === 'guard' || sim.kind === 'collector') continue;
+    inside.set(sim.inRoomId, (inside.get(sim.inRoomId) ?? 0) + 1);
+  }
+  for (const room of world.rooms.values()) {
+    const count = inside.get(room.id) ?? 0;
+    if (room.occupancy !== count) setOccupancy(world, room, count);
+  }
 }
 
 export function stressBand(stress: number): StressBand {
@@ -90,6 +109,7 @@ export function tickPeople(world: World): void {
   if (world.gameOver) return;
   const clock = clockOf(world.time.minute);
   ensureRouting(world);
+  if (clock.minuteOfDay % 60 === 0) recountOccupancy(world);
   runIntake(world, clock);
   runSchedules(world, clock);
   runHousekeeping(world, clock);
@@ -125,7 +145,7 @@ function fillVacantOffices(world: World, clock: Clock): void {
   if (clock.minuteOfDay < rule.arriveStart || clock.minuteOfDay > rule.arriveEnd) return;
   for (const room of roomsOfKind(world, 'office')) {
     if (!room.vacant || room.tenants.length > 0 || room.onFire) continue;
-    if (!isReachableFromLobby(world, room.floor, room.x)) continue;
+    if (!reachableFor(world, room, 'office')) continue;
     room.vacant = false;
     for (let i = 0; i < ROOMS.office.capacity; i++) {
       const sim = spawnWorker(world, room, clock);
@@ -143,7 +163,7 @@ function sellVacantCondos(world: World, clock: Clock): void {
   for (const room of roomsOfKind(world, 'condo')) {
     if (!room.vacant || room.tenants.length > 0 || room.onFire) continue;
     if (room.eval < ECONOMY.condoSaleEvalMin) continue;
-    if (!isReachableFromLobby(world, room.floor, room.x)) continue;
+    if (!reachableFor(world, room, 'other')) continue;
     recordCondoSale(world, room);
     room.vacant = false;
     for (let i = 0; i < ROOMS.condo.capacity; i++) {
@@ -162,7 +182,7 @@ function spawnHotelGuests(world: World, clock: Clock): void {
   for (const room of world.rooms.values()) {
     if (!HOTEL_KINDS.has(room.kind)) continue;
     if (room.dirty || room.infested || room.onFire || room.tenants.length > 0) continue;
-    if (!isReachableFromLobby(world, room.floor, room.x)) continue;
+    if (!reachableFor(world, room, 'hotel')) continue;
     if (world.rng.next() >= chance) continue;
     const checkIn = world.rng.int(rule.checkInStart, rule.checkInEnd);
     const checkOut = world.rng.int(rule.checkOutStart, rule.checkOutEnd);
@@ -180,7 +200,7 @@ function spawnCommerceVisitors(world: World, clock: Clock): void {
     if (rate <= 0) continue;
     const rule = ROOMS[room.kind];
     if (room.onFire || room.occupancy >= rule.capacity) continue;
-    if (!isReachableFromLobby(world, room.floor, room.x)) continue;
+    if (!reachableFor(world, room, 'other')) continue;
     let count = Math.floor(rate);
     if (world.rng.next() < rate - count) count += 1;
     const stay = DINING_KINDS.has(room.kind) ? SCHEDULES.diner.visitMinutes : SCHEDULES.shopper.visitMinutes;
@@ -201,7 +221,7 @@ function spawnShowAudiences(world: World, clock: Clock): void {
       stay = SCHEDULES.partyHall.durationMinutes;
     }
     if (stay === 0) continue;
-    if (room.onFire || !isReachableFromLobby(world, room.floor, room.x)) continue;
+    if (room.onFire || !reachableFor(world, room, 'other')) continue;
     const seats = ROOMS[room.kind].capacity;
     const weekend = clock.isWeekend ? SCHEDULES.shopper.weekendMultiplier : 1;
     const fill = Math.min(1, (SHOW_FILL_MIN + world.rng.next() * (1 - SHOW_FILL_MIN)) * weekend);
@@ -226,6 +246,42 @@ function visitorRatePerMinute(room: Room, clock: Clock): number {
   const rule = SCHEDULES.shopper;
   if (clock.minuteOfDay < rule.open || clock.minuteOfDay >= rule.close) return 0;
   return (ROOMS[room.kind].capacity / rule.visitMinutes) * fill * weekend;
+}
+
+/**
+ * Can the people this room is for get to it from the ground lobby: the class blind answer,
+ * then the same question asked with their rider class, so a floor served only by cars given
+ * to somebody else never leases, sells, books or draws a crowd. A tower whose cars all carry
+ * everyone has one graph for every class, so the second question is skipped there.
+ */
+function reachableFor(world: World, room: Room, cls: RiderClass): boolean {
+  if (!isReachableFromLobby(world, room.floor, room.x)) return false;
+  if (everyCarCarriesEveryone(world)) return true;
+  let cache = classReach.get(world);
+  if (!cache || cache.minute !== world.time.minute) {
+    cache = { minute: world.time.minute, answers: new Map() };
+    classReach.set(world, cache);
+  }
+  const key = `${cls}:${room.floor}`;
+  const known = cache.answers.get(key);
+  if (known !== undefined) return known;
+  const door = entrances(world).find((p) => p.floor === 1);
+  const answer = door !== undefined && findRoute(world, door, { floor: room.floor, x: roomCenter(room) }, { riderClass: cls }) !== null;
+  cache.answers.set(key, answer);
+  return answer;
+}
+
+/**
+ * Class answers for one minute: the tower cannot change shape inside a tick, and a player
+ * command lands between ticks, so a fresh minute always asks again. Not saved, not hashed.
+ */
+const classReach = new WeakMap<World, { minute: number; answers: Map<string, boolean> }>();
+
+function everyCarCarriesEveryone(world: World): boolean {
+  for (const shaft of world.shafts.values()) {
+    for (const car of shaft.cars) if (car.serves !== 'any') return false;
+  }
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -293,7 +349,15 @@ function startTrip(world: World, sim: Sim, goal: ScheduleEntry['goal']): boolean
   if (sim.inRoomId === room.id) return true;
   const target = { floor: room.floor, x: roomCenter(room) };
   const legs = findRoute(world, sim.pos, target, routeOpts(sim));
-  if (!legs) return false;
+  if (!legs) {
+    // A tenant with no way at all to its own office or condo cannot keep the lease: the
+    // cars that reach it carry somebody else, or the floor lost its last way up.
+    if (isTenant(sim) && room.id === sim.homeRoomId) {
+      endLeaseWithNoWayIn(world, room);
+      return true;
+    }
+    return false;
+  }
   if (sim.inRoomId !== null) departRoom(world, sim);
   sim.route = [...withoutStandingRides(legs), { kind: 'enter', roomId: room.id }];
   sim.state = 'walking';
@@ -441,6 +505,13 @@ function stepAlongRoute(world: World, sim: Sim): void {
       beginWait(world, sim, leg, shaft);
       return;
     } else if (leg.kind === 'stairs') {
+      if (!world.rooms.has(leg.roomId)) {
+        // The stairs were demolished on the way: nobody climbs what is gone (as a lost shaft).
+        if (sim.kind === 'guard' && !sim.exiting) guardLostRoute(sim);
+        else if (sim.kind === 'collector' && !sim.exiting) collectorLostRoute(sim);
+        else leaveTower(world, sim);
+        return;
+      }
       climbStairs(world, sim, leg);
       budget = 0;
     } else {
@@ -522,6 +593,11 @@ function stayMinutesFor(sim: Sim, room: Room): number {
 /** A route that ended without an enter leg finished at an entrance. */
 function arriveWithoutRoom(world: World, sim: Sim): void {
   if (sim.exiting || sim.state === 'leaving') {
+    // Let off mid tower (sendAway): runLeaving walks it to the street from here.
+    if (sim.state !== 'leaving' && !atEntrance(world, sim.pos)) {
+      sim.state = 'leaving';
+      return;
+    }
     finishLeave(world, sim);
     return;
   }
@@ -614,7 +690,15 @@ function retryHallCall(world: World, sim: Sim): void {
 function rerouteWaitingSim(world: World, sim: Sim): void {
   const dest = routeDestination(world, sim);
   const legs = findRoute(world, sim.pos, dest.at, routeOpts(sim));
-  if (!legs) return; // nothing better on offer: keep waiting and let stress decide
+  if (!legs) {
+    // On the way out there is no trip left to give up, so stress never ends this wait:
+    // with no car or stairs out of this floor any more, the person goes (as runLeaving does).
+    if (sim.exiting) {
+      log(world, `Someone on ${floorLabel(sim.pos.floor)} found no way out and left the tower.`, 'warn', { simId: sim.id });
+      finishLeave(world, sim);
+    }
+    return; // otherwise nothing better on offer: keep waiting and let stress decide
+  }
   const enter: Leg[] = dest.roomId !== null ? [{ kind: 'enter', roomId: dest.roomId }] : [];
   sim.route = [...withoutStandingRides(legs), ...enter];
   sim.state = 'walking';
@@ -667,6 +751,52 @@ function giveUp(world: World, sim: Sim): void {
   sim.state = 'leaving';
   sim.leaveReason = `Gave up waiting for an elevator on ${floorLabel(sim.pos.floor)}.`;
   log(world, sim.leaveReason, 'warn', { simId: sim.id });
+}
+
+/** Every tenant of an office or condo nobody can get to moves out, and the room is back on offer. */
+function endLeaseWithNoWayIn(world: World, room: Room): void {
+  const who = room.kind === 'condo' ? 'its owners' : 'its tenants';
+  const reason = `The ${ROOMS[room.kind].label.toLowerCase()} on ${floorLabel(room.floor)} had no way in, so ${who} moved out.`;
+  let roomBeat = false;
+  for (const id of room.tenants) {
+    const sim = world.sims.get(id);
+    if (!sim) continue;
+    const followed = isFollowed(world.story, id);
+    if (followed || !roomBeat) {
+      recordBeat(world.story, { code: 'room.vacated', minute: world.time.minute, simId: id, roomId: room.id, value: 1 });
+      if (!followed) roomBeat = true;
+    }
+    sim.homeRoomId = null;
+    sendAway(world, sim, reason);
+    world.stats.tenantsLeftReasons[reason] = (world.stats.tenantsLeftReasons[reason] ?? 0) + 1;
+  }
+  room.tenants = [];
+  room.vacant = true;
+  room.lowEvalSinceMinute = null;
+  log(world, reason, 'warn', { roomId: room.id });
+}
+
+/**
+ * Send a sim out of the tower for good because of something that happened to it (its home
+ * burned, was bombed or can no longer be reached, or a visit ended). It leaves whatever room
+ * it sits in, which gives that room its seat back. A rider stays aboard to the car's next
+ * stop and walks out from there; anyone else heads for the street now.
+ */
+export function sendAway(world: World, sim: Sim, reason: string): void {
+  sim.leaveReason = reason;
+  if (sim.inRoomId !== null) {
+    const room = world.rooms.get(sim.inRoomId);
+    // A guard in the office or a collector in the center never counted toward its occupancy.
+    if (room && sim.kind !== 'guard' && sim.kind !== 'collector') setOccupancy(world, room, Math.max(0, room.occupancy - 1));
+    sim.inRoomId = null;
+  }
+  if (sim.inCarId !== null && letOffAtNextStop(world, sim)) {
+    sim.exiting = true;
+    return;
+  }
+  sim.inCarId = null;
+  sim.state = 'leaving';
+  sim.route = [];
 }
 
 /** Workers and residents hold a lease. Guests, shoppers, diners, staff and VIPs do not. */
@@ -997,6 +1127,10 @@ function nearestEntrance(world: World, from: { floor: number; x: number }): { fl
     }
   }
   return best;
+}
+
+function atEntrance(world: World, pos: { floor: number; x: number }): boolean {
+  return entrances(world).some((door) => door.floor === pos.floor && door.x === pos.x);
 }
 
 function roomCenter(room: Room): number {

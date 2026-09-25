@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   EVENT_TEST_HOOKS,
+  formatDollars,
   handleEventCommand,
   hooksActive,
   startFire,
+  startTheft,
+  startVip,
   resetEventTestHooks,
   tickEvents,
   vipRatingOf,
@@ -11,8 +14,8 @@ import {
   vipWaitBand,
 } from '../../src/sim/events';
 import { personName, vipArrivalHour, vipPreference } from '../../src/sim/identity';
-import { EVAL, EVENTS, ROOMS } from '../../src/sim/rules';
-import { deserialize, serialize } from '../../src/sim/save';
+import { EVAL, EVENTS, ROOMS, SCHEDULES } from '../../src/sim/rules';
+import { deserialize, hashWorld, serialize } from '../../src/sim/save';
 import type { ActiveEvent, Room, RoomKind, Star, World } from '../../src/sim/types';
 import { tick, tickMany } from '../../src/sim/tick';
 import { addRoom, allocId, createWorld } from '../../src/sim/world';
@@ -138,6 +141,24 @@ describe('fire', () => {
     const result = handleEventCommand(world, { kind: 'fire.callHelicopter' });
     expect(result).toEqual({ ok: false, reason: 'There is no fire right now.' });
   });
+
+  // Audit 2026-09-25 I S2: a refused command leaves the world as it was; the helicopter
+  // the tower cannot afford was never checked for cash or hash.
+  it('I S2: a helicopter the tower cannot afford is refused and changes neither cash nor hash', () => {
+    const office = place(world, 'office', 2, 100);
+    EVENT_TEST_HOOKS.target.fire = office.id;
+    startFire(world);
+    expect(office.onFire).toBe(true);
+    world.cash = 1_000;
+    const hash = hashWorld(world);
+    expect(handleEventCommand(world, { kind: 'fire.callHelicopter' })).toEqual({
+      ok: false,
+      reason: `Not enough cash. A firefighting helicopter costs ${formatDollars(EVENTS.fire.helicopterCost)}.`,
+    });
+    expect(world.cash).toBe(1_000);
+    expect(hashWorld(world)).toBe(hash);
+    expect(eventOf(world, 'fire')).toBeDefined();
+  });
 });
 
 describe('fire: nobody walks into a burning building', () => {
@@ -204,6 +225,80 @@ describe('fire: nobody walks into a burning building', () => {
     tickMany(world, 20);
     expect(office.occupancy).toBe(0);
   });
+
+  // Audit 2026-09-25 I S5: condo sales stop while any room burns (decision: no arrivals
+  // during a fire). The only condo in the test above is the burning one, which is skipped
+  // anyway, so a vacant condo elsewhere selling mid-fire passed every test.
+  describe('I S5: a vacant condo that is not burning', () => {
+    /** Runs from 06:00 to just past the end of the 07:30 to 09:00 sale window. */
+    function throughSaleWindow(): void {
+      while (world.time.minute % 1440 <= SCHEDULES.resident.leaveEnd) tick(world);
+    }
+    function owners(condo: Room): number {
+      return [...world.sims.values()].filter((s) => s.kind === 'resident' && s.homeRoomId === condo.id).length;
+    }
+    const SOLD = 'A condo on floor 2 was sold to a new owner.';
+
+    it('I S5: control, with no fire it sells in the morning window', () => {
+      tower();
+      const forSale = place(world, 'condo', 2, 300, { vacant: true, eval: 1 });
+      throughSaleWindow();
+      expect(forSale.vacant).toBe(false);
+      expect(owners(forSale)).toBeGreaterThan(0);
+      expect(world.log.filter((e) => e.text === SOLD)).toHaveLength(1);
+    });
+
+    it('I S5: stays unsold while a different room burns through the window', () => {
+      tower();
+      const forSale = place(world, 'condo', 2, 300, { vacant: true, eval: 1 });
+      const fastFood = [...world.rooms.values()].find((r) => r.kind === 'fastFood') as Room;
+      EVENT_TEST_HOOKS.target.fire = fastFood.id;
+      startFire(world);
+      expect(fastFood.onFire).toBe(true);
+      throughSaleWindow();
+      expect(eventOf(world, 'fire')).toBeDefined();
+      expect(forSale.onFire).toBe(false);
+      expect(forSale.vacant).toBe(true);
+      expect(forSale.occupancy).toBe(0);
+      expect(owners(forSale)).toBe(0);
+      expect(world.log.filter((e) => e.text.includes('was sold'))).toHaveLength(0);
+    });
+  });
+});
+
+describe('fire hold: the VIP and a booked thief wait outside too (audit 2026-09-25 B S6, decision 3)', () => {
+  it('keeps the VIP and the thief outside until the fire ends, and the visit is not an incident', () => {
+    const w = createWorld(11);
+    w.cash = 50_000_000;
+    w.stars = 5;
+    buildTower(w, [
+      ...lobbyRun(100, 199),
+      { kind: 'build', room: 'office', floor: 2, x: 100 },
+      { kind: 'build', room: 'hotelSuite', floor: 3, x: 100 },
+      { kind: 'build', room: 'shop', floor: 2, x: 120 },
+      { kind: 'shaft.build', shaft: 'standard', x: 190, floorMin: 1, floorMax: 3 },
+    ]);
+    const office = [...w.rooms.values()].find((r) => r.kind === 'office') as Room;
+    startVip(w);
+    const visit = eventOf(w, 'vip') as Extract<ActiveEvent, { kind: 'vip' }>;
+    visit.arrivesAt = w.time.minute + 2;
+    startTheft(w, (w.time.minute % 1440) + 3);
+    EVENT_TEST_HOOKS.target.fire = office.id;
+    startFire(w);
+
+    tickMany(w, 30);
+    expect(eventOf(w, 'fire')).toBeDefined();
+    expect(w.sims.get(visit.simId)?.state).toBe('outside');
+    expect(visit.phase).toBe('notice');
+    expect([...w.sims.values()].filter((s) => s.kind === 'thief')).toEqual([]);
+    expect(eventOf(w, 'theft')?.phase).toBe('notice');
+
+    expect(handleEventCommand(w, { kind: 'fire.callHelicopter' }).ok).toBe(true);
+    tickMany(w, 3);
+    expect(w.sims.get(visit.simId)?.state).not.toBe('outside');
+    expect(visit.incident).toBe(false);
+    expect([...w.sims.values()].filter((s) => s.kind === 'thief')).toHaveLength(1);
+  });
 });
 
 describe('bomb', () => {
@@ -247,6 +342,23 @@ describe('bomb', () => {
       ok: false,
       reason: 'There is no bomb threat right now.',
     });
+  });
+
+  // Audit 2026-09-25 I S2: a refused command leaves the world as it was; the ransom the
+  // tower cannot afford was never checked for cash or hash.
+  it('I S2: a ransom the tower cannot afford is refused and changes neither cash nor hash', () => {
+    threatenedTower(EVENTS.bomb.minStar, false);
+    at(world, ROLL_MINUTE);
+    expect(eventOf(world, 'bomb')).toBeDefined();
+    world.cash = 1_000;
+    const hash = hashWorld(world);
+    expect(handleEventCommand(world, { kind: 'bomb.pay' })).toEqual({
+      ok: false,
+      reason: `Not enough cash. The ransom is ${formatDollars(EVENTS.bomb.ransom)}.`,
+    });
+    expect(world.cash).toBe(1_000);
+    expect(hashWorld(world)).toBe(hash);
+    expect(eventOf(world, 'bomb')).toBeDefined();
   });
 
   it('security finds the bomb after searching every built floor', () => {
