@@ -1,0 +1,3 @@
+# Owner-reported items during the 2026-09-25 audit
+
+- 2026-09-25 | Matt, mid-audit: "the audit log of user stories.complaints etc is way too long, contains too much data on the screen and doesnt seem to fit. Not to mention this is a game for all not tech nerds nobody knows what an audit log is but us" | the panel is the one titled "Event log" (src/ui/panels.ts:958, LOG_PANEL_LINES = 200, timestamp plus text per row) | IMPORTANT, real-data lens (player-facing text and layout) | Evidence to close: the panel renamed in plain words, showing a short recent feed that fits a phone screen, with a screenshot at phone width; Matt's yes on the wording
