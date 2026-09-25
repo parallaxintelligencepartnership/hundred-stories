@@ -8,7 +8,7 @@ import { EDITION, type Edition } from './rules';
 import { deserialize, hashWorld } from './save';
 import { tick } from './tick';
 import type { World } from './types';
-import { createWorld } from './world';
+import { createWorld, type TowerStart } from './world';
 
 /** An entry the replay's sim refused. The original accepted it, so the worlds had parted by then. */
 export interface RefusedEntry {
@@ -47,8 +47,9 @@ function walk(
   untilTick: number,
   checks: readonly Checkpoint[],
   onCheck: (check: Checkpoint, world: World) => boolean,
+  start: TowerStart = {},
 ): ReplayResult & { stopped: boolean } {
-  const world = createWorld(startingNumber);
+  const world = createWorld(startingNumber, start);
   const refused: RefusedEntry[] = [];
   let c = 0;
   const checksBefore = (n: number): boolean => {
@@ -78,11 +79,18 @@ function walk(
  * Build a fresh world from its starting number and apply each logged command before the tick it
  * was applied before, then run on to `untilTick`. The world returned sits at minute `untilTick`
  * with every entry logged at or before that minute applied, which is the state a save written at
- * that minute holds. Throws when this build's edition cannot replay the log's.
+ * that minute holds. Throws when this build's edition cannot replay the log's. `start` is the log's
+ * own start (BuildLog.start), for a tower that did not begin with the standard cash.
  */
-export function replay(startingNumber: number, edition: Edition, log: readonly BuildLogEntry[], untilTick: number): ReplayResult {
+export function replay(
+  startingNumber: number,
+  edition: Edition,
+  log: readonly BuildLogEntry[],
+  untilTick: number,
+  start: TowerStart = {},
+): ReplayResult {
   if (!editionCanReplay(edition)) throw new Error(`A log from the ${edition} edition cannot be replayed in the ${EDITION} edition.`);
-  const { world, refused } = walk(startingNumber, log, untilTick, [], () => true);
+  const { world, refused } = walk(startingNumber, log, untilTick, [], () => true, start);
   return { world, refused };
 }
 
@@ -128,7 +136,7 @@ export function verifySave(text: string): VerifyResult {
     }
     bad = { check, actual };
     return false;
-  });
+  }, log.start);
   const firstRefused = refused[0] ?? null;
   if (bad === null && firstRefused === null) {
     return { status: 'match', tick: minute, hash: finalHash, entries: log.entries.length, checkpoints: log.checks.length };

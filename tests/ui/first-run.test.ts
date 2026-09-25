@@ -336,7 +336,7 @@ describe('tips', () => {
   it('shows one at a time: a tenant leaving, rent day, an event, a long wait', () => {
     const game = readyGame();
     const { root } = mount(game);
-    game.world.stats.tenantsLeftReasons['Too long waiting for an elevator on floor 4.'] = 1;
+    game.world.stats.tenantsLeftReasons['People waited too long for an elevator on floor 4.'] = 1;
     game.world.stats.lastQuarter = { income: 10_000, upkeep: 0, net: 10_000 };
     game.world.events.push({ kind: 'santa' });
     const hour = Math.floor(game.world.time.minute / 60);
@@ -351,7 +351,7 @@ describe('tips', () => {
     }
     expect(tipsOf(root)).toHaveLength(0);
     expect(seen).toContain('Someone waited over 5 minutes for a car, and another car from the elevator panel shortens the wait.Got it');
-    expect(seen).toContain('A tenant moved out: too long waiting for an elevator on floor 4.Got it');
+    expect(seen).toContain('A tenant moved out: people waited too long for an elevator on floor 4.Got it');
     expect(seen).toContain('Rent day: the tower took in $10,000 last quarter. The finances panel shows the details.Got it');
     expect(seen).toContain('Big events show up as alerts. When one needs you to choose, it has a button for that.Got it');
   });

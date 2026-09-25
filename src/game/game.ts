@@ -1,20 +1,33 @@
 // The game shell: owns the world, the clock loop, the active tool, pointer input on the tower view, and saves.
 import { canBuild, canBuildShaft, canExtendShaft } from '../sim/build';
-import { applyAndRecord, startBuildLog } from '../sim/buildlog';
+import { applyAndRecord, buildLogOf, startBuildLog } from '../sim/buildlog';
 import { markCheckpoint } from '../sim/replay';
 import { LIMITS, ROOMS, SHAFTS } from '../sim/rules';
 import { deserialize, serialize } from '../sim/save';
 import { tick } from '../sim/tick';
 import { clockOf, type Command, type CommandResult, type Id, type Shaft, type World } from '../sim/types';
-import { createWorld, log as logEvent } from '../sim/world';
+import { createWorld, log as logEvent, type TowerStart } from '../sim/world';
 import { SCHEDULES } from '../sim/rules';
 import { classifyPress, isTap, PRESS_SLOP_PX, TOUCH_SLOP_PX } from '../render/input';
 import type { Renderer } from '../render/renderer';
-import { NIGHT_MULTIPLIER, type GameApi, type Placement, type PlacementRect, type Speed, type Tool } from './api';
-import { readSave, stashUnreadable, writeSave } from './storage';
+import { NIGHT_MULTIPLIER, type DailyChoice, type DailyInfo, type GameApi, type Placement, type PlacementRect, type Speed, type Tool } from './api';
+import { readSave, readSlot, stashUnreadable, writeSave, writeSlot, type SlotName } from './storage';
+import {
+  DAILY_END_MINUTE,
+  dailyFinished,
+  dailyMode,
+  dailyOpening,
+  dailyStart,
+  dailyTwist,
+  dateOfMode,
+  localDateKey,
+  previousDateKey,
+} from './daily';
 import { createTap, drainTap, isBuildCommand, primeTap, type GameEvent, type GameEventListener } from './events';
 
 const TICKS_PER_SECOND_AT_1X = 10;
+/** The refusal for a build after today's tower has ended, in the player's words. */
+export const DAILY_OVER_REASON = "Today's tower is over. Come back tomorrow for a new one.";
 /** The largest interpolation alpha while the clock runs: the frame never reaches the next tick's position early. */
 const ALPHA_MAX = 1 - 1e-9;
 const MAX_TICKS_PER_FRAME = 240;
@@ -75,6 +88,10 @@ export interface GameClock {
   scheduleIdle(run: () => void): () => void;
   /** True while the tab is hidden: the timer drives the sim then, the frame loop otherwise. */
   hidden(): boolean;
+  /** The player's local calendar date, YYYY-MM-DD: the only place the daily reads the date. */
+  today(): string;
+  /** A fresh starting number for a new tower in My tower. */
+  freshSeed(): number;
 }
 
 /**
@@ -162,11 +179,21 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     now: clock.now ?? (() => performance.now()),
     scheduleIdle: clock.scheduleIdle ?? scheduleIdle,
     hidden: clock.hidden ?? documentHidden,
+    today: clock.today ?? (() => localDateKey()),
+    freshSeed: clock.freshSeed ?? (() => Math.floor(Date.now() % 1_000_000)),
   };
   // Every player command reaches the sim through applyAndRecord, the one recording boundary, so
   // the build log beside the world holds everything a replay needs (src/sim/buildlog.ts).
   let world: World = createWorld(seed);
   startBuildLog(world);
+  // Which save slot this world lives in (src/game/storage.ts). Every save and load goes to it.
+  let slot: SlotName = 'mine';
+  // Moved since it was last saved or loaded: leaving a slot saves it only then, so opening
+  // another slot never rewrites a tower that did not change.
+  let dirty = false;
+  // Set while the daily slot holds an unfinished tower from an earlier date and the player
+  // has not yet chosen between finishing it and starting today's.
+  let dailyChoice: DailyChoice | null = null;
   let tool: Tool = { kind: 'none' };
   let speed: Speed = 1;
   let speedBeforePause: Speed = 1;
@@ -258,17 +285,44 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     const now = time.now();
     const dt = Math.min(1, (now - last) / 1000 || 0);
     last = now;
-    if (speed === 0 || world.gameOver) return 0;
+    if (speed === 0 || world.gameOver || dailyOver()) return 0;
     const rate = TICKS_PER_SECOND_AT_1X * speed * (isNight() ? NIGHT_MULTIPLIER : 1);
     loop.accumulator += dt * rate;
+    // A daily never runs past its last minute, however many ticks a night burst earned.
+    if (slot === 'daily') loop.accumulator = Math.min(loop.accumulator, DAILY_END_MINUTE - world.time.minute);
     const minuteBefore = world.time.minute;
     const n = drainTicks(loop, runTick, time.now, drainLimits);
     if (n > 0) {
+      dirty = true;
       drainEvents();
+      if (dailyOver()) {
+        endDaily();
+        return n;
+      }
       notify();
       maybeAutosave(minuteBefore, world.time.minute);
     }
     return n;
+  }
+
+  /** The date of the daily in hand, or null outside the daily slot. */
+  function dailyDate(): string | null {
+    if (slot !== 'daily') return null;
+    return dateOfMode(buildLogOf(world).mode);
+  }
+
+  function dailyOver(): boolean {
+    return slot === 'daily' && dailyFinished(world);
+  }
+
+  /** The daily reached its end: stop the clock and keep the result. The ui shows the card. */
+  function endDaily(): void {
+    speed = 0;
+    loop.accumulator = 0;
+    cancelAutosave?.();
+    cancelAutosave = null;
+    notify();
+    void saveWorld(true);
   }
 
   // While the tab is visible the frame loop drives the sim, so ticks land on frame boundaries and
@@ -306,7 +360,8 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
   async function saveWorld(quiet: boolean): Promise<CommandResult> {
     try {
       markCheckpoint(world); // the hash here lets a replay find where it drifted
-      await writeSave(serialize(world));
+      await writeTo(slot, serialize(world));
+      dirty = false;
       if (!quiet) {
         logEvent(world, 'Game saved.', 'info');
         notify();
@@ -315,6 +370,70 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     } catch (e) {
       return { ok: false, reason: e instanceof Error ? e.message : 'Could not save.' };
     }
+  }
+
+  // My tower goes through the original writeSave and readSave; the other slots by name.
+  function writeTo(name: SlotName, text: string): Promise<void> {
+    return name === 'mine' ? writeSave(text) : writeSlot(name, text);
+  }
+
+  function readFrom(name: SlotName): Promise<string | null> {
+    return name === 'mine' ? readSave() : readSlot(name);
+  }
+
+  /** Put a world in hand: the same reset importSave and newGame do. */
+  function swapWorld(next: World): void {
+    world = next;
+    dirty = false;
+    primeTap(tap, world);
+    selection = null;
+    tool = { kind: 'none' };
+    pending = null;
+    loop.accumulator = 0;
+    renderer?.resetMotion(); // no sprite may lerp from the old tower into the new one
+    renderer?.setSelection(null);
+    renderer?.setGhost(null);
+    renderer?.camera.reset();
+  }
+
+  /** A fresh tower in hand, from its number and its start. */
+  function freshTower(newSeed: number, begin: { start?: TowerStart; mode?: string } = {}): void {
+    const next = createWorld(newSeed, begin.start);
+    startBuildLog(next, undefined, begin);
+    swapWorld(next);
+  }
+
+  /**
+   * Move to another slot. The slot being left is saved first, but only when its tower moved
+   * since it was last saved or loaded, so a slot nobody played in is never rewritten.
+   */
+  async function enterSlot(next: SlotName): Promise<void> {
+    dailyChoice = null;
+    if (next === slot) return;
+    if (dirty) await saveWorld(true);
+    slot = next;
+    dirty = false;
+  }
+
+  /** A slot's save as a world. Null when there is none or it does not read. */
+  async function readWorld(name: SlotName): Promise<World | null> {
+    const text = await readFrom(name);
+    if (!text) return null;
+    const res = deserialize(text);
+    return res.ok ? res.world : null;
+  }
+
+  function startSpeed(): void {
+    speed = 1;
+    speedBeforePause = 1;
+  }
+
+  /** Today's tower, begun fresh on today's date and saved into the daily slot at once. */
+  async function beginToday(today: string): Promise<void> {
+    freshTower(dailyStart(today), { start: dailyTwist(today).start, mode: dailyMode(today) });
+    startSpeed();
+    notify();
+    await saveWorld(true);
   }
 
   function frame(): void {
@@ -631,7 +750,9 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
       return world;
     },
     apply(cmd: Command): CommandResult {
+      if (dailyOver()) return { ok: false, reason: DAILY_OVER_REASON };
       const res = applyAndRecord(world, cmd);
+      if (res.ok) dirty = true;
       if (!res.ok) logEvent(world, res.reason, 'warn');
       else followBuild(cmd);
       if (res.ok && eventListeners.size > 0 && isBuildCommand(cmd.kind)) emit({ kind: 'build', command: cmd.kind });
@@ -656,6 +777,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     },
     getTool: () => tool,
     setSpeed(s) {
+      if (dailyOver() || (dailyChoice && s > 0)) return; // the result card or the choice stands
       speed = s;
       if (s > 0) speedBeforePause = s;
       notify();
@@ -730,7 +852,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
       });
     },
     confirmPending(): CommandResult {
-      if (!pending) return { ok: false, reason: 'There is nothing waiting to be built.' };
+      if (!pending) return { ok: false, reason: 'Pick a spot to build first.' };
       const at = pending;
       const cmd: Command | null = at.shaftId !== undefined
         ? { kind: 'shaft.extend', shaftId: at.shaftId, floorMin: at.floorMin, floorMax: at.floorMax }
@@ -741,7 +863,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
             : null;
       if (!cmd) {
         clearPending();
-        return { ok: false, reason: 'There is nothing waiting to be built.' };
+        return { ok: false, reason: 'Pick a spot to build first.' };
       }
       const res = api.apply(cmd); // apply logs the refusal, so a failure keeps the outline up
       if (res.ok) clearPending();
@@ -755,20 +877,22 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
       return saveWorld(false); // the player pressed Save, so this one logs
     },
     async load() {
-      const text = await readSave();
+      const text = await readFrom(slot);
       if (!text) return { ok: false, reason: 'There is no saved game yet.' };
       const res = deserialize(text);
       if (!res.ok) {
         stashUnreadable(text);
         logEvent(
           world,
-          `Your saved tower could not be read: ${res.reason} A copy is kept in this browser. Starting a fresh lot.`,
+          `We could not open your saved tower. ${res.reason} We kept a copy of it. You are starting a new tower.`,
           'warn'
         );
         notify();
         return { ok: false, reason: res.reason };
       }
-      return api.importSave(text);
+      const loaded = api.importSave(text);
+      if (loaded.ok) dirty = false; // what is in hand is what the slot holds
+      return loaded;
     },
     exportSave() {
       markCheckpoint(world);
@@ -778,6 +902,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
       const res = deserialize(text);
       if (!res.ok) return res;
       world = res.world;
+      dirty = true; // an opened file is not in the slot until the next save
       primeTap(tap, world);
       selection = null;
       renderer?.resetMotion(); // no sprite may lerp from the old tower into the new one
@@ -785,9 +910,72 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
       notify();
       return { ok: true };
     },
+    getSlot: () => slot,
+    getDaily(): DailyInfo | null {
+      const date = dailyDate();
+      if (date === null) return null;
+      const twist = dailyTwist(date);
+      return { date, twist: { name: twist.name, line: twist.line }, endMinute: DAILY_END_MINUTE, finished: dailyFinished(world) };
+    },
+    getDailyChoice: () => dailyChoice,
+    async openDaily() {
+      const today = time.today();
+      if (slot === 'daily' && dailyDate() === today && !dailyChoice) return;
+      await enterSlot('daily');
+      const saved = await readWorld('daily');
+      const savedDate = saved ? dateOfMode(buildLogOf(saved).mode) : null;
+      const opening = dailyOpening(saved && savedDate !== null ? { date: savedDate, finished: dailyFinished(saved) } : null, today);
+      if (opening === 'fresh' || !saved || savedDate === null) {
+        await beginToday(today);
+        return;
+      }
+      swapWorld(saved);
+      if (opening === 'choose') {
+        // The older tower stands, stopped, behind the choice.
+        speed = 0;
+        dailyChoice = { savedDate, today, yesterday: previousDateKey(today) === savedDate };
+      } else if (dailyFinished(saved)) speed = 0;
+      else startSpeed();
+      notify();
+    },
+    async chooseDaily(which) {
+      const choice = dailyChoice;
+      if (!choice) return;
+      dailyChoice = null;
+      if (which === 'finish') {
+        startSpeed();
+        notify();
+        return;
+      }
+      await beginToday(choice.today);
+    },
+    async openFriend(friendSeed) {
+      await enterSlot('friend');
+      // The same link opened again goes on with the tower it started; another link starts over.
+      const saved = await readWorld('friend');
+      if (saved && saved.seed === friendSeed) swapWorld(saved);
+      else {
+        freshTower(friendSeed);
+        await saveWorld(true);
+      }
+      startSpeed();
+      notify();
+    },
+    async openMyTower() {
+      await enterSlot('mine');
+      const saved = await readWorld('mine');
+      if (saved) swapWorld(saved);
+      else {
+        freshTower(time.freshSeed());
+        await saveWorld(true);
+      }
+      startSpeed();
+      notify();
+    },
     newGame(newSeed) {
       world = createWorld(newSeed);
       startBuildLog(world);
+      dailyChoice = null;
       primeTap(tap, world);
       selection = null;
       renderer?.resetMotion();

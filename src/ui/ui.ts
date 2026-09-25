@@ -57,13 +57,14 @@ import { createStatusBar, speedModeText } from './status';
 import { placementNote } from './explain';
 import { createHoverCard } from './hover';
 import { createViewControl } from './overlays';
+import { createDailyPanel, dailyCard } from './daily';
 
 export interface Ui {
   destroy(): void;
   update(): void;
 }
 
-type PanelKind = 'none' | 'finances' | 'log' | 'settings' | 'share' | 'intro' | 'stories' | 'recap' | 'chronicle';
+type PanelKind = 'none' | 'finances' | 'log' | 'settings' | 'share' | 'intro' | 'stories' | 'recap' | 'chronicle' | 'daily';
 
 /** Real milliseconds the star card stays up unless closed first. */
 export const STAR_CARD_LINGER_MS = 20_000;
@@ -190,6 +191,10 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   /** The star card: the story seq it last looked at, and the card on screen, if any. */
   let starStorySeq = 0;
   let starToast: HTMLElement | null = null;
+  /** The message and link the share panel uses instead of the tower's own, while it is open for a daily. */
+  let shareWords: { text: string; url: string } | null = null;
+  /** The daily card last put up by itself, so each one opens once and Close keeps it closed. */
+  let dailyShownKey = '';
 
   const shell = el('div', 'hs-ui');
   // The icon symbols, once for the whole chrome; every icon() refers to them by id.
@@ -245,7 +250,10 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   const menuButton = button('Menu', 'hs-btn', () =>
     setPanel(panelKind === 'settings' ? 'none' : 'settings'),
   );
-  actions.append(status.mode, speedBar, shareButton, menuButton);
+  // Outside My tower (today's tower, a friend's tower) one tap goes back to it.
+  const myTowerButton = button('My tower', 'hs-btn', () => openMyTower());
+  myTowerButton.hidden = true;
+  actions.append(status.mode, speedBar, myTowerButton, shareButton, menuButton);
 
   // Palette: a building directory board, with a header row that folds it away.
   const palette = el('nav', 'hs-palette');
@@ -408,6 +416,12 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     openChronicle() {
       setPanel('chronicle');
     },
+    openDaily() {
+      void switchTower(() => game.openDaily());
+    },
+    openMyTower() {
+      openMyTower();
+    },
     select(sel) {
       // A name in a list is a way into that person: the list's panel steps aside for theirs.
       if (panelKind !== 'none') panelKind = 'none';
@@ -444,6 +458,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     const world = game.world;
     const speed = game.getSpeed();
     if (world !== seenWorld) onWorld(world);
+    myTowerButton.hidden = (game.getSlot?.() ?? 'mine') === 'mine';
+    watchDaily();
 
     status.update(world, speed);
 
@@ -514,6 +530,53 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
       if (starToast === node) starToast = null;
     }, STAR_CARD_LINGER_MS);
     timers.add(timer);
+  }
+
+  /**
+   * Today's tower puts up its own card: the twist when a daily starts, the choice when an older
+   * one is waiting, the result when it ends. Each once; the intro is never pushed aside.
+   */
+  function watchDaily(): void {
+    const card = dailyCard(game);
+    const daily = game.getDaily?.() ?? null;
+    const choice = game.getDailyChoice?.() ?? null;
+    const key = card === null ? '' : `${card}:${choice ? choice.savedDate : daily?.date ?? ''}`;
+    if (key === dailyShownKey) return;
+    if (key === '') {
+      dailyShownKey = '';
+      if (panelKind === 'daily') panelKind = 'none';
+      return;
+    }
+    if (panelKind === 'intro') return;
+    dailyShownKey = key;
+    shareWords = null;
+    panelKind = 'daily';
+  }
+
+  /** Point the page address at the tower in hand, so a reload opens the same slot. */
+  function syncAddress(): void {
+    if (typeof history === 'undefined' || typeof location === 'undefined') return;
+    const slot = game.getSlot();
+    const daily = game.getDaily();
+    const query = slot === 'daily' && daily ? `?daily=${daily.date}` : slot === 'friend' ? `?seed=${game.world.seed}` : '';
+    try {
+      history.replaceState(null, '', `${location.pathname}${query}`);
+    } catch {
+      // an address the browser will not rewrite changes nothing about the game
+    }
+  }
+
+  /** Move to another tower, then show it from the top with nothing open. */
+  async function switchTower(open: () => Promise<void>): Promise<void> {
+    await open();
+    syncAddress();
+    panelKind = 'none';
+    mountedKey = '';
+    update();
+  }
+
+  function openMyTower(): void {
+    void switchTower(() => game.openMyTower());
   }
 
   function refreshHoverReadout(): void {
@@ -859,7 +922,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     const selection = game.getSelection();
     const key =
       panelKind !== 'none'
-        ? `panel:${panelKind}`
+        ? `panel:${panelKind}${panelKind === 'daily' ? `:${dailyCard(game) ?? ''}` : ''}`
         : selection
           ? `query:${selection.roomId ?? ''}:${selection.simId ?? ''}:${selection.shaftId ?? ''}:${
               selectionExists(selection) ? '1' : '0'
@@ -890,7 +953,23 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
           : panelKind === 'settings'
             ? createSettingsPanel(game, ctx)
             : panelKind === 'share'
-              ? createSharePanel(game, renderer, ctx)
+              ? createSharePanel(game, renderer, ctx, shareWords ?? undefined)
+              : panelKind === 'daily'
+                ? createDailyPanel(game, ctx, {
+                    share(text, url) {
+                      shareWords = { text, url };
+                      panelKind = 'share';
+                      update();
+                    },
+                    myTower: () => openMyTower(),
+                    choose(which) {
+                      void game.chooseDaily(which).then(() => {
+                        syncAddress();
+                        mountedKey = '';
+                        update();
+                      });
+                    },
+                  })
               : panelKind === 'stories'
                 ? createStoriesPanel(game, ctx)
                 : panelKind === 'recap'
@@ -988,6 +1067,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   function setPanel(kind: PanelKind): void {
     // Any way out of the intro (Skip, Close, finishing, another panel) counts as seen.
     if (panelKind === 'intro' && kind !== 'intro') markIntroSeen();
+    if (kind !== 'share') shareWords = null;
     panelKind = kind;
     update();
   }

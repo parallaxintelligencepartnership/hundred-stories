@@ -86,6 +86,10 @@ export interface PanelContext {
   openRecap?: () => void;
   /** Open the tower chronicle, from the stories panel. */
   openChronicle?: () => void;
+  /** Open today's tower in its own slot, from the settings panel. */
+  openDaily?: () => void;
+  /** Go back to My tower, from the settings panel outside it. */
+  openMyTower?: () => void;
   /** Put another person or room in the query panel, closing whichever panel asked. */
   select?: (sel: Selection) => void;
 }
@@ -157,7 +161,7 @@ export function button(label: string, className: string, onClick: () => void): H
   return node;
 }
 
-function row(label: string, value: string): HTMLDivElement {
+export function row(label: string, value: string): HTMLDivElement {
   const node = el('div', 'hs-row');
   node.append(el('span', 'hs-row-label', label), el('span', 'hs-row-value', value));
   return node;
@@ -1274,13 +1278,23 @@ export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElem
 
   // A new tower always gets a fresh random start. The starting number is still reachable
   // through the page address (?seed=, read in main.ts) for testing, never from this panel.
+  // New game only ever replaces My tower, so outside it the button is My tower instead. Today's
+  // tower sits beside it and opens in its own slot.
   const newGame = el('div', 'hs-actions');
-  newGame.append(
-    button('New game', 'hs-btn', () => {
-      game.newGame(freshStart());
-      ctx.notice('New game started.');
-    }),
-  );
+  const slot = game.getSlot?.() ?? 'mine';
+  const openMine = ctx.openMyTower;
+  if (slot === 'mine') {
+    newGame.append(
+      button('New game', 'hs-btn', () => {
+        game.newGame(freshStart());
+        ctx.notice('New game started.');
+      }),
+    );
+  } else if (openMine) {
+    newGame.append(button('My tower', 'hs-btn', () => openMine()));
+  }
+  const openDaily = ctx.openDaily;
+  if (openDaily && slot !== 'daily') newGame.append(button("Today's tower", 'hs-btn', () => openDaily()));
   body.append(section('New game'), newGame);
 
   const motion = section('Display');
@@ -1365,13 +1379,22 @@ function soundSection(sound: Sound): HTMLDivElement {
 
 // ----------------------------------------------------------- share panel
 
-export function createSharePanel(game: GameApi, renderer: Renderer, ctx: PanelContext): PanelElement {
+/**
+ * The share panel. `words`, when given, replaces the message and the link (today's tower shares
+ * its score and a link to the same day); the picture and the share sheet are the same.
+ */
+export function createSharePanel(
+  game: GameApi,
+  renderer: Renderer,
+  ctx: PanelContext,
+  words?: { text: string; url: string },
+): PanelElement {
   const { panel, body } = panelShell('Share', 'share', ctx);
 
   const stats = shareStats(game.world);
-  const text = shareText(stats);
-  const url = shareUrl(stats);
-  const message = shareMessage(stats);
+  const text = words ? words.text : shareText(stats);
+  const url = words ? words.url : shareUrl(stats);
+  const message = words ? `${text}\n${url}` : shareMessage(stats);
 
   const preview = el('div', 'hs-share-preview');
   body.append(preview);

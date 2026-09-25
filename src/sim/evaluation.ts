@@ -107,22 +107,22 @@ function label(kind: RoomKind): string {
 export function leaveReasonFor(world: World, room: Room): string {
   const noisy = ROOMS[room.kind].quiet ? noisyNeighborsOf(world, room) : [];
   const penalties = [
-    { weight: room.infested ? EVAL.infestedPenalty : 0, text: `Cockroaches in the ${label(room.kind)} on floor ${room.floor}.` },
+    { weight: room.infested ? EVAL.infestedPenalty : 0, text: `There were cockroaches in the ${label(room.kind)} on floor ${room.floor}.` },
     {
       weight: room.dirty ? EVAL.dirtyPenalty : 0,
       // A room held dirty by uncollected waste (recycling.ts) says so.
       text:
         room.wasteBacklogSince != null
-          ? `Nobody collected the waste from the ${label(room.kind)} on floor ${room.floor}.`
+          ? `Nobody took away the trash from the ${label(room.kind)} on floor ${room.floor}.`
           : `Nobody cleaned the ${label(room.kind)} on floor ${room.floor}.`,
     },
     {
       weight: EVAL.noisePenaltyPerNeighbor * noisy.length,
-      text: noisy.length > 0 ? `Too noisy next to the ${label((noisy[0] as Room).kind)} on floor ${room.floor}.` : '',
+      text: noisy.length > 0 ? `It was too loud next to the ${label((noisy[0] as Room).kind)} on floor ${room.floor}.` : '',
     },
     {
       weight: EVAL.stressWeight * averageTenantStress(world, room),
-      text: `Too long waiting for an elevator on floor ${room.floor}.`,
+      text: `People waited too long for an elevator on floor ${room.floor}.`,
     },
     {
       weight: takesRent(room.kind) ? (Math.max(0, room.rent - 100) / 100) * RENT.evalWeight : 0,
@@ -131,7 +131,7 @@ export function leaveReasonFor(world: World, room: Room): string {
   ];
   let best = penalties[0] as { weight: number; text: string };
   for (const p of penalties) if (p.text !== '' && p.weight > best.weight) best = p;
-  if (best.text === '') return `Life on floor ${room.floor} was not worth the rent.`;
+  if (best.text === '') return `Floor ${room.floor} was not worth the rent.`;
   return best.text;
 }
 

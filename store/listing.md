@@ -44,7 +44,7 @@ Every room, price, elevator and stress rule is set up so a tower can fail. Tenan
 
 Build a tower. Run it well.
 
-Hundred Stories is a tower-building simulation with pixel art drawn in code. Start with a lobby and a little cash. Place offices, condos, hotel rooms, shops and restaurants, run elevators up through the floors, and keep the people inside happy enough to stay.
+Hundred Stories is a tower-building simulation with hand-illustrated, drawn in code. Start with a lobby and a little cash. Place offices, condos, hotel rooms, shops and restaurants, run elevators up through the floors, and keep the people inside happy enough to stay.
 
 A hundred stories is the height of a tower worth building. It is also what goes on inside one: the tenant on 40 who wants a quieter floor, the shop on 2 that counts on the lunch crowd, the hotel guest who missed the last express elevator and is not coming back. Every floor is a story. Everyone's got one.
 

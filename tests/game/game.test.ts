@@ -132,7 +132,7 @@ describe('save and load through the browser slot', () => {
 
     expect(result.ok).toBe(false);
     expect(
-      fresh.world.log.some((line) => line.level === 'warn' && line.text.includes('could not be read')),
+      fresh.world.log.some((line) => line.level === 'warn' && line.text.includes('We could not open your saved tower.')),
     ).toBe(true);
     expect(stashUnreadable).toHaveBeenCalledTimes(1);
     expect(stashUnreadable).toHaveBeenCalledWith(text);

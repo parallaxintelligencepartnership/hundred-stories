@@ -68,7 +68,7 @@ export function onQuarterStart(world: World): void {
     const streak = (world.stats.badQuarterStreak ?? 0) + 1;
     world.stats.badQuarterStreak = streak;
     if (streak >= ECONOMY.bankruptAfterQuarters && !world.gameOver) {
-      world.gameOver = { at: world.time.minute, reason: 'The bank has foreclosed on the tower.' };
+      world.gameOver = { at: world.time.minute, reason: 'The bank took the tower back.' };
       log(world, 'The bank took the tower because your cash stayed too low for too long.', 'alert');
     }
   } else {

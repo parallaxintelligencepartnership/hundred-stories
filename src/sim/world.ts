@@ -6,13 +6,23 @@ import { LIMITS } from './rules';
 import { createStoryState } from './story';
 import type { FloorIndex, Id, LogEntry, Room, Shaft, Sim, World } from './types';
 
-export function createWorld(seed: number): World {
+/**
+ * What a tower may start with besides its starting number. Empty is the standard start. The
+ * daily tower (src/game/daily.ts) uses `cash` for its Tight money day; the build log keeps the
+ * start beside the log so a replay begins from the same place (src/sim/buildlog.ts).
+ */
+export interface TowerStart {
+  cash?: number;
+}
+
+export function createWorld(seed: number, start: TowerStart = {}): World {
+  const cash = start.cash ?? LIMITS.startingCash;
   return {
     seed,
     rng: createRng(seed),
     time: { minute: 6 * 60 }, // a new game opens at 06:00 on the first weekday
-    cash: LIMITS.startingCash,
-    quarterStartCash: LIMITS.startingCash, // a new game opens inside its first quarter
+    cash,
+    quarterStartCash: cash, // a new game opens inside its first quarter
     stars: 1,
     population: 0,
     dayStartPopulation: 0,

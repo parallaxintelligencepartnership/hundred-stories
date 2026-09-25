@@ -316,7 +316,7 @@ export interface Tip {
   text: string;
 }
 
-/** "Too noisy next to ..." reads on after a colon as "too noisy next to ...". */
+/** "It was too loud next to ..." reads on after a colon as "it was too loud next to ...". */
 function lowerFirst(text: string): string {
   return text.charAt(0).toLowerCase() + text.slice(1);
 }
