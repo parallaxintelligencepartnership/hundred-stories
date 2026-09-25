@@ -40,7 +40,7 @@ Save format: 0.5.0 still writes format 5, with one optional field (the cockroach
 
 - Cloudflare: `npx wrangler rollback` returns the live site to the previous uploaded version; `npx wrangler versions list` shows the versions. Or check out the previous tag and `npm run deploy`.
 - pi3: `deploy.sh` snapshots the live tree to `html.prev` before every sync; the swap is in `deploy/README.md` under Rollback.
-- Return target for this ship: `git checkout ship-2026-09-25`. Previous good state: `ship-2026-09-24b` (0.4.10), or `npx wrangler rollback` to the 0.4.10 version 9d224970-fa39-41f6-a1aa-bd205166a0b6.
+- Return target for this ship: `git checkout ship-2026-09-25`; the live 0.5.0 version is 994e5173-dcba-4b0f-a50e-05b99d255c1c. Previous good state: `ship-2026-09-24b` (0.4.10), or `npx wrangler rollback` to the 0.4.10 version 9d224970-fa39-41f6-a1aa-bd205166a0b6.
 
 ## Known limitations and accepted risks
 No finding was accepted; the accepted risks list is empty, and at the 0.5.0 ship no finding of any severity is open in `.itworks/REVIEWS.md`.
