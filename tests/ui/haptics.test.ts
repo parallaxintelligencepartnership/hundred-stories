@@ -133,7 +133,7 @@ describe('the Haptics switch', () => {
     const list = row.parentNode!;
     expect(list.parentNode!.textContent).toContain('Display');
     expect(list.children.at(-1)).toBe(row);
-    expect(row.textContent).toBe('Haptics');
+    expect(row.textContent).toBe('Vibration');
     // On by default; off is stored and read back.
     expect(hapticsEnabled()).toBe(true);
     expect(control.getAttribute('role')).toBe('switch');

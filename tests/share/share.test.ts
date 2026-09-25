@@ -127,7 +127,8 @@ describe('parseChallenge', () => {
   });
 
   it('rejects values out of range', () => {
-    expect(parseChallenge('?floors=0&people=340&stars=4')).toBeNull();
+    // A tower with nothing above ground yet shares floors 0, and that link reads (audit 2026-09-25, E2 S6).
+    expect(parseChallenge('?floors=0&people=0&stars=1')).toEqual({ floors: 0, people: 0, stars: 1 });
     expect(parseChallenge('?floors=201&people=340&stars=4')).toBeNull();
     expect(parseChallenge('?floors=12&people=1000000&stars=4')).toBeNull();
     expect(parseChallenge('?floors=12&people=340&stars=0')).toBeNull();

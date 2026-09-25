@@ -276,6 +276,25 @@ describe('the bomb card', () => {
     expect(bombCards(h.root)).toHaveLength(0);
   });
 
+  // Decision 12 (audit 2026-09-25): like the fire card's helicopter, Pay ransom is disabled
+  // while the tower cannot afford it, with the reason beside it, and comes back when it can.
+  it('disables Pay ransom when cash is short, and enables it again when the cash is there', () => {
+    const world = bombTower();
+    world.cash = EVENTS.bomb.ransom - 1;
+    const h = mount(world);
+    startBomb(world);
+    h.notify();
+    const card = bombCards(h.root)[0]!;
+    const pay = buttonOf(card, 'bomb.pay');
+    expect(pay?.textContent).toBe('Pay ransom');
+    expect(pay?.disabled).toBe(true);
+    expect(card.textContent).toContain('Not enough cash. The ransom is $500,000.');
+    world.cash = EVENTS.bomb.ransom;
+    h.notify();
+    expect(buttonOf(card, 'bomb.pay')?.disabled).toBe(false);
+    expect(card.textContent).not.toContain('Not enough cash');
+  });
+
   it('shows the blast as the outcome when nobody pays', () => {
     const world = bombTower();
     const h = mount(world);

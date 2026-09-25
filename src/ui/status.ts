@@ -160,7 +160,7 @@ export function nightArcPath(): string {
 export function speedModeText(speed: Speed, minute: number): string {
   if (!isNightMinute(clockOf(Math.max(0, Math.floor(minute))).minuteOfDay)) return '';
   if (speed === 0) return `Paused, night x${NIGHT_MULTIPLIER}`;
-  return `Night x${NIGHT_MULTIPLIER}, x${speed * NIGHT_MULTIPLIER} in all`;
+  return `Night: ${speed * NIGHT_MULTIPLIER} times as fast`;
 }
 
 // --------------------------------------------------------------- weather

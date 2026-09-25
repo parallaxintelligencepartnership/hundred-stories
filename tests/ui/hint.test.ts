@@ -56,7 +56,7 @@ describe('a blocked localStorage', () => {
 
 describe('hintText', () => {
   it('tells a finger about fingers', () => {
-    expect(hintText(true)).toBe('Move: one finger. Zoom: pinch. Tap to place.');
+    expect(hintText(true)).toBe('Move: one finger. Zoom: pinch. Tap a spot, then tap Build.');
   });
 
   it('keeps the wheel, the keys and the click for a mouse', () => {

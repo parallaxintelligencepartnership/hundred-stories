@@ -17,13 +17,15 @@ const throwing: PrefStore = {
 };
 
 describe('prefs', () => {
-  it('never throws with a storage that throws, and reads nothing from it', () => {
+  it('never throws with a storage that throws, and keeps the choices for this session', () => {
+    expect(getPref(PREF_KEYS.introSeen, throwing)).toBe(null);
+    expect(getList(PREF_KEYS.tips, throwing)).toEqual([]);
     expect(() => setPref(PREF_KEYS.introSeen, 'true', throwing)).not.toThrow();
     expect(() => setFlag(PREF_KEYS.guideDone, true, throwing)).not.toThrow();
     expect(() => addToList(PREF_KEYS.tips, 'nightSpeed', throwing)).not.toThrow();
-    expect(getPref(PREF_KEYS.introSeen, throwing)).toBe(null);
-    expect(getFlag(PREF_KEYS.guideDone, throwing)).toBe(null);
-    expect(getList(PREF_KEYS.tips, throwing)).toEqual([]);
+    expect(getPref(PREF_KEYS.introSeen, throwing)).toBe('true');
+    expect(getFlag(PREF_KEYS.guideDone, throwing)).toBe(true);
+    expect(getList(PREF_KEYS.tips, throwing)).toEqual(['nightSpeed']);
   });
 
   it('answers null with no storage at all', () => {

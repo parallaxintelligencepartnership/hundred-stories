@@ -5,7 +5,8 @@
 import { EVENT_ROLL_MINUTE_OF_DAY, vipSafetyBand, vipWaitBand } from '../sim/events';
 import { personName } from '../sim/identity';
 import { EVENTS } from '../sim/rules';
-import { carCovers, clockOf } from '../sim/types';
+import { entrances, findRoute } from '../sim/routing';
+import { clockOf, riderClassOf } from '../sim/types';
 import type { ActiveEvent, Room, VipRating, VipVisitRecord, World } from '../sim/types';
 import { formatClock, formatDate } from './format';
 
@@ -64,18 +65,21 @@ function suiteOf(world: VipWorld, visit: VipEvent): Room | undefined {
   return visit.suiteId === null ? undefined : world.rooms?.get(visit.suiteId);
 }
 
-/** Does a car a hotel guest may ride stop at this floor and at the lobby? The lobby floor needs none. */
-function elevatorServes(world: VipWorld, floor: number): boolean {
-  if (floor === 1) return true;
-  for (const shaft of world.shafts?.values() ?? []) {
-    if (shaft.kind === 'service') continue;
-    if (!shaft.stops.has(floor) || !shaft.stops.has(1)) continue;
-    const car = shaft.cars.find(
-      (c) => (c.serves === 'any' || c.serves === 'hotel') && carCovers(shaft, c, floor) && carCovers(shaft, c, 1),
-    );
-    if (car) return true;
-  }
-  return false;
+/**
+ * Can the VIP get from the lobby door to the suite, the way the sim routes a hotel guest
+ * (sendVipToSuite: stairs, escalators, any car a guest may ride, a sky lobby transfer)? A world
+ * without the parts routing reads (a partial test world) answers no.
+ */
+function vipCanReach(world: VipWorld, suite: Room): boolean {
+  if (!isRoutable(world)) return false;
+  const door = entrances(world).find((p) => p.floor === 1);
+  if (!door) return false;
+  const center = suite.x + Math.floor(suite.width / 2);
+  return findRoute(world, door, { floor: suite.floor, x: center }, { riderClass: riderClassOf('vip') }) !== null;
+}
+
+function isRoutable(world: VipWorld): world is World {
+  return world.rooms instanceof Map && world.shafts instanceof Map;
 }
 
 function incidentActive(world: VipWorld): boolean {
@@ -90,8 +94,8 @@ export function vipChecklist(world: VipWorld, visit: VipEvent): VipCheck[] {
     { label: 'A suite is ready for them', done: suite !== undefined },
     { label: 'The suite is clean', done: suite !== undefined && !suite.dirty && !suite.infested },
     {
-      label: floor === null ? 'An elevator stops at the suite floor' : floor === 1 ? 'The suite is on the lobby floor' : `An elevator stops at ${floorText(floor)}`,
-      done: floor !== null && elevatorServes(world, floor),
+      label: floor === null ? 'The VIP can get to the suite' : floor === 1 ? 'The suite is on the lobby floor' : `The VIP can get to ${floorText(floor)}`,
+      done: suite !== undefined && vipCanReach(world, suite),
     },
     { label: 'No fire or bomb in the tower', done: !incidentActive(world) },
   ];
