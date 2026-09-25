@@ -1,0 +1,2 @@
+function doBuild(world: World, kind: RoomKind, floor: number, x: number): CommandResult {
+  const check = canBuild(world, kind, floor, x);

@@ -1,0 +1,1 @@
+    events: world.events.filter((e) => e.kind !== 'fire').map((event) => ({ ...event })),

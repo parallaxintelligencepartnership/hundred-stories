@@ -1,0 +1,2 @@
+  spawnHotelGuests(world, clock);
+  if (burning) return;

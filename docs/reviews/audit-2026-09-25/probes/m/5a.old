@@ -1,0 +1,3 @@
+  if (!restsOnStructure(world, kind, floor, rule.height, x, rule.width)) {
+    return no('Nothing is holding this up. Build under it first.');
+  }

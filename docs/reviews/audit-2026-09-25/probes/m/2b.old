@@ -1,0 +1,2 @@
+  const rule = SHAFTS[shaft.kind];
+  if (shaft.cars.length >= rule.maxCars) {

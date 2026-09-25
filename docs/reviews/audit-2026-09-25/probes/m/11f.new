@@ -1,0 +1,2 @@
+  sim.leaveReason = `Gave up waiting for an elevator on ${floorLabel(sim.pos.floor)}.`;
+}

@@ -1,0 +1,4 @@
+    version: HASH_VERSION,
+    seed: world.seed,
+    minute: world.time.minute,
+    cash: Math.round(world.cash / 1000),

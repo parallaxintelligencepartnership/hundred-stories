@@ -1,0 +1,5 @@
+  sim.state = 'gone';
+  removeSim(world, sim.id);
+  releaseGuard(world, event.guardId);
+  endEvent(world, event);
+  const facts: Omit<StoryBeat, 'code' | 'minute'> = { simId: sim.id };

@@ -1,0 +1,1 @@
+    if (suites < requires.hotelSuites) return false;

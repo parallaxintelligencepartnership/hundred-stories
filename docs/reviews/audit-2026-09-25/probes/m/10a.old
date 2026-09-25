@@ -1,0 +1,2 @@
+    runTo(world, entry.t);
+    const result = applyCommand(world, entry.cmd);

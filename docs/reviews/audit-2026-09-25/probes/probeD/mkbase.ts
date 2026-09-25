@@ -1,0 +1,15 @@
+import { writeFileSync } from 'node:fs';
+import { applyCommand } from '/Users/matthew/parallax-private/Projects/hundred-stories/src/sim/build';
+import { ROOMS } from '/Users/matthew/parallax-private/Projects/hundred-stories/src/sim/rules';
+import { createWorld } from '/Users/matthew/parallax-private/Projects/hundred-stories/src/sim/world';
+import { tick } from '/Users/matthew/parallax-private/Projects/hundred-stories/src/sim/tick';
+import { serialize } from '/Users/matthew/parallax-private/Projects/hundred-stories/src/sim/save';
+import type { Command } from '/Users/matthew/parallax-private/Projects/hundred-stories/src/sim/types';
+const world = createWorld(4242);
+world.cash = 50_000_000;
+const ok = (c: Command) => applyCommand(world, c).ok;
+for (let x = 0; x < 120; x++) ok({ kind: 'build', room: 'lobby', floor: 1, x });
+ok({ kind: 'shaft.build', shaft: 'standard', x: 20, floorMin: 1, floorMax: 6 });
+for (let f = 2; f <= 6; f++) for (let x = 0; x + ROOMS.office.width <= 120; x += ROOMS.office.width) ok({ kind: 'build', room: 'office', floor: f, x });
+while (world.time.minute < 1440 + 9 * 60) tick(world);
+writeFileSync('/private/tmp/claude-501/-Users-matthew-parallax-private-Projects-hundred-stories/59100aac-82b1-4a98-947c-f0845463d155/scratchpad/audit/probeD/base.json', serialize(world));

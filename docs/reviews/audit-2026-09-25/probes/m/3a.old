@@ -1,0 +1,1 @@
+  if (clock.dayOfQuarter === 0 && clock.minuteOfDay === SCHEDULES.quarterStartMinuteOfDay) onQuarterStart(world);

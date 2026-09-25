@@ -1,0 +1,4 @@
+  while (world.stars > 1 && population < STARS[world.stars].population) {
+    world.stars = (world.stars - 1) as Star;
+  }
+  if (world.stars > 1 && world.stars < before) world.stars = (world.stars - 1) as Star;

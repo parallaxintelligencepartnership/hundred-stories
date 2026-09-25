@@ -1,0 +1,2 @@
+  for (let step = 0; step < 2 && world.stars < 6; step++) {
+    const next = (world.stars + 1) as Star;

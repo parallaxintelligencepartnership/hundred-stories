@@ -1,0 +1,3 @@
+  if (shaftInTheWay(world, floors, x, rule.width)) { world.cash -= rule.shaftCost; return no('An elevator is in the way.'); }
+
+  if (world.cash < rule.shaftCost)

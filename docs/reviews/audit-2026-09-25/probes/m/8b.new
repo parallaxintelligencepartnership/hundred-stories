@@ -1,0 +1,2 @@
+    gameOver: world.gameOver,
+  } satisfies

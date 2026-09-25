@@ -1,0 +1,2 @@
+  const stranded = strandsSomething(world, { shaftId: shaft.id });
+  if (stranded) return stranded;

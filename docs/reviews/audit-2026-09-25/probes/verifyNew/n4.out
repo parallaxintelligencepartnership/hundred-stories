@@ -1,0 +1,4 @@
+N1 build express 1..100: {"ok":true} span 100 floors -> texture 192 x 14400 device px; over 8192: true
+N1 build express -10..100: {"ok":true} span 110 floors -> texture 192 x 15840 device px; over 8192: true
+N1 build express 1..56: {"ok":true} span 56 floors -> texture 192 x 8064 device px; over 8192: false
+N1 build express 1..57: {"ok":true} span 57 floors -> texture 192 x 8208 device px; over 8192: true

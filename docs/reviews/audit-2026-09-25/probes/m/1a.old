@@ -1,0 +1,4 @@
+  const paid = spend(world, rule.cost, rule.label);
+  if (!paid.ok) return no(cannotAfford(rule.label, rule.cost));
+
+  const room = makeRoom(world, kind, floor, x);

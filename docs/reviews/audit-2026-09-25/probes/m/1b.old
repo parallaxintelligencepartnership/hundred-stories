@@ -1,0 +1,2 @@
+  const paid = spend(world, rule.shaftCost, rule.label);
+  if (!paid.ok) return no(cannotAfford(rule.label, rule.shaftCost));

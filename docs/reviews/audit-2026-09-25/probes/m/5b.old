@@ -1,0 +1,2 @@
+  const stranded = strandsSomething(world, { roomId: room.id });
+  if (stranded) return stranded;

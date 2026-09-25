@@ -1,0 +1,2 @@
+  const capped = demoCapRefusal(floorMin, floorMax, shaft.x, shaft.width);
+  if (capped) return capped;

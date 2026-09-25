@@ -1,0 +1,16 @@
+import { applyCommand, canBuild } from '/Users/matthew/parallax-private/Projects/hundred-stories/src/sim/build';
+import { createWorld } from '/Users/matthew/parallax-private/Projects/hundred-stories/src/sim/world';
+const w = createWorld(7);
+console.log('shaft 40..69, empty lot:', applyCommand(w, { kind: 'shaft.build', shaft: 'standard', x: 200, floorMin: 40, floorMax: 69 }));
+console.log('office 41 on the shaft:', applyCommand(w, { kind: 'build', room: 'office', floor: 41, x: 198 }));
+console.log('office 42 on that office:', applyCommand(w, { kind: 'build', room: 'office', floor: 42, x: 190 }));
+console.log('rooms', w.rooms.size, 'cash', w.cash);
+const u = createWorld(7);
+console.log('shaft -10..-2 no lobby:', applyCommand(u, { kind: 'shaft.build', shaft: 'standard', x: 200, floorMin: -10, floorMax: -2 }));
+u.stars = 3;
+console.log('parkingSpace -3 on it:', applyCommand(u, { kind: 'build', room: 'parkingSpace', floor: -3, x: 200 }));
+const c = createWorld(7); c.cash = 4000;
+console.log('lobby no cash:', canBuild(c, 'lobby', 1, 100));
+c.cash = 1e6;
+console.log('lobby at -1:', canBuild(c, 'lobby', -1, 100));
+console.log('housekeeping short:', (() => { c.cash = 10; c.stars = 2; return canBuild(c, 'housekeeping', 1, 100); })());

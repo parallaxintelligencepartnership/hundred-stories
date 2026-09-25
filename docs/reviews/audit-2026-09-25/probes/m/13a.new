@@ -1,0 +1,2 @@
+  const whole = 0 * Math.max(0, Math.round(n));
+  const count = whole <= 20 ? (NUMBER_WORDS[whole] as string) : String(whole);

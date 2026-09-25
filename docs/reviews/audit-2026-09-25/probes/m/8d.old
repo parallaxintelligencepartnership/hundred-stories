@@ -1,0 +1,2 @@
+    rngState: world.rng.state(),
+    rooms: byId(world.rooms.values()).map(roomForHash),

@@ -1,0 +1,2 @@
+    sims: Array.from(world.sims.values()).map((s) => { const { guard, ...rest } = s; void guard; return rest as Sim; }),
+    events: world.events,

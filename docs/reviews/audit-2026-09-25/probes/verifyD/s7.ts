@@ -1,0 +1,21 @@
+const ls = new Map<string, string>();
+let refuse = false;
+(globalThis as any).localStorage = { getItem: (k: string) => ls.get(k) ?? null, setItem: (k: string, v: string) => { if (refuse) throw new DOMException('quota', 'QuotaExceededError'); ls.set(k, v); } };
+const { createGame } = await import('/Users/matthew/parallax-private/Projects/hundred-stories/src/game/game');
+let now = 0;
+const game = createGame(11, { now: () => now, hidden: () => true, scheduleIdle: (run) => { run(); return () => {}; }, today: () => '2026-09-28', freshSeed: () => 77 });
+game.apply({ kind: 'build', room: 'lobby', floor: 1, x: 150 });
+console.log('first save:', JSON.stringify(await game.save()));
+refuse = true;
+for (let x = 100; x < 110; x++) game.apply({ kind: 'build', room: 'lobby', floor: 1, x });
+const logBefore = game.world.log.length;
+console.log('Save now while refused:', JSON.stringify(await game.save()));
+// the autosave: cross 06:00
+game.world.time.minute = 360 + 1440 - 1; now += 1000; game.stepOnce();
+await new Promise((r) => setTimeout(r, 0));
+await game.openDaily();
+console.log('switched to', game.getSlot(), '| world seed', game.world.seed);
+console.log('log lines added about saving:', game.world.log.slice(0).filter((l: any) => /save/i.test(l.text)).map((l: any) => l.text));
+refuse = false;
+await game.openMyTower();
+console.log('back in My tower: lobby tiles', [...game.world.rooms.values()].filter((r: any) => r.kind === 'lobby').length, '(had 11 before the switch)');

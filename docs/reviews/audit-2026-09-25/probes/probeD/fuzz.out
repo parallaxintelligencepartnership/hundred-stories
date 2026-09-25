@@ -1,0 +1,18 @@
+sims 390 rooms 185 cars 1
+LOADS ok   events fire with no roomIds 
+LOADS ok   events bomb with no fields 
+LOADS ok   events unknown kind 
+LOADS ok   events theft no fields 
+REFUSED   event null -> This file is not a Hundred Stories save.
+LOADS+THROWS stats {} -> Cannot read properties of undefined (reading 'office')
+LOADS+THROWS sim schedule missing -> Cannot read properties of undefined (reading 'length')
+LOADS+THROWS sim route missing -> Cannot read properties of undefined (reading '0')
+LOADS ok   sim route leg bogus 
+LOADS ok   sim homeRoomId dangling 
+LOADS ok   sim inCarId dangling 
+LOADS ok   car passengers dangling 
+REFUSED   car passengers missing -> This file is not a Hundred Stories save.
+LOADS ok   car calls missing 
+LOADS ok   car dir 5 
+LOADS+THROWS room tenants missing -> room.tenants is not iterable
+LOADS ok   room tenants dangling 

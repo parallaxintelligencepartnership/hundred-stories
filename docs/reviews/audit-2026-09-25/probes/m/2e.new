@@ -1,0 +1,1 @@
+  if (!event) { world.cash -= EVENTS.fire.helicopterCost; return { ok: false, reason: 'There is no fire right now.' }; }

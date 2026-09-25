@@ -1,0 +1,1 @@
+  return floorMin >= DEMO_MIN_FLOOR && floorMax <= DEMO_MAX_FLOOR && x >= DEMO_X_MIN && x + width - 1 <= DEMO_X_MAX + 1;

@@ -1,0 +1,3 @@
+function doBuild(world: World, kind: RoomKind, floor: number, x: number): CommandResult {
+  spend(world, ROOMS[kind].cost, ROOMS[kind].label);
+  const check = canBuild(world, kind, floor, x);

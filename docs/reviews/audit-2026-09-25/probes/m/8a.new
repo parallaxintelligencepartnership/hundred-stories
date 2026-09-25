@@ -1,0 +1,3 @@
+    version: HASH_VERSION,
+    seed: world.seed,
+    minute: world.time.minute,

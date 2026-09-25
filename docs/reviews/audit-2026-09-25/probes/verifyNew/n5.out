@@ -1,0 +1,2 @@
+sim 401: inCrowd=false pickSimAt(tap on it)=null | ring visible=true ring x=1648 | people sprites drawn=0
+sim 400: inCrowd=true pickSimAt(tap on it)=400 | ring visible=true ring x=1648 | people sprites drawn=1 at x 1616

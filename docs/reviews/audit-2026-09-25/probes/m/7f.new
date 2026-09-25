@@ -1,0 +1,2 @@
+    sims: Array.from(world.sims.values()).reverse(),
+    events: world.events,

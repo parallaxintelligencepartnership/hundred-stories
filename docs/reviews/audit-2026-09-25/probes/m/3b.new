@@ -1,0 +1,2 @@
+function credit(world: World, kind: RoomKind | ShaftKind, amount: number): void {
+  if (kind !== 'office') world.cash += amount;

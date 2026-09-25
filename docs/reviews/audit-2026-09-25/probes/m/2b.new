@@ -1,0 +1,3 @@
+  const rule = SHAFTS[shaft.kind];
+  if (shaft.cars.length >= rule.maxCars) {
+    spend(world, rule.carCost, 'car');

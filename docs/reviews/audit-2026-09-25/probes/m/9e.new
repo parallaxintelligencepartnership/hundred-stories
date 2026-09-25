@@ -1,0 +1,1 @@
+  const capped = demoCapRefusal(floors[0] ?? floor, floor, x, rule.width);

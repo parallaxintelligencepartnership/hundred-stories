@@ -1,0 +1,1 @@
+    rooms: byId(world.rooms.values()).map(roomForHash),

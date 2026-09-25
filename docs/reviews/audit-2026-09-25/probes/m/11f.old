@@ -1,0 +1,3 @@
+  sim.leaveReason = `Gave up waiting for an elevator on ${floorLabel(sim.pos.floor)}.`;
+  log(world, sim.leaveReason, 'warn', { simId: sim.id });
+}

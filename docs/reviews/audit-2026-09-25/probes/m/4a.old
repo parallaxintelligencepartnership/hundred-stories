@@ -1,0 +1,2 @@
+  if (world.stars < 6) {
+    const next = (world.stars + 1) as Star;
