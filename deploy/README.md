@@ -6,6 +6,13 @@ shape as stillpub (see `pubworks/docs/deploy-stillpub.md` and
 
 ## One-time setup
 
+0. **Detach the Workers custom domains first** if `SITE_HOST` is currently
+   served by Cloudflare Workers static assets (as hundredstories.xyz and www
+   are in production, per `wrangler.jsonc` routes): remove the custom domain
+   routes in `wrangler.jsonc` (or detach them in the Cloudflare dashboard
+   under Workers & Pages → the worker → Settings → Domains & Routes) before
+   the next step. A Workers custom domain holds its own DNS record for the
+   hostname, and it collides with the apex A record this runbook adds next.
 1. **Buy the domain** (the value that will go in `SITE_HOST`, e.g.
    `hundredstories.xyz`).
 2. **Cloudflare DNS**: add an A record for the apex to pi3's public address (the same A record stillpub.com uses, DNS only),
@@ -39,6 +46,10 @@ cp deploy/.env.example deploy/.env   # first time only; edit SITE_HOST
 deploy/deploy.sh                     # build, rsync, compose up, curl checks
 ```
 
+`deploy/deploy.sh` exits with an error and does nothing if `deploy/.env`
+does not exist yet, unless `--no-up` is given (staging does not need a live
+`SITE_HOST`).
+
 Before DNS/TLS exist for `SITE_HOST`, stage files without bringing the stack
 up:
 
@@ -51,15 +62,26 @@ Then once DNS is live, ssh in and run `docker compose up -d` in
 
 ## Update
 
-Re-run `deploy/deploy.sh`. It rebuilds `dist/`, snapshots the current
-`/opt/hundred-stories/html` to `/opt/hundred-stories/html.prev` on pi3 before
-overwriting it, syncs the new build, re-syncs `compose.yml`/`nginx.conf`, and
-runs `docker compose up -d` again (picks up any compose/nginx changes).
+Re-run `deploy/deploy.sh`. It rebuilds `dist/`, and — only if the new build
+actually differs from the live release — snapshots the current
+`/opt/hundred-stories/html` to a dated directory under
+`/opt/hundred-stories/html.snapshots/` (keeping the last 3) and points
+`/opt/hundred-stories/html.prev` at that snapshot before overwriting `html`.
+Re-running with an unchanged build (for example to push an `nginx.conf`
+edit) leaves `html.prev` untouched. It syncs the new build, re-syncs
+`compose.yml`/`nginx.conf`, and runs `docker compose up -d --force-recreate`
+again, which picks up compose changes and, thanks to `--force-recreate`,
+also picks up an `nginx.conf`-only change (a bind-mounted file's contents
+are not part of compose's own change detection, so without
+`--force-recreate` the container keeps serving the old config until it is
+recreated or restarted).
 
 ## Rollback
 
-`deploy.sh` keeps exactly one previous release: `/opt/hundred-stories/html.prev`
-(saved right before each new sync). To roll back to it:
+`deploy.sh` keeps the last 3 distinct releases as dated snapshots under
+`/opt/hundred-stories/html.snapshots/`, and always points
+`/opt/hundred-stories/html.prev` at the most recent one that actually
+differed from the release before it. To roll back to it:
 
 ```sh
 ssh pi3 '

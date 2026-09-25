@@ -4,8 +4,14 @@
 import { describe, expect, it } from 'vitest';
 
 import landing from '../../index.html?raw';
+import notFoundPage from '../../404.html?raw';
+import howToPlayPage from '../../how-to-play/index.html?raw';
+import privacyPage from '../../privacy/index.html?raw';
+import viteConfigSource from '../../vite.config.ts?raw';
 import { mountStoreRow, STORE_LINKS, storeEntries, storeNamesText } from '../../src/site/stores';
 import { FakeDom } from '../ui/fake-dom';
+
+const FORBIDDEN = ['Steam', 'Source on GitHub', 'Source available to read'];
 
 describe('store links', () => {
   it('are empty until a listing exists', () => {
@@ -71,5 +77,28 @@ describe('the landing store row', () => {
     const googlePlay = row.children[1];
     expect(googlePlay?.tagName).toBe('A');
     expect(googlePlay?.children.map((c) => c.textContent)).toEqual(['Get it on', 'Google Play']);
+  });
+});
+
+describe('Steam and the source link are off every public page and the install manifest', () => {
+  it('keeps 404, how-to-play and privacy free of Steam and the source link text', () => {
+    for (const [name, page] of [
+      ['404.html', notFoundPage],
+      ['how-to-play/index.html', howToPlayPage],
+      ['privacy/index.html', privacyPage],
+    ] as const) {
+      for (const phrase of FORBIDDEN) {
+        expect(page, `${name} should not contain "${phrase}"`).not.toContain(phrase);
+      }
+    }
+  });
+
+  it('keeps the PWA manifest description free of Steam and the source link text', () => {
+    const match = viteConfigSource.match(/description:\s*\n?\s*'([^']*)'/);
+    expect(match, 'manifest description not found in vite.config.ts').toBeTruthy();
+    const description = match![1];
+    for (const phrase of FORBIDDEN) {
+      expect(description, `manifest description should not contain "${phrase}"`).not.toContain(phrase);
+    }
   });
 });

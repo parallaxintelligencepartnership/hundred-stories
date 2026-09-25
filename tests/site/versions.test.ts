@@ -58,3 +58,43 @@ describe('version stamps', () => {
     expect(all(gradle, /versionCode (\d+)/g)).toEqual([String(code)]);
   });
 });
+
+describe('public/_headers no-cache rules key to page paths', () => {
+  // Workers static assets 307-redirect a request for a bare `.../index.html` path to the
+  // directory path it serves the file at; a _headers rule matches the request path, not the
+  // path actually served, so an /index.html-shaped rule only ever fires on that redirect. See
+  // verify-H S8. Every no-cache page rule must be a directory path (or /), not an *.html path.
+  it('keys every rule other than /assets/*, named .js files and .webmanifest to a page path ending in /', () => {
+    const headers = read('public/_headers');
+    const paths = all(headers, /^(\/\S*)$/gm);
+    const exempt = (path: string) => path === '/*' || path === '/assets/*' || path.endsWith('.js') || path.endsWith('.webmanifest');
+    for (const path of paths) {
+      if (exempt(path)) continue;
+      expect(path.endsWith('/'), path).toBe(true);
+    }
+  });
+});
+
+describe('Tauri desktop capability', () => {
+  // The save slot in src/game/storage.ts only ever mkdir, read_text_file, write_text_file,
+  // rename and write_file under $APPDATA, plus the save/open dialogs. The three recursive
+  // read-all/write-all/meta-all sets granted far more of the filesystem than that; see
+  // verify-H S7. This pins the minimum list so it cannot silently widen again.
+  it('grants exactly the minimum fs and dialog permissions, including fs:allow-rename', () => {
+    const cap = JSON.parse(read('src-tauri/capabilities/default.json')) as { permissions: string[] };
+    expect(cap.permissions).toEqual([
+      'core:default',
+      'fs:scope-appdata-recursive',
+      'fs:allow-mkdir',
+      'fs:allow-read-text-file',
+      'fs:allow-write-text-file',
+      'fs:allow-rename',
+      'fs:allow-write-file',
+      'dialog:allow-save',
+      'dialog:allow-open',
+    ]);
+    expect(cap.permissions).not.toEqual(
+      expect.arrayContaining(['fs:allow-appdata-read-recursive', 'fs:allow-appdata-write-recursive', 'fs:allow-appdata-meta-recursive']),
+    );
+  });
+});

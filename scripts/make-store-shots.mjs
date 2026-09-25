@@ -320,7 +320,9 @@ async function toScene(browser, spec, scene) {
   if (scene === 'tower') return;
   // One key step is one wheel notch (zoom x0.77), and the camera snaps to the nearest stop
   // (0.175, 0.5, 1, 2, 3) when it rests, so a scene is a number of steps from the opening zoom 1.
-  const steps = { wide: -2, close: 2, closer: 1 }[scene] ?? 0;
+  // closer needs 4 steps: 3 lands back on the "close" stop (zoom 2), and only the 4th step's
+  // factor (1.3021^4 = 2.87) is nearer the next stop up, zoom 3.
+  const steps = { wide: -2, close: 2, closer: 4 }[scene] ?? 0;
   for (let i = 0; i < Math.abs(steps); i++) {
     if (steps < 0) await key(browser, 'Minus', '-');
     else await key(browser, 'Equal', '=');
@@ -347,12 +349,26 @@ async function capture(browser, spec) {
   return png;
 }
 
-async function drawGraphic(browser, base, g) {
+/** The GRAPHICS source, read straight off disk (repo public/), as a data URL. Never loaded
+ * through the preview origin: dist-app strips og.png, robots.txt, sitemap.xml and every
+ * wordmark file (vite.config.ts APP_UNUSED_PUBLIC_FILES), so fetching them from `base` hits
+ * the SPA fallback and returns the game's index.html instead of an image. */
+export function graphicSourceDataUrl(g, root = ROOT) {
+  const filePath = join(root, g.source);
+  if (!existsSync(filePath)) throw new Error(`${g.id}: source ${g.source} does not exist on disk`);
+  const ext = g.source.slice(g.source.lastIndexOf('.') + 1).toLowerCase();
+  const mime = ext === 'svg' ? 'image/svg+xml' : `image/${ext}`;
+  return `data:${mime};base64,${readFileSync(filePath).toString('base64')}`;
+}
+
+async function drawGraphic(browser, g) {
   const { evaluate, send } = browser;
   await send('Emulation.clearDeviceMetricsOverride');
-  const url = `${base}/${g.source.replace(/^public\//, '')}`;
   const dataUrl = await evaluate(`(async () => {
-    const img = await createImageBitmap(await (await fetch(${JSON.stringify(url)})).blob());
+    const res = await fetch(${JSON.stringify(graphicSourceDataUrl(g))});
+    const type = res.headers.get('content-type') || '';
+    if (!type.startsWith('image/')) throw new Error(${JSON.stringify(g.id)} + ': source is not an image (' + type + ')');
+    const img = await createImageBitmap(await res.blob());
     const c = document.createElement('canvas'); c.width = ${g.width}; c.height = ${g.height};
     const x = c.getContext('2d');
     if (!${Boolean(g.transparent)}) {
@@ -431,7 +447,7 @@ async function main() {
       if (only && !only.has(g.id)) continue;
       await browser.send('Page.navigate', { url: `${base}/robots.txt` });
       await sleep(300);
-      const png = await drawGraphic(browser, base, g);
+      const png = await drawGraphic(browser, g);
       const file = join(OUT_DIR, g.store, `${g.id}.png`);
       mkdirSync(dirname(file), { recursive: true });
       writeFileSync(file, png);

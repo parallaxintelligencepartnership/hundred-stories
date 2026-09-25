@@ -5,12 +5,11 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "fs:allow-appdata-read-recursive",
-    "fs:allow-appdata-write-recursive",
-    "fs:allow-appdata-meta-recursive",
+    "fs:scope-appdata-recursive",
     "fs:allow-mkdir",
     "fs:allow-read-text-file",
     "fs:allow-write-text-file",
+    "fs:allow-rename",
     "fs:allow-write-file",
     "dialog:allow-save",
     "dialog:allow-open"
