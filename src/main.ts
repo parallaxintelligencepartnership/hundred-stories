@@ -3,6 +3,7 @@ import { createUi } from './ui/ui';
 import { createGame } from './game/game';
 import { createSteam } from './steam/steam';
 import { parseWeatherQuery, setForcedWeather } from './render/weather';
+import { MAX_START } from './share/share';
 
 export interface BootDeps {
   createRenderer: typeof createRenderer;
@@ -72,10 +73,12 @@ export type BootTarget = { kind: 'daily' } | { kind: 'friend'; seed: number } | 
 export function bootTarget(search: string): BootTarget {
   const params = new URLSearchParams(search);
   if (params.has('daily')) return { kind: 'daily' };
+  // The same range a share link's tower number may carry (src/share/share.ts): plain digits up
+  // to the 32 bit rng state. Past it the number wraps onto another tower, so it is refused.
   const seedParam = params.get('seed');
-  if (seedParam !== null && seedParam.trim() !== '') {
+  if (seedParam !== null && /^\d+$/.test(seedParam)) {
     const seed = Number(seedParam);
-    if (Number.isSafeInteger(seed) && seed >= 0) return { kind: 'friend', seed };
+    if (Number.isSafeInteger(seed) && seed <= MAX_START) return { kind: 'friend', seed };
   }
   return { kind: 'mine', fresh: params.has('new') };
 }

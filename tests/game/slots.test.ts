@@ -128,7 +128,7 @@ describe("today's tower", () => {
 
     const { game } = gameOn(TIGHT_DAY);
     await game.openDaily();
-    expect(game.getDailyChoice()).toEqual({ savedDate: '2026-09-27', today: TIGHT_DAY, yesterday: true });
+    expect(game.getDailyChoice()).toEqual({ savedDate: '2026-09-27', today: TIGHT_DAY, yesterday: true, ahead: false });
     expect(game.world.seed).toBe(dailyStart('2026-09-27'));
     expect(game.getSpeed()).toBe(0);
     game.setSpeed(1); // the choice stands until it is answered

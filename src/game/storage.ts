@@ -55,19 +55,54 @@ function openDb(factory: IDBFactory): Promise<IDBDatabase> {
   });
 }
 
+/** Beside each browser copy, under its key plus this: when it was written (ms since 1970). */
+const STAMP_SUFFIX = ':written';
+
+interface StampedText {
+  text: string;
+  stamp: number;
+}
+
+// Two writes in the same millisecond still stamp in the order they were made.
+let lastStamp = 0;
+function nextStamp(): number {
+  lastStamp = Math.max(Date.now(), lastStamp + 1);
+  return lastStamp;
+}
+
+function stampOf(raw: unknown): number {
+  const n = Number(raw ?? 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
 export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): SaveStorage {
   const KEY = SLOT_KEYS[slot];
   const localKey = `${DB}:${KEY}`;
+  // When IndexedDB is in play each copy carries the wall clock time it was written, beside it
+  // under its own key (the save text itself is untouched, so an older build still reads it). A
+  // write that fell back to localStorage is then newer than the IndexedDB copy it could not
+  // replace, and the read takes it. A copy with no stamp (written before stamps) counts as 0,
+  // so two old copies still read IndexedDB first, as they always did. The wall clock rather
+  // than the game minute: a new tower or an opened file starts at an earlier minute and is
+  // still the newer save.
+  const idbStampKey = `${KEY}${STAMP_SUFFIX}`;
+  const localStampKey = `${localKey}${STAMP_SUFFIX}`;
 
   async function writeSave(text: string): Promise<void> {
+    const stamp = nextStamp();
     if (deps.indexedDB) {
       try {
         const db = await openDb(deps.indexedDB);
         await new Promise<void>((resolve, reject) => {
           const tx = db.transaction(STORE, 'readwrite');
-          tx.objectStore(STORE).put(text, KEY);
+          const store = tx.objectStore(STORE);
+          store.put(text, KEY);
+          store.put(stamp, idbStampKey);
           tx.oncomplete = () => resolve();
-          tx.onerror = () => reject(tx.error);
+          tx.onerror = () => reject(tx.error ?? new Error('write failed'));
+          // A quota failure at commit can abort with no error event. Without this the write
+          // never settles, and every later save and slot switch waits on it for the session.
+          tx.onabort = () => reject(tx.error ?? new Error('write aborted'));
         });
         return;
       } catch {
@@ -77,32 +112,50 @@ export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): 
     try {
       if (!deps.localStorage) throw new Error('no localStorage');
       deps.localStorage.setItem(localKey, text);
+      if (deps.indexedDB) deps.localStorage.setItem(localStampKey, String(stamp));
     } catch {
       // a full quota, a private window, or no store at all: all one message to the player
       throw new Error(REFUSED_REASON);
     }
   }
 
-  async function readSave(): Promise<string | null> {
-    if (deps.indexedDB) {
-      try {
-        const db = await openDb(deps.indexedDB);
-        const text = await new Promise<string | null>((resolve, reject) => {
-          const tx = db.transaction(STORE, 'readonly');
-          const req = tx.objectStore(STORE).get(KEY);
-          req.onsuccess = () => resolve((req.result as string | undefined) ?? null);
-          req.onerror = () => reject(req.error);
-        });
-        if (text) return text;
-      } catch {
-        // fall through to localStorage
-      }
-    }
+  async function readIndexedDb(factory: IDBFactory): Promise<StampedText | null> {
     try {
-      return deps.localStorage?.getItem(localKey) ?? null;
+      const db = await openDb(factory);
+      return await new Promise<StampedText | null>((resolve, reject) => {
+        const tx = db.transaction(STORE, 'readonly');
+        const store = tx.objectStore(STORE);
+        const req = store.get(KEY);
+        const stampReq = store.get(idbStampKey);
+        let text: string | null = null;
+        // Requests in one transaction succeed in the order they were made.
+        req.onsuccess = () => {
+          text = (req.result as string | undefined) ?? null;
+        };
+        req.onerror = () => reject(req.error);
+        stampReq.onsuccess = () => resolve(text ? { text, stamp: stampOf(stampReq.result) } : null);
+        stampReq.onerror = () => reject(stampReq.error);
+      });
+    } catch {
+      return null; // the localStorage copy, if any, is all there is
+    }
+  }
+
+  function readLocal(): StampedText | null {
+    try {
+      const text = deps.localStorage?.getItem(localKey) ?? null;
+      if (!text) return null;
+      return { text, stamp: stampOf(deps.localStorage?.getItem(localStampKey)) };
     } catch {
       return null;
     }
+  }
+
+  async function readSave(): Promise<string | null> {
+    const fromDb = deps.indexedDB ? await readIndexedDb(deps.indexedDB) : null;
+    const fromLocal = readLocal();
+    if (fromDb && fromLocal) return fromLocal.stamp > fromDb.stamp ? fromLocal.text : fromDb.text;
+    return fromDb?.text ?? fromLocal?.text ?? null;
   }
 
   return { writeSave, readSave };
@@ -259,8 +312,17 @@ const TEMP_SUFFIX = '.tmp';
 export function createTauriStorage(fs: TauriSlotFs | Promise<TauriSlotFs>, slot: SlotName = 'mine'): SaveStorage {
   const FILE_SLOT_NAME = SLOT_FILES[slot];
   let dirReady: Promise<void> | null = null;
+  // Writes of this slot run one after another: two at once (an autosave and Save now) would
+  // share the one .tmp file, and the second rename would find it gone.
+  let queue: Promise<void> = Promise.resolve();
 
-  async function writeSave(text: string): Promise<void> {
+  function writeSave(text: string): Promise<void> {
+    const run = queue.then(() => writeNow(text));
+    queue = run.catch(() => {});
+    return run;
+  }
+
+  async function writeNow(text: string): Promise<void> {
     try {
       const f = await fs;
       await (dirReady ??= f.ensureDir().catch((e: unknown) => {
@@ -463,16 +525,51 @@ export const writeSlot = (slot: SlotName, text: string): Promise<void> => active
 export const readSlot = (slot: SlotName): Promise<string | null> => active(slot).readSave();
 
 const UNREADABLE_KEY = 'hs.save.unreadable';
+const DAILY_KEPT_KEY = 'hs.save.daily-kept';
 
-// Stashes a save the deserializer refused, so the player isn't left with nothing after a
-// corrupt or foreign-version save. Silent on failure, same as the rest of this module: a full
-// quota or missing store just means no backup, not a crash.
-export function stashUnreadable(text: string): void {
+function keep(key: string, text: string): boolean {
   try {
     const ls = (globalThis as { localStorage?: Storage }).localStorage;
-    if (!ls) return;
-    ls.setItem(UNREADABLE_KEY, text);
+    if (!ls) return false;
+    ls.setItem(key, text);
+    return ls.getItem(key) === text;
   } catch {
-    // a full quota, a private window, or no store at all: silent, same as writeSave
+    // a full quota, a private window, or no store at all: no copy, and the caller says so
+    return false;
   }
+}
+
+function kept(key: string): string | null {
+  try {
+    return (globalThis as { localStorage?: Storage }).localStorage?.getItem(key) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Keeps a copy of a My tower save the deserializer refused, so the player isn't left with
+ * nothing after a corrupt or foreign-version save. True only when the copy is really there: the
+ * game tells the player it kept a copy only then.
+ */
+export function stashUnreadable(text: string): boolean {
+  return keep(UNREADABLE_KEY, text);
+}
+
+/** The copy stashUnreadable kept, for Save to a file; null when there is none. */
+export function readUnreadable(): string | null {
+  return kept(UNREADABLE_KEY);
+}
+
+/**
+ * Keeps a copy of a daily dated after today (the device's date moved back) before today's
+ * tower takes the daily slot. True only when the copy is there.
+ */
+export function keepDailyCopy(text: string): boolean {
+  return keep(DAILY_KEPT_KEY, text);
+}
+
+/** The daily keepDailyCopy kept, or null. */
+export function readDailyCopy(): string | null {
+  return kept(DAILY_KEPT_KEY);
 }

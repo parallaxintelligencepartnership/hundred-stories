@@ -15,12 +15,22 @@ export interface DailyInfo {
   finished: boolean;
 }
 
-/** The choice when the daily slot holds an unfinished tower from an earlier date. */
+/**
+ * The choice when the daily slot holds an unfinished tower from an earlier date, or any tower
+ * dated after today (`ahead`: the device's date moved back). The saved tower stands, stopped,
+ * behind the choice. 'finish' goes on with it (a finished one stays on its result);
+ * 'today' keeps a copy of an `ahead` tower, then starts today's.
+ */
 export interface DailyChoice {
   savedDate: string;
   today: string;
   /** The saved one is from the day before today. */
   yesterday: boolean;
+  /**
+   * The saved one is dated after today. The card offers "Start today's tower instead". The game
+   * always sets it; optional only so a choice written before it existed still type-checks.
+   */
+  ahead?: boolean;
 }
 
 export type Tool =
@@ -99,6 +109,15 @@ export interface GameApi {
   save(): Promise<CommandResult>;
   load(): Promise<CommandResult>;
   exportSave(): string;
+  /**
+   * The copy kept of a My tower save that could not be opened, as the text of a save file, or
+   * null when there is none. The ui hands it to the same Save to a file path as exportSave.
+   */
+  getKeptCopy(): string | null;
+  /**
+   * Open a saved file. Inside Today's tower this leaves the daily first (saving it if it moved)
+   * and the file opens as My tower.
+   */
   importSave(text: string): CommandResult;
   newGame(seed: number): void;
   /** Which save slot the tower in hand lives in: My tower, Today's tower or Friend's tower. */
