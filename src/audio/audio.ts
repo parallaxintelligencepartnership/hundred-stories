@@ -2,7 +2,7 @@
 // stream; an ambient bed follows the clock. Off by default, and while it is off nothing is
 // created: no AudioContext, no listeners on the game.
 import type { GameApi, GameEvent } from '../game/api';
-import { clockOf } from '../sim/types';
+import { clockOf, type ActiveEvent } from '../sim/types';
 import { weatherAt } from '../game/weather';
 import type { MoodInput } from './mood';
 import { BEDS, MAX_MELODIC, MELODIC, VOICES, chapterFor, musicalHz, cutoffForWarmth, isNight, hatVelocityMultiplier, keyFor, tempoFor, type Chapter, type Voice } from './score';
@@ -552,12 +552,19 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
   let unsubClock: (() => void) | null = null;
   let lastMinuteOfDay = -1;
   const lastPlayed = new Map<Effect, number>();
-  let highest: number = game.world.stars;
-  let chapter = chapterFor(highest);
-  const tempo = tempoFor(game.world.seed);
-  const beatSeconds = 60 / tempo;
-  const barSeconds = 4 * beatSeconds;
-  const key = keyFor(game.world.seed);
+  // The tower whose seed and stars set the tempo, key and chapter below. The game replaces
+  // game.world on a tower switch, new game or import without emitting any end events, so every
+  // entry point compares identity and resets from the new world (checkWorld).
+  let knownWorld = game.world;
+  // The chapter follows the tower's current stars, up and down, so a session and a reload of the
+  // same save agree (audit 2026-09-25, decision 4); every chapter is a full arrangement.
+  let stars: number = game.world.stars;
+  let chapter = chapterFor(stars);
+  let tempo = tempoFor(game.world.seed);
+  let beatSeconds = 60 / tempo;
+  let barSeconds = 4 * beatSeconds;
+  let key = keyFor(game.world.seed);
+  let reverbDelay: DelayNode | null = null;
   const initialClock = clockOf(game.world.time.minute);
   let cachedVenueFill = venueFillFor(game.world.rooms?.values() ?? []);
   let targetMood = moodFor({ minuteOfDay: initialClock.minuteOfDay, isWeekend: initialClock.isWeekend,
@@ -642,6 +649,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
       // Feedback delay keeps the keys warm without a convolver or recorded impulse.
       const wet = ctx.createGain(); wet.gain.value = dbToGain(REVERB_WET_DB);
       const delay = ctx.createDelay(1); delay.delayTime.value = beatSeconds * REVERB_DELAY_BEATS;
+      reverbDelay = delay;
       const low = ctx.createBiquadFilter(); low.type = 'lowpass'; low.frequency.value = REVERB_CUTOFF_HZ;
       const feedback = ctx.createGain(); feedback.gain.value = REVERB_FEEDBACK;
       musicColour.connect(wet); wet.connect(delay); delay.connect(low);
@@ -656,13 +664,23 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
       drumsBus = ctx.createGain(); drumsBus.gain.value = 1; drumsBus.connect(musicCompressor);
       tapeDepth = ctx.createGain(); tapeDepth.gain.value = TAPE_WOBBLE_CENTS;
     }
-    if (ctx.state === 'suspended') void ctx.resume().catch(() => {});
+    if (ctx.state === 'suspended') {
+      const resuming = ctx;
+      // Sound may be turned off again before the resume settles; sleep saw a suspended context
+      // then, so suspend it here once the resume lands.
+      void resuming.resume().then(() => { if (!settings.on) void resuming.suspend().catch(() => {}); }).catch(() => {});
+    }
     if (unsubEvents) return; // Already awake: gestures must not reset smoothing or mute automation.
+    // Nothing was heard while asleep: take the tower, its stars and its incidents as they are now.
+    checkWorld();
+    stars = game.world.stars;
+    if (!pinned) { chapter = chapterFor(stars); previousChapter = null; }
     lastMoodMs = now();
     if (master) master.gain.setValueAtTime(1, ctx.currentTime);
     musicBus?.gain.setValueAtTime((settings.music ?? 60) / 100 * dbToGain(-6 * easedMood.tension), ctx.currentTime);
     effectsBus?.gain.setValueAtTime(settings.effects / 100, ctx.currentTime);
     ambientBus?.gain.setValueAtTime(settings.ambient / 100 * dbToGain(-10), ctx.currentTime);
+    syncThreat(); // an incident that ended unheard clears; one still burning ducks and drones again
     startTape();
     if (!unsubEvents) unsubEvents = game.subscribeEvents(onEvent);
     if (!unsubClock) unsubClock = game.subscribe(onClock);
@@ -712,16 +730,15 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
 
   function onEvent(event: GameEvent): void {
     if (!ctx || !effectsBus) return;
+    checkWorld();
     if (event.kind === 'stars') {
-      if (event.to > event.from) {
-        highest = Math.max(highest, event.to);
-        const next = chapterFor(highest);
-        const stinger: Cue = event.to >= 6 ? 'tower' : (`star${Math.max(2, Math.min(5, event.to))}` as Cue);
-        playNamedCue(stinger);
-        if (next !== chapter && !pinned) {
-          previousChapter = chapter; chapter = next;
-          transitionAt = Math.ceil((ctx.currentTime + (next === 6 ? cueDuration(stinger) : 0)) / barSeconds) * barSeconds;
-        }
+      stars = event.to;
+      const next = chapterFor(stars);
+      const stinger: Cue | null = event.to > event.from ? event.to >= 6 ? 'tower' : (`star${Math.max(2, Math.min(5, event.to))}` as Cue) : null;
+      if (stinger) playNamedCue(stinger);
+      if (next !== chapter && !pinned) {
+        previousChapter = chapter; chapter = next;
+        transitionAt = Math.ceil((ctx.currentTime + (stinger && next === 6 ? cueDuration(stinger) : 0)) / barSeconds) * barSeconds;
       }
       return;
     }
@@ -770,11 +787,16 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
   }
 
   function startThreat(next: Threat, cue: Cue): void {
-    if (!ctx) return;
     if (threat === next) return;
+    enterThreat(next, cue);
+  }
+
+  /** Duck, stop or soften the kit and start the drone for `next`; `cue` is null on a silent re-entry. */
+  function enterThreat(next: Threat, cue: Cue | null): void {
+    if (!ctx) return;
     const level = threatLevel(next);
     threat = next; tension = true; targetMood = { ...targetMood, tension: level };
-    playNamedCue(cue);
+    if (cue) playNamedCue(cue);
     const kitLevel = urgent(next) ? 0 : 0.7;
     hatBus?.gain.setValueAtTime(kitLevel, ctx.currentTime);
     drumsBus?.gain.setValueAtTime(urgent(next) ? 0 : 0.775, ctx.currentTime);
@@ -788,12 +810,54 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
     }
   }
 
-  function endThreat(cue: Cue): void {
-    if (!ctx) return;
+  function endThreat(cue: Cue | null): void {
     threat = 'none'; tension = false; targetMood = { ...targetMood, tension: 0 };
-    playNamedCue(cue);
+    if (!ctx) return;
+    if (cue) playNamedCue(cue);
     if (tensionGain) tensionGain.gain.setTargetAtTime(0, ctx.currentTime, 0.15);
     if (tensionOsc) { tensionOsc.stop(ctx.currentTime + 1); tensionOsc = null; tensionGain = null; }
+  }
+
+  /** The incident the live world holds now; the one already heard wins a tie between two. */
+  function liveThreat(): Threat {
+    const events = (game.world as { events?: readonly ActiveEvent[] }).events ?? [];
+    const live = (kind: Threat): boolean => events.some(e => e.kind === kind
+      && (e.kind !== 'theft' || e.phase === 'acting' || e.phase === 'leaving')); // a theft is heard from theft.started
+    if (threat !== 'none' && live(threat) && (urgent(threat) || !live('fire') && !live('bomb'))) return threat;
+    return live('fire') ? 'fire' : live('bomb') ? 'bomb' : live('theft') ? 'theft' : 'none';
+  }
+
+  /**
+   * Re-derive the incident from the world when its end may have gone unheard: on waking (no
+   * listener while sound is off) and on a tower switch (the game primes its tap, so the old
+   * tower's end beat never comes). No cue plays; the drone restarts for one still burning.
+   */
+  function syncThreat(): void {
+    if (pinned) return;
+    const next = liveThreat();
+    if (next === 'none') { if (threat !== 'none' || tension) endThreat(null); return; }
+    enterThreat(next, null);
+  }
+
+  /** After a tower switch: tempo, key, chapter and incidents come from the new tower. */
+  function checkWorld(): boolean {
+    if (game.world === knownWorld) return false;
+    knownWorld = game.world;
+    tempo = tempoFor(game.world.seed); beatSeconds = 60 / tempo; barSeconds = 4 * beatSeconds;
+    key = keyFor(game.world.seed);
+    stars = game.world.stars;
+    if (!pinned) chapter = chapterFor(stars);
+    previousChapter = null; transitionAt = 0;
+    cachedVenueFill = venueFillFor(game.world.rooms?.values() ?? []);
+    lastMinuteOfDay = -1;
+    if (ctx) {
+      reverbDelay?.delayTime.setValueAtTime(beatSeconds * REVERB_DELAY_BEATS, ctx.currentTime);
+      // Bars realign to the new tempo after what is already scheduled, and the phrase starts over.
+      nextBar = Math.ceil(Math.max(nextBar, ctx.currentTime) / barSeconds) * barSeconds;
+      nextBarIndex = 0;
+      if (unsubEvents) syncThreat();
+    }
+    return true;
   }
 
   function playNamedCue(name: Cue): void {
@@ -828,6 +892,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
   }
 
   function onClock(): void {
+    checkWorld();
     const m = ((inputs().minute % 1440) + 1440) % 1440;
     if (m === lastMinuteOfDay) return;
     lastMinuteOfDay = m;
@@ -937,6 +1002,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
     nextBarIndex = 0;
     const schedule = () => {
       if (!ctx || !musicBus || !settings.on) return;
+      checkWorld();
       advanceMood();
       while (nextBar < ctx.currentTime + LOOKAHEAD_SECONDS) {
         // A throttled tab skips missed bars instead of firing overdue notes together.
@@ -1141,7 +1207,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
       pinned = source;
       pinnedAt = ctx ? ctx.currentTime : null;
       if (source) chapter = source(0).chapter;
-      else chapter = chapterFor(highest);
+      else chapter = chapterFor(stars);
       previousChapter = null;
       // A listening preset is heard at once: the mood snaps to it rather than easing over minutes.
       targetForBar();
