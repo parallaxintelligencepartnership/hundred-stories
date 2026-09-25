@@ -106,6 +106,18 @@ describe('milestone recap', () => {
     expect(items(panel)).toEqual([NO_STORIES_YET]);
   });
 
+  it('opens on a bento grid: the milestone, how many new stories, and what it opened up', () => {
+    const world = createWorld(25);
+    recordBeat(world.story, { code: 'star.gained', minute: 100, value: 2 });
+    const panel = createRecapPanel({ world } as never, context().ctx);
+    const bento = node(panel).descendants().find((n) => n.className === 'hs-bento');
+    expect(bento?.children.map((t) => [t.className, t.children[0]?.textContent, t.children[1]?.textContent])).toEqual([
+      ['hs-tile', 'Milestone', '2 stars'],
+      ['hs-tile', 'New stories', '0'],
+      ['hs-tile is-wide is-text', 'Opened up', unlocksText(2)],
+    ]);
+  });
+
   it('is reopenable from the stories panel once a milestone is on record', () => {
     const world = createWorld(24);
     const { ctx, opened } = context();

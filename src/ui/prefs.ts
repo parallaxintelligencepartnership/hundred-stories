@@ -13,6 +13,10 @@ export const PREF_KEYS = {
   guideDone: 'hs.guide.done',
   tips: 'hs.tips',
   goalsCollapsed: 'hs.goals.collapsed',
+  /** The Display switches in Settings. Package 2B reads largeText and colorBlind. */
+  largeText: 'hs.largeText',
+  colorBlind: 'hs.colorBlind',
+  glassClear: 'hs.glassClear',
 } as const;
 
 export type PrefKey = (typeof PREF_KEYS)[keyof typeof PREF_KEYS];
