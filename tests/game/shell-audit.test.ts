@@ -408,6 +408,67 @@ describe('D S8: saves while paused and when the page is hidden or closed', () =>
     await settle();
     expect(JSON.parse(ls.data.get('hundred-stories:autosave')!).minute).toBe(minute);
   });
+
+  it('a build made during a slow save is written by one follow-up save, with no hide event (fix review s8b)', async () => {
+    // An IndexedDB whose writes settle 50 ms later, and the browser-like idle slot (a timeout).
+    const store = new Map<string, unknown>();
+    let puts = 0;
+    vi.stubGlobal('indexedDB', {
+      open() {
+        const req: Record<string, unknown> = {};
+        req.result = {
+          transaction() {
+            const tx: Record<string, unknown> = {};
+            tx.objectStore = () => ({
+              put(value: unknown, key: string) {
+                if (key === 'autosave') puts++;
+                setTimeout(() => {
+                  store.set(key, value);
+                  (tx.oncomplete as (() => void) | undefined)?.();
+                }, 50);
+              },
+              get(key: string) {
+                const g: Record<string, unknown> = {};
+                setTimeout(() => {
+                  g.result = store.get(key);
+                  (g.onsuccess as (() => void) | undefined)?.();
+                }, 1);
+                return g;
+              },
+            });
+            return tx;
+          },
+        };
+        setTimeout(() => (req.onsuccess as (() => void) | undefined)?.(), 0);
+        return req;
+      },
+    } as unknown as IDBFactory);
+    const { game } = gameOn('2026-09-28', 11, {
+      hidden: () => false,
+      scheduleIdle: (run) => {
+        const t = setTimeout(run, 0);
+        return () => clearTimeout(t);
+      },
+    });
+    const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+    const onDisk = (): number => JSON.parse(store.get('autosave') as string).rooms.length;
+    game.apply({ kind: 'build', room: 'lobby', floor: 1, x: 150 });
+    await game.save();
+    game.setSpeed(0);
+    for (let x = 140; x < 150; x++) game.apply({ kind: 'build', room: 'lobby', floor: 1, x });
+    await wait(300);
+    expect(onDisk()).toBe(11);
+
+    const before = puts;
+    game.apply({ kind: 'build', room: 'lobby', floor: 1, x: 139 });
+    await wait(10); // that save is writing now
+    game.apply({ kind: 'build', room: 'lobby', floor: 1, x: 138 });
+    game.apply({ kind: 'build', room: 'lobby', floor: 1, x: 137 });
+    await wait(500);
+    expect(game.world.rooms.size).toBe(14);
+    expect(onDisk()).toBe(14);
+    expect(puts - before).toBe(2); // the two asks during the write made one follow-up
+  });
 });
 
 describe('D S9: an unreadable save at boot', () => {

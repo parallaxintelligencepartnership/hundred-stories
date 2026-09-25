@@ -408,6 +408,8 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
   // One save per batch of ticks, and never two at once: a burst of ticks that crosses several
   // boundaries, or a slow write still in flight, must not pile up writes.
   let autosaveInFlight = false;
+  // A save was asked for while one was writing: one more runs when that one settles.
+  let saveAgain = false;
   // The autosave stringifies the whole tower, several MB on a big one. It runs in an idle slot,
   // not inside the timer step, so it never stacks on top of a rush-hour tick.
   let cancelAutosave: (() => void) | null = null;
@@ -421,7 +423,13 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
    * save that runs after a switch still writes the tower it was meant for, where it belongs.
    */
   function saveWhenIdle(): void {
-    if (autosaveInFlight || holds > 0) return;
+    if (holds > 0) return;
+    if (autosaveInFlight) {
+      // A write already started may have taken the tower before this change. Remember the ask
+      // and save once more when it settles; any number of asks meanwhile make one follow-up.
+      if (!cancelAutosave) saveAgain = true;
+      return;
+    }
     autosaveInFlight = true;
     const name = slot;
     const w = world;
@@ -429,6 +437,9 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
       cancelAutosave = null;
       void saveWorld('background', name, w).finally(() => {
         autosaveInFlight = false;
+        if (!saveAgain) return;
+        saveAgain = false;
+        if (dirty) saveWhenIdle();
       });
     });
   }

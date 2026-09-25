@@ -35,7 +35,20 @@ describe('B S1: an office its workers cannot reach', () => {
   it('stays vacant and adds no population when the only car carries hotel guests', () => {
     const { world, office } = officeTower();
     carriesOnly(world, 'hotel');
-    atOnDay(world, 0, 12); // a whole weekday morning, arrivals included
+    // A whole weekday morning, arrivals included, one minute at a time: the office must never be
+    // leased, not merely be empty at the end. A lease that the move-out rule later undoes still
+    // counts as a lease, so every tick is checked (fix review 2026-09-25).
+    const earlier = new Set(world.log);
+    const end = 12 * 60;
+    while (world.time.minute < end) {
+      runMinutes(world, 1);
+      expect(office.vacant, `leased at minute ${world.time.minute}`).toBe(true);
+      expect(office.tenants, `tenants at minute ${world.time.minute}`).toHaveLength(0);
+    }
+    const aboutOffice = world.log.filter(
+      (e) => !earlier.has(e) && (e.roomId === office.id || /rent|no way in/.test(e.text)),
+    );
+    expect(aboutOffice.map((e) => e.text)).toEqual([]);
     expect(office.vacant).toBe(true);
     expect(office.tenants).toHaveLength(0);
     expect(populationOf(world)).toBe(0);
