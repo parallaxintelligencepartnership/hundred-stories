@@ -173,22 +173,35 @@ describe('the renderer draws each room in its look', () => {
     }
   });
 
-  it('remakes a room\'s layers when a new neighbor changes its look', async () => {
-    const { world, a, b } = clashingOffices();
-    world.rooms.delete(a.id); // start with b alone
+  it('never repaints a built room when a newer one goes up beside it: build A, then B to its left', async () => {
+    // Two offices that pick the same look on their own. A (the lower id) is built first at x 109;
+    // B (the higher id, as every later build is) goes up after, to its left at x 100.
+    const clash = clashingOffices();
+    const world = clash.world;
+    const A = clash.a;
+    const B = clash.b;
+    A.x = 109;
+    B.x = 100;
+    world.rooms.delete(B.id);
     markStructureChanged(world);
     const { renderer, stage } = await mount(world);
     renderer.render(world, 1);
-    const alone = lookOf('office', interiorVariant(world.seed, b));
-    expect(fixturesOf(stage, b).texture.label).toBe(`interior|office|9|1|${alone.base}`);
-    addRoom(world, a);
+    const fixtures = fixturesOf(stage, A);
+    const label = fixtures.texture.label;
+    const decorOfA = (): (string | undefined)[] => sprites(stage, 'decor|').filter((s) => s.parent!.x === A.x * TILE_PX).map((s) => s.texture.label);
+    const decor = decorOfA();
+    expect(label).toBe(`interior|office|9|1|${lookOf('office', interiorVariant(world.seed, A)).base}`);
+    addRoom(world, B);
     markStructureChanged(world);
     renderer.render(world, 1);
+    // A's sprites are the same objects, untouched: nothing was remade for the old room.
+    expect(fixturesOf(stage, A)).toBe(fixtures);
+    expect(fixtures.texture.label).toBe(label);
+    expect(decorOfA()).toEqual(decor);
     const now = interiorVariants(world.seed, world.rooms.values());
-    expect(now.get(b.id)).not.toBe(now.get(a.id));
-    const look = lookOf('office', now.get(b.id)!);
-    expect(fixturesOf(stage, b).texture.label).toBe(`interior|office|9|1|${look.base}`);
-    expect(sprites(stage, `interior|office`)).toHaveLength(2);
+    expect(now.get(A.id)).toBe(interiorVariant(world.seed, A));
+    // Only the newer room moved away from the clash.
+    expect(now.get(B.id)).not.toBe(now.get(A.id));
   });
 });
 
