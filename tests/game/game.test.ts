@@ -3,7 +3,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LIMITS } from '../../src/sim/rules';
 import { hashWorld } from '../../src/sim/save';
-import { createGame, shouldAutosave } from '../../src/game/game';
+import { createGame, shouldAutosave, unreadableMessage } from '../../src/game/game';
 import { stashUnreadable, writeSave } from '../../src/game/storage';
 
 // The browser save slot stands in as one in memory string, so save() and load() run end to end.
@@ -79,6 +79,27 @@ describe('export and import', () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toBe('This save is damaged and was not loaded. (rooms[0].floor)');
     expect(hashWorld(game.world)).toBe(before);
+  });
+});
+
+describe('the unreadable save message', () => {
+  it('shows a damaged save in plain words and sends the field path to the console', () => {
+    const game = createGame(3);
+    expect(game.apply({ kind: 'build', room: 'lobby', floor: 1, x: 100 })).toEqual({ ok: true });
+    const damaged = JSON.parse(game.exportSave()) as Record<string, any>;
+    damaged.rooms[0].floor = 0;
+    const result = game.importSave(JSON.stringify(damaged));
+    expect(result.ok).toBe(false);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const message = unreadableMessage(result.ok ? '' : result.reason, true);
+      expect(message).toContain('This save is damaged and was not loaded.');
+      expect(message).not.toMatch(/[[\]()]/);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain('rooms[0].floor');
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 

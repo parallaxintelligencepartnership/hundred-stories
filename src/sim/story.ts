@@ -64,6 +64,9 @@ export interface Chronicle {
  * Whole-game tallies the chronicle states, counted as each beat is recorded so they outlive the
  * capped recent list. movedOut counts room.vacated beats with value 1 or more only: a hotel
  * checkout, an eviction by fire or bomb, and a demolition carry value 0 and are not move-outs.
+ * One room moving out counts once: it writes one beat for the room plus one per followed tenant,
+ * all in a row at one minute, and only the first of that run counts, so the tally never depends
+ * on how many people the player follows.
  */
 export interface StoryTotals {
   movedOut: number;
@@ -91,11 +94,22 @@ export function createStoryState(): StoryState {
   return { seq: 0, recent: [], followed: [], threads: {}, chronicle: null, totals: createStoryTotals() };
 }
 
-/** Add one beat to the running totals. */
-function countBeat(totals: StoryTotals, beat: StoryBeat): void {
+/** A room.vacated beat that is part of the same room's move-out as the beat before it. */
+function sameMoveOut(beat: StoryBeat, prev: StoryBeat | undefined): boolean {
+  return (
+    prev !== undefined &&
+    prev.code === 'room.vacated' &&
+    (prev.value ?? 0) >= 1 &&
+    prev.roomId === beat.roomId &&
+    prev.minute === beat.minute
+  );
+}
+
+/** Add one beat to the running totals. `prev` is the beat recorded just before it. */
+function countBeat(totals: StoryTotals, beat: StoryBeat, prev: StoryBeat | undefined): void {
   switch (beat.code) {
     case 'room.vacated':
-      if ((beat.value ?? 0) >= 1) totals.movedOut += 1;
+      if ((beat.value ?? 0) >= 1 && !sameMoveOut(beat, prev)) totals.movedOut += 1;
       break;
     case 'theft.caught':
       totals.theftsCaught += 1;
@@ -116,7 +130,7 @@ function countBeat(totals: StoryTotals, beat: StoryBeat): void {
 
 export function recordBeat(story: StoryState, beat: StoryBeat): void {
   story.seq += 1;
-  countBeat(story.totals, beat);
+  countBeat(story.totals, beat, story.recent[story.recent.length - 1]);
   story.recent.push(beat);
   if (story.recent.length > STORY_RECENT_CAP) {
     story.recent.shift();
@@ -293,7 +307,7 @@ export function sanitizeStory(raw: unknown): StoryState {
 function cleanTotals(raw: unknown, recent: readonly StoryBeat[]): StoryTotals {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
     const totals = createStoryTotals();
-    for (const beat of recent) countBeat(totals, beat);
+    recent.forEach((beat, i) => countBeat(totals, beat, recent[i - 1]));
     return totals;
   }
   const r = raw as Record<string, unknown>;

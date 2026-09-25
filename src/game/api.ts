@@ -115,6 +115,12 @@ export interface GameApi {
    */
   getKeptCopy(): string | null;
   /**
+   * The copy kept of a Today's tower dated after today, taken when "Start today's tower instead"
+   * replaced it, as the text of a save file, or null when there is none. It stays until the next
+   * such replacement. The ui hands it to the same Save to a file path as exportSave.
+   */
+  getKeptDailyCopy(): string | null;
+  /**
    * Open a saved file. Inside Today's tower this leaves the daily first (saving it if it moved)
    * and the file opens as My tower.
    */

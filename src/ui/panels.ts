@@ -1730,7 +1730,7 @@ function importFileInput(game: GameApi, ctx: PanelContext): HTMLInputElement {
  * Export by platform (storage.ts decides which): the desktop save dialog, the phone share sheet,
  * or the browser download. A cancelled dialog or share sheet says nothing.
  */
-function exportSave(text: string, ctx: PanelContext): void {
+export function exportSave(text: string, ctx: PanelContext): void {
   const platform = savePlatform();
   if (platform === 'tauri') {
     void exportSaveWithDialog(text)

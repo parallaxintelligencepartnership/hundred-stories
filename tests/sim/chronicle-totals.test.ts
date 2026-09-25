@@ -2,10 +2,12 @@
 // (audit 2026-09-25, C S6), and a hotel checkout is not a move-out.
 import { describe, expect, it } from 'vitest';
 
+import demo from '../../store/fixtures/demo-tower.json?raw';
 import { assembleChronicle } from '../../src/sim/chronicle';
 import { ROOMS } from '../../src/sim/rules';
 import { deserialize, serialize } from '../../src/sim/save';
-import { recordBeat, STORY_RECENT_CAP } from '../../src/sim/story';
+import { tickEvaluation } from '../../src/sim/evaluation';
+import { followSim, recordBeat, STORY_RECENT_CAP } from '../../src/sim/story';
 import type { Room, RoomKind, World } from '../../src/sim/types';
 import { allocId, createWorld } from '../../src/sim/world';
 
@@ -51,5 +53,54 @@ describe('chronicle tallies (audit C S6)', () => {
     const back = deserialize(serialize(world));
     expect(back.ok).toBe(true);
     if (back.ok) expect(tallies(back.world)).toEqual(expected);
+  });
+});
+
+describe('chronicle move-out count (checkpoint 2026-09-25)', () => {
+  /** One real office moves out with `follow` of its workers followed; the chronicle's line and the totals. */
+  function moveOutWith(follow: number): { line: string | undefined; movedOut: number; tenants: number } {
+    const read = deserialize(demo);
+    if (!read.ok) throw new Error(read.reason);
+    const world = read.world;
+    const office = [...world.rooms.values()].find((r) => r.kind === 'office' && r.tenants.length >= 4);
+    if (!office) throw new Error('no office with four workers in the demo tower');
+    const tenants = office.tenants.length;
+    for (const id of office.tenants.slice(0, follow)) expect(followSim(world.story, id)).toBe(true);
+    for (const id of office.tenants) {
+      const sim = world.sims.get(id);
+      if (sim) sim.stress = 1;
+    }
+    office.rent = 150;
+    office.dirty = true;
+    office.lowEvalSinceMinute = world.time.minute - 5000;
+    const before = world.story.totals.movedOut;
+    tickEvaluation(world);
+    expect(office.tenants).toEqual([]);
+    const line = assembleChronicle(world).lines.find((l) => /moved out\.$/.test(l));
+    return { line, movedOut: world.story.totals.movedOut - before, tenants };
+  }
+
+  it('counts one office moving out once, whether nobody or three of its workers are followed', () => {
+    const none = moveOutWith(0);
+    const three = moveOutWith(3);
+    expect(none.tenants).toBeGreaterThanOrEqual(4);
+    expect(none.movedOut).toBe(1);
+    expect(three.movedOut).toBe(1);
+    expect(three.line).toBe(none.line);
+  });
+
+  it('a story saved without totals recounts one move-out per room, not per followed worker', () => {
+    const world = createWorld(5);
+    const office = room(world, 'office', 3);
+    const other = room(world, 'office', 4);
+    const story = world.story;
+    for (const simId of [900, 901, 902]) recordBeat(story, { code: 'room.vacated', minute: 10, simId, roomId: office.id, value: 1 });
+    recordBeat(story, { code: 'room.vacated', minute: 10, simId: 903, roomId: other.id, value: 1 });
+    expect(story.totals.movedOut).toBe(2);
+    const saved = JSON.parse(serialize(world)) as { story: Record<string, unknown> };
+    delete saved.story.totals;
+    const back = deserialize(JSON.stringify(saved));
+    expect(back.ok).toBe(true);
+    if (back.ok) expect(back.world.story.totals.movedOut).toBe(2);
   });
 });

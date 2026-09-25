@@ -6,11 +6,13 @@ import type { GameApi } from '../game/api';
 import { dailyResult, dailyShareText, dailyShareUrl, dailyTwistLine, formatDateKey, localDateKey, DAILY_DAYS } from '../game/daily';
 import { DAILY_COPY_FAILED } from '../game/game';
 import { formatCount, formatMoney, starsGlyphs } from './format';
-import { button, el, panelShell, row, tile, type PanelContext, type PanelElement } from './panels';
+import { button, el, exportSave, panelShell, row, tile, type PanelContext, type PanelElement } from './panels';
 
 export const DAILY_TITLE = "Today's tower";
 /** Said on the card when "Start today's tower instead" could not keep a copy of the later tower. */
 export const COPY_FAILED_NOTE = 'We could not keep a copy, so that tower is still here.';
+/** The button that gets the kept copy of a later-dated tower back out, as a file. */
+export const SAVE_KEPT_DAILY = 'Save the kept tower to a file';
 
 export interface DailyPanelActions {
   /** Open the share panel with the daily's own message and link. */
@@ -77,6 +79,13 @@ export function createDailyPanel(
 
   const daily = game.getDaily();
   if (!daily) return panel;
+  // "Start today's tower instead" kept a copy of the later tower: this is the way to get it out,
+  // through the same dialog, share sheet or download as Save to a file.
+  const keptButton = (): HTMLElement | null => {
+    const kept = game.getKeptDailyCopy?.() ?? null;
+    if (kept === null) return null;
+    return button(SAVE_KEPT_DAILY, 'hs-btn', () => exportSave(game.getKeptDailyCopy?.() ?? kept, ctx));
+  };
   // An older daily, finished after the choice: today's tower is still there to play.
   const older = daily.date !== today;
 
@@ -112,6 +121,8 @@ export function createDailyPanel(
       ),
       button('My tower', 'hs-btn', () => actions.myTower()),
     );
+    const keptResult = keptButton();
+    if (keptResult) buttons.append(keptResult);
     body.append(buttons);
     return panel;
   }
@@ -128,6 +139,8 @@ export function createDailyPanel(
   );
   const buttons = el('div', 'hs-actions');
   buttons.append(button('Start building', 'hs-btn is-primary', () => ctx.close()), button('My tower', 'hs-btn', () => actions.myTower()));
+  const keptStart = keptButton();
+  if (keptStart) buttons.append(keptStart);
   body.append(buttons);
   return panel;
 }

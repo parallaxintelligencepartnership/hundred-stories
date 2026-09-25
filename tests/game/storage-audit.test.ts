@@ -1,7 +1,7 @@
 // The browser and desktop save slots under the failures the 2026-09-25 audit found: a write that
 // fell back to localStorage, a transaction that aborts with no error event, and two desktop
 // writes of one slot at once.
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createStorage, createTauriStorage } from '../../src/game/storage';
 
 function fakeLocalStorage(): Storage & { data: Map<string, string> } {
@@ -105,6 +105,42 @@ describe('D S3: after a fallback write the newest copy wins', () => {
     ctl.data.set('autosave', 'idb tower');
     ls.setItem('hundred-stories:autosave', 'local tower');
     expect(await createStorage({ indexedDB: factory, localStorage: ls }).readSave()).toBe('idb tower');
+  });
+});
+
+describe('checkpoint: the newest copy wins with the clock set back across a reload', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.resetModules();
+  });
+
+  it('reads the fallback copy written after a reload with the clock a day earlier', async () => {
+    const ls = fakeLocalStorage();
+    const { factory, ctl } = fakeIdb();
+    const T = Date.UTC(2026, 8, 25, 12);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(T);
+    vi.resetModules();
+    const first = await import('../../src/game/storage');
+    await first.createStorage({ indexedDB: factory, localStorage: ls }).writeSave('{"minute":1000}');
+    // a reload: a fresh module, and the device clock set back one day
+    vi.setSystemTime(T - 86_400_000);
+    vi.resetModules();
+    const second = await import('../../src/game/storage');
+    expect(second).not.toBe(first);
+    ctl.mode = 'error';
+    await second.createStorage({ indexedDB: factory, localStorage: ls }).writeSave('{"minute":5000}');
+    expect(await second.createStorage({ indexedDB: factory, localStorage: ls }).readSave()).toBe('{"minute":5000}');
+  });
+
+  it('a numbered copy beats an old one with no number, whatever the stamps say', async () => {
+    const ls = fakeLocalStorage();
+    const { factory, ctl } = fakeIdb();
+    ctl.data.set('autosave', 'old idb tower');
+    ctl.data.set('autosave:written', Date.UTC(2030, 0, 1));
+    ctl.mode = 'error';
+    await createStorage({ indexedDB: factory, localStorage: ls }).writeSave('new local tower');
+    expect(await createStorage({ indexedDB: factory, localStorage: ls }).readSave()).toBe('new local tower');
   });
 });
 

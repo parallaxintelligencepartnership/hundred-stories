@@ -11,7 +11,7 @@ import { SCHEDULES } from '../sim/rules';
 import { classifyPress, isTap, PRESS_SLOP_PX, TOUCH_SLOP_PX } from '../render/input';
 import type { Renderer } from '../render/renderer';
 import { NIGHT_MULTIPLIER, type DailyChoice, type DailyInfo, type GameApi, type Placement, type PlacementRect, type Speed, type Tool } from './api';
-import { keepDailyCopy, readSave, readSlot, readUnreadable, stashUnreadable, writeSave, writeSlot, type SlotName } from './storage';
+import { keepDailyCopy, readDailyCopy, readSave, readSlot, readUnreadable, stashUnreadable, writeSave, writeSlot, type SlotName } from './storage';
 import {
   DAILY_END_MINUTE,
   dailyFinished,
@@ -33,8 +33,21 @@ export const NOT_SAVING_NOTICE = 'This device is not saving your tower right now
 /** Said when "Start today's tower instead" cannot keep a copy of the later tower first. */
 export const DAILY_COPY_FAILED = 'We could not keep a copy of that tower, so it stays for now.';
 
+/**
+ * The loader's reason without the field it tripped on: a damaged save's reason ends in the field
+ * path in brackets, e.g. "(sims[3].route)", which is code and never shown to a player. The path
+ * goes to the console on one line, so a developer can still find it.
+ */
+function plainReason(reason: string): string {
+  const found = /^(.*?)\s*\(([^()]*)\)$/.exec(reason);
+  if (!found) return reason;
+  console.warn(`Unreadable save field: ${found[2]}`);
+  return found[1] ?? reason;
+}
+
 /** What the player is told when their My tower save cannot be opened, at boot or on the My tower tap. */
 export function unreadableMessage(reason: string, copied: boolean): string {
+  reason = plainReason(reason);
   const kept = copied
     ? 'We kept a copy of it.'
     : 'We could not keep a copy, so we left it where it is.';
@@ -1038,6 +1051,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
       return serialize(world);
     },
     getKeptCopy: () => readUnreadable() ?? unreadableText,
+    getKeptDailyCopy: () => readDailyCopy(),
     importSave(text) {
       const res = deserialize(text);
       if (!res.ok) return res;

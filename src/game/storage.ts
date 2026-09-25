@@ -57,10 +57,13 @@ function openDb(factory: IDBFactory): Promise<IDBDatabase> {
 
 /** Beside each browser copy, under its key plus this: when it was written (ms since 1970). */
 const STAMP_SUFFIX = ':written';
+/** Beside each browser copy, under its key plus this: its save sequence number. */
+const SEQ_SUFFIX = ':seq';
 
 interface StampedText {
   text: string;
   stamp: number;
+  seq: number;
 }
 
 // Two writes in the same millisecond still stamp in the order they were made.
@@ -70,6 +73,10 @@ function nextStamp(): number {
   return lastStamp;
 }
 
+// The last sequence number this page wrote, per slot key. A reload starts it at 0 again, which is
+// why each write also asks both stores for the highest number already there.
+const lastSeq = new Map<string, number>();
+
 function stampOf(raw: unknown): number {
   const n = Number(raw ?? 0);
   return Number.isFinite(n) ? n : 0;
@@ -78,18 +85,52 @@ function stampOf(raw: unknown): number {
 export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): SaveStorage {
   const KEY = SLOT_KEYS[slot];
   const localKey = `${DB}:${KEY}`;
-  // When IndexedDB is in play each copy carries the wall clock time it was written, beside it
-  // under its own key (the save text itself is untouched, so an older build still reads it). A
-  // write that fell back to localStorage is then newer than the IndexedDB copy it could not
-  // replace, and the read takes it. A copy with no stamp (written before stamps) counts as 0,
-  // so two old copies still read IndexedDB first, as they always did. The wall clock rather
-  // than the game minute: a new tower or an opened file starts at an earlier minute and is
-  // still the newer save.
+  // When IndexedDB is in play each copy carries a save sequence number beside it, under its own
+  // key (the save text itself is untouched, so an older build still reads it). Each write takes
+  // one more than the highest number in either store or in memory, so the number never goes
+  // backwards, not across a reload and not when the device clock is set back. A write that fell
+  // back to localStorage is then newer than the IndexedDB copy it could not replace, and the read
+  // takes it. A copy without a number (written before sequence numbers) counts as 0. The wall
+  // clock stamp is still written and decides only between equal numbers; a copy with no stamp
+  // counts as 0 too, so two old copies still read IndexedDB first, as they always did. Not the game minute: a new tower
+  // or an opened file starts at an earlier minute and is still the newer save.
   const idbStampKey = `${KEY}${STAMP_SUFFIX}`;
   const localStampKey = `${localKey}${STAMP_SUFFIX}`;
+  const idbSeqKey = `${KEY}${SEQ_SUFFIX}`;
+  const localSeqKey = `${localKey}${SEQ_SUFFIX}`;
+
+  async function readIndexedDbSeq(factory: IDBFactory): Promise<number> {
+    try {
+      const db = await openDb(factory);
+      return await new Promise<number>((resolve, reject) => {
+        const req = db.transaction(STORE, 'readonly').objectStore(STORE).get(idbSeqKey);
+        req.onsuccess = () => resolve(stampOf(req.result));
+        req.onerror = () => reject(req.error);
+      });
+    } catch {
+      return 0;
+    }
+  }
+
+  function readLocalSeq(): number {
+    try {
+      return stampOf(deps.localStorage?.getItem(localSeqKey));
+    } catch {
+      return 0;
+    }
+  }
+
+  async function nextSeq(): Promise<number> {
+    const found = deps.indexedDB ? Math.max(await readIndexedDbSeq(deps.indexedDB), readLocalSeq()) : 0;
+    // No await between reading lastSeq and setting it, so two writes at once still get two numbers.
+    const seq = Math.max(found, lastSeq.get(KEY) ?? 0) + 1;
+    lastSeq.set(KEY, seq);
+    return seq;
+  }
 
   async function writeSave(text: string): Promise<void> {
     const stamp = nextStamp();
+    const seq = await nextSeq();
     if (deps.indexedDB) {
       try {
         const db = await openDb(deps.indexedDB);
@@ -98,6 +139,7 @@ export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): 
           const store = tx.objectStore(STORE);
           store.put(text, KEY);
           store.put(stamp, idbStampKey);
+          store.put(seq, idbSeqKey);
           tx.oncomplete = () => resolve();
           tx.onerror = () => reject(tx.error ?? new Error('write failed'));
           // A quota failure at commit can abort with no error event. Without this the write
@@ -112,7 +154,10 @@ export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): 
     try {
       if (!deps.localStorage) throw new Error('no localStorage');
       deps.localStorage.setItem(localKey, text);
-      if (deps.indexedDB) deps.localStorage.setItem(localStampKey, String(stamp));
+      if (deps.indexedDB) {
+        deps.localStorage.setItem(localStampKey, String(stamp));
+        deps.localStorage.setItem(localSeqKey, String(seq));
+      }
     } catch {
       // a full quota, a private window, or no store at all: all one message to the player
       throw new Error(REFUSED_REASON);
@@ -127,14 +172,20 @@ export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): 
         const store = tx.objectStore(STORE);
         const req = store.get(KEY);
         const stampReq = store.get(idbStampKey);
+        const seqReq = store.get(idbSeqKey);
         let text: string | null = null;
+        let stamp = 0;
         // Requests in one transaction succeed in the order they were made.
         req.onsuccess = () => {
           text = (req.result as string | undefined) ?? null;
         };
         req.onerror = () => reject(req.error);
-        stampReq.onsuccess = () => resolve(text ? { text, stamp: stampOf(stampReq.result) } : null);
+        stampReq.onsuccess = () => {
+          stamp = stampOf(stampReq.result);
+        };
         stampReq.onerror = () => reject(stampReq.error);
+        seqReq.onsuccess = () => resolve(text ? { text, stamp, seq: stampOf(seqReq.result) } : null);
+        seqReq.onerror = () => reject(seqReq.error);
       });
     } catch {
       return null; // the localStorage copy, if any, is all there is
@@ -145,7 +196,11 @@ export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): 
     try {
       const text = deps.localStorage?.getItem(localKey) ?? null;
       if (!text) return null;
-      return { text, stamp: stampOf(deps.localStorage?.getItem(localStampKey)) };
+      return {
+        text,
+        stamp: stampOf(deps.localStorage?.getItem(localStampKey)),
+        seq: stampOf(deps.localStorage?.getItem(localSeqKey)),
+      };
     } catch {
       return null;
     }
@@ -154,7 +209,12 @@ export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): 
   async function readSave(): Promise<string | null> {
     const fromDb = deps.indexedDB ? await readIndexedDb(deps.indexedDB) : null;
     const fromLocal = readLocal();
-    if (fromDb && fromLocal) return fromLocal.stamp > fromDb.stamp ? fromLocal.text : fromDb.text;
+    if (fromDb && fromLocal) {
+      // A copy with no number was written by a build before sequence numbers, so any numbered
+      // copy is newer. The stamp decides only between equal numbers (two copies without one).
+      if (fromLocal.seq !== fromDb.seq) return fromLocal.seq > fromDb.seq ? fromLocal.text : fromDb.text;
+      return fromLocal.stamp > fromDb.stamp ? fromLocal.text : fromDb.text;
+    }
     return fromDb?.text ?? fromLocal?.text ?? null;
   }
 
