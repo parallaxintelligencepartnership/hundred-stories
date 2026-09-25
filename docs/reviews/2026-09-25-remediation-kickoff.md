@@ -30,3 +30,10 @@ This note is for the session that runs the fix wave. Matt's words on 2026-09-25:
 - A CRITICAL cannot be closed with a test that fails when the fix is reverted. Do not ship; report which one and why.
 - The full test run, typecheck or build fails after two fix attempts on the branch. Do not ship; report.
 - The deploy verification fails (the console grep or the live load). Roll back per `deploy/README.md`, report.
+
+## Progress, session of 2026-09-25 afternoon
+- Runner: nothing runs on the Mac. Tests run on pi2 (x86_64, 8 cores) in a node:26-bookworm-slim container with the tree mounted at the Mac's absolute path, through the session runner script (rsync of the tracked and untracked tree minus WAVs and PNGs, vitest, tsc, vite-node probes, and mutation patches applied in a sibling copy). Recorded in MAP.md under Environment.
+- P2b, P5b and P6a merges verified: typecheck clean, their 15 touched test files green (282 tests). The seven IMPORTANT and sixteen ADVISORY lines those packages and P7 had fixed but never closed are closed in REVIEWS.md on their named tests.
+- Matt's rule recorded in DECISIONS.md: no finding stays open at ship at any severity; device-step items get a fix and a test and close on that; verification-only findings get their probe run before the ship.
+- The built site served by the deploy nginx.conf in a container on pi2 mounts the game under the live CSP with no Refused or unsafe-eval console lines.
+- In flight: P8 (nine test guards with mutation proofs), the real-browser probe for line 294 and the phone-width News screenshot for line 354, both on pi2.
