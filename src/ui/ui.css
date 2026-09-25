@@ -1,6 +1,10 @@
 @import '../fonts.css';
-/* Hundred Stories chrome. Flat surfaces, hairline structure, no cards, no shadows, no gradients.
-   Tokens per docs/VISUAL.md; the light theme remaps the same names. */
+/* Hundred Stories chrome. The tower fills the screen edge to edge and the ui floats over it.
+   Two surfaces: glass for the controls layer (the top bar, the speed pill, the round buttons,
+   the toasts), and a heavily tinted, nearly solid surface for anything that holds text (sheets,
+   cards, the palette). Soft corners from one nested radius family, soft shadows, no hard
+   borders. Tokens per docs/VISUAL.md and docs/reviews/2026-09-24-ui-polish-spec.md; the light
+   theme remaps the same names. */
 
 :root {
   --steel: #1c232e;
@@ -16,7 +20,36 @@
   --eval-fair: #f4b942;
   --eval-poor: #ff5c4d;
 
+  /* Surfaces. The glass tint alone keeps --ink and --ink-dim at WCAG AA (4.5:1) over a white
+     sky, so the blur never has to help; the clear look (hs-glass-clear) keeps --ink at AA and
+     turns the dim text to --ink on the controls. The text surface is nearly solid. */
+  --glass-tinted: rgba(22, 28, 38, 0.88);
+  --glass-clear: rgba(22, 28, 38, 0.72);
+  --glass: var(--glass-tinted);
+  --glass-blur: blur(20px) saturate(1.4);
+  --surface: rgba(28, 35, 46, 0.99);
+  --surface-solid: var(--steel);
+  --hairline: rgba(232, 236, 242, 0.12);
+  --press-tint: rgba(232, 236, 242, 0.1);
+  --scrim: rgba(8, 12, 18, 0.4);
+
+  /* Corners: one family. A child sits in its parent's padding, so its radius is the parent's
+     minus that padding: calc(var(--radius-20) - var(--pad-20)) is the button inside a card. */
+  --radius-12: 12px;
+  --radius-16: 16px;
+  --radius-20: 20px;
+  --radius-pill: 999px;
+  --pad-12: 4px;
+  --pad-16: 8px;
+  --pad-20: 12px;
+
+  /* Shadows: controls, cards, sheets. Soft, never a hard edge. */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.2), 0 4px 14px rgba(0, 0, 0, 0.22);
+  --shadow-2: 0 2px 6px rgba(0, 0, 0, 0.2), 0 12px 32px rgba(0, 0, 0, 0.3);
+  --shadow-3: 0 -4px 12px rgba(0, 0, 0, 0.18), 0 -16px 40px rgba(0, 0, 0, 0.3);
+
   --font-ui: 'Bricolage Grotesque', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  /* Only the clock and cash use it, always with tabular figures. */
   --font-readout: 'Share Tech Mono', ui-monospace, 'SFMono-Regular', monospace;
   --size-12: 12px;
   --size-14: 14px;
@@ -24,19 +57,41 @@
   --size-20: 20px;
   --size-28: 28px;
 
-  /* Status bar (0.4.3): a 56 px strip of readouts, one row on a desktop and two on a phone. */
-  --status-h: 56px;
-  --status-gap: 12px;
-  --status-value: 20px;
+  /* Motion. Sheets, cards and a button press move on a spring with a small overshoot; fades
+     use the standard ease. Reduced motion (the setting or the system) turns every move into a
+     plain fade: no slide, no overshoot, no press scale. */
+  --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-spring: var(--ease-standard);
+  --motion-fast: 200ms;
+  --motion-med: 240ms;
+  --motion-slow: 280ms;
+  --motion-fade: 200ms;
+  --motion: var(--motion-fast);
+  --press-scale: 0.96;
+  --enter-x: 16px;
+  --enter-y: 100%;
+  --toast-rise: 8px;
+
+  /* Touch and focus. */
+  --touch: 44px;
+  --focus-width: 3px;
+  --focus-color: var(--amber);
+  --focus-offset: 2px;
+  --focus-ring: var(--focus-width) solid var(--focus-color);
+
+  /* Layout. The top bar floats var(--edge) from the edges; floating things keep --gap-float. */
+  --edge: 12px;
+  --gap-float: 8px;
+  --status-h: 52px;
+  --status-gap: 4px;
+  --status-value: 16px;
   --status-meta: 12px;
-  --star-size: 16px;
-  --clock-size: 40px;
-  --top-h: var(--status-h);
+  --star-size: 14px;
+  --clock-size: 28px;
+  --top-h: calc(var(--status-h) + var(--edge));
   --palette-w: 232px;
-  --ticker-h: 28px;
-  --panel-w: 320px;
+  --panel-w: 360px;
   --pad: 8px;
-  --motion: 160ms;
 
   /* The notch, the home indicator and a phone's rounded corners. Zero on every other screen,
      so the strips can spend them without a media query. */
@@ -44,6 +99,14 @@
   --safe-right: env(safe-area-inset-right, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
+}
+
+/* A spring: linear() stops that rise past 1 by about 4 percent and settle. A browser without
+   linear() keeps the standard ease. */
+@supports (transition-timing-function: linear(0, 1)) {
+  :root {
+    --ease-spring: linear(0, 0.19 5%, 0.5 11%, 0.8 19%, 0.96 27%, 1.03 35%, 1.04 41%, 1.025 52%, 1.006 68%, 1);
+  }
 }
 
 /* Theme is a three-way choice: system (default), light, dark. The dark tokens
@@ -65,6 +128,15 @@
     --eval-good: #1f6fc4;
     --eval-fair: #b57a04;
     --eval-poor: #c22a1c;
+    --glass-tinted: rgba(246, 248, 251, 0.92);
+    --glass-clear: rgba(246, 248, 251, 0.74);
+    --surface: rgba(246, 248, 251, 0.99);
+    --hairline: rgba(21, 28, 37, 0.12);
+    --press-tint: rgba(21, 28, 37, 0.08);
+    --scrim: rgba(21, 28, 37, 0.28);
+    --shadow-1: 0 1px 2px rgba(21, 28, 37, 0.12), 0 4px 14px rgba(21, 28, 37, 0.14);
+    --shadow-2: 0 2px 6px rgba(21, 28, 37, 0.1), 0 12px 32px rgba(21, 28, 37, 0.18);
+    --shadow-3: 0 -4px 12px rgba(21, 28, 37, 0.08), 0 -16px 40px rgba(21, 28, 37, 0.16);
   }
 }
 
@@ -81,6 +153,34 @@
   --eval-good: #1f6fc4;
   --eval-fair: #b57a04;
   --eval-poor: #c22a1c;
+  --glass-tinted: rgba(246, 248, 251, 0.92);
+  --glass-clear: rgba(246, 248, 251, 0.74);
+  --surface: rgba(246, 248, 251, 0.99);
+  --hairline: rgba(21, 28, 37, 0.12);
+  --press-tint: rgba(21, 28, 37, 0.08);
+  --scrim: rgba(21, 28, 37, 0.28);
+  --shadow-1: 0 1px 2px rgba(21, 28, 37, 0.12), 0 4px 14px rgba(21, 28, 37, 0.14);
+  --shadow-2: 0 2px 6px rgba(21, 28, 37, 0.1), 0 12px 32px rgba(21, 28, 37, 0.18);
+  --shadow-3: 0 -4px 12px rgba(21, 28, 37, 0.08), 0 -16px 40px rgba(21, 28, 37, 0.16);
+}
+
+/* See-through buttons (package 2 adds the switch): the controls layer turns clearer. Text on
+   it stays at AA because the dim text becomes full ink there. Sheets and cards never change. */
+:root.hs-glass-clear {
+  --glass: var(--glass-clear);
+}
+
+:root.hs-glass-clear .hs-top,
+:root.hs-glass-clear .hs-news {
+  --ink-dim: var(--ink);
+}
+
+/* No backdrop blur: the glass becomes the solid surface, so nothing depends on the blur. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root,
+  :root.hs-glass-clear {
+    --glass: var(--surface-solid);
+  }
 }
 
 html,
@@ -131,75 +231,149 @@ body {
 }
 
 .hs-ui :focus-visible {
-  outline: 2px solid var(--amber);
-  outline-offset: 1px;
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
 }
 
-/* Top strip ---------------------------------------------------------- */
+/* A dialog takes focus itself when it opens, so a screen reader reads its title first; the
+   ring would only box the whole card. */
+.hs-ui .hs-sheet:focus-visible {
+  outline: none;
+}
 
+/* Words for a screen reader only. */
+.hs-ui .hs-readout-label,
+.hs-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.hs-icon {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+}
+
+/* A press: a slight scale and a touch squarer corner, on the spring. Each control sets its own
+   --r and --r-press. Only in answer to the player: nothing in the chrome moves by itself. */
+.hs-icon-btn,
+.hs-btn,
+.hs-readout,
+.hs-stars-button,
+.hs-news-toast,
+.hs-alert-toast {
+  border-radius: var(--r, var(--radius-12));
+  transition:
+    transform var(--motion-fast) var(--ease-spring),
+    border-radius var(--motion-fast) var(--ease-spring),
+    background-color var(--motion-fade) var(--ease-standard);
+}
+
+.hs-icon-btn:active:not(:disabled),
+.hs-btn:active:not(:disabled),
+button.hs-readout:active,
+.hs-stars-button:active,
+button.hs-news-toast:active,
+.hs-alert-toast:active {
+  transform: scale(var(--press-scale));
+  border-radius: var(--r-press, calc(var(--r, var(--radius-12)) - 4px));
+}
+
+
+/* Top bar ------------------------------------------------------------ */
+
+/* Nothing of its own to see: the pill, the View choice and the controls float in it. It never
+   hides or moves with what the player is doing. */
 .hs-top {
   position: absolute;
-  inset: 0 0 auto 0;
-  min-height: calc(var(--top-h) + var(--safe-top));
+  top: calc(var(--safe-top) + var(--edge));
+  left: calc(var(--edge) + var(--safe-left));
+  right: calc(var(--edge) + var(--safe-right));
   display: flex;
   flex-wrap: wrap;
-  align-items: stretch;
-  gap: var(--status-gap);
-  padding: var(--safe-top) calc(var(--pad) + var(--safe-right)) 0 calc(var(--pad) + var(--safe-left));
-  background: var(--steel);
-  border-bottom: 1px solid var(--line);
+  align-items: flex-start;
+  gap: var(--gap-float);
+  pointer-events: none;
+}
+
+.hs-top > * {
   pointer-events: auto;
 }
 
-.hs-readouts,
-.hs-clock-group {
+/* The glass layer: the controls float on it. */
+.hs-status-pill,
+.hs-speed,
+.hs-round,
+.hs-speed-mode,
+.hs-top-views > .hs-status-view,
+.hs-pill-btn {
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-1);
+}
+
+/* The pill: cash, people, stars, the clock and the weather, one row everywhere. */
+.hs-status-pill {
+  --r: var(--radius-pill);
   display: flex;
-  align-items: stretch;
+  flex-wrap: nowrap;
+  align-items: center;
   gap: var(--status-gap);
-  min-height: var(--status-h);
-}
-
-.hs-clock-group {
-  flex: 1 1 auto;
-}
-
-/* A readout is a column of the directory board: label, value, meta, split by hairlines. */
-.hs-readout {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
   min-width: 0;
-  padding: 0 var(--status-gap) 0 0;
+  min-height: var(--status-h);
+  padding: 4px;
+  border-radius: calc(var(--status-h) / 2);
+}
+
+/* A readout: its icon, then the value over a small line of meta. Inside the pill's 4 px
+   padding, so its corner is the pill's minus 4. */
+.hs-readout {
+  --r: calc(var(--status-h) / 2 - 4px);
+  display: grid;
+  grid-template-columns: auto auto;
+  grid-template-rows: auto auto;
+  column-gap: 6px;
+  align-items: center;
+  align-content: center;
+  min-width: 0;
+  min-height: var(--touch);
+  padding: 2px 12px;
   background: transparent;
   border: 0;
-  border-right: 1px solid var(--line);
   text-align: left;
+  color: var(--ink);
+}
+
+.hs-readout-icon {
+  grid-row: 1 / span 2;
+  color: var(--ink-dim);
 }
 
 button.hs-readout {
   cursor: pointer;
 }
 
-button.hs-readout:hover .hs-readout-label {
-  color: var(--amber);
+button.hs-readout:hover {
+  background: var(--press-tint);
 }
 
-.hs-status-cash {
-  flex: 0 0 160px;
-}
-
-.hs-status-pop {
-  flex: 0 0 112px;
-}
-
-.hs-readout-label,
 .hs-readout-meta {
+  grid-column: 2;
   font-size: var(--status-meta);
   line-height: 1.2;
   color: var(--ink-dim);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
 }
 
 .hs-readout-meta.is-up {
@@ -210,13 +384,26 @@ button.hs-readout:hover .hs-readout-label {
   color: var(--alert);
 }
 
+/* Values in the UI font with tabular figures; cash and the clock keep the readout face. */
 .hs-readout-value {
-  font-family: var(--font-readout);
+  grid-column: 2;
   font-size: var(--status-value);
-  line-height: 1.1;
-  letter-spacing: 0.04em;
-  color: var(--indicator);
+  font-weight: 600;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+.hs-status-cash .hs-readout-value,
+.hs-clock-digits {
+  font-family: var(--font-readout);
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.hs-status-cash .hs-readout-icon {
+  color: var(--indicator);
 }
 
 .hs-readout.is-hidden {
@@ -226,25 +413,31 @@ button.hs-readout:hover .hs-readout-label {
 /* Stars: six icons, amber earned and outline unearned, with what the next one needs. */
 .hs-status-stars {
   position: relative;
+  display: flex;
   padding: 0;
 }
 
 .hs-stars-button {
+  --r: calc(var(--status-h) / 2 - 4px);
   display: flex;
   flex-direction: column;
   justify-content: center;
-  height: 100%;
-  padding: 0 var(--status-gap) 0 0;
+  min-height: var(--touch);
+  padding: 2px 12px;
   background: transparent;
   border: 0;
   text-align: left;
   cursor: pointer;
 }
 
+.hs-stars-button:hover {
+  background: var(--press-tint);
+}
+
 .hs-star-row {
   display: flex;
   gap: 2px;
-  padding: 3px 0;
+  padding: 2px 0;
 }
 
 .hs-star {
@@ -259,17 +452,49 @@ button.hs-readout:hover .hs-readout-label {
   color: var(--amber);
 }
 
+/* The phone's stand-in for the row: one star and the count. */
+.hs-stars-count {
+  display: none;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--status-value);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.hs-count-glyph {
+  fill: var(--amber);
+  color: var(--amber);
+}
+
+/* What the next star needs: text, so the solid text surface. */
 .hs-tip {
   position: absolute;
-  top: 100%;
+  top: calc(100% + var(--gap-float) + 4px);
   left: 0;
   z-index: 5;
   display: none;
   width: 280px;
-  padding: var(--pad);
-  background: var(--steel);
-  border: 1px solid var(--line);
+  padding: 12px 16px;
+  background: var(--surface);
+  border-radius: var(--radius-16);
+  box-shadow: var(--shadow-2);
   font-size: var(--size-12);
+}
+
+/* Where anchor positioning is supported, the tip hangs from the stars and flips to stay on
+   screen; elsewhere it keeps the plain placement above. */
+@supports (anchor-name: --hs-stars) {
+  .hs-stars-button {
+    anchor-name: --hs-stars;
+  }
+
+  .hs-tip {
+    position-anchor: --hs-stars;
+    top: calc(anchor(bottom) + var(--gap-float) + 4px);
+    left: anchor(left);
+    position-try-fallbacks: flip-inline;
+  }
 }
 
 .hs-status-stars:hover .hs-tip,
@@ -294,8 +519,8 @@ button.hs-readout:hover .hs-readout-label {
   display: grid;
   grid-template-columns: 56px minmax(0, 1fr);
   gap: var(--pad);
-  padding: 3px 0;
-  border-top: 1px solid var(--line);
+  padding: 4px 0;
+  border-top: 1px solid var(--hairline);
   color: var(--ink);
 }
 
@@ -307,11 +532,14 @@ button.hs-readout:hover .hs-readout-label {
   color: var(--indicator);
 }
 
-/* Clock: a 24 hour dial with midnight at the top and the night arc shaded. */
+/* Clock: a 24 hour dial with midnight at the top and the night arc shaded, the time, and the
+   weather icon. */
 .hs-status-clock {
+  display: flex;
   flex-direction: row;
   align-items: center;
   gap: var(--pad);
+  padding: 2px 12px;
 }
 
 .hs-dial {
@@ -321,8 +549,8 @@ button.hs-readout:hover .hs-readout-label {
 }
 
 .hs-dial-face {
-  fill: var(--steel-2);
-  stroke: var(--line);
+  fill: var(--press-tint);
+  stroke: var(--ink-dim);
   stroke-width: 1.5;
 }
 
@@ -337,13 +565,13 @@ button.hs-readout:hover .hs-readout-label {
 }
 
 .hs-dial-hand {
-  stroke: var(--indicator);
-  stroke-width: 2;
+  stroke: var(--amber);
+  stroke-width: 2.5;
   stroke-linecap: round;
 }
 
 .hs-dial-pin {
-  fill: var(--indicator);
+  fill: var(--amber);
 }
 
 .hs-clock-text {
@@ -352,24 +580,41 @@ button.hs-readout:hover .hs-readout-label {
   min-width: 0;
 }
 
-/* The weather under the time, in the readout face at the meta size (src/game/weather.ts). */
-.hs-weather {
-  font-family: var(--font-readout);
+.hs-clock-ampm {
   font-size: var(--status-meta);
-  line-height: 1.2;
-  letter-spacing: 0.04em;
+  font-weight: 600;
   color: var(--ink-dim);
+}
+
+/* The weather: its icon; the word is for a screen reader and the tooltip. */
+.hs-weather {
+  display: inline-flex;
+  align-items: center;
+  color: var(--ink);
+}
+
+.hs-weather-icon {
+  width: 20px;
+  height: 20px;
+}
+
+.hs-weather-word {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
   white-space: nowrap;
 }
 
-.hs-weather-short {
-  display: none;
-}
-
 .hs-speed-mode {
-  padding: 3px 8px;
-  border: 1px solid var(--amber);
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: var(--radius-pill);
   font-size: var(--size-12);
+  font-weight: 600;
   color: var(--amber);
   white-space: nowrap;
 }
@@ -385,47 +630,118 @@ button.hs-readout:hover .hs-readout-label {
   overflow: hidden;
 }
 
+/* The View choice stays in the bar until it moves to its own popover: its own row under the
+   pill, so the controls on the right never move for it. */
+.hs-top-views {
+  order: 3;
+  display: flex;
+  flex: 1 1 100%;
+  pointer-events: none;
+}
+
+.hs-top-views > .hs-status-view {
+  min-height: var(--touch);
+  padding: 4px 6px 4px 16px;
+  border-radius: var(--radius-16);
+  pointer-events: auto;
+}
+
+/* Speed, My tower, Share and Menu: on the right, always in the same place. */
 .hs-top-actions {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--gap-float);
+  order: 2;
+  margin-left: auto;
   min-height: var(--status-h);
 }
 
+/* Speed: one segmented pill of icons. Buttons sit in its 4 px padding, so their corner is the
+   pill's minus 4. */
 .hs-speed {
   display: flex;
-  border: 1px solid var(--line);
+  gap: 2px;
+  padding: 4px;
+  border-radius: calc(var(--touch) / 2 + 4px);
 }
 
-.hs-speed button + button {
-  border-left: 1px solid var(--line);
-}
-
-.hs-btn {
-  background: var(--steel-2);
-  border: 1px solid var(--line);
+.hs-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: var(--touch);
+  min-height: var(--touch);
+  padding: 0;
+  border: 0;
   color: var(--ink);
-  padding: 5px 10px;
+  font-size: var(--size-14);
+  font-weight: 600;
   cursor: pointer;
 }
 
-/* The top strip's My tower button shows only outside My tower. */
+.hs-icon-btn .hs-btn-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.hs-speed-btn {
+  --r: calc(var(--touch) / 2);
+  --r-press: calc(var(--touch) / 2 - 6px);
+  background: transparent;
+}
+
+.hs-speed-btn .hs-btn-label {
+  display: none;
+}
+
+.hs-speed-btn:hover:not([aria-pressed='true']) {
+  background: var(--press-tint);
+}
+
+.hs-speed-btn[aria-pressed='true'] {
+  background: var(--amber);
+  color: var(--on-amber);
+}
+
+/* Share and Menu: round, the icon and a short word; a phone keeps the icon (ui.css below). */
+.hs-round {
+  --r: calc(var(--touch) / 2 + 4px);
+  --r-press: calc(var(--touch) / 2 - 2px);
+  min-height: calc(var(--touch) + 8px);
+  min-width: calc(var(--touch) + 8px);
+  padding: 0 18px 0 16px;
+}
+
+.hs-round:hover {
+  background: var(--steel-2);
+}
+
+.hs-pill-btn {
+  --r: var(--radius-pill);
+  min-height: calc(var(--touch) + 8px);
+  padding: 0 18px;
+  border: 0;
+  font-weight: 600;
+}
+
+.hs-btn {
+  --r: var(--radius-12);
+  background: var(--steel-2);
+  border: 1px solid transparent;
+  color: var(--ink);
+  padding: 5px 12px;
+  cursor: pointer;
+}
+
+/* The top bar's My tower button shows only outside My tower. */
 .hs-btn[hidden] {
   display: none;
 }
 
-.hs-speed .hs-btn {
-  border: 0;
-  min-width: 44px;
-}
-
 .hs-btn:hover:not(:disabled) {
   border-color: var(--amber);
-}
-
-.hs-speed .hs-btn:hover:not(:disabled) {
-  color: var(--amber);
 }
 
 .hs-btn[aria-pressed='true'] {
@@ -443,15 +759,15 @@ button.hs-readout:hover .hs-readout-label {
 .hs-palette {
   position: absolute;
   /* Under the strip, whatever height it wrapped to. The fallback is the unwrapped strip. */
-  top: var(--top-actual, calc(var(--top-h) + var(--safe-top)));
-  bottom: calc(var(--ticker-h) + var(--safe-bottom));
-  left: 0;
+  top: calc(var(--top-actual, calc(var(--top-h) + var(--safe-top))) + var(--gap-float));
+  bottom: calc(var(--edge) + var(--safe-bottom));
+  left: calc(var(--edge) + var(--safe-left));
   width: var(--palette-w);
-  padding-left: var(--safe-left);
   overflow-x: hidden;
   overflow-y: auto;
-  background: var(--steel);
-  border-right: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: var(--radius-20);
+  box-shadow: var(--shadow-2);
   pointer-events: auto;
 }
 
@@ -602,7 +918,8 @@ button.hs-readout:hover .hs-readout-label {
 }
 
 .hs-tool-cost {
-  font-family: var(--font-readout);
+  font-family: var(--font-ui);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
@@ -700,25 +1017,132 @@ button.hs-readout:hover .hs-readout-label {
 
 /* Panels --------------------------------------------------------------- */
 
-.hs-panel {
+/* The sheet (src/ui/sheet.ts): a floating card at 900 px and up, a bottom sheet below. Text
+   lives on it, so it takes the nearly solid surface, never the glass. */
+.hs-sheet {
   position: absolute;
-  top: var(--top-actual, calc(var(--top-h) + var(--safe-top)));
-  right: 0;
-  bottom: calc(var(--ticker-h) + var(--safe-bottom));
-  width: var(--panel-w);
-  max-width: 100vw;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
   box-sizing: border-box;
-  overflow-x: hidden;
-  overflow-y: auto;
-  background: var(--steel);
-  border-left: 1px solid var(--line);
+  overflow: hidden;
+  background: var(--surface);
+  color: var(--ink);
   pointer-events: auto;
-  transform: translateX(0);
-  transition: transform var(--motion) ease-out;
+  opacity: 1;
+  transition:
+    transform var(--motion-slow) var(--ease-spring),
+    height var(--motion-slow) var(--ease-spring),
+    opacity var(--motion-fade) var(--ease-standard);
 }
 
-.hs-panel.is-entering {
-  transform: translateX(100%);
+.hs-sheet .hs-panel-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.hs-sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 19;
+  background: var(--scrim);
+  pointer-events: auto;
+  opacity: 1;
+  transition: opacity var(--motion-fade) var(--ease-standard);
+}
+
+/* The grab handle: a 44 px strip with a short bar in it. A tap toggles half and full. */
+.hs-sheet-handle {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: var(--touch);
+  padding: 0;
+  background: transparent;
+  border: 0;
+  cursor: grab;
+  touch-action: none;
+}
+
+.hs-sheet-handle::before {
+  content: '';
+  width: 40px;
+  height: 5px;
+  border-radius: var(--radius-pill);
+  background: var(--ink-dim);
+  opacity: 0.6;
+}
+
+.hs-sheet.is-dragging {
+  transition: none;
+}
+
+@media (min-width: 900px) {
+  .hs-sheet {
+    top: calc(var(--top-actual, calc(var(--top-h) + var(--safe-top))) + var(--gap-float));
+    right: calc(var(--edge) + var(--safe-right));
+    width: var(--panel-w);
+    max-height: calc(100% - var(--top-actual, var(--top-h)) - 2 * var(--edge) - var(--safe-bottom));
+    border-radius: var(--radius-20);
+    box-shadow: var(--shadow-2);
+    transform: none;
+  }
+
+  .hs-sheet-handle,
+  .hs-sheet-backdrop {
+    display: none;
+  }
+
+  @starting-style {
+    .hs-sheet {
+      opacity: 0;
+      transform: translateX(var(--enter-x));
+    }
+  }
+}
+
+@media (max-width: 899px) {
+  .hs-sheet {
+    left: var(--safe-left);
+    right: var(--safe-right);
+    bottom: 0;
+    height: var(--sheet-h);
+    max-height: calc(100% - var(--safe-top) - var(--edge));
+    padding-bottom: var(--safe-bottom);
+    border-radius: var(--radius-20) var(--radius-20) 0 0;
+    box-shadow: var(--shadow-3);
+    transform: translateY(var(--sheet-drag, 0px));
+  }
+
+  .hs-sheet[data-snap='half'] {
+    --sheet-h: 55vh;
+    --sheet-h: 55dvh;
+  }
+
+  .hs-sheet[data-snap='full'] {
+    --sheet-h: calc(100vh - var(--safe-top) - var(--edge));
+    --sheet-h: calc(100dvh - var(--safe-top) - var(--edge));
+  }
+
+  .hs-sheet .hs-panel-head {
+    touch-action: none;
+  }
+
+  @starting-style {
+    .hs-sheet {
+      opacity: 0;
+      transform: translateY(var(--enter-y));
+    }
+
+    .hs-sheet-backdrop {
+      opacity: 0;
+    }
+  }
 }
 
 .hs-panel-head {
@@ -726,9 +1150,15 @@ button.hs-readout:hover .hs-readout-label {
   align-items: center;
   justify-content: space-between;
   gap: var(--pad);
-  min-height: 44px;
-  padding: 6px var(--pad);
-  border-bottom: 1px solid var(--line);
+  min-height: var(--touch);
+  padding: 8px 12px 8px 16px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.hs-panel-close {
+  min-height: var(--touch);
+  padding: 0 16px;
+  border-radius: calc(var(--touch) / 2);
 }
 
 .hs-panel-title {
@@ -757,7 +1187,7 @@ button.hs-readout:hover .hs-readout-label {
 
 .hs-panel-body {
   max-width: 100%;
-  padding: var(--pad);
+  padding: 12px 16px 16px;
 }
 
 .hs-section {
@@ -789,7 +1219,8 @@ button.hs-readout:hover .hs-readout-label {
 
 .hs-row-value {
   justify-self: end;
-  font-family: var(--font-readout);
+  font-family: var(--font-ui);
+  font-variant-numeric: tabular-nums;
   font-size: var(--size-14);
   text-align: right;
   white-space: nowrap;
@@ -872,7 +1303,8 @@ button.hs-readout:hover .hs-readout-label {
 .hs-stop {
   min-width: 44px;
   padding: 3px 6px;
-  font-family: var(--font-readout);
+  font-family: var(--font-ui);
+  font-variant-numeric: tabular-nums;
   font-size: var(--size-12);
   background: var(--steel-2);
   border: 1px solid var(--line);
@@ -905,7 +1337,8 @@ button.hs-readout:hover .hs-readout-label {
 
 .hs-car-label {
   margin: 0 0 4px;
-  font-family: var(--font-readout);
+  font-family: var(--font-ui);
+  font-variant-numeric: tabular-nums;
   font-size: var(--size-12);
 }
 
@@ -948,7 +1381,8 @@ button.hs-readout:hover .hs-readout-label {
 .hs-level-value {
   flex: 0 0 3ch;
   text-align: right;
-  font-family: var(--font-readout);
+  font-family: var(--font-ui);
+  font-variant-numeric: tabular-nums;
   color: var(--ink-dim);
 }
 
@@ -968,7 +1402,8 @@ button.hs-readout:hover .hs-readout-label {
 
 .hs-log-time {
   flex: 0 0 auto;
-  font-family: var(--font-readout);
+  font-family: var(--font-ui);
+  font-variant-numeric: tabular-nums;
   color: var(--ink-dim);
 }
 
@@ -1048,64 +1483,26 @@ button.hs-readout:hover .hs-readout-label {
   flex: 1 1 auto;
 }
 
-/* Event ticker --------------------------------------------------------- */
-
-.hs-ticker {
-  position: absolute;
-  inset: auto 0 0 0;
-  height: calc(var(--ticker-h) + var(--safe-bottom));
-  display: flex;
-  align-items: center;
-  gap: var(--pad);
-  width: 100%;
-  padding: 0 calc(var(--pad) + var(--safe-right)) var(--safe-bottom) calc(var(--pad) + var(--safe-left));
-  background: var(--steel);
-  border: 0;
-  border-top: 1px solid var(--line);
-  text-align: left;
-  cursor: pointer;
-  pointer-events: auto;
-}
-
-.hs-ticker-time {
-  flex: 0 0 auto;
-  font-family: var(--font-readout);
-  font-size: var(--size-12);
-  color: var(--ink-dim);
-}
-
-.hs-ticker-text {
-  flex: 1 1 auto;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  font-size: var(--size-12);
-}
-
-.hs-ticker.is-alert .hs-ticker-text {
-  color: var(--alert);
-}
-
-.hs-ticker.is-story .hs-ticker-text {
-  font-style: italic;
-}
-
 /* Controls hint -------------------------------------------------------- */
 
 .hs-hint {
   position: absolute;
   left: 50%;
-  bottom: calc(var(--ticker-h) + var(--safe-bottom) + var(--pad));
+  top: calc(var(--top-actual, calc(var(--top-h) + var(--safe-top))) + var(--gap-float));
   transform: translateX(-50%);
   display: flex;
   align-items: center;
   gap: var(--pad);
-  max-width: calc(100% - 2 * var(--pad));
-  padding: 4px var(--pad);
-  background: var(--steel);
-  border: 1px solid var(--line);
+  max-width: calc(100% - 2 * var(--edge));
+  min-height: var(--touch);
+  padding: 4px 4px 4px 16px;
+  border-radius: var(--radius-pill);
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-1);
   font-size: var(--size-12);
-  color: var(--ink-dim);
+  color: var(--ink);
   pointer-events: auto;
 }
 
@@ -1115,9 +1512,11 @@ button.hs-readout:hover .hs-readout-label {
 
 .hs-hint-close {
   flex: 0 0 auto;
-  padding: 1px 6px;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: var(--radius-pill);
   background: transparent;
-  border: 1px solid var(--line);
+  border: 1px solid var(--hairline);
   font-size: var(--size-12);
   color: var(--ink-dim);
   cursor: pointer;
@@ -1137,9 +1536,12 @@ button.hs-readout:hover .hs-readout-label {
   left: 0;
   top: 0;
   max-width: calc(100% - 32px);
-  padding: 3px 8px;
-  background: var(--steel);
+  padding: 4px 10px;
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
   border: 1px solid var(--amber);
+  border-radius: var(--radius-12);
   font-size: var(--size-12);
   color: var(--ink);
   white-space: nowrap;
@@ -1166,17 +1568,21 @@ button.hs-readout:hover .hs-readout-label {
   gap: 4px;
   max-width: calc(100% - 32px);
   padding: 4px;
-  background: var(--steel);
-  border: 1px solid var(--line);
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border-radius: var(--radius-16);
+  box-shadow: var(--shadow-1);
   pointer-events: auto;
 }
 
 /* Thumb sized: a phone is the whole reason this bar exists. */
 .hs-place-btn {
-  min-width: 44px;
-  min-height: 44px;
+  min-width: var(--touch);
+  min-height: var(--touch);
   padding: 5px 10px;
   line-height: 1;
+  border-radius: calc(var(--radius-16) - 4px); /* nested inside the bar's 4 px padding */
 }
 
 .hs-place-btn.is-primary {
@@ -1240,16 +1646,16 @@ a.hs-btn {
 /* The side card: the query panel's slot, as tall as it needs, under the status bar. */
 .hs-card {
   position: absolute;
-  top: var(--top-actual, calc(var(--top-h) + var(--safe-top)));
-  right: 0;
+  top: calc(var(--top-actual, calc(var(--top-h) + var(--safe-top))) + var(--gap-float));
+  right: calc(var(--edge) + var(--safe-right));
   width: var(--panel-w);
-  max-width: 100vw;
-  max-height: calc(100% - var(--top-actual, var(--top-h)) - var(--ticker-h) - var(--safe-bottom));
+  max-width: calc(100vw - 2 * var(--edge));
+  max-height: calc(100% - var(--top-actual, var(--top-h)) - 2 * var(--edge) - var(--safe-bottom));
   box-sizing: border-box;
   overflow-y: auto;
-  background: var(--steel);
-  border-left: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: var(--radius-20);
+  box-shadow: var(--shadow-2);
   pointer-events: auto;
 }
 
@@ -1295,23 +1701,130 @@ a.hs-btn {
 
 /* Toasts --------------------------------------------------------------- */
 
+/* The alerts, tips and the star card: bottom right on a wide screen, over the tower and over
+   an open sheet, since an alert has to be seen. */
 .hs-toasts {
   position: absolute;
-  right: calc(var(--pad) + var(--safe-right));
-  bottom: calc(var(--ticker-h) + var(--safe-bottom) + var(--pad));
+  z-index: 30;
+  right: calc(var(--edge) + var(--safe-right));
+  bottom: calc(var(--edge) + var(--safe-bottom));
   display: flex;
   flex-direction: column;
   gap: var(--pad);
-  width: min(320px, calc(100% - 16px));
+  width: min(340px, calc(100% - 2 * var(--edge)));
   pointer-events: none;
 }
 
+.hs-alerts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pad);
+}
+
+/* A card that holds text: the solid surface, a soft shadow, and an alert colour edge drawn as
+   a shadow, not a border. */
 .hs-toast {
   position: relative;
-  padding: var(--pad);
-  background: var(--steel-2);
-  border: 1px solid var(--alert);
+  padding: 12px 14px;
+  background: var(--surface);
+  border-radius: var(--radius-16);
+  box-shadow: var(--shadow-2), inset 3px 0 0 var(--alert);
   pointer-events: auto;
+}
+
+/* An alert toast (toast.ts): stays until tapped. */
+.hs-alert-toast {
+  --r: var(--radius-16);
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  min-height: var(--touch);
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 0;
+  box-shadow: var(--shadow-2), inset 3px 0 0 var(--alert);
+  color: var(--ink);
+  font-size: var(--size-14);
+  text-align: left;
+  cursor: pointer;
+  pointer-events: auto;
+  opacity: 1;
+  transition:
+    opacity var(--motion-fade) var(--ease-standard),
+    transform var(--motion-med) var(--ease-spring);
+}
+
+.hs-alert-toast .hs-toast-words {
+  flex: 1 1 auto;
+}
+
+/* The news: small glass toasts centred above the bottom edge, at most two (toast.ts). */
+.hs-news {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--chrome-bottom, 0px) + var(--safe-bottom) + var(--edge) + 4px);
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--pad);
+  width: min(460px, calc(100% - 2 * var(--edge)));
+  pointer-events: none;
+}
+
+.hs-news-toast {
+  --r: var(--radius-16);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  max-width: 100%;
+  min-height: var(--touch);
+  align-items: center;
+  padding: 8px 16px;
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 0;
+  box-shadow: var(--shadow-1);
+  color: var(--ink);
+  font-size: var(--size-14);
+  line-height: 1.35;
+  text-align: left;
+  pointer-events: auto;
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    opacity var(--motion-fade) var(--ease-standard),
+    transform var(--motion-med) var(--ease-spring);
+}
+
+button.hs-news-toast {
+  cursor: pointer;
+}
+
+.hs-news-toast.is-story .hs-toast-words {
+  font-style: italic;
+}
+
+.hs-toast-time {
+  flex: 0 0 auto;
+  font-size: var(--size-12);
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.hs-news-toast.is-leaving,
+.hs-alert-toast.is-leaving {
+  opacity: 0;
+}
+
+@starting-style {
+  .hs-news-toast,
+  .hs-alert-toast {
+    opacity: 0;
+    transform: translateY(var(--toast-rise));
+  }
 }
 
 /* Every alert closes: the control sits in the top right corner, clear of the text. */
@@ -1350,9 +1863,10 @@ a.hs-btn {
 
 .hs-toast-more {
   margin: 0;
-  padding: 2px var(--pad);
-  background: var(--steel-2);
-  border: 1px solid var(--line);
+  padding: 4px 12px;
+  background: var(--surface);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-1);
   font-size: var(--size-12);
   pointer-events: auto;
 }
@@ -1363,7 +1877,7 @@ a.hs-btn {
 }
 
 .hs-toast.is-notice {
-  border-color: var(--line);
+  box-shadow: var(--shadow-2), inset 3px 0 0 var(--ink-dim);
 }
 
 /* View: the information layers (0.5.1) --------------------------------- */
@@ -1371,26 +1885,50 @@ a.hs-btn {
 /* A readout column like the others: the label, the choice as one segmented control, then the
    legend for the view that is on. */
 .hs-status-view {
-  flex: 0 0 auto;
-  gap: 2px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  min-height: 0;
+  padding: 0;
+}
+
+/* The View choice keeps its visible word until it moves to its own popover. */
+.hs-ui .hs-status-view .hs-readout-label {
+  position: static;
+  width: auto;
+  height: auto;
+  margin: 0;
+  overflow: visible;
+  clip-path: none;
+  font-size: var(--size-12);
+  font-weight: 600;
+  color: var(--ink-dim);
 }
 
 .hs-view {
   display: flex;
-  border: 1px solid var(--line);
+  gap: 2px;
+  padding: 2px;
   width: max-content;
+  background: var(--press-tint);
+  border-radius: var(--radius-12);
 }
 
 .hs-view .hs-view-btn {
+  --r: calc(var(--radius-12) - 2px);
+  min-height: 32px;
   border: 0;
-  padding: 1px 8px;
+  padding: 0 10px;
+  background: transparent;
   font-size: var(--size-12);
   line-height: 1.4;
   white-space: nowrap;
 }
 
-.hs-view .hs-view-btn + .hs-view-btn {
-  border-left: 1px solid var(--line);
+.hs-view .hs-view-btn[aria-pressed='true'] {
+  background: var(--amber);
+  color: var(--on-amber);
 }
 
 .hs-view .hs-view-btn:hover:not([aria-pressed='true']) {
@@ -1442,9 +1980,10 @@ a.hs-btn {
   left: 0;
   top: 0;
   width: 248px;
-  padding: 6px 8px;
-  background: var(--steel);
-  border: 1px solid var(--line);
+  padding: 8px 12px;
+  background: var(--surface);
+  border-radius: var(--radius-16);
+  box-shadow: var(--shadow-2);
   font-size: var(--size-12);
   line-height: 1.4;
   color: var(--ink);
@@ -1485,142 +2024,126 @@ a.hs-btn {
 
 .hs-hover-value {
   text-align: right;
-  font-family: var(--font-readout);
+  font-family: var(--font-ui);
+  font-variant-numeric: tabular-nums;
 }
 
 /* Phone width ---------------------------------------------------------- */
 
 @media (max-width: 720px) {
-  /* The View control takes its own row under the clock and the controls. */
-  .hs-clock-group {
-    display: contents;
+  /* The top bar on a phone: the pill takes the first row, whole, so it stays one row; the
+     speed pill, Share and Menu sit on the right of the second; the View choice under them. */
+  .hs-top {
+    --edge: 8px;
+    top: calc(var(--safe-top) + 8px);
+    left: calc(8px + var(--safe-left));
+    right: calc(8px + var(--safe-right));
+    gap: 6px;
   }
 
-  .hs-status-clock {
-    flex: 1 1 0;
-  }
-
-  .hs-status-view {
-    order: 10;
+  .hs-status-pill {
     flex: 1 1 100%;
-    flex-direction: row;
-    align-items: center;
-    flex-wrap: wrap;
-    column-gap: var(--pad);
-    min-height: 32px;
-    padding: 4px 0;
-    border-right: 0;
-    border-top: 1px solid var(--line);
+    justify-content: space-between;
+    --status-h: 48px;
+    padding: 2px;
+  }
+
+  .hs-readout,
+  .hs-stars-button,
+  .hs-status-clock {
+    padding: 2px 6px;
+  }
+
+  .hs-top-actions {
+    order: 2;
+  }
+
+  .hs-top-views {
+    order: 3;
+    flex: 1 1 100%;
+  }
+
+  .hs-top-views > .hs-status-view {
+    flex: 1 1 auto;
+    padding: 4px 12px;
+  }
+
+  /* The time stamp goes on a phone: the log keeps it. */
+  .hs-toast-time {
+    display: none;
   }
 
   .hs-hover-card {
     width: 224px;
   }
 
-  /* Two 56 px rows: cash, population and stars; then the clock and the controls. */
-  .hs-top {
-    min-height: calc(var(--status-h) * 2 + var(--safe-top));
-    column-gap: var(--pad);
-    row-gap: 0;
-  }
-
-  .hs-readouts {
-    flex: 1 1 100%;
-    gap: var(--pad);
-    border-bottom: 1px solid var(--line);
-  }
-
-  .hs-readout,
-  .hs-stars-button {
-    padding-right: var(--pad);
-  }
-
-  .hs-status-cash {
-    flex: 1 1 0;
-  }
-
-  .hs-status-pop {
-    flex: 0 1 104px;
-  }
-
-  .hs-status-stars {
-    border-right: 0;
-  }
-
-  .hs-status-clock {
-    border-right: 0;
-  }
-
-  .hs-clock-group {
-    flex: 1 1 0;
-    min-width: 0;
-  }
-
-  .hs-top-actions .hs-btn {
-    padding: 5px 6px;
-  }
-
-  .hs-speed .hs-btn {
-    min-width: 32px;
-  }
-
-  /* The second row is tight: the time stays, the date moves into the clock's tooltip. */
-  .hs-status-clock .hs-readout-meta {
+  /* One row: the day line moves into the clock's tooltip, the changes into the cash and
+     population tooltips, and the six stars become one star and the count. */
+  .hs-status-clock .hs-readout-meta,
+  .hs-status-cash .hs-readout-meta,
+  .hs-status-pop .hs-readout-meta,
+  .hs-status-stars .hs-readout-meta {
     display: none;
   }
 
+  .hs-star-row {
+    display: none;
+  }
+
+  .hs-stars-count {
+    display: flex;
+  }
+
+  /* The time and the weather icon say it; the dial is the first thing to go. */
   .hs-status-clock {
-    --clock-size: 32px;
     gap: 6px;
-    padding-right: 0;
   }
 
-  /* The widest time, 12:59 PM, is 93 px on one line and there are 105 px beside the controls:
-     the digits keep the value size and AM or PM sits under them at the meta size. */
+  .hs-dial {
+    display: none;
+  }
+
   .hs-clock-ampm {
-    display: block;
     font-size: var(--status-meta);
-    line-height: 1.2;
-    letter-spacing: 0;
-    color: var(--ink-dim);
   }
 
-  /* Under 400 px, $47,522,007 at the 20 px value token is wider than the cash column beside
-     population and the six stars: the values drop to 16 px and the cash and population
-     changes move into those readouts' tooltips. Population then needs only 72 px, which
-     leaves cash room for $123,456,789. */
+  /* Icons only on a phone: the aria-label and the tooltip still name each one. */
+  .hs-round {
+    padding: 0;
+  }
+
+  .hs-round .hs-btn-label {
+    display: none;
+  }
+
+  .hs-speed-btn {
+    min-width: 40px;
+  }
+
+  /* Under 400 px the pill spends every pixel on the values: the readout icons go too, and
+     $123,456,789 still fits beside the people, the star and the time. */
   @media (max-width: 399px) {
-    .hs-status-pop {
-      flex: 0 1 72px;
-    }
-
-    .hs-status-cash .hs-readout-value,
-    .hs-status-pop .hs-readout-value {
-      font-size: var(--size-16);
-    }
-
-    .hs-status-cash .hs-readout-meta,
-    .hs-status-pop .hs-readout-meta {
+    .hs-readout-icon {
       display: none;
     }
 
-    /* The weather word becomes its two letters (CL, OV, RN, ST), never wider than the time. */
-    .hs-weather-word {
-      display: none;
+    .hs-readout,
+    .hs-stars-button,
+    .hs-status-clock {
+      padding: 2px 4px;
     }
 
-    .hs-weather-short {
-      display: inline;
+    .hs-readout {
+      column-gap: 0;
     }
   }
 
-  /* No room beside the speed buttons on a phone: the night mode hangs just under them. */
+  /* The night mode hangs just under the speed pill. */
   .hs-speed-mode {
     position: absolute;
     top: 100%;
     right: 0;
     margin-top: 4px;
-    background: var(--steel);
   }
 
   .hs-tip {
@@ -1649,15 +2172,15 @@ a.hs-btn {
      tower is always visible above it and the list below the fold is a flick away. */
   .hs-palette {
     top: auto;
-    bottom: calc(var(--ticker-h) + var(--safe-bottom));
+    bottom: 0;
     left: 0;
     right: 0;
     width: auto;
     max-height: 42vh;
     padding-left: var(--safe-left);
     padding-right: var(--safe-right);
-    border-right: 0;
-    border-top: 1px solid var(--line);
+    padding-bottom: var(--safe-bottom);
+    border-radius: var(--radius-20) var(--radius-20) 0 0;
     overflow-y: auto;
     /* The sheet scrolls up and down and nothing else: sideways and past the ends belong to
        neither the page nor the tower. */
@@ -1665,10 +2188,10 @@ a.hs-btn {
     overscroll-behavior: contain;
   }
 
-  /* Folded away, the sheet is the header bar sitting on the ticker. */
+  /* Folded away, the sheet is the header bar on the bottom edge. */
   .hs-palette.is-collapsed {
     top: auto;
-    bottom: calc(var(--ticker-h) + var(--safe-bottom));
+    bottom: 0;
     max-height: none;
     height: auto;
   }
@@ -1700,21 +2223,9 @@ a.hs-btn {
     grid-row: 2;
   }
 
-  .hs-panel {
-    top: auto;
-    bottom: calc(var(--ticker-h) + var(--safe-bottom));
-    left: 0;
-    width: 100vw;
-    max-height: 60vh;
-    border-left: 0;
-    border-top: 1px solid var(--line);
-    touch-action: pan-y;
-    overscroll-behavior: contain;
-  }
-
   /* The palette owns the bottom of a phone screen, so the hint sits under the top strip. */
   .hs-hint {
-    top: calc(var(--top-actual, calc(var(--top-h) * 2 + var(--safe-top))) + var(--pad));
+    top: calc(var(--top-actual, calc(var(--top-h) * 2 + var(--safe-top))) + var(--gap-float));
     bottom: auto;
   }
 
@@ -1726,13 +2237,12 @@ a.hs-btn {
   /* The side card is a sheet on the folded palette; the open palette takes its place. */
   .hs-card {
     top: auto;
-    bottom: var(--chrome-bottom, calc(var(--ticker-h) + var(--safe-bottom)));
-    left: 0;
-    width: 100vw;
+    bottom: calc(var(--chrome-bottom, var(--safe-bottom)) + var(--gap-float));
+    left: calc(var(--edge) + var(--safe-left));
+    right: calc(var(--edge) + var(--safe-right));
+    width: auto;
+    max-width: none;
     max-height: 45vh;
-    border-left: 0;
-    border-bottom: 0;
-    border-top: 1px solid var(--line);
     touch-action: pan-y;
     overscroll-behavior: contain;
   }
@@ -1748,15 +2258,33 @@ a.hs-btn {
 
 /* Reduced motion ------------------------------------------------------- */
 
-.hs-ui.is-reduced .hs-panel,
-.hs-ui.is-reduced .hs-toast {
-  transition: none;
+/* The setting or the system: every move becomes a plain fade. No slide, no overshoot, no
+   press scale; sheets, cards and toasts still fade in and out. */
+.hs-ui.is-reduced {
+  --ease-spring: var(--ease-standard);
+  --press-scale: 1;
+  --enter-x: 0px;
+  --enter-y: 0px;
+  --toast-rise: 0px;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .hs-panel,
-  .hs-toast {
-    transition: none;
+  .hs-ui {
+    --ease-spring: var(--ease-standard);
+    --press-scale: 1;
+    --enter-x: 0px;
+    --enter-y: 0px;
+    --toast-rise: 0px;
+  }
+}
+
+.hs-ui.is-reduced .hs-sheet {
+  transition: opacity var(--motion-fade) var(--ease-standard);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hs-sheet {
+    transition: opacity var(--motion-fade) var(--ease-standard);
   }
 }
 
@@ -1769,7 +2297,8 @@ a.hs-btn {
   margin-right: 6px;
   padding: 0 3px;
   border: 1px solid var(--line);
-  font-family: var(--font-readout);
+  font-family: var(--font-ui);
+  font-variant-numeric: tabular-nums;
   font-weight: 400;
   text-align: center;
   line-height: 14px;
@@ -1786,7 +2315,8 @@ a.hs-btn {
   min-width: 14px;
   padding: 0 2px;
   border: 1px solid var(--line);
-  font-family: var(--font-readout);
+  font-family: var(--font-ui);
+  font-variant-numeric: tabular-nums;
   font-size: var(--size-12);
   line-height: 14px;
   text-align: center;
@@ -1802,16 +2332,18 @@ a.hs-btn {
   display: none;
 }
 
-/* The minimap: bottom right of the view, above the ticker, 96 px wide. The width and the
+/* The minimap: bottom right of the view, above the bottom edge, 96 px wide. The width and the
    height are set inline from the tower's floors; the two canvases stack. */
 .hs-minimap {
   position: absolute;
-  right: calc(var(--pad) + var(--safe-right));
-  bottom: calc(var(--ticker-h) + var(--safe-bottom) + var(--pad));
+  right: calc(var(--edge) + var(--safe-right));
+  bottom: calc(var(--edge) + var(--safe-bottom));
   width: 96px;
   box-sizing: content-box;
-  background: var(--steel);
-  border: 1px solid var(--line);
+  overflow: hidden;
+  background: var(--surface);
+  border-radius: var(--radius-12);
+  box-shadow: var(--shadow-1);
   pointer-events: auto;
   cursor: pointer;
   touch-action: none;
@@ -1829,21 +2361,23 @@ a.hs-btn {
   image-rendering: pixelated;
 }
 
-/* A panel owns the right edge, so the map steps left of it. */
-.hs-ui.is-panel-open .hs-minimap {
-  right: calc(var(--panel-w) + var(--pad) + var(--safe-right));
+/* A card owns the right edge on a wide screen, so the map steps left of it. */
+@media (min-width: 900px) {
+  .hs-ui.is-panel-open .hs-minimap {
+    right: calc(var(--panel-w) + 2 * var(--edge) + var(--safe-right));
+  }
 }
 
-/* Toasts share the bottom right, so they step left of a visible map. */
+/* Alerts share the bottom right, so they step left of a visible map. */
 .hs-minimap:not(.is-hidden) ~ .hs-toasts {
-  right: calc(96px + 2 * var(--pad) + 2px + var(--safe-right));
+  right: calc(96px + 2 * var(--edge) + var(--safe-right));
 }
 
 @media (max-width: 720px) {
   /* A phone's bottom belongs to the sheet and the side card, so the map sits top right,
      under the status bar and clear of the controls hint while it shows. */
   .hs-minimap {
-    top: calc(var(--top-actual, calc(var(--top-h) * 2 + var(--safe-top))) + var(--pad));
+    top: calc(var(--top-actual, calc(var(--top-h) * 2 + var(--safe-top))) + var(--gap-float));
     bottom: auto;
     width: 64px;
   }
@@ -1860,7 +2394,7 @@ a.hs-btn {
   /* On a phone the alerts sit under the status bar and never take more than the top quarter of
      the view; they scroll inside that band, and step left of the map in the corner. */
   .hs-toasts {
-    top: calc(var(--top-actual, calc(var(--top-h) * 2 + var(--safe-top))) + var(--pad));
+    top: calc(var(--top-actual, calc(var(--top-h) * 2 + var(--safe-top))) + var(--gap-float));
     bottom: auto;
     left: calc(var(--pad) + var(--safe-left));
     right: calc(var(--pad) + var(--safe-right));
@@ -1872,7 +2406,7 @@ a.hs-btn {
   }
 
   .hs-minimap:not(.is-hidden) ~ .hs-toasts {
-    right: calc(64px + 2 * var(--pad) + var(--safe-right));
+    right: calc(64px + 2 * var(--edge) + var(--safe-right));
   }
 
   .hs-toast {
@@ -1899,7 +2433,8 @@ a.hs-btn {
 }
 
 .hs-daily-people-count {
-  font-family: var(--font-readout);
+  font-family: var(--font-ui);
+  font-variant-numeric: tabular-nums;
   font-size: var(--size-28);
   font-weight: 600;
 }

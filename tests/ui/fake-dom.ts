@@ -121,6 +121,15 @@ export class FakeElement {
     this.listeners.set(type, (this.listeners.get(type) ?? []).filter((f) => f !== fn));
   }
 
+  /** Focus lands here: the dom's activeElement. */
+  focus(): void {
+    this.dom.activeElement = this;
+  }
+
+  contains(node: unknown): boolean {
+    return node === this || this.descendants().includes(node as FakeElement);
+  }
+
   /** Records the click on the dom (a download link's click is how the web export fires). */
   click(): void {
     this.dom.clicked.push(this);
@@ -156,10 +165,13 @@ export class FakeDom {
   private frames = new Map<number, () => void>();
   private nextFrame = 1;
   readonly windowListeners = new Map<string, Listener[]>();
+  /** Where focus is: the body until something is focused. */
+  activeElement: FakeElement | null = null;
 
   constructor() {
     this.head = new FakeElement('head', this);
     this.body = new FakeElement('body', this);
+    this.activeElement = this.body;
   }
 
   /** What a measured element reports: the shell fills a phone-sized view, anything else is a chip. */
@@ -192,7 +204,11 @@ export class FakeDom {
     const caf = (id: number): void => {
       this.frames.delete(id);
     };
+    const dom = this;
     g['document'] = {
+      get activeElement() {
+        return dom.activeElement;
+      },
       head: this.head,
       body: this.body,
       createElement: (tag: string) => this.createElement(tag),

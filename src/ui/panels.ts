@@ -59,13 +59,14 @@ import {
   stressBandLabel,
   stressBandOf,
 } from './format';
-import { icon, type IconName } from './icons';
+import { type IconName } from './icons';
+import { createSheet, type Sheet } from './sheet';
 import { vipView, vipViewKey, type VipView } from './vip';
 import { keyHelpLines } from './keys';
 import { GROUPS } from './palette';
 
 /** A panel element may expose a cheap refresh that rewrites live numbers without rebuilding. */
-export type PanelElement = HTMLDivElement & { refresh?: () => void };
+export type PanelElement = HTMLDivElement & { refresh?: () => void; sheet?: Sheet };
 
 export interface PanelContext {
   /** Applies a command, reports the reason when it is refused, and marks the panels dirty. */
@@ -184,16 +185,12 @@ function flag(label: string, alert = false): HTMLSpanElement {
  * beside it is the label. Close stays a word, not a cross, so it needs no explaining.
  */
 export function panelShell(title: string, section: IconName, ctx: Pick<PanelContext, 'close'>): { panel: PanelElement; body: HTMLDivElement } {
-  const panel = el('div', 'hs-panel') as PanelElement;
-  const head = el('div', 'hs-panel-head');
-  const name = el('h2', 'hs-panel-title');
-  name.append(icon(section, 'hs-panel-icon') as unknown as HTMLElement, el('span', 'hs-panel-title-text', title));
-  const close = button('Close', 'hs-btn hs-panel-close', () => ctx.close());
-  close.setAttribute('aria-label', `Close ${title.toLowerCase()}`);
-  head.append(name, close);
-  const body = el('div', 'hs-panel-body');
-  panel.append(head, body);
-  return { panel, body };
+  // The shared sheet (sheet.ts): a floating card on a wide screen, a bottom sheet on a phone.
+  // The owner mounts it with panel.sheet.mount(host) and takes it down with panel.sheet.unmount().
+  const sheet = createSheet({ title, icon: section, className: 'hs-panel', onClose: () => ctx.close() });
+  const panel = sheet.node as PanelElement;
+  panel.sheet = sheet;
+  return { panel, body: sheet.body };
 }
 
 export function kindLabel(kind: RoomKind | ShaftKind): string {

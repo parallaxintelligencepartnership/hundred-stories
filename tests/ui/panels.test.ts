@@ -60,10 +60,10 @@ describe('log panel', () => {
     expect(list.children.length).toBe(LOG_PANEL_LINES);
     expect(texts(list)[0]).toBe('line 299');
     expect(texts(list)[LOG_PANEL_LINES - 1]).toBe('line 100');
-    // Everything in the panel: the header (the head, its title holding an icon svg with its
+    // Everything in the panel: the sheet's grab handle, the header (the head, its title holding an icon svg with its
     // <use> and the title text, and a close button), the body, the list, and three nodes per
     // line (the li, its time and its text).
-    expect(node(panel).descendants().length).toBe(6 + 1 + 1 + LOG_PANEL_LINES * 3);
+    expect(node(panel).descendants().length).toBe(1 + 6 + 1 + 1 + LOG_PANEL_LINES * 3);
   });
 
   it('builds only the lines that landed, and keeps the ones already shown', () => {

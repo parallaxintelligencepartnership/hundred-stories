@@ -34,7 +34,7 @@ function tower(floors: number, opts: { basement?: number } = {}): { rooms: Map<n
 }
 
 describe('visibility rule', () => {
-  // A 900 px view with 56 px of status bar and 28 px of ticker leaves a 816 px free band.
+  // A 900 px view with 84 px of chrome over it leaves a 816 px free band.
   const band = 900 - 56 - 28;
   it.each([
     ['a 5 floor tower fits at zoom 1', 5, 1, false],

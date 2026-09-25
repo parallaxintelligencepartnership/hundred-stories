@@ -1,7 +1,8 @@
-// The status bar at phone width (390 px): two 56 px rows, cash, population and stars on the
-// first; the clock and the controls on the second, with the day in the clock's tooltip. The
-// fake DOM has no layout, so the row placement is read from the shell's DOM order and from
-// the phone block of ui.css, which is what puts each group on its row.
+// The top bar at phone width (390 px): the glass pill of cash, people, stars, the clock and the
+// weather is one row, the whole first row; the speed pill, Share and Menu sit on the right
+// under it, and the View choice under them until it moves to its own popover. The fake DOM has
+// no layout, so the placement is read from the shell's DOM order and from the phone block of
+// ui.css, which is what puts each group on its row.
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createUi } from '../../src/ui/ui';
@@ -97,52 +98,60 @@ function mount(minute: number, extra: Record<string, unknown> = {}): FakeElement
   return root;
 }
 
-describe('status bar at phone width', () => {
-  it('puts the clock on the second row, the day in its tooltip, and the time whole beside a 32 px dial', () => {
+
+describe('top bar at phone width', () => {
+  const wide = (): string => css.slice(0, css.indexOf('@media (max-width: 720px) {'));
+
+  it('keeps the pill one row, the whole first row: cash, people, stars, then the clock with the weather', () => {
     const root = mount(12 * 60 + 59 + 2 * 1440); // 12:59 PM, the widest time
     const top = find(root, 'hs-top');
-    const [readouts, clockGroup, actions] = top.children as [FakeElement, FakeElement, FakeElement];
-    // Row one: the readouts take the full width, so everything after them wraps to row two.
-    expect(has(readouts, 'hs-readouts')).toBe(true);
-    expect(rule(phoneBlock(), '.hs-readouts').flex).toBe('1 1 100%');
-    for (const c of ['hs-status-cash', 'hs-status-pop', 'hs-status-stars']) find(readouts, c);
-    // Row two: the clock group dissolves into the row, the clock first, the controls after it.
-    expect(has(clockGroup, 'hs-clock-group')).toBe(true);
+    const [pill, views, actions] = top.children as [FakeElement, FakeElement, FakeElement];
+    expect(has(pill, 'hs-status-pill')).toBe(true);
+    expect(pill.getAttribute('role')).toBe('group');
+    expect(pill.getAttribute('aria-label')).toBe('Your tower');
+    expect(pill.children.slice(0, 4).map((n) => n.className.split(' ')[1])).toEqual([
+      'hs-status-cash',
+      'hs-status-pop',
+      'hs-status-stars',
+      'hs-status-clock',
+    ]);
+    expect(rule(wide(), '.hs-status-pill')['flex-wrap']).toBe('nowrap');
+    // Row one is the pill alone; the controls and the View choice come after it.
+    expect(rule(phoneBlock(), '.hs-status-pill').flex).toBe('1 1 100%');
     expect(has(actions, 'hs-top-actions')).toBe(true);
-    expect(rule(phoneBlock(), '.hs-clock-group').display).toBe('contents');
-    const clock = find(clockGroup, 'hs-status-clock');
-    expect(clockGroup.children[0]).toBe(clock);
+    expect(has(views, 'hs-top-views')).toBe(true);
+    expect(rule(phoneBlock(), '.hs-top-actions').order).toBe('2');
+    expect(rule(phoneBlock(), '.hs-top-views').order).toBe('3');
 
     // The day line is hidden on a phone and lives in the tooltip instead.
+    const clock = find(pill, 'hs-status-clock');
     const date = clock.descendants().find((n) => has(n, 'hs-readout-meta')) as FakeElement;
     expect(date.textContent).toMatch(/^Weekend, quarter 1, year 1$/);
     expect(clock.getAttribute('title')).toBe(date.textContent);
     expect(rule(phoneBlock(), '.hs-status-clock .hs-readout-meta').display).toBe('none');
+    // So is the dial: the time and the weather icon say it.
+    expect(rule(phoneBlock(), '.hs-dial').display).toBe('none');
 
-    // The time: digits at the 20 px value token, AM or PM stacked under them at the 12 px
-    // meta token, the dial at 32 px, so "12:59" fits in the 105 px left beside the controls.
+    // The time: the digits in the readout face, AM or PM beside them at the 12 px meta token.
     const value = find(clock, 'hs-readout-value');
     expect(value.textContent).toBe('12:59 PM');
     expect(find(value, 'hs-clock-digits').textContent).toBe('12:59');
     expect(find(value, 'hs-clock-ampm').textContent).toBe(' PM');
-    const ampm = rule(phoneBlock(), '.hs-clock-ampm');
-    expect([ampm.display, ampm['font-size']]).toEqual(['block', 'var(--status-meta)']);
-    expect(rule(phoneBlock(), '.hs-status-clock')['--clock-size']).toBe('32px');
+    expect(rule(phoneBlock(), '.hs-clock-ampm')['font-size']).toBe('var(--status-meta)');
+    // The weather is the last thing in the clock readout: an icon, its word hidden from sight.
+    expect(clock.children[clock.children.length - 1]?.className).toBe('hs-weather');
+    expect(rule(wide(), '.hs-weather-word').position).toBe('absolute');
   });
 
-  it('at 360 px fits cash, population and the six stars on row one: 16 px values, the changes in the tooltips', () => {
-    // At 360 px the cash column is 102 px beside population (104) and the stars (122):
-    // $47,522,007 is 119 px at the 20 px value token and 95 px at 16 px, so under 400 px
-    // the values drop to 16 px and both change lines move into their readout's tooltip.
-    const narrow = nestedBlock(phoneBlock(), '@media (max-width: 399px)');
-    for (const c of ['.hs-status-cash', '.hs-status-pop']) {
-      expect(rule(narrow, `${c} .hs-readout-value`)['font-size']).toBe('var(--size-16)');
-      expect(rule(narrow, `${c} .hs-readout-meta`).display).toBe('none');
+  it('moves the changes into the tooltips and the six stars into one star and the count', () => {
+    for (const c of ['.hs-status-cash', '.hs-status-pop', '.hs-status-stars', '.hs-status-clock']) {
+      expect(rule(phoneBlock(), `${c} .hs-readout-meta`).display).toBe('none');
     }
-    // The clock keeps its 20 px digits; only the first row's values shrink.
-    expect(rule(narrow, '.hs-readout-value')).toEqual({});
+    expect(rule(phoneBlock(), '.hs-star-row').display).toBe('none');
+    expect(rule(phoneBlock(), '.hs-stars-count').display).toBe('flex');
+    expect(rule(wide(), '.hs-stars-count').display).toBe('none');
 
-    const root = mount(9 * 60, { cash: 47_522_007, quarterStartCash: 47_000_000, population: 177, dayStartPopulation: 170 });
+    const root = mount(9 * 60, { cash: 47_522_007, quarterStartCash: 47_000_000, population: 177, dayStartPopulation: 170, stars: 3 });
     const cash = find(root, 'hs-status-cash');
     const pop = find(root, 'hs-status-pop');
     expect(find(cash, 'hs-readout-value').textContent).toBe('$47,522,007');
@@ -150,38 +159,58 @@ describe('status bar at phone width', () => {
     expect(cash.getAttribute('title')).toBe('Open finances. +$522,007 this quarter');
     expect(find(pop, 'hs-readout-value').textContent).toBe('177');
     expect(pop.getAttribute('title')).toBe('Up 7 today');
+    expect(find(root, 'hs-stars-count-text').textContent).toBe('3');
   });
 
-  it('at 360 px leaves cash room for a nine digit figure, population narrowed to 72 px', () => {
+  it('keeps the readout face for cash and the clock only, with tabular figures', () => {
+    const face = rule(wide(), '.hs-clock-digits');
+    expect(face['font-family']).toBe('var(--font-readout)');
+    expect(face['font-variant-numeric']).toBe('tabular-nums');
+    expect(rule(wide(), '.hs-status-cash .hs-readout-value')['font-family']).toBe('var(--font-readout)');
+    // Every other use of the readout face is gone: two selectors in one rule, and the token.
+    const uses = css.match(/font-family: var\(--font-readout\)/g) ?? [];
+    expect(uses).toHaveLength(1);
+    expect(rule(wide(), '.hs-readout-value')['font-family']).toBeUndefined();
+  });
+
+  it('at 360 px leaves cash room for a nine digit figure in the one row', () => {
     const narrow = nestedBlock(phoneBlock(), '@media (max-width: 399px)');
-    expect(rule(narrow, '.hs-status-pop').flex).toBe('0 1 72px');
-    const root = mount(9 * 60, { cash: 123_456_789, quarterStartCash: 123_000_000 });
+    expect(rule(narrow, '.hs-readout-icon').display).toBe('none');
+    expect(rule(narrow, '.hs-readout').padding).toBe('2px 4px');
+    expect(rule(narrow, '.hs-readout')['column-gap']).toBe('0');
+    const root = mount(12 * 60 + 59, { cash: 123_456_789, quarterStartCash: 123_000_000, population: 15_000, stars: 6 });
     const cash = find(root, 'hs-status-cash');
     const value = find(cash, 'hs-readout-value').textContent;
     expect(value).toBe('$123,456,789');
     expect(cash.getAttribute('title')).toBe('Open finances. +$456,789 this quarter');
-    // The budget at 360 px, from the Chrome measure: 8 px padding each side, two 8 px gaps,
-    // population 72, stars 122, and the cash column's own 8 px right padding. Share Tech Mono
-    // advances 0.5 em plus the 0.04 em letter spacing, 8.64 px a character at 16 px.
-    const room = 360 - 2 * 8 - 2 * 8 - 72 - 122 - 8;
-    expect(room).toBe(126);
-    expect(value.length * 16 * 0.54).toBeLessThanOrEqual(room);
+    // The budget at 360 px: 8 px from each edge and the pill's own 2 px padding leave 340 px;
+    // four readouts at 4 px padding a side and three 4 px gaps take 44 of it. Share Tech Mono
+    // advances 0.5 em plus the 0.02 em letter spacing at the 16 px value token; the UI font's
+    // tabular digits are at most 0.6 em; the star is 16 px, a 4 px gap and one digit; the clock
+    // is "12:59" in the readout face, " PM" at 12 px, a 6 px gap and the 20 px weather icon.
+    const room = 360 - 2 * 8 - 2 * 2 - 4 * 2 * 4 - 3 * 4;
+    expect(room).toBe(296);
+    const cashW = value.length * 16 * 0.52;
+    const popW = '15,000'.length * 16 * 0.6;
+    const starsW = 16 + 4 + 16 * 0.6;
+    const clockW = 5 * 16 * 0.52 + 3 * 12 * 0.6 + 6 + 20;
+    expect(cashW + popW + starsW + clockW).toBeLessThanOrEqual(room);
   });
 
-  it('under 400 px shows the weather as two letters in the clock column, never wider than the time', () => {
-    const narrow = nestedBlock(phoneBlock(), '@media (max-width: 399px)');
-    expect(rule(narrow, '.hs-weather-word').display).toBe('none');
-    expect(rule(narrow, '.hs-weather-short').display).toBe('inline');
-    const wide = css.slice(0, css.indexOf('@media (max-width: 720px) {'));
-    expect(rule(wide, '.hs-weather-short').display).toBe('none');
-    expect(rule(wide, '.hs-weather')['font-family']).toBe('var(--font-readout)');
-    const root = mount(12 * 60 + 59);
-    const clock = find(root, 'hs-status-clock');
-    const text = find(clock, 'hs-clock-text');
-    // It stacks under the time in the clock's own column, so row two gains no width.
-    expect(text.children.some((n) => has(n, 'hs-weather'))).toBe(true);
-    expect(find(clock, 'hs-weather-short').textContent).toMatch(/^(CL|OV|RN|ST)$/);
-    // Two letters at the 12 px meta size are narrower than the 20 px "12:59".
-    expect(2 * 12 * 0.54).toBeLessThan(5 * 20 * 0.54);
+  it('keeps Share and Menu round with 44 px targets, the word hidden on a phone and named by aria-label', () => {
+    const root = mount(9 * 60);
+    const actions = find(root, 'hs-top-actions');
+    const buttons = actions.descendants().filter((n) => n.tagName === 'BUTTON');
+    const share = buttons.find((n) => n.getAttribute('aria-label') === 'Share') as FakeElement;
+    const menu = buttons.find((n) => n.getAttribute('aria-label') === 'Menu') as FakeElement;
+    for (const b of [share, menu]) {
+      expect(has(b, 'hs-round')).toBe(true);
+      expect(b.title.length).toBeGreaterThan(0); // the tooltip, for a long press or a hover
+      expect(find(b, 'hs-btn-label').textContent).toBe(b.getAttribute('aria-label'));
+    }
+    expect(rule(phoneBlock(), '.hs-round .hs-btn-label').display).toBe('none');
+    expect(rule(wide(), '.hs-icon-btn')['min-width']).toBe('var(--touch)');
+    expect(rule(wide(), '.hs-icon-btn')['min-height']).toBe('var(--touch)');
+    expect(css).toMatch(/--touch: 44px;/);
   });
 });

@@ -16,29 +16,35 @@ export function isSheetLayout(paletteWidth: number, shellWidth: number): boolean
 export interface ChromeMeasure {
   /** Height of the whole ui shell, which covers the tower view. */
   shellHeight: number;
-  /** Height the top strip really takes, wrapped rows and all. */
-  stripHeight: number;
-  /** Top edge of the ticker, in the same coordinates as the shell. */
-  tickerTop: number;
+  /** Bottom edge of the floating top bar, every row of it, in the same coordinates as the shell. */
+  barBottom: number;
   /** Top edge of the palette, which only counts while it is a sheet over the view. */
   paletteTop: number;
   sheet: boolean;
 }
 
 /**
- * How many pixels of the view the chrome covers, top and bottom.
+ * The band the camera frames the street in: the tower is full bleed, so only the floating top
+ * bar is taken off the top, and nothing off the bottom. The palette, a panel or a toast float
+ * over the tower and never push it.
+ */
+export function viewInsets(measure: Pick<ChromeMeasure, 'barBottom'>): { top: number; bottom: number } {
+  const top = Number.isFinite(measure.barBottom) ? Math.max(0, measure.barBottom) : 0;
+  return { top, bottom: 0 };
+}
+
+/**
+ * How many pixels of the view the floating chrome covers, top and bottom, for the ui's own
+ * floating bits (the placement chip and bar, the hover card) to stay clear of.
  *
- * The top is the strip. The bottom starts at whichever comes first, the ticker or the
- * palette sheet; a side rail palette covers the left, which the camera does not mind.
+ * The top is the top bar. The bottom is the palette while it is the phone sheet; a side rail
+ * palette covers the left, which none of them mind.
  */
 export function chromeInsets(measure: ChromeMeasure): { top: number; bottom: number } {
-  const top = Number.isFinite(measure.stripHeight) ? Math.max(0, measure.stripHeight) : 0;
+  const { top } = viewInsets(measure);
   const shellHeight = Number.isFinite(measure.shellHeight) ? measure.shellHeight : 0;
-  const tickerTop = Number.isFinite(measure.tickerTop) ? measure.tickerTop : Infinity;
-  const paletteTop =
-    measure.sheet && Number.isFinite(measure.paletteTop) ? measure.paletteTop : Infinity;
-  const highest = Math.min(tickerTop, paletteTop);
-  const bottom = Number.isFinite(highest) ? Math.max(0, shellHeight - highest) : 0;
+  const paletteTop = measure.sheet && Number.isFinite(measure.paletteTop) ? measure.paletteTop : Infinity;
+  const bottom = Number.isFinite(paletteTop) ? Math.max(0, shellHeight - paletteTop) : 0;
   return { top, bottom };
 }
 

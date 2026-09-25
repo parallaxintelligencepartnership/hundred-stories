@@ -15,6 +15,7 @@ import {
   quarterDelta,
   quarterDeltaText,
   speedModeText,
+  weatherIcon,
   weatherShort,
 } from '../../src/ui/status';
 import { weatherAt, weatherLabel, type WeatherKind } from '../../src/game/weather';
@@ -164,19 +165,25 @@ describe('weather readout beside the clock', () => {
   };
   const kinds: WeatherKind[] = ['clear', 'overcast', 'rain', 'storm'];
 
-  it('names each kind with weatherLabel and a two letter short form', () => {
+  it('names each kind with weatherLabel, a two letter short form and an icon', () => {
     expect(kinds.map(weatherLabel)).toEqual(['Clear', 'Cloudy', 'Rain', 'Storm']);
     expect(kinds.map(weatherShort)).toEqual(['CL', 'OV', 'RN', 'ST']);
   });
 
-  it('shows the word and its short form inside the clock, updated when the kind changes', () => {
+  it('shows the kind as an icon beside the time, with the word for a screen reader and the tooltip, updated when it changes', () => {
     const bar = createStatusBar();
     const clock = bar.clock as unknown as FakeElement;
+    const glyphs = (): FakeElement[] =>
+      clock.descendants().filter((n) => (n.getAttribute('class') ?? '').split(' ').includes('hs-weather-icon'));
+    const href = (): string | null | undefined => glyphs()[0]?.children[0]?.getAttribute('href');
+    expect(kinds.map(weatherIcon)).toEqual(['clear', 'cloudy', 'rain', 'storm']);
     for (const kind of kinds) {
       setForcedWeather({ kind, from: kind, blend: 1, intensity: 1 });
       bar.update(stubWorld(), 1);
       expect(find(clock, 'hs-weather-word').textContent).toBe(weatherLabel(kind));
-      expect(find(clock, 'hs-weather-short').textContent).toBe(weatherShort(kind));
+      expect(glyphs()).toHaveLength(1); // the old icon is swapped out, never piled up
+      expect(href()).toBe(`#hs-icon-${weatherIcon(kind)}`);
+      expect(glyphs()[0]?.getAttribute('aria-hidden')).toBe('true');
       expect(find(clock, 'hs-weather').getAttribute('title')).toBe(`Weather: ${weatherLabel(kind)}`);
     }
     // Unpinned, the readout follows the forecast for the tower's seed.

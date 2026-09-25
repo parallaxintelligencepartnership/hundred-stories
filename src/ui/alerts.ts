@@ -15,7 +15,7 @@ import { button, el } from './panels';
 
 /** Cards shown at once; older ones fold into the "and N more" line. */
 export const ALERT_STACK_MAX = 3;
-/** Real milliseconds a card without a decision stays up. */
+/** Real milliseconds a resolved incident's card (a bomb or a theft outcome) stays up. */
 export const ALERT_LINGER_MS = 8000;
 /** Real milliseconds the "Fire out" closing state stays up. */
 export const FIRE_OUT_LINGER_MS = 8000;
@@ -416,9 +416,9 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
       endTheftCard(theftLine.headline);
       return;
     }
-    const { card, body } = open('hs-toast');
+    // Any other alert line (the bank taking the tower, say) stays until the player closes it.
+    const { body } = open('hs-toast');
     body.append(el('p', 'hs-toast-text', entry.text));
-    deps.later(() => close(card), ALERT_LINGER_MS);
   }
 
   function notice(text: string): void {

@@ -1,5 +1,5 @@
-// The chrome around the tower: top strip, directory board palette, query panel,
-// finances, log, settings, ticker and toasts. It talks to the game through GameApi only.
+// The chrome around the tower: the floating top bar, directory board palette, query panel,
+// finances, log, settings, and the toasts that carry the news. It talks to the game through GameApi only.
 // Nothing here touches the document until createUi runs, so the module imports cleanly in tests.
 
 import './ui.css';
@@ -33,8 +33,9 @@ import {
   type TipId,
 } from './onboarding';
 import { PREF_KEYS, addToList, getFlag, getList, getPref, setFlag, setPref } from './prefs';
-import { createIconSheet } from './icons';
-import { chromeInsets, isSheetLayout, placementBoxes } from './layout';
+import { createIconSheet, icon, type IconName } from './icons';
+import { chromeInsets, isSheetLayout, placementBoxes, viewInsets } from './layout';
+import { createToasts } from './toast';
 import type { Box } from './layout';
 import {
   button,
@@ -68,8 +69,8 @@ type PanelKind = 'none' | 'finances' | 'log' | 'settings' | 'share' | 'intro' | 
 
 /** Real milliseconds the star card stays up unless closed first. */
 export const STAR_CARD_LINGER_MS = 20_000;
-/** A followed person's story line takes the ticker at most this often, in real time. */
-export const STORY_TICKER_GAP_MS = 30_000;
+/** A followed person's story line becomes a news toast at most this often, in real time. */
+export const STORY_TOAST_GAP_MS = 30_000;
 
 /** The live measurement of the chrome: stop it, or ask it to measure again. */
 interface ChromeWatch {
@@ -144,6 +145,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   let destroyed = false;
   /** The band the chrome covers, so the chip and the bar stay out from under it. */
   let chromeBand = { top: 0, bottom: 0 };
+  /** The band the camera frames the tower in: only the top bar, the tower is full bleed. */
+  let viewBand = { top: 0, bottom: 0 };
   /** The frame loop that follows the ghost. It only runs while there is a ghost to follow. */
   let placementRaf = 0;
   /**
@@ -181,11 +184,13 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   let hintKey = '';
   /** The hover tile the readout and the chip last showed, so a move within one tile does nothing. */
   let hoverKey = '';
-  // The ticker: log lines first, a followed person's story line only in a quiet moment.
-  let tickerLogSeen = -1;
-  let tickerStorySeq = 0;
-  let tickerShowsAlert = false;
+  // The news toasts: log lines first, a followed person's story line only in a quiet moment.
+  let newsLogSeen = -1;
+  let newsStorySeq = 0;
+  let newsShowsAlert = false;
   let storyShownAt = Number.NEGATIVE_INFINITY;
+  /** The last refusal shown as a notice, so its log line does not show a second time. */
+  let lastNoticeText = '';
   /** The guided first tower follows its first worker once, then leaves the cast to the player. */
   let metFirstWorker = false;
   /** The star card: the story seq it last looked at, and the card on screen, if any. */
@@ -200,14 +205,17 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   // The icon symbols, once for the whole chrome; every icon() refers to them by id.
   shell.append(createIconSheet() as unknown as HTMLElement);
   const top = el('header', 'hs-top');
-  // Status bar, left to right: cash, population, stars, then the clock, then speed and menu.
-  // On a phone the first group is the first row and the clock and controls the second.
-  const readouts = el('div', 'hs-readouts');
-  const clockGroup = el('div', 'hs-clock-group');
+  // The top bar floats over the tower: one glass pill of cash, people, stars, the clock and
+  // the weather; the View choice (for now, until it moves to its own popover); then the speed
+  // pill, Share and Menu, which never hide or move. A phone gives the pill its own row.
+  const pill = el('div', 'hs-status-pill');
+  pill.setAttribute('role', 'group');
+  pill.setAttribute('aria-label', 'Your tower');
+  const views = el('div', 'hs-top-views');
   const actions = el('div', 'hs-top-actions');
-  top.append(readouts, clockGroup, actions);
+  top.append(pill, views, actions);
 
-  // Readouts: segmented indicator faces, the one place the mono readout type appears.
+  // Readouts: the mono readout type is kept for cash and the clock only.
   const status = createStatusBar();
   status.cash.addEventListener('click', () => setPanel(panelKind === 'finances' ? 'none' : 'finances'));
 
@@ -222,21 +230,22 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     if (typeof renderer.setOverlay === 'function') renderer.setOverlay(kind);
   });
 
-  readouts.append(status.cash, status.population, status.stars);
-  clockGroup.append(status.clock, view.root, hoverReadout);
+  pill.append(status.cash, status.population, status.stars, status.clock, hoverReadout);
+  views.append(view.root);
 
+  // Speed: one segmented pill of icons. The keys stay: space pauses, comma and period step.
   const speedBar = el('div', 'hs-speed');
   speedBar.setAttribute('role', 'group');
   speedBar.setAttribute('aria-label', 'Speed');
   const speedButtons: { node: HTMLButtonElement; speed: Speed }[] = (
     [
-      ['Pause', 0],
-      ['1x', 1],
-      ['2x', 2],
-      ['4x', 4],
-    ] as [string, Speed][]
-  ).map(([label, speed]) => {
-    const node = button(label, 'hs-btn', () => {
+      ['pause', 'Pause', 'Pause (space bar)', 0],
+      ['play', 'Play', 'Play at normal speed (space bar)', 1],
+      ['fast', 'Fast', 'Fast, two times as quick (period key)', 2],
+      ['faster', 'Faster', 'Faster, four times as quick (period key)', 4],
+    ] as [IconName, string, string, Speed][]
+  ).map(([glyph, label, tip, speed]) => {
+    const node = iconButton(glyph, label, tip, 'hs-speed-btn', () => {
       game.setSpeed(speed);
       update();
     });
@@ -244,14 +253,15 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     return { node, speed };
   });
 
-  const shareButton = button('Share', 'hs-btn', () =>
+  // Share and Menu: round buttons, the icon always and the word beside it where there is room.
+  const shareButton = iconButton('share', 'Share', 'Share your tower', 'hs-round', () =>
     setPanel(panelKind === 'share' ? 'none' : 'share'),
   );
-  const menuButton = button('Menu', 'hs-btn', () =>
+  const menuButton = iconButton('menu', 'Menu', 'Open the menu', 'hs-round', () =>
     setPanel(panelKind === 'settings' ? 'none' : 'settings'),
   );
   // Outside My tower (today's tower, a friend's tower) one tap goes back to it.
-  const myTowerButton = button('My tower', 'hs-btn', () => openMyTower());
+  const myTowerButton = button('My tower', 'hs-btn hs-pill-btn', () => openMyTower());
   myTowerButton.hidden = true;
   actions.append(status.mode, speedBar, myTowerButton, shareButton, menuButton);
 
@@ -294,14 +304,6 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
       update();
     },
   });
-
-  const ticker = el('button', 'hs-ticker');
-  ticker.type = 'button';
-  ticker.title = 'Open the event log';
-  const tickerTime = el('span', 'hs-ticker-time');
-  const tickerText = el('span', 'hs-ticker-text', 'Welcome to your tower.');
-  ticker.append(tickerTime, tickerText);
-  ticker.addEventListener('click', () => setPanel(panelKind === 'log' ? 'none' : 'log'));
 
   // Controls hint: one line over the view, for the first few loads only.
   const hint = el('div', 'hs-hint');
@@ -347,11 +349,16 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   const cancelButton = placeButton('Cancel', 'Put this back', () => game.cancelPending());
   bar.append(leftButton, rightButton, upButton, downButton, buildButton, cancelButton);
 
+  // Toasts: the news floats above the bottom edge and fades; alerts stay until tapped. The
+  // alert cards (fire, bomb, theft) live in the same assertive region as the alert toasts,
+  // and tips and the star card sit beside them in the polite stack in the corner.
+  const toastLayer = createToasts();
   const toasts = el('div', 'hs-toasts');
   toasts.setAttribute('role', 'status');
   toasts.setAttribute('aria-live', 'polite');
+  toasts.append(toastLayer.alerts);
   const alerts = createAlertStack({
-    host: toasts,
+    host: toastLayer.alerts,
     getWorld: () => game.world,
     apply: (cmd) => ctx.apply(cmd),
     later(fn, ms) {
@@ -370,13 +377,13 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     ? createMinimap({
         camera: renderer.camera,
         getWorld: () => game.world,
-        getChrome: () => chromeBand,
+        getChrome: () => viewBand,
         onMove: () => refreshPlacement(),
       })
     : null;
-  shell.append(top, palette, card.node, hint, chip, bar, panelSlot, ticker);
+  shell.append(top, palette, card.node, hint, chip, bar, panelSlot);
   if (minimap) shell.append(minimap.node);
-  shell.append(toasts);
+  shell.append(toasts, toastLayer.news);
   root.append(shell);
 
   // The hover card: a preview of the shaft or room under the pointer, or under the tap.
@@ -431,14 +438,15 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   };
 
   applyReducedMotion(reducedMotion);
-  // The top strip wraps on a narrow screen, so nothing below it can assume one row: the
-  // measured height goes into a variable the palette, the panel and the hint sit under, and
-  // into the band the camera frames the street in.
-  chromeWatch = watchChrome({ strip: top, palette, ticker, shell }, (topPx, bottomPx) => {
-    chromeBand = { top: topPx, bottom: bottomPx };
-    shell.style.setProperty('--chrome-bottom', `${Math.round(bottomPx)}px`); // the phone card sits on it
+  // The top bar wraps on a narrow screen, so nothing below it can assume one row: its measured
+  // bottom goes into a variable the palette, the panel and the hint sit under, and into the
+  // band the camera frames the street in. Nothing else pushes the tower: it is full bleed.
+  chromeWatch = watchChrome({ strip: top, palette, shell }, (band, keepOut) => {
+    chromeBand = keepOut;
+    viewBand = band;
+    shell.style.setProperty('--chrome-bottom', `${Math.round(keepOut.bottom)}px`); // the phone card and the news sit on it
     viewSize = null; // the chrome moved, so the view may have too
-    game.setChrome(topPx, bottomPx);
+    game.setChrome(band.top, band.bottom);
     refreshPlacement();
   });
   lastLogTotal = game.world.logTotal;
@@ -485,7 +493,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     refreshOnboarding(world);
     watchForTips(world, speed);
     showNextTip();
-    refreshTicker();
+    refreshNews();
     watchStars(world);
     drainAlerts();
   }
@@ -615,7 +623,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     leaveTotal = sumCounts(leaveCounts);
     lastQuarterSeen = world.stats?.lastQuarter ?? null;
     populationWatch = { population: world.population, since: world.time.minute };
-    tickerStorySeq = world.story?.seq ?? 0; // beats already recorded are history, not news
+    newsStorySeq = world.story?.seq ?? 0; // beats already recorded are history, not news
+    newsLogSeen = -1; // and so are its log lines
     starStorySeq = world.story?.seq ?? 0;
     starToast?.remove();
     starToast = null;
@@ -934,7 +943,12 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
       return;
     }
     mountedKey = key;
-    mountedPanel?.remove();
+    // A panel rebuilt in place (new numbers, another room) keeps focus where the player had it,
+    // and still sends it back to where it came from when the panel finally closes.
+    const old = mountedPanel?.sheet ?? null;
+    const carried = old?.isOpen && old.hasFocus() ? { returnFocus: old.returnTarget, focusIndex: old.focusIndex() } : null;
+    if (old) old.unmount({ restoreFocus: key === '' });
+    else mountedPanel?.remove();
     mountedPanel = null;
     shell.classList.toggle('is-panel-open', key !== '');
     if (key === '') return;
@@ -979,11 +993,9 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
                     : createQueryPanel(game, selection ?? {}, ctx);
 
     mountedPanel = panel;
-    panelSlot.append(panel);
-    if (!reducedMotion) {
-      panel.classList.add('is-entering');
-      window.requestAnimationFrame(() => panel.classList.remove('is-entering'));
-    }
+    // The sheet slides in on its own (ui.css, @starting-style), a plain fade under reduced motion.
+    if (panel.sheet) panel.sheet.mount(panelSlot, carried ?? {});
+    else panelSlot.append(panel);
   }
 
   /** A demolished room or a sim that went home rebuilds the panel instead of showing stale numbers. */
@@ -996,41 +1008,53 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   }
 
   /**
-   * The ticker shows the newest log line. A followed person's new beat takes it only when no
-   * log line (an alert, a build, anything) arrived in the same batch, no alert is showing, and
-   * the last story line is at least STORY_TICKER_GAP_MS old: alerts and build feedback win.
+   * The newest log line of a batch becomes a news toast; an alert line is the alert stack's
+   * card instead. A followed person's new beat becomes a toast only when no log line (an alert,
+   * a build, anything) arrived in the same batch, no alert is the newest line, and the last
+   * story toast is at least STORY_TOAST_GAP_MS old: alerts and build feedback win.
    */
-  function refreshTicker(): void {
+  function refreshNews(): void {
     const world = game.world;
     const log = world.log;
     const newest = log.length > 0 ? log[log.length - 1] : undefined;
-    const logMoved = world.logTotal !== tickerLogSeen;
-    tickerLogSeen = world.logTotal;
+    const logMoved = world.logTotal !== newsLogSeen;
+    const first = newsLogSeen < 0;
+    newsLogSeen = world.logTotal;
     const beat = newFollowedBeat(world);
     if (logMoved && newest) {
-      setText(tickerTime, formatTimestamp(newest.minute));
-      setText(tickerText, newest.text);
-      tickerShowsAlert = newest.level === 'alert';
-      ticker.classList.toggle('is-alert', tickerShowsAlert);
-      ticker.classList.remove('is-story');
+      newsShowsAlert = newest.level === 'alert';
+      // The first look is the tower as loaded: its old lines are history, not news.
+      if (first || newsShowsAlert) return;
+      // A refusal was already said as a notice where the player acted.
+      if (newest.text === lastNoticeText) {
+        lastNoticeText = '';
+        return;
+      }
+      toastLayer.show(newest.text, { time: formatTimestamp(newest.minute), onTap: openLog, tapLabel: 'Open the event log' });
       return;
     }
-    if (!beat || tickerShowsAlert || beat.simId === undefined) return;
+    if (!beat || newsShowsAlert || beat.simId === undefined) return;
     const now = performance.now();
-    if (now - storyShownAt < STORY_TICKER_GAP_MS) return;
+    if (now - storyShownAt < STORY_TOAST_GAP_MS) return;
     storyShownAt = now;
-    setText(tickerTime, formatTimestamp(beat.minute));
-    setText(tickerText, `${storyName(world, beat.simId)}: ${describeBeat(beat, world)}`);
-    ticker.classList.remove('is-alert');
-    ticker.classList.add('is-story');
+    toastLayer.show(`${storyName(world, beat.simId)}: ${describeBeat(beat, world)}`, {
+      time: formatTimestamp(beat.minute),
+      className: 'is-story',
+      onTap: openLog,
+      tapLabel: 'Open the event log',
+    });
   }
 
-  /** The newest beat about a followed person since the ticker last looked, or null. */
+  function openLog(): void {
+    setPanel('log');
+  }
+
+  /** The newest beat about a followed person since the news last looked, or null. */
   function newFollowedBeat(world: World): StoryBeat | null {
     const story = world.story;
     if (!story) return null;
-    const fresh = Math.max(0, Math.min(story.seq - tickerStorySeq, story.recent.length));
-    tickerStorySeq = story.seq;
+    const fresh = Math.max(0, Math.min(story.seq - newsStorySeq, story.recent.length));
+    newsStorySeq = story.seq;
     for (let i = story.recent.length - 1; i >= story.recent.length - fresh; i -= 1) {
       const beat = story.recent[i];
       if (beat && beat.simId !== undefined && isFollowed(story, beat.simId)) return beat;
@@ -1061,6 +1085,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   }
 
   function notice(text: string): void {
+    lastNoticeText = text;
     alerts.notice(text);
   }
 
@@ -1130,6 +1155,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
 
   function onKeyDown(event: KeyboardEvent): void {
     if (event.defaultPrevented) return;
+    // An open sheet takes Escape (close) and Tab (stay inside) before anything else.
+    if (mountedPanel?.sheet?.handleKey(event)) return;
     if (isFormField(event.target)) return;
     // A card with a text field is open: no key is ours, and none is the camera's either.
     if (mountedPanel && hasTextField(mountedPanel)) {
@@ -1150,7 +1177,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
         return;
       case 'clear':
         // An alert on screen takes the first Escape; the next one drops the tool.
-        if (alerts.dismissNewest()) {
+        if (alerts.dismissNewest() || toastLayer.dismissNewestAlert()) {
           event.preventDefault();
           return;
         }
@@ -1192,7 +1219,9 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
       chromeWatch?.disconnect();
       for (const timer of timers) clearTimeout(timer);
       timers.clear();
-      mountedPanel?.remove();
+      toastLayer.destroy();
+      if (mountedPanel?.sheet) mountedPanel.sheet.unmount({ restoreFocus: false });
+      else mountedPanel?.remove();
       mountedPanel = null;
       shell.remove();
     },
@@ -1232,41 +1261,41 @@ function setPressed(node: HTMLElement, pressed: boolean): void {
 }
 
 /**
- * Keep --top-actual on the shell equal to the height the top strip really takes, and tell
- * the caller how much of the view the chrome covers whenever that changes.
+ * Keep --top-actual on the shell equal to the bottom edge of the floating top bar, and tell
+ * the caller the camera's band and the keep-out band whenever either changes.
  *
- * The strip wraps, the palette folds and turns into a sheet, and the ticker sits on a safe
- * area that rotates: one observer watches all three. Where there is no ResizeObserver the
- * window resize alone keeps it roughly honest, which is what the css falls back to anyway.
+ * The bar wraps and the palette folds and turns into a sheet: one observer watches both. Where
+ * there is no ResizeObserver the window resize alone keeps it roughly honest, which is what the
+ * css falls back to anyway.
  */
 function watchChrome(
-  parts: { strip: HTMLElement; palette: HTMLElement; ticker: HTMLElement; shell: HTMLElement },
-  onChrome: (topPx: number, bottomPx: number) => void,
+  parts: { strip: HTMLElement; palette: HTMLElement; shell: HTMLElement },
+  onChrome: (view: { top: number; bottom: number }, keepOut: { top: number; bottom: number }) => void,
 ): ChromeWatch {
-  let lastTop = -1;
-  let lastBottom = -1;
+  let lastKey = '';
   const measure = (): void => {
     const strip = parts.strip.getBoundingClientRect();
-    parts.shell.style.setProperty('--top-actual', `${Math.round(strip.height)}px`);
     const shell = parts.shell.getBoundingClientRect();
+    const barBottom = strip.bottom - shell.top;
+    parts.shell.style.setProperty('--top-actual', `${Math.round(barBottom)}px`);
     const paletteRect = parts.palette.getBoundingClientRect();
-    const insets = chromeInsets({
+    const measured = {
       shellHeight: shell.height,
-      stripHeight: strip.height,
-      tickerTop: parts.ticker.getBoundingClientRect().top,
-      paletteTop: paletteRect.top,
+      barBottom,
+      paletteTop: paletteRect.top - shell.top,
       sheet: isSheetLayout(paletteRect.width, shell.width),
-    });
-    if (insets.top === lastTop && insets.bottom === lastBottom) return;
-    lastTop = insets.top;
-    lastBottom = insets.bottom;
-    onChrome(insets.top, insets.bottom);
+    };
+    const view = viewInsets(measured);
+    const keepOut = chromeInsets(measured);
+    const key = `${view.top},${view.bottom},${keepOut.top},${keepOut.bottom}`;
+    if (key === lastKey) return;
+    lastKey = key;
+    onChrome(view, keepOut);
   };
   const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => measure());
   if (observer) {
     observer.observe(parts.strip);
     observer.observe(parts.palette);
-    observer.observe(parts.ticker);
   }
   window.addEventListener('resize', measure);
   measure();
@@ -1277,6 +1306,18 @@ function watchChrome(
       window.removeEventListener('resize', measure);
     },
   };
+}
+
+/**
+ * A button that leads with its icon. The word sits beside it on a wide screen and is hidden on
+ * a phone (ui.css), where the aria-label and the tooltip still name it.
+ */
+function iconButton(glyph: IconName, label: string, tip: string, className: string, onClick: () => void): HTMLButtonElement {
+  const node = button('', `hs-icon-btn ${className}`, onClick);
+  node.append(icon(glyph, 'hs-icon hs-btn-icon') as unknown as HTMLElement, el('span', 'hs-btn-label', label));
+  node.setAttribute('aria-label', label);
+  node.title = tip;
+  return node;
 }
 
 /** True on a touch screen. A browser that will not answer is treated as a mouse. */

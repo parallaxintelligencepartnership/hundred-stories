@@ -358,6 +358,21 @@ describe('the alert stack', () => {
     expect(shown(h.root)).toHaveLength(3);
   });
 
+  it('keeps a plain alert line until the player closes it, in the assertive region', () => {
+    vi.useFakeTimers();
+    const world = createWorld(7);
+    const h = mount(world);
+    log(world, 'The bank took the tower because your cash stayed too low for too long.', 'alert');
+    h.notify();
+    vi.advanceTimersByTime(10 * ALERT_LINGER_MS);
+    const cards = shown(h.root);
+    expect(cards.map((n) => n.textContent)).toEqual(['×The bank took the tower because your cash stayed too low for too long.']);
+    const region = cards[0]!.parentNode as FakeElement;
+    expect([region.className, region.getAttribute('aria-live')]).toEqual(['hs-alerts', 'assertive']);
+    click(closeOf(cards[0]!));
+    expect(shown(h.root)).toHaveLength(0);
+  });
+
   it('keeps alerts to the top quarter of a phone screen', () => {
     const css = readFileSync(new URL('../../src/ui/ui.css', import.meta.url), 'utf8');
     const phone = css.slice(css.lastIndexOf('@media (max-width: 720px) {'));

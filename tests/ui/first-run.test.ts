@@ -376,7 +376,7 @@ describe('tips', () => {
   });
 });
 
-describe('ticker story lines', () => {
+describe('news toasts and story lines', () => {
   it('shows a followed person in a quiet moment, at most every 30 seconds, never over an alert or a new log line', () => {
     let now = 100_000;
     const clock = vi.spyOn(performance, 'now').mockImplementation(() => now);
@@ -387,17 +387,23 @@ describe('ticker story lines', () => {
       world.story = createStoryState();
       addRoom(game, { kind: 'lobby', floor: 1, x: 180, width: 20 }); // a standing tower: no intro
       const { root } = mount(game);
-      const text = (): string => one(root, 'hs-ticker-text')?.textContent ?? '';
+      const news = (): FakeElement[] => byClass(root, 'hs-news-toast');
+      const text = (): string => news().at(-1)?.descendants().find((n) => n.className === 'hs-toast-words')?.textContent ?? '';
       const log = (line: string, level: 'info' | 'alert'): void => {
         (world.log as unknown as { minute: number; text: string; level: string }[]).push({ minute: 500, text: line, level });
         world.logTotal += 1;
       };
       followSim(world.story, 501);
       const name = storyName(world as never, 501);
+      // No ticker strip any more: the news is a toast in the polite region.
+      expect(byClass(root, 'hs-ticker')).toHaveLength(0);
+      const region = byClass(root, 'hs-news')[0] as FakeElement;
+      expect([region.getAttribute('role'), region.getAttribute('aria-live')]).toEqual(['status', 'polite']);
 
       log('Built a lobby on floor 1.', 'info');
       game.notify();
       expect(text()).toBe('Built a lobby on floor 1.');
+      expect(news()[0]?.parentNode).toBe(region);
 
       recordBeat(world.story, { code: 'wait.long', minute: 510, simId: 502, value: 8 }); // not followed
       game.notify();
@@ -407,6 +413,7 @@ describe('ticker story lines', () => {
       game.notify();
       expect(text().startsWith(`${name}: `)).toBe(true);
       expect(text().toLowerCase()).toContain('eight minutes');
+      expect(news().at(-1)?.classList.contains('is-story')).toBe(true);
 
       now += 10_000;
       recordBeat(world.story, { code: 'trip.arrived', minute: 520, simId: 501, value: 3 });
@@ -414,24 +421,47 @@ describe('ticker story lines', () => {
       expect(text().toLowerCase()).toContain('eight minutes'); // too soon for another
 
       now += 30_000;
+      const before = news().length;
       log('Fire broke out in the office on floor 2.', 'alert');
       recordBeat(world.story, { code: 'trip.arrived', minute: 530, simId: 501, value: 3 });
       game.notify();
-      expect(text()).toBe('Fire broke out in the office on floor 2.'); // the alert wins the batch
+      // The alert wins the batch: it is the alert stack's card, in the assertive region, and
+      // neither it nor the story line becomes news.
+      expect(news()).toHaveLength(before);
+      const alertRegion = byClass(root, 'hs-alerts')[0] as FakeElement;
+      expect([alertRegion.getAttribute('role'), alertRegion.getAttribute('aria-live')]).toEqual(['alert', 'assertive']);
+      expect(alertRegion.textContent).toContain('Fire');
 
       recordBeat(world.story, { code: 'trip.arrived', minute: 540, simId: 501, value: 3 });
       game.notify();
-      expect(text()).toBe('Fire broke out in the office on floor 2.'); // and is not covered
+      expect(news()).toHaveLength(before); // and the alert is not covered by a story
 
       log('Built an office on floor 2.', 'info');
       game.notify();
+      expect(text()).toBe('Built an office on floor 2.');
       now += 30_000;
       recordBeat(world.story, { code: 'trip.arrived', minute: 550, simId: 501, value: 3 });
       game.notify();
       expect(text().startsWith(`${name}: `)).toBe(true);
       expect(text().toLowerCase()).toContain('three minutes');
+      // Never more than two on screen.
+      expect(news().filter((n) => !n.classList.contains('is-leaving')).length).toBeLessThanOrEqual(2);
     } finally {
       clock.mockRestore();
     }
+  });
+
+  it('opens the event log from a news toast', () => {
+    const game = stubGame();
+    addRoom(game, { kind: 'lobby', floor: 1, x: 180, width: 20 });
+    const { root } = mount(game);
+    (game.world.log as unknown as { minute: number; text: string; level: string }[]).push({ minute: 500, text: 'Built a lobby on floor 1.', level: 'info' });
+    (game.world as unknown as { logTotal: number }).logTotal += 1;
+    game.notify();
+    const toast = byClass(root, 'hs-news-toast')[0] as FakeElement;
+    expect(toast.tagName).toBe('BUTTON');
+    expect(toast.title).toBe('Open the event log');
+    click(toast);
+    expect(root.descendants().some((n) => n.className === 'hs-panel-title-text' && n.textContent === 'Event log')).toBe(true);
   });
 });
