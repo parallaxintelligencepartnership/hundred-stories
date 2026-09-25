@@ -1,3 +1,5 @@
+> **Latest local work — 2026-09-25:** whole-app audit at 7b4e60f (9 CRITICAL, 30 IMPORTANT, 52 ADVISORY, `.itworks/REVIEWS.md`, reports under `docs/reviews/audit-2026-09-25/`). Next session runs the fix wave end to end from [the kickoff note](docs/reviews/2026-09-25-remediation-kickoff.md) with no questions, per Matt.
+
 > **Latest local work — 2026-09-24:** Matthew accepted the audio listening pass and revised game. Audio implementation: `c01e0fe`. See [audio closeout](docs/reviews/2026-09-24-audio-closeout.md) for validation and remaining listening limits. Integrate locally for further work with Claude; **hold push/deployment until the combined changes are authorized**. Comparison WAVs are local ignored files under `audio-preview/`.
 
 # Handoff: 2026-09-20b performance round, rent, sixth ship

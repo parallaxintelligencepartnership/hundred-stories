@@ -27,9 +27,9 @@ Target: every finding in the `## Audit - 2026-09-25` section of `.itworks/REVIEW
 | 10 | Should ?daily=DATE open that date's tower? | No. |
 | 11 | Apply validStart to ?seed in bootTarget? | Yes, cheap and closes a crash-shaped input. |
 | 12 | Pay ransom enabled when cash is short? | Disable it, like the fire card's button. |
-| 13 | Event log panel wording | Needs Matt's yes before P5b lands. Proposal below. |
+| 13 | Event log panel wording | Matt, 2026-09-25: "news not event log and it gets cleaned up". The panel is News, per the proposal below. |
 
-Event log proposal (decision 13): the panel becomes **"News"** in the dock and the sheet. It shows the newest ten lines in plain sentences, newest first, with a relative time ("just now", "an hour ago", "yesterday") instead of a clock stamp. A "Show older" link at the bottom reveals the next fifty. No level tags, no ids. The VIP card keeps its spot at the top. At phone width the list fits without scrolling behind the dock.
+News (decision 13, approved): the panel becomes **"News"** in the dock and the sheet. It shows the newest ten lines in plain sentences, newest first, with a relative time ("just now", "an hour ago", "yesterday") instead of a clock stamp. A "Show older" link at the bottom reveals the next fifty. No level tags, no ids. The VIP card keeps its spot at the top. At phone width the list fits without scrolling behind the dock.
 
 ## Packages
 
@@ -79,7 +79,7 @@ Files: `src/ui/ui.ts`, `src/ui/prefs.ts`, `src/ui/panels.ts` (except the log pan
 - IMPORTANT E2 S2, E2 S3, E2 S5.
 - ADVISORY E1 S3, S4, S5, S6, S8; E2 S4, S6; decision 12.
 
-### P5b Event log becomes News (Opus, after Matt's yes on decision 13, after P5 merges)
+### P5b Event log becomes News (Opus, after P5 merges)
 Files: `src/ui/panels.ts` (log panel), `src/ui/ui.ts` (dock label), `src/ui/ui.css`, `tests/ui/panels.test.ts`, a phone-width screenshot for the evidence.
 
 ### P6a Renderer (Opus)
@@ -110,9 +110,9 @@ Files: new or extended tests only, under `tests/sim`, `tests/scenarios`, `tests/
 | Wave | Packages | Notes |
 |---|---|---|
 | 1 | P1, P2, P4, P5, P7 | five agents, disjoint files |
-| 2 | P3, P6a, P6b, P8, P5b | P3 after P1 merges; P5b after Matt's yes on the wording and after P5 merges |
+| 2 | P3, P6a, P6b, P8, P5b | P3 after P1 merges; P5b after P5 merges |
 | 3 | fix review | one verifier re-runs every probe under `docs/reviews/audit-2026-09-25/probes/` against the branch; a checkpoint on the whole diff |
-| 4 | closeout | full test run once, typecheck, build, the nginx-container console grep from the gotchas, then the ship on Matt's go |
+| 4 | closeout | full test run once, typecheck, build, the nginx-container console grep from the gotchas, then the ship; Matt gave the go for the whole run on 2026-09-25 ("kicks this right off end to end with no interruptions") |
 
 Estimated agent count: 10 implementers plus 2 reviewers. Save format moves to v6 (P3), so the version stamps and SHIPPED.md say so.
 
