@@ -16,7 +16,7 @@ import { ROOMS, SHAFTS } from '../sim/rules';
 import type { RoomKind, ShaftKind } from '../sim/types';
 import { VENUE_SHELL, type Art } from './art';
 import { FLOOR_PX, TILE_PX } from './grid';
-import { INTERIORS } from './interiors';
+import { DECOR, INTERIORS, lookOf } from './interiors';
 
 export type ThumbnailKind = RoomKind | ShaftKind;
 
@@ -82,7 +82,15 @@ export function thumbnailPlan(art: Art, kind: ThumbnailKind): ThumbnailPlan {
         layers.push({ texture: art.interior(room, 1, floors, i), x: i * TILE_PX, y: band.top, w: TILE_PX, h: band.height, smooth: true });
       }
     } else {
-      layers.push({ texture: art.interior(room, tiles, floors, 0), x: 0, y: band.top, w: width, h: band.height, smooth: true });
+      const look = lookOf(room, 0);
+      layers.push({ texture: art.interior(room, tiles, floors, look.base), x: 0, y: band.top, w: width, h: band.height, smooth: true });
+      // The first look's plants and frames, as a room of that look shows them (no painted wall).
+      if (art.decor) {
+        for (const p of look.decor) {
+          const piece = DECOR[p.piece];
+          layers.push({ texture: art.decor(p.piece, true), x: p.x, y: p.y, w: piece.w, h: piece.h, smooth: true });
+        }
+      }
     }
   }
   return { width, height, layers };

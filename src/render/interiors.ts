@@ -32,9 +32,11 @@ import {
   SHOP_COUNTER_W,
   stool,
   VENUE_BAND,
+  VENUE_BASES,
   vgrad,
 } from './illustrated';
-import { isVenueKind, TREATMENTS, venueOf, venueOpen, type Treatment } from './venue';
+import { PALETTE } from './palette';
+import { isVenueKind, mix, TREATMENTS, venueOf, venueOpen } from './venue';
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -66,12 +68,21 @@ export interface Post {
 }
 
 export interface InteriorSpec {
-  /** How many drawn variants; a room picks one with interiorVariant. Venues: their treatments. */
+  /**
+   * How many variants a room picks from (interiorVariants): its looks when it has them, else its
+   * baked layouts. A shop's are its treatments; an office's and a restaurant's, two per treatment.
+   */
   variants: number;
+  /** How many fixture textures are baked (the looks' bases); absent means one per variant. */
+  bases?: number;
+  /** What each variant is drawn as (lookOf); absent means variant n is base n, bare. */
+  looks?: readonly Look[];
+  /** Whether a room may be drawn mirrored (interiorFlip): only kinds with nobody at a post. */
+  flips?: boolean;
   /** The rows the fixture texture covers, for a room `floors` tall. */
   band(floors: number): Band;
-  /** The fixtures, in room coordinates (the bake crops to the band). `w` is the width in px. */
-  draw(ctx: Ctx, w: number, floors: number, variant: number): void;
+  /** The fixtures of base layout `base`, in room coordinates (the bake crops to the band). `w` is the width in px. */
+  draw(ctx: Ctx, w: number, floors: number, base: number): void;
   /** Whether the room keeps its doors open at `minute`; absent means always open. */
   open?(minute: number): boolean;
   /** What a closed room shows over its fixtures, drawn in room coordinates inside `rect`. */
@@ -213,14 +224,23 @@ function exitSign(ctx: Ctx, x: number, y: number): void {
 // ---------------------------------------------------------------- homes and hotel rooms
 
 const HOME_PALETTES = [
-  { sofa: 0x2f7d7d, wood: 0xc98a45, accent: 0xe07a5f, rug: 0xd9c2a0, sky: '#8fd4ff', hill: '#4fa55a' },
-  { sofa: 0xd9a441, wood: 0x6b4420, accent: 0x2f5c9e, rug: 0xb9c8d6, sky: '#ffd8a8', hill: '#b0417a' },
+  { sofa: 0x2f7d7d, wood: 0xc98a45, accent: 0xe07a5f, rug: 0xd9c2a0, duvet: 0xf2efe6 },
+  { sofa: 0xd9a441, wood: 0x6b4420, accent: 0x2f5c9e, rug: 0xb9c8d6, duvet: 0xe6ecf2 },
+  { sofa: 0x6a3a97, wood: 0xa9702f, accent: 0x2f7d3a, rug: 0xe8d9b8, duvet: 0xe6ecf2 },
 ] as const;
 
-function drawCondo(ctx: Ctx, w: number, _floors: number, variant: number): void {
-  const p = HOME_PALETTES[variant % 2] as (typeof HOME_PALETTES)[number];
+/**
+ * A condo's three fixture layouts (its bases): the open plan (kitchen, dining, living) in two
+ * palettes, and the studio (a bed, a reading chair, a desk, a kitchenette). Frames, plants and
+ * pets are placed by the look (CONDO_LOOKS); the mirror is the sprite's (interiorFlip).
+ */
+function drawCondo(ctx: Ctx, w: number, _floors: number, base: number): void {
+  if (base === 2) {
+    drawStudio(ctx, w);
+    return;
+  }
+  const p = HOME_PALETTES[base % 2] as (typeof HOME_PALETTES)[number];
   const by = BASE;
-  flip(ctx, w, variant % 2 === 1);
   // The kitchen: a fridge, a run of counter with cabinets over it, a kettle.
   box(ctx, 6, TY + 2, 17, by - TY - 2, '#e4e8ee', 2);
   line(ctx, [[8, TY + 16], [21, TY + 16]], INK, 1.2);
@@ -242,17 +262,47 @@ function drawCondo(ctx: Ctx, w: number, _floors: number, variant: number): void 
   disc(ctx, dx + 26, by - 21, 2.5, css(p.accent), 1.2); // a bowl
   chair(ctx, dx + 42, by, css(p.wood), false);
   pendant(ctx, dx + 26, 3, '#f7f1d8', false);
-  // Living: a rug, the sofa with a picture over it, a coffee table, a floor lamp, a plant.
+  // Living: a rug, the sofa, a coffee table, a floor lamp. The frame over the sofa and the
+  // plant in the corner are the look's.
   const lx = dx + 62;
   const sw = Math.max(40, Math.min(64, w - lx - 44));
   ellipse(ctx, lx + sw / 2 + 6, by - 1, sw / 2 + 12, 2.4, css(p.rug), 1.2);
-  picture(ctx, lx + sw / 2 - 14, TY + 1, 28, 14, p.sky, p.hill);
   sofa(ctx, lx, by, sw, p.sofa);
   box(ctx, lx + 8, by - 9, sw - 16, 3, css(scaleColour(p.wood, 1.1)), 1); // coffee table
   line(ctx, [[lx + 11, by - 6], [lx + 11, by]], INK, 1.5);
   line(ctx, [[lx + sw - 11, by - 6], [lx + sw - 11, by]], INK, 1.5);
   floorLamp(ctx, lx + sw + 10, by, TY + 2, '#f7f1d8');
-  if (lx + sw + 22 < w - 12) plant(ctx, w - 16, by);
+}
+
+/** The studio condo: bed and nightstand, a reading chair by a lamp, a desk, a kitchenette. */
+function drawStudio(ctx: Ctx, w: number): void {
+  const p = HOME_PALETTES[2];
+  const by = BASE;
+  ellipse(ctx, 40, by - 1, 36, 2.4, css(p.rug), 1.2);
+  bed(ctx, 6, by, 64, p.duvet, p.sofa, p.wood);
+  nightstand(ctx, 72, by, p.wood, '#f7f1d8');
+  // The reading corner: an armchair, a side table with a book, a floor lamp.
+  sofa(ctx, 92, by, 30, p.sofa);
+  floorLamp(ctx, 130, by, TY + 4, '#f7f1d8');
+  // The desk: a top on two legs, a screen, a mug, a chair pulled in at its end.
+  const dx = 140;
+  box(ctx, dx, by - 18, 40, 3.5, css(p.wood), 1);
+  line(ctx, [[dx + 3, by - 15], [dx + 3, by]], INK, 2);
+  line(ctx, [[dx + 37, by - 15], [dx + 37, by]], INK, 2);
+  monitor(ctx, dx + 10, by - 31, 16, 10, '#8fd4ff');
+  box(ctx, dx + 30, by - 23, 4, 5, css(p.accent), 1, 1.5);
+  chair(ctx, dx + 38, by, css(p.accent), false);
+  // The kitchenette: a counter with cabinets over it, a kettle, the fridge at the end.
+  const kx = w - 60;
+  box(ctx, kx, TY + 1, 36, 10, css(p.wood), 1);
+  line(ctx, [[kx + 18, TY + 2], [kx + 18, TY + 10]], INK, 1);
+  box(ctx, kx, by - 21, 36, 4, '#f2efe6', 1);
+  box(ctx, kx + 1, by - 17, 34, 17, css(scaleColour(p.wood, 0.85)), 1);
+  for (let x = kx + 4; x + 10 < kx + 36; x += 13) box(ctx, x, by - 15, 10, 13, css(scaleColour(p.wood, 0.95)), 1, 1);
+  box(ctx, kx + 22, by - 27, 7, 6, css(p.accent), 2); // kettle
+  box(ctx, w - 22, TY + 2, 17, by - TY - 2, '#e4e8ee', 2);
+  line(ctx, [[w - 20, TY + 16], [w - 7, TY + 16]], INK, 1.2);
+  line(ctx, [[w - 8, TY + 6], [w - 8, TY + 12]], '#5a6472', 1.2);
 }
 
 const HOTEL_PALETTES = [
@@ -306,39 +356,132 @@ function fastFoodCounterX(w: number): number {
 const FAST_FOOD_COOK_GAP = 26;
 const fastFoodCookX = (w: number): number => fastFoodCounterX(w) + 42 + FAST_FOOD_COOK_GAP / 2;
 
-function drawFastFood(ctx: Ctx, w: number): void {
+/**
+ * The fast food's five schemes: the counter and its trim, the menu boards, the seats and tables,
+ * how people sit (seating), what stands behind the counter (back), and which end the register
+ * is at. The counter's run and the cook's spot are the same in every scheme (fastFoodCookX).
+ */
+const FAST_FOOD_SCHEMES = [
+  { counter: 0xc03028, trim: 0xf4b942, board: 0x2b2b2b, seat: 0xf4b942, table: 0xf2efe6, drinks: 0xc03028, seating: 'stools', back: 'fryer', register: 'left' },
+  { counter: 0x2f7d3a, trim: 0xf2efe6, board: 0x1f3a2a, seat: 0x8a5a2b, table: 0xc98a45, drinks: 0x2f7d3a, seating: 'booths', back: 'juicer', register: 'right' },
+  { counter: 0x2f5c9e, trim: 0xf08a1f, board: 0x1b2433, seat: 0xf08a1f, table: 0xf7f5ee, drinks: 0x2f5c9e, seating: 'ledge', back: 'oven', register: 'left' },
+  { counter: 0x1f7d7d, trim: 0xff9ec4, board: 0x2b2b2b, seat: 0xff9ec4, table: 0xf7f5ee, drinks: 0x1f7d7d, seating: 'diner', back: 'shakes', register: 'right' },
+  { counter: 0x2b2b2b, trim: 0xc9a227, board: 0x3a2a20, seat: 0xa9702f, table: 0xc98a45, drinks: 0x8c1f3d, seating: 'bench', back: 'case', register: 'left' },
+] as const;
+export const FAST_FOOD_VARIANTS = FAST_FOOD_SCHEMES.length;
+
+function drawFastFood(ctx: Ctx, w: number, _floors = 1, variant = 0): void {
+  const s = FAST_FOOD_SCHEMES[((variant % FAST_FOOD_VARIANTS) + FAST_FOOD_VARIANTS) % FAST_FOOD_VARIANTS] as (typeof FAST_FOOD_SCHEMES)[number];
   const by = BASE;
   const counterX = fastFoodCounterX(w);
   // Menu boards over the counter, lit panels with the day's food, apart over the cook's spot.
   for (let i = 0, x = counterX + 4; i < 2; i++, x += FAST_FOOD_COOK_GAP + 38) {
-    box(ctx, x, TY, 38, 14, '#2b2b2b', 1);
-    const items = ['#d2761f', '#f4b942', '#c03028'];
+    box(ctx, x, TY, 38, 14, css(s.board), 1);
+    const items = ['#d2761f', css(s.trim === 0xf2efe6 ? 0x7cc243 : s.trim), css(s.counter === 0x2b2b2b ? 0xc03028 : s.counter)];
     for (let k = 0; k < 3; k++) {
       disc(ctx, x + 7 + k * 12, TY + 6, 3, items[(k + i) % 3] as string, 1);
       line(ctx, [[x + 4 + k * 12, TY + 11], [x + 10 + k * 12, TY + 11]], '#f7f5ee', 1);
     }
   }
-  // Behind the counter: a fryer and a drinks machine, either side of the cook.
-  box(ctx, counterX + 80, by - 34, 22, 14, '#9aa3ae', 1);
-  box(ctx, counterX + 84, by - 38, 14, 4, '#f4b942', 1, 1.5);
-  box(ctx, w - 34, by - 44, 20, 24, '#c03028', 1.5);
+  // Behind the counter, either side of the cook: the scheme's machine, and the drinks.
+  const mx = counterX + 80;
+  if (s.back === 'fryer') {
+    box(ctx, mx, by - 34, 22, 14, '#9aa3ae', 1);
+    box(ctx, mx + 4, by - 38, 14, 4, '#f4b942', 1, 1.5);
+  } else if (s.back === 'juicer') {
+    box(ctx, mx + 2, by - 26, 18, 6, '#9aa3ae', 1); // the base
+    box(ctx, mx + 5, by - 40, 12, 14, 'rgba(143,212,255,0.7)', 2); // the jug
+    disc(ctx, mx + 9, by - 31, 2.4, '#f08a1f', 1);
+    disc(ctx, mx + 13, by - 33, 2.4, '#7cc243', 1);
+  } else if (s.back === 'oven') {
+    ctx.beginPath();
+    ctx.ellipse(mx + 11, by - 22, 13, 16, 0, Math.PI, Math.PI * 2);
+    ctx.closePath();
+    ctx.fillStyle = '#a4522c';
+    ctx.fill();
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    box(ctx, mx + 4, by - 30, 14, 8, '#2b2b2b', 4, 1.5); // the mouth
+    ctx.fillStyle = 'rgba(255,150,60,0.8)';
+    ctx.fillRect(mx + 6, by - 26, 10, 3);
+  } else if (s.back === 'shakes') {
+    box(ctx, mx + 2, by - 42, 18, 6, '#c4ccd6', 1.5); // the mixer head
+    line(ctx, [[mx + 8, by - 36], [mx + 8, by - 30]], '#5a6472', 1.5);
+    box(ctx, mx + 5, by - 30, 7, 9, css(s.trim), 1, 1.5); // a cup under the spindle
+    box(ctx, mx + 14, by - 30, 6, 9, '#f7f5ee', 1, 1.5);
+    line(ctx, [[mx + 2, by - 21], [mx + 20, by - 21]], INK, 2);
+  } else {
+    box(ctx, mx, by - 36, 24, 15, 'rgba(191,222,240,0.6)', 1.5); // the display case
+    line(ctx, [[mx + 2, by - 28], [mx + 22, by - 28]], INK, 1);
+    for (let k = 0; k < 3; k++) disc(ctx, mx + 6 + k * 6, by - 31, 2, ['#d9a441', '#8c3050', '#f7f5ee'][k] as string, 1);
+    for (let k = 0; k < 3; k++) box(ctx, mx + 4 + k * 6, by - 26, 4, 3, '#c98a45', 0.5, 1);
+  }
+  box(ctx, w - 34, by - 44, 20, 24, css(s.drinks), 1.5);
   box(ctx, w - 31, by - 41, 14, 8, '#f7f5ee', 1, 1);
   for (let k = 0; k < 3; k++) line(ctx, [[w - 29 + k * 5, by - 32], [w - 29 + k * 5, by - 27]], INK, 1.2);
-  // The counter, red and yellow, with a register and a tray.
-  box(ctx, counterX, by - 22, w - counterX - 10, 5, '#f4b942', 1);
-  box(ctx, counterX + 2, by - 17, w - counterX - 14, 17, '#c03028', 1);
+  // The counter in the scheme's colors, with a register and a tray.
+  box(ctx, counterX, by - 22, w - counterX - 10, 5, css(s.trim), 1);
+  box(ctx, counterX + 2, by - 17, w - counterX - 14, 17, css(s.counter), 1);
   for (let x = counterX + 8; x < w - 16; x += 12) line(ctx, [[x, by - 14], [x, by - 3]], 'rgba(255,255,255,0.35)', 1.5);
-  box(ctx, counterX + 6, by - 31, 14, 9, '#5a6472', 1.5);
-  box(ctx, counterX + 26, by - 24, 16, 2.5, '#d9643a', 1, 1.2);
-  // The seating: small tables with stools, a trash bin by the door.
-  for (let x = 22; x + 30 < counterX - 6; x += 46) {
-    stool(ctx, x - 9, by, '#f4b942');
-    box(ctx, x - 2, by - 20, 22, 3, '#f2efe6', 1);
-    line(ctx, [[x + 9, by - 17], [x + 9, by]], INK, 2);
-    line(ctx, [[x + 4, by], [x + 14, by]], INK, 2);
-    box(ctx, x + 2, by - 25, 6, 5, '#d2761f', 2, 1.2); // a burger in its box
-    box(ctx, x + 11, by - 27, 4, 7, '#c03028', 1, 1.2); // a cup
-    stool(ctx, x + 27, by, '#f4b942');
+  const regX = s.register === 'left' ? counterX + 6 : w - 62;
+  box(ctx, regX, by - 31, 14, 9, '#5a6472', 1.5);
+  box(ctx, s.register === 'left' ? counterX + 26 : counterX + 8, by - 24, 16, 2.5, '#d9643a', 1, 1.2);
+  // The seating, from the door to the counter.
+  const right = counterX - 6;
+  const tray = (x: number, y: number): void => {
+    box(ctx, x, y - 5, 6, 5, '#d2761f', 2, 1.2); // a burger in its box
+    box(ctx, x + 9, y - 7, 4, 7, css(s.counter === 0x2b2b2b ? 0xc03028 : s.counter), 1, 1.2); // a cup
+  };
+  if (s.seating === 'stools') {
+    for (let x = 22; x + 30 < right; x += 46) {
+      stool(ctx, x - 9, by, css(s.seat));
+      box(ctx, x - 2, by - 20, 22, 3, css(s.table), 1);
+      line(ctx, [[x + 9, by - 17], [x + 9, by]], INK, 2);
+      line(ctx, [[x + 4, by], [x + 14, by]], INK, 2);
+      tray(x + 2, by - 20);
+      stool(ctx, x + 27, by, css(s.seat));
+    }
+  } else if (s.seating === 'booths') {
+    // High backed booths facing across small tables.
+    for (let x = 8; x + 48 < right; x += 50) {
+      box(ctx, x, by - 28, 6, 28, css(s.seat), 2);
+      box(ctx, x + 6, by - 12, 8, 4, css(scaleColour(s.seat, 1.15)), 1, 1.5);
+      box(ctx, x + 15, by - 19, 18, 3, css(s.table), 1);
+      line(ctx, [[x + 24, by - 16], [x + 24, by]], INK, 2);
+      tray(x + 17, by - 19);
+      box(ctx, x + 34, by - 12, 8, 4, css(scaleColour(s.seat, 1.15)), 1, 1.5);
+      box(ctx, x + 42, by - 28, 6, 28, css(s.seat), 2);
+    }
+  } else if (s.seating === 'ledge') {
+    // A ledge along the wall with high stools under it, and one round table.
+    box(ctx, 8, by - 26, right - 40, 3, css(s.table), 1);
+    for (let i = 0, x = 16; x < right - 36; i++, x += 18) {
+      line(ctx, [[x, by - 23], [x + 3, by - 19]], INK, 1.5); // a bracket
+      stool(ctx, x + 6, by, css(s.seat));
+      if (i % 2 === 0) tray(x + 2, by - 26);
+    }
+    box(ctx, right - 28, by - 19, 24, 3, css(s.table), 1.5);
+    line(ctx, [[right - 16, by - 16], [right - 16, by]], INK, 2);
+    line(ctx, [[right - 22, by], [right - 10, by]], INK, 2);
+  } else if (s.seating === 'diner') {
+    // Round pedestal tables with a chair either side.
+    for (let x = 12; x + 44 < right; x += 48) {
+      chair(ctx, x, by, css(s.seat), true);
+      ellipse(ctx, x + 22, by - 18, 11, 2, css(s.table), 1.5);
+      line(ctx, [[x + 22, by - 16], [x + 22, by]], '#c4ccd6', 2);
+      line(ctx, [[x + 16, by], [x + 28, by]], INK, 2);
+      tray(x + 15, by - 20);
+      chair(ctx, x + 34, by, css(s.seat), false);
+    }
+  } else {
+    // One long shared table with benches either side.
+    const tl = 10;
+    const tr = right - 4;
+    box(ctx, tl + 4, by - 11, tr - tl - 8, 4, css(s.seat), 1, 1.5); // the bench
+    box(ctx, tl, by - 19, tr - tl, 3.5, css(s.table), 1);
+    for (const x of [tl + 6, tr - 8]) line(ctx, [[x, by - 15.5], [x, by]], INK, 2);
+    for (let x = tl + 10; x + 14 < tr; x += 26) tray(x, by - 19);
   }
 }
 
@@ -1118,6 +1261,242 @@ function drawEscalator(ctx: Ctx, w: number, floors: number): void {
   box(ctx, x1 + 2, y1 - 2, 16, 3, '#c9a227', 0.5, 1.2);
 }
 
+// ---------------------------------------------------------------- looks: decor, paint, flip
+
+/**
+ * A small piece a room's look places over its fixtures: a plant, a pet, a frame on the wall, a
+ * counter front. Baked once (art.ts decor) and shared by every room that shows it, so a look
+ * costs a few sprites, not a texture of its own (the texture budget, docs/VISUAL.md). Drawn in
+ * its own `w` by `h` box, top left at 0, 0.
+ */
+export interface DecorPiece {
+  w: number;
+  h: number;
+  draw(ctx: Ctx): void;
+}
+
+function tallPlant(ctx: Ctx, x: number, by: number): void {
+  line(ctx, [[x, by - 10], [x - 1, by - 40]], '#2f5c3a', 2);
+  for (const [dx, dy, a] of [[-6, -40, -0.5], [6, -36, 0.5], [-6, -30, -0.4], [6, -25, 0.6], [-5, -20, -0.7], [0, -44, 0]] as const) {
+    ctx.beginPath();
+    ctx.ellipse(x + dx, by + dy, 6, 3.4, a, 0, Math.PI * 2);
+    ctx.fillStyle = dy < -35 ? '#4fa55a' : '#2f7d3a';
+    ctx.fill();
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+  box(ctx, x - 7, by - 11, 14, 11, '#e9dfc9', 2);
+}
+
+export const DECOR = {
+  plant: { w: 24, h: 38, draw: (ctx) => plant(ctx, 12, 37) },
+  plantBig: { w: 32, h: 46, draw: (ctx) => plant(ctx, 16, 45, true) },
+  plantTall: { w: 26, h: 52, draw: (ctx) => tallPlant(ctx, 13, 51) },
+  hangingPlant: {
+    w: 20,
+    h: 20,
+    draw: (ctx) => {
+      line(ctx, [[10, 0], [10, 6]], '#333a44', 1);
+      for (const [dx, dy] of [[-5, 13], [5, 14], [-6, 17], [6, 18]] as const) ellipse(ctx, 10 + dx, dy, 2.4, 3.4, '#2f7d3a', 1.5);
+      box(ctx, 5, 6, 10, 7, '#a4522c', 2);
+    },
+  },
+  shelfPlants: {
+    w: 34,
+    h: 16,
+    draw: (ctx) => {
+      box(ctx, 1, 11, 32, 3, '#c98a45', 1);
+      box(ctx, 4, 5, 7, 6, '#a4522c', 1.5, 1.5);
+      ellipse(ctx, 7.5, 4, 4, 2.4, '#4fa55a', 1.2);
+      box(ctx, 14, 3, 5, 8, '#2f5c9e', 1, 1.5); // a book on its end
+      box(ctx, 20, 4, 4, 7, '#d9a441', 1, 1.5);
+      box(ctx, 26, 6, 6, 5, '#f7f5ee', 1.5, 1.5);
+      ellipse(ctx, 29, 5, 3.4, 2, '#2f7d3a', 1.2);
+    },
+  },
+  cat: {
+    w: 16,
+    h: 16,
+    draw: (ctx) => {
+      ctx.beginPath(); // the tail, curled round
+      ctx.moveTo(12, 14);
+      ctx.quadraticCurveTo(16, 12, 14, 7);
+      ctx.strokeStyle = INK;
+      ctx.lineWidth = 3.4;
+      ctx.stroke();
+      ctx.strokeStyle = '#d9843a';
+      ctx.lineWidth = 1.6;
+      ctx.stroke();
+      ellipse(ctx, 8, 11, 5, 4, '#d9843a', 2); // the body
+      poly(ctx, [[2.5, 4], [3, 1], [5, 3], [8, 3], [10, 1], [10.5, 4], [10, 8], [3, 8]], '#d9843a', 2); // the head and ears
+      disc(ctx, 5, 5.5, 0.6, INK, 0);
+      disc(ctx, 8, 5.5, 0.6, INK, 0);
+    },
+  },
+  dog: {
+    w: 26,
+    h: 14,
+    draw: (ctx) => {
+      ellipse(ctx, 12, 9.5, 9, 3.5, '#b98a4a', 2); // lying down
+      line(ctx, [[3, 9], [1, 7]], INK, 2); // the tail
+      ellipse(ctx, 21, 6.5, 4, 3.6, '#b98a4a', 2); // the head
+      ellipse(ctx, 20, 7.5, 1.6, 3, '#6b4420', 1.2); // an ear
+      disc(ctx, 24.5, 7.5, 0.9, INK, 0);
+      disc(ctx, 22, 5.5, 0.6, INK, 0);
+    },
+  },
+  frameSea: { w: 30, h: 16, draw: (ctx) => picture(ctx, 1, 1, 28, 14, '#8fd4ff', '#4fa55a') },
+  frameDusk: { w: 30, h: 16, draw: (ctx) => picture(ctx, 1, 1, 28, 14, '#ffd8a8', '#b0417a') },
+  frameAbstract: {
+    w: 24,
+    h: 20,
+    draw: (ctx) => {
+      box(ctx, 1, 1, 22, 18, '#f7f5ee', 1);
+      ctx.fillStyle = '#2f5c9e';
+      ctx.fillRect(4, 4, 8, 12);
+      ctx.fillStyle = '#e07a5f';
+      ctx.fillRect(12, 4, 8, 6);
+      disc(ctx, 16, 13, 3, '#f4b942', 1);
+    },
+  },
+  poster: {
+    w: 20,
+    h: 26,
+    draw: (ctx) => {
+      box(ctx, 1, 1, 18, 24, '#2f7d7d', 1);
+      disc(ctx, 10, 9, 5, '#ffd866', 1.5);
+      poly(ctx, [[3, 22], [9, 13], [13, 18], [17, 14], [17, 22]], '#1f3a5f', 1.5);
+    },
+  },
+  wallClock: {
+    w: 14,
+    h: 14,
+    draw: (ctx) => {
+      disc(ctx, 7, 7, 5.5, '#f7f5ee');
+      line(ctx, [[7, 7], [7, 3.5]], INK, 1);
+      line(ctx, [[7, 7], [9.5, 7]], INK, 1);
+    },
+  },
+  hostStand: {
+    w: 16,
+    h: 32,
+    draw: (ctx) => {
+      poly(ctx, [[2, 10], [14, 10], [12, 31], [4, 31]], '#6b4420');
+      box(ctx, 1, 7, 14, 4, '#3a2a20', 1);
+      box(ctx, 4, 2, 8, 5, '#f7f5ee', 0.5, 1.2); // the book of bookings
+      line(ctx, [[5, 20], [11, 20]], 'rgba(255,255,255,0.35)', 1);
+    },
+  },
+  highTable: {
+    w: 38,
+    h: 30,
+    draw: (ctx) => {
+      stool(ctx, 6, 29, '#c9a227');
+      box(ctx, 9, 9, 20, 3, '#3a2a20', 1);
+      line(ctx, [[19, 12], [19, 29]], INK, 2);
+      line(ctx, [[14, 29], [24, 29]], INK, 2);
+      box(ctx, 13, 3, 3, 6, 'rgba(143,212,255,0.8)', 0.5, 1); // two glasses
+      box(ctx, 21, 4, 3, 5, '#8c1f3d', 0.5, 1);
+      stool(ctx, 32, 29, '#c9a227');
+    },
+  },
+  // Two counter fronts that sit over a restaurant's kitchen pass (RESTAURANT_PASS_W): a wood bar
+  // with beer taps, and white tile with a colored band. The pot and its steam stay where they are.
+  barFront: {
+    w: RESTAURANT_PASS_W + 2,
+    h: 38,
+    draw: (ctx) => {
+      const x0 = 1;
+      box(ctx, x0, 11, RESTAURANT_PASS_W, 5, '#3a2a20', 1);
+      box(ctx, x0 + 2, 16, RESTAURANT_PASS_W - 4, 21, '#8a5a2b', 1);
+      for (let x = x0 + 12; x < RESTAURANT_PASS_W - 4; x += 16) box(ctx, x - 5, 19, 10, 15, '#6b4420', 1, 1.2);
+      for (let k = 0; k < 3; k++) {
+        const tx = x0 + 56 + k * 8;
+        line(ctx, [[tx, 11], [tx, 4]], '#c9a227', 2);
+        box(ctx, tx - 1.5, 1, 3, 4, ['#f7f5ee', '#2b2b2b', '#c03028'][k] as string, 0.5, 1);
+      }
+    },
+  },
+  tileFront: {
+    w: RESTAURANT_PASS_W + 2,
+    h: 38,
+    draw: (ctx) => {
+      const x0 = 1;
+      box(ctx, x0, 11, RESTAURANT_PASS_W, 5, '#c4ccd6', 1);
+      box(ctx, x0 + 2, 16, RESTAURANT_PASS_W - 4, 21, '#f7f5ee', 1);
+      for (let y = 20; y < 36; y += 4) line(ctx, [[x0 + 3, y], [x0 + RESTAURANT_PASS_W - 3, y]], 'rgba(34,34,34,0.18)', 0.8);
+      ctx.fillStyle = '#2f7d7d';
+      ctx.fillRect(x0 + 3, 24, RESTAURANT_PASS_W - 6, 3);
+    },
+  },
+} satisfies Record<string, DecorPiece>;
+
+export type DecorName = keyof typeof DECOR;
+
+/** One piece of a look, its top left in room px as drawn unmirrored. */
+export interface Placement {
+  piece: DecorName;
+  x: number;
+  y: number;
+}
+
+/**
+ * What a room is drawn as: which fixture texture (its base, art.ts interior), a feature wall
+ * painted behind the furniture (a palette.ts paint token, or none for the kind's own wall), and
+ * the decor placed over it. A kind with `flips` also mirrors any look (interiorFlip).
+ */
+export interface Look {
+  base: number;
+  wall: number | null;
+  decor: readonly Placement[];
+}
+
+/** A piece standing on the floor, centered on `cx`. */
+const onFloor = (piece: DecorName, cx: number): Placement => ({ piece, x: Math.round(cx - DECOR[piece].w / 2), y: BASE - DECOR[piece].h + 1 });
+/** A piece on the wall or hanging from the ceiling, its top left at `x`, `y`. */
+const at = (piece: DecorName, x: number, y: number): Placement => ({ piece, x, y });
+const CEILING = WIN_SILL + 2;
+const P = PALETTE.paint;
+
+/**
+ * Office looks, two per treatment (venue.ts TREATMENT_LABELS), in treatment order: look
+ * `2t` and `2t + 1` belong to treatment `t`, so the room panel's words always fit the room.
+ * Bases: 0 the open plan bench, 1 rows of desks, 2 the creative floor, 3 the meeting room.
+ */
+export const OFFICE_LOOKS: readonly Look[] = [
+  { base: 0, wall: null, decor: [onFloor('plantBig', 128)] }, // studio, open plan
+  { base: 3, wall: P.sage, decor: [at('shelfPlants', 22, TY - 2), at('frameDusk', 94, TY - 2)] }, // studio, meeting room
+  { base: 1, wall: null, decor: [] }, // finance, desks in rows
+  { base: 3, wall: P.slate, decor: [at('frameSea', 24, TY - 2), at('wallClock', 98, TY - 1)] }, // finance, boardroom
+  { base: 2, wall: null, decor: [onFloor('plant', 132)] }, // creative
+  { base: 0, wall: P.blush, decor: [at('wallClock', 64, TY + 1), onFloor('plantTall', 129)] }, // creative, open plan
+];
+
+/** Restaurant looks, two per treatment like the offices; each second look changes the counter front. */
+const PASS_X = 24 * TILE_PX - RESTAURANT_PASS_W - 6;
+export const RESTAURANT_LOOKS: readonly Look[] = [
+  { base: 0, wall: null, decor: [] }, // bistro
+  { base: 0, wall: P.sage, decor: [onFloor('highTable', 22), at('tileFront', PASS_X - 1, BASE - 37), onFloor('plantTall', 280)] },
+  { base: 1, wall: null, decor: [] }, // noodle bar
+  { base: 1, wall: P.butter, decor: [at('barFront', PASS_X - 1, BASE - 37), at('hangingPlant', 38, CEILING), at('hangingPlant', 214, CEILING)] },
+  { base: 2, wall: null, decor: [] }, // grill
+  { base: 2, wall: P.clay, decor: [onFloor('hostStand', 14), onFloor('plantTall', 40), at('barFront', PASS_X - 1, BASE - 37)] },
+];
+
+/** Condo looks over the three bases: palette and layout, a frame, a plant, a pet, a painted wall. */
+export const CONDO_LOOKS: readonly Look[] = [
+  { base: 0, wall: null, decor: [at('frameSea', 167, TY), onFloor('plant', 240)] },
+  { base: 1, wall: null, decor: [at('frameDusk', 167, TY), onFloor('plant', 240), onFloor('cat', 186)] },
+  { base: 2, wall: P.sage, decor: [at('frameAbstract', 26, TY), onFloor('dog', 40), at('shelfPlants', 90, TY + 1)] },
+  { base: 0, wall: P.blush, decor: [at('frameAbstract', 176, TY), onFloor('dog', 186), onFloor('plantTall', 240), at('hangingPlant', 84, CEILING)] },
+  { base: 1, wall: P.mist, decor: [at('frameSea', 167, TY), at('shelfPlants', 130, TY + 1), onFloor('plantBig', 240), onFloor('cat', 44)] },
+  { base: 2, wall: P.butter, decor: [at('frameDusk', 92, TY), at('poster', 30, TY - 1), at('cat', 30, BASE - 12 - DECOR.cat.h), onFloor('plant', 84)] },
+];
+
+/** The fast food's looks: one per scheme, no decor (the schemes differ in their fixtures). */
+const FAST_FOOD_LOOKS: readonly Look[] = Array.from({ length: FAST_FOOD_VARIANTS }, (_, base) => ({ base, wall: null, decor: [] }));
+
 // ---------------------------------------------------------------- the registry
 
 /** Housekeepers stop taking rooms at 20:00 (src/sim/people.ts); their office closes then. */
@@ -1130,27 +1509,32 @@ function housekeepingOpen(minute: number): boolean {
 function venueSpec(kind: 'office' | 'shop' | 'restaurant'): InteriorSpec {
   const behind = kind === 'shop' ? (w: number) => w - 6 - SHOP_COUNTER_W / 2 : (w: number) => w - 6 - RESTAURANT_PASS_W / 2 - 12;
   const band = closedBand(kind);
+  const looks = kind === 'office' ? OFFICE_LOOKS : kind === 'restaurant' ? RESTAURANT_LOOKS : undefined;
   const spec: InteriorSpec = {
-    variants: TREATMENTS,
+    variants: looks ? looks.length : TREATMENTS,
+    bases: VENUE_BASES[kind],
     band: () => VENUE_BAND,
-    draw: (ctx, w, _floors, variant) => drawVenueFixtures(ctx, kind, (variant % TREATMENTS) as Treatment, w),
+    draw: (ctx, w, _floors, base) => drawVenueFixtures(ctx, kind, base, w),
     open: (minute) => venueOpen(kind, minute),
     closed: { rect: (w) => ({ x: 0, y: band.top, w, h: band.height }), draw: (ctx, w) => drawClosed(ctx, kind, w) },
     pools: true,
   };
-  // An office has no counter: nobody stands at a post there.
+  if (looks) spec.looks = looks;
+  // An office has no counter: nobody stands at a post there, so it can be drawn mirrored.
   if (kind !== 'office') spec.post = { kind: 'diner', x: behind, when: 'occupied' };
+  else spec.flips = true;
   return spec;
 }
 
 const PER_FLOOR = (): Band => VENUE_BAND;
 /**
  * How many of the two drawn variants of a hotel room are baked: one, a cut for the texture budget
- * (package 8b). Condos keep both (a mirrored plan in a second palette): they bake at the
- * structural resolution (INTERIOR_2X_MAX_PX), so the second costs a quarter of a hotel's.
+ * (package 8b). Condos bake three layouts at the structural resolution (INTERIOR_2X_MAX_PX), a
+ * quarter of a hotel's cost each, and draw six looks over them with shared decor, mirrored by
+ * the sprite rather than by a texture of their own.
  */
 export const HOTEL_VARIANTS = 1;
-export const CONDO_VARIANTS = 2;
+export const CONDO_VARIANTS = CONDO_LOOKS.length;
 
 /**
  * The widest illustrated interior baked at twice the structural resolution. Wider rooms (condos,
@@ -1177,13 +1561,13 @@ export const INTERIORS: Record<RoomKind, InteriorSpec> = {
   office: venueSpec('office'),
   shop: venueSpec('shop'),
   restaurant: venueSpec('restaurant'),
-  // Homes and hotel rooms are drawn in two variants (a mirrored plan in a second palette).
-  condo: { variants: CONDO_VARIANTS, band: PER_FLOOR, draw: drawCondo, pools: true },
+  condo: { variants: CONDO_VARIANTS, bases: 3, looks: CONDO_LOOKS, flips: true, band: PER_FLOOR, draw: drawCondo, pools: true },
   hotelSingle: { variants: HOTEL_VARIANTS, band: PER_FLOOR, draw: drawHotel('hotelSingle'), pools: true },
   hotelTwin: { variants: HOTEL_VARIANTS, band: PER_FLOOR, draw: drawHotel('hotelTwin'), pools: true },
   hotelSuite: { variants: HOTEL_VARIANTS, band: PER_FLOOR, draw: drawHotel('hotelSuite'), pools: true },
   fastFood: {
-    variants: 1,
+    variants: FAST_FOOD_VARIANTS,
+    looks: FAST_FOOD_LOOKS,
     band: PER_FLOOR,
     draw: drawFastFood,
     open: (minute) => venueOpen('restaurant', minute),
@@ -1264,16 +1648,95 @@ export const INTERIORS: Record<RoomKind, InteriorSpec> = {
   escalator: { variants: 1, band: FLIGHT, draw: drawEscalator, pools: false, overlay: true, structuralScale: true },
 };
 
+/** The kinds whose rooms side by side on a floor avoid each other's variant (interiorVariants). */
+export const NEIGHBOR_KINDS: ReadonlySet<RoomKind> = new Set<RoomKind>(['office', 'restaurant', 'fastFood', 'condo']);
+
+const LOOK_SALT: Partial<Record<RoomKind, number>> = { office: 0x68e31da4, restaurant: 0xb5297a4d, fastFood: 0x1b56c4e9, condo: 0x7feb352d };
+const FLIP_SALT = 0x846ca68b;
+const NEIGHBOR_SALT = 0x3c6ef372;
+
+const mod = (v: number, n: number): number => ((Math.trunc(v) % n) + n) % n;
+
+/** The variants a room may be drawn in: for a venue, only its treatment's looks. */
+function candidatesOf(seed: number, room: { id: Id; kind: RoomKind }): number[] {
+  const kind = room.kind;
+  const n = INTERIORS[kind].variants;
+  if (isVenueKind(kind)) {
+    const per = Math.max(1, Math.floor(n / TREATMENTS));
+    const t = venueOf(seed, room.id, kind).treatment;
+    return Array.from({ length: per }, (_, i) => t * per + i);
+  }
+  return Array.from({ length: n }, (_, i) => i);
+}
+
 /**
- * Which variant a room is drawn in: a venue's treatment (venue.ts, from the seed and the id), a
- * lobby tile's place in its rhythm (by x, so a run reads as one lobby), otherwise by id.
+ * Which variant a room is drawn in on its own, before its neighbors are looked at: a venue's
+ * treatment (venue.ts, from the seed and the id) and one of that treatment's looks; a lobby
+ * tile's place in its rhythm (by x, so a run reads as one lobby); an office's, restaurant's,
+ * fast food's or condo's from the seed and the id; every other kind by id.
  */
 export function interiorVariant(seed: number, room: { id: Id; kind: RoomKind; x: number }): number {
   const kind = room.kind;
-  if (isVenueKind(kind)) return venueOf(seed, room.id, kind).treatment;
   const n = INTERIORS[kind].variants;
-  if (kind === 'lobby' || kind === 'skyLobby') return ((room.x % n) + n) % n;
-  return ((room.id % n) + n) % n;
+  const salt = LOOK_SALT[kind];
+  if (isVenueKind(kind)) {
+    const c = candidatesOf(seed, room);
+    return salt === undefined ? (c[0] as number) : (c[mix((seed | 0) ^ salt, Math.trunc(room.id)) % c.length] as number);
+  }
+  if (kind === 'lobby' || kind === 'skyLobby') return mod(room.x, n);
+  if (salt !== undefined) return mix((seed | 0) ^ salt, Math.trunc(room.id)) % n;
+  return mod(room.id, n);
+}
+
+/**
+ * Every room's variant, with the neighbor rule: along each floor from left to right, a room of a
+ * NEIGHBOR_KINDS kind whose nearest room to the left is the same kind in the same variant takes
+ * another of its candidates, when it has one. Stairs and escalators, drawn over the rooms they
+ * cross, are not neighbors. A pure function of the seed and each room's id, kind, floor and x:
+ * never world.rng, never saved, never in the world hash.
+ */
+export function interiorVariants(seed: number, rooms: Iterable<{ id: Id; kind: RoomKind; floor: number; x: number }>): Map<Id, number> {
+  const floors = new Map<number, { id: Id; kind: RoomKind; floor: number; x: number }[]>();
+  const out = new Map<Id, number>();
+  for (const room of rooms) {
+    if (INTERIORS[room.kind].overlay) {
+      out.set(room.id, interiorVariant(seed, room));
+      continue;
+    }
+    const list = floors.get(room.floor);
+    if (list) list.push(room);
+    else floors.set(room.floor, [room]);
+  }
+  for (const list of floors.values()) {
+    list.sort((a, b) => a.x - b.x || a.id - b.id);
+    let prev: { kind: RoomKind; variant: number } | null = null;
+    for (const room of list) {
+      let v = interiorVariant(seed, room);
+      if (prev && prev.kind === room.kind && prev.variant === v && NEIGHBOR_KINDS.has(room.kind)) {
+        const c = candidatesOf(seed, room);
+        if (c.length > 1) {
+          const i = Math.max(0, c.indexOf(v));
+          v = c[(i + 1 + (mix((seed | 0) ^ NEIGHBOR_SALT, Math.trunc(room.id)) % (c.length - 1))) % c.length] as number;
+        }
+      }
+      out.set(room.id, v);
+      prev = { kind: room.kind, variant: v };
+    }
+  }
+  return out;
+}
+
+/** Whether a room is drawn mirrored: kinds that flip, by the seed and the id. */
+export function interiorFlip(seed: number, room: { id: Id; kind: RoomKind }): boolean {
+  if (!INTERIORS[room.kind].flips) return false;
+  return ((mix((seed | 0) ^ FLIP_SALT, Math.trunc(room.id)) >>> 7) & 1) === 1;
+}
+
+/** What variant `variant` of a kind is drawn as: its look, or base `variant` bare. */
+export function lookOf(kind: RoomKind, variant: number): Look {
+  const spec = INTERIORS[kind];
+  const v = mod(variant, Math.max(1, spec.variants));
+  return spec.looks?.[v] ?? { base: v, wall: null, decor: [] };
 }
 
 /** Whether a room keeps its doors open at `minute`: always, for a kind with no hours. */

@@ -75,7 +75,7 @@ export const VENUE_ACCENTS: Record<VenueKind, readonly (readonly [number, number
 };
 
 /** The same 32-bit mix as src/sim/identity.ts, copied so the renderer owns its own hash. */
-function mix(a: number, b: number): number {
+export function mix(a: number, b: number): number {
   let h = (a ^ 0x9e3779b9) >>> 0;
   h = Math.imul(h ^ b, 0x85ebca6b) >>> 0;
   h ^= h >>> 13;

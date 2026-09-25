@@ -98,6 +98,26 @@ export const PALETTE = {
     columnLight: 0x5c5c5c,
     led: 0x5fd38a,
   },
+  // Feature walls a room's look paints behind its furniture (interiors.ts looks): light, muted
+  // tones, so the furniture's dark outlines still read against them.
+  paint: {
+    sage: 0xdfe8d4,
+    mist: 0xd9e5ee,
+    blush: 0xf2d9d3,
+    butter: 0xf7ebc2,
+    lilac: 0xe5dcef,
+    slate: 0xd3dae3,
+    clay: 0xebcfb8,
+    mint: 0xd2ebe1,
+  },
+  // Elevator car finishes, one per shaft (illustrated.ts CAR_FINISHES): the cab's lit interior
+  // top to bottom, the door panels top to bottom, and the trim around the opening.
+  carFinish: [
+    { interior: [0xfff3c4, 0xf0bf62], door: [0xeef0f3, 0xb3bac4], trim: null },
+    { interior: [0xf3dfc4, 0xc28d5a], door: [0xc98a45, 0x8a5a2b], trim: 0x6b4420 },
+    { interior: [0xfbf4dc, 0xdcc99a], door: [0xf4dc8e, 0xc9a227], trim: 0x8a6d1f },
+    { interior: [0xe6f4f0, 0x9fd0c5], door: [0xe2e8ee, 0x9aa8b6], trim: 0x1f7d7d },
+  ],
 } as const;
 
 /**
