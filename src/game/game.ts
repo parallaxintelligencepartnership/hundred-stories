@@ -748,7 +748,8 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
       const res = canBuildShaft(world, tool.shaft, sx, floorMin, floorMax);
       renderer.setGhost({
         widthTiles: rule.width,
-        heightFloors: floorMax - floorMin + 1,
+        // Floors the span covers, not counting the floor 0 that does not exist.
+        heightFloors: bandOf(floorMax) - bandOf(floorMin) + 1,
         floor: floorMin,
         x: sx,
         ok: res.ok,

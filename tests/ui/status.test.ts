@@ -19,7 +19,7 @@ import {
   weatherShort,
 } from '../../src/ui/status';
 import { weatherAt, weatherLabel, type WeatherKind } from '../../src/game/weather';
-import { setForcedWeather } from '../../src/render/weather';
+import { easeView, publishWeatherView, rainFalling, settledView, setForcedWeather, weatherNow } from '../../src/render/weather';
 import { FakeDom, type FakeElement } from './fake-dom';
 
 let dom: FakeDom;
@@ -191,5 +191,53 @@ describe('weather readout beside the clock', () => {
     const world = stubWorld();
     bar.update(world, 1);
     expect(find(clock, 'hs-weather-word').textContent).toBe(weatherLabel(weatherAt(world.seed, world.time.minute).kind));
+  });
+});
+
+describe('the weather word follows the weather drawn (audit 2026-09-25 F3 S3)', () => {
+  afterEach(() => publishWeatherView(0, null));
+  const find = (root: FakeElement, c: string): FakeElement => {
+    const node = [root, ...root.descendants()].find((n) => n.className.split(' ').includes(c));
+    if (!node) throw new Error(`no ${c}`);
+    return node;
+  };
+
+  it('at 320 game minutes a second (4x at night) says Rain only while rain is falling on screen', () => {
+    // A tower whose forecast rains within its first twenty blocks, so the old readout had a Rain to show.
+    let seed = 1;
+    const rainsWithin = (s: number): boolean => {
+      for (let b = 0; b < 20; b++) if (['rain', 'storm'].includes(weatherAt(s, b * 360).kind)) return true;
+      return false;
+    };
+    while (!rainsWithin(seed)) seed++;
+    const bar = createStatusBar();
+    const clock = bar.clock as unknown as FakeElement;
+    const world = stubWorld({ seed, time: { minute: 0 } } as Partial<World>);
+    const perFrame = (320 * 16) / 1000; // game minutes per 16 ms frame at 320 minutes a second
+    let view = settledView(weatherNow(seed, 0));
+    let forecastRain = 0;
+    let mismatches = 0;
+    for (let minute = 0; minute < 20 * 360; minute += perFrame) {
+      // What the renderer does every frame: ease in real time, then hand the view over.
+      view = easeView(view, weatherNow(seed, minute), 16);
+      publishWeatherView(seed, view);
+      world.time.minute = minute;
+      bar.update(world, 1);
+      const word = find(clock, 'hs-weather-word').textContent;
+      const says = word === 'Rain' || word === 'Storm';
+      if (['rain', 'storm'].includes(weatherAt(seed, minute).kind)) forecastRain++;
+      if (says !== rainFalling(view) > 0) mismatches++;
+    }
+    expect(forecastRain).toBeGreaterThan(0);
+    expect(mismatches).toBe(0);
+  });
+
+  it('falls back to the forecast when no view has been drawn for the tower', () => {
+    const bar = createStatusBar();
+    const clock = bar.clock as unknown as FakeElement;
+    const world = stubWorld({ seed: 5 } as Partial<World>);
+    publishWeatherView(6, settledView({ kind: 'storm', from: 'storm', blend: 1, intensity: 1 })); // another tower's
+    bar.update(world, 1);
+    expect(find(clock, 'hs-weather-word').textContent).toBe(weatherLabel(weatherAt(5, world.time.minute).kind));
   });
 });

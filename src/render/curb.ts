@@ -4,7 +4,10 @@
 // waits at the curb while a fire or a bomb is active.
 //
 // Cosmetic only: the figures are a sample of people the sim has outside the tower or leaving
-// it, drawn walking a loop along the street on real time. Nothing here reads or writes world.rng
+// it, drawn walking a loop along the street on real time. While a fire burns nobody walks in:
+// the people outside wait on the street, clear of the door and the fire engine. A person on
+// the way out is on the street only once they are in the ground lobby and the tower does not
+// draw them, so nobody is drawn inside and outside at once. Nothing here reads or writes world.rng
 // or any sim field; the renderer never touches the sim. All motion stops under reduced motion.
 
 import { Container, Sprite, type Texture } from 'pixi.js';
@@ -30,14 +33,29 @@ const CURB_LOOP_PX = CURB_PATH_PX + 120;
 export const UMBRELLA_WEIGHT = RAIN_ON;
 /** A vehicle pulls up or drives off over this long. */
 export const VEHICLE_MOVE_MS = 1500;
+/** During a fire the people outside wait at least this far from their door, px: past the fire engine. */
+export const CURB_WAIT_PX = VEHICLE_SIZE.fire.w + 24;
 
 export interface CurbFigure {
   simId: Id;
   kind: SimKind;
   /** Which door: the lobby's left end (-1) or right end (1). */
   side: -1 | 1;
-  /** In from the street toward the door, or out from the door along it. */
-  heading: 'in' | 'out';
+  /** In from the street toward the door, out from the door along it, or standing (a fire). */
+  heading: 'in' | 'out' | 'wait';
+}
+
+/** What the street needs to know about the tower when it picks its people. */
+export interface CurbSampleOptions {
+  /** A fire is burning: nobody walks in, the people outside wait on the street. */
+  fire?: boolean;
+  /**
+   * The ground lobby's doors, world px. Given, a person leaving is on the street only while on
+   * the ground floor between them, not while still upstairs.
+   */
+  lobby?: { left: number; right: number } | null;
+  /** True for a person the tower draws now: they are inside, so not on the street as well. */
+  inTower?: (sim: Sim) => boolean;
 }
 
 /**
@@ -45,10 +63,18 @@ export interface CurbFigure {
  * chosen by a hash of the id so the same people stay on the street from one frame to the next.
  * One pass over the sims, keeping the lowest hashes, so a tower of thousands costs one walk.
  */
-export function curbFigures(sims: Iterable<Sim>, max = CURB_MAX): CurbFigure[] {
+export function curbFigures(sims: Iterable<Sim>, max = CURB_MAX, options: CurbSampleOptions = {}): CurbFigure[] {
   const best: { h: number; sim: Sim }[] = [];
+  const lobby = options.lobby;
   for (const sim of sims) {
     if (sim.state !== 'outside' && sim.state !== 'leaving') continue;
+    if (sim.state === 'leaving') {
+      if (options.inTower?.(sim)) continue;
+      if (lobby) {
+        const x = sim.pos.x * TILE_PX;
+        if (sim.pos.floor !== 1 || x < lobby.left || x > lobby.right) continue;
+      }
+    }
     const h = mix(sim.id * 31 + 7);
     if (best.length === max && h >= (best[best.length - 1] as { h: number }).h) continue;
     let i = best.length;
@@ -60,7 +86,7 @@ export function curbFigures(sims: Iterable<Sim>, max = CURB_MAX): CurbFigure[] {
     simId: sim.id,
     kind: sim.kind,
     side: (h & 1 ? 1 : -1) as -1 | 1,
-    heading: sim.state === 'leaving' ? 'out' : 'in',
+    heading: sim.state === 'leaving' ? 'out' : options.fire ? 'wait' : 'in',
   }));
 }
 
@@ -95,6 +121,8 @@ export function emergencyVehicle(world: Pick<World, 'events'>): 'fire' | 'police
  * Under reduced motion the clock does not run: each stands at their own fixed spot.
  */
 export function curbOffset(figure: CurbFigure, nowMs: number, reducedMotion: boolean): number | null {
+  // Waiting out a fire: standing at their own spot down the street, never at the door.
+  if (figure.heading === 'wait') return CURB_WAIT_PX + (mix(figure.simId) % (CURB_PATH_PX - CURB_WAIT_PX));
   const start = mix(figure.simId) % CURB_LOOP_PX;
   const run = reducedMotion ? 0 : (nowMs / 1000) * CURB_WALK_PX_PER_S;
   const p = (start + run) % CURB_LOOP_PX;
@@ -128,6 +156,8 @@ export interface CurbFrame {
   /** The view's left and right edges, world px: a commuter off screen gets no sprite at all. */
   viewLeft: number;
   viewRight: number;
+  /** True for a person the tower draws now (renderer: the crowd sample, visible): not on the street too. */
+  inTower?: (sim: Sim) => boolean;
 }
 
 export interface Curb {
@@ -136,6 +166,8 @@ export interface Curb {
   count(): number;
   /** Add every texture the commuters show to `into`, so a sweep keeps them. */
   textures(into: Set<Texture>): void;
+  /** Forget the street for a different tower: no commuters, no vehicles, a fresh sample next frame. */
+  reset(): void;
   destroy(): void;
 }
 
@@ -165,6 +197,7 @@ export function createCurb(layer: Container, art: () => Art): Curb {
   layer.addChild(root);
   let sample: CurbFigure[] = [];
   let sampledAt = -Infinity;
+  let sampledFire = false;
   const walkers = new Map<Id, Walker>();
   const vip: Vehicle = { node: null, kind: null, away: 1, want: false };
   const rescue: Vehicle = { node: null, kind: null, away: 1, want: false };
@@ -217,9 +250,12 @@ export function createCurb(layer: Container, art: () => Art): Curb {
       props.visible = f.people;
       umbrellas.visible = f.people;
       if (!f.people) return;
-      if (f.nowMs - sampledAt >= RESAMPLE_MS || f.nowMs < sampledAt) {
-        sample = curbFigures(f.world.sims.values());
+      // A fire starting or ending turns the street at once, not at the next resample.
+      const fire = emergencyVehicle(f.world) === 'fire';
+      if (f.nowMs - sampledAt >= RESAMPLE_MS || f.nowMs < sampledAt || fire !== sampledFire) {
+        sample = curbFigures(f.world.sims.values(), CURB_MAX, { fire, lobby: doors, ...(f.inTower ? { inTower: f.inTower } : {}) });
         sampledAt = f.nowMs;
+        sampledFire = fire;
       }
       const a = art();
       const rain = umbrellasUp(f.view);
@@ -232,7 +268,7 @@ export function createCurb(layer: Container, art: () => Art): Curb {
         if (x < f.viewLeft - SIM_W || x > f.viewRight + SIM_W) continue;
         seen.add(fig.simId);
         const code = f.lookOf(sim);
-        const frame: PersonFrame = f.reducedMotion ? FRAME.stand : walkFrameAt(f.nowMs + (mix(fig.simId) % 360));
+        const frame: PersonFrame = f.reducedMotion || fig.heading === 'wait' ? FRAME.stand : walkFrameAt(f.nowMs + (mix(fig.simId) % 360));
         const key = `${fig.kind}|${code}|${frame}`;
         let w = walkers.get(fig.simId);
         if (!w) {
@@ -264,6 +300,17 @@ export function createCurb(layer: Container, art: () => Art): Curb {
     },
     textures(into) {
       for (const w of walkers.values()) into.add(w.body.texture);
+    },
+    reset() {
+      for (const id of [...walkers.keys()]) drop(id);
+      sample = [];
+      sampledAt = -Infinity;
+      sampledFire = false;
+      for (const v of [vip, rescue]) {
+        v.away = 1;
+        v.want = false;
+        if (v.node) v.node.visible = false;
+      }
     },
     destroy() {
       for (const id of [...walkers.keys()]) drop(id);

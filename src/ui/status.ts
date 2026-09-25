@@ -5,7 +5,7 @@
 
 import { NIGHT_MULTIPLIER, type Speed } from '../game/api';
 import { weatherLabel, type WeatherKind } from '../game/weather';
-import { weatherNow } from '../render/weather';
+import { shownWeatherKind } from '../render/weather';
 import { ROOMS, SCHEDULES, STARS } from '../sim/rules';
 import { clockOf } from '../sim/types';
 import type { Star, World } from '../sim/types';
@@ -385,7 +385,8 @@ export function createStatusBar(): StatusBar {
     setText(clockAmPm, time.slice(split));
     const date = formatDate(world.time.minute);
     setText(dateValue, date);
-    const kind = weatherNow(world.seed, world.time.minute).kind;
+    // The weather the tower view is drawing, so the word and the rain on screen agree.
+    const kind = shownWeatherKind(world.seed, world.time.minute);
     if (kind !== weatherShown) {
       weatherShown = kind;
       setText(weatherWord, weatherLabel(kind));
