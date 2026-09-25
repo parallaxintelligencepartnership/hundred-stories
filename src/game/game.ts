@@ -1,5 +1,7 @@
 // The game shell: owns the world, the clock loop, the active tool, pointer input on the tower view, and saves.
-import { applyCommand, canBuild, canBuildShaft, canExtendShaft } from '../sim/build';
+import { canBuild, canBuildShaft, canExtendShaft } from '../sim/build';
+import { applyAndRecord, startBuildLog } from '../sim/buildlog';
+import { markCheckpoint } from '../sim/replay';
 import { LIMITS, ROOMS, SHAFTS } from '../sim/rules';
 import { deserialize, serialize } from '../sim/save';
 import { tick } from '../sim/tick';
@@ -161,7 +163,10 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     scheduleIdle: clock.scheduleIdle ?? scheduleIdle,
     hidden: clock.hidden ?? documentHidden,
   };
+  // Every player command reaches the sim through applyAndRecord, the one recording boundary, so
+  // the build log beside the world holds everything a replay needs (src/sim/buildlog.ts).
   let world: World = createWorld(seed);
+  startBuildLog(world);
   let tool: Tool = { kind: 'none' };
   let speed: Speed = 1;
   let speedBeforePause: Speed = 1;
@@ -300,6 +305,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
 
   async function saveWorld(quiet: boolean): Promise<CommandResult> {
     try {
+      markCheckpoint(world); // the hash here lets a replay find where it drifted
       await writeSave(serialize(world));
       if (!quiet) {
         logEvent(world, 'Game saved.', 'info');
@@ -520,7 +526,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     const touch = ev.pointerType === 'touch';
     if (tool.kind === 'room' && tool.room === 'lobby') {
       drag = { floor, x, kind: 'lobby', touch };
-      applyCommand(world, { kind: 'build', room: 'lobby', floor: 1, x });
+      applyAndRecord(world, { kind: 'build', room: 'lobby', floor: 1, x });
       notify();
     } else if (tool.kind === 'shaft') {
       // An elevator in hand on a shaft that is already there means stretch that one, whichever
@@ -549,7 +555,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
       // paint segments while dragging on the lobby floor
       const from = Math.min(drag.x, x);
       const to = Math.max(drag.x, x);
-      for (let sx = from; sx <= to; sx++) applyCommand(world, { kind: 'build', room: 'lobby', floor: 1, x: sx });
+      for (let sx = from; sx <= to; sx++) applyAndRecord(world, { kind: 'build', room: 'lobby', floor: 1, x: sx });
       drag.x = x;
       notify();
     }
@@ -585,7 +591,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     if (drag.kind === 'lobby') {
       const from = Math.min(drag.x, x);
       const to = Math.max(drag.x, x);
-      for (let sx = from; sx <= to; sx++) applyCommand(world, { kind: 'build', room: 'lobby', floor: 1, x: sx });
+      for (let sx = from; sx <= to; sx++) applyAndRecord(world, { kind: 'build', room: 'lobby', floor: 1, x: sx });
       notify();
     }
     if (drag.kind === 'shaftExtend') {
@@ -625,7 +631,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
       return world;
     },
     apply(cmd: Command): CommandResult {
-      const res = applyCommand(world, cmd);
+      const res = applyAndRecord(world, cmd);
       if (!res.ok) logEvent(world, res.reason, 'warn');
       else followBuild(cmd);
       if (res.ok && eventListeners.size > 0 && isBuildCommand(cmd.kind)) emit({ kind: 'build', command: cmd.kind });
@@ -764,7 +770,10 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
       }
       return api.importSave(text);
     },
-    exportSave: () => serialize(world),
+    exportSave() {
+      markCheckpoint(world);
+      return serialize(world);
+    },
     importSave(text) {
       const res = deserialize(text);
       if (!res.ok) return res;
@@ -778,6 +787,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     },
     newGame(newSeed) {
       world = createWorld(newSeed);
+      startBuildLog(world);
       primeTap(tap, world);
       selection = null;
       renderer?.resetMotion();
