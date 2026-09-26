@@ -38,6 +38,7 @@ benchmarks: see scripts/bench/README.md (npx vite-node@6.0.0 scripts/bench/bench
 | capacitor.config.ts, ios/, android/ | Capacitor 8 shells (xyz.hundredstories.app) loading dist-app; signing is not configured in the repo |
 | src-tauri/ | Tauri 2 desktop shell (xyz.hundredstories.desktop): tauri.conf.json with its own CSP, capabilities/default.json (app data fs, dialogs), achievements.rs behind the steam cargo feature, Cargo.lock |
 | store/, scripts/make-store-shots.mjs | listing copy, per-store notes, SUBMISSION.md runbook, the screenshot fixture; npm run store:shots writes store/shots/ (gitignored) |
+| scripts/make-design-sheet.mjs, tests/design/ | the design pass contact sheet: fixed shot list, --only names, --out dir, --no-build, --textures (dev server on ?smoke, prints baked bytes against the 2026-09-23 baseline); builds into a temp dir per run; output under docs/reviews/design-pass-2026-09-25/ (gitignored: sheet/, baseline/, <pkg>-after/) |
 | public/icons/, scripts/make-icons.mjs | PWA icons, and the script that draws them plus the iOS, Android and Tauri icons and splashes |
 | public/og.png, scripts/make-og.mjs | the 1200x630 link preview card and the dependency free script that draws it |
 | public/robots.txt, public/sitemap.xml | crawler files for the site pages |
