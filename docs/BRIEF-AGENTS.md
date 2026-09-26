@@ -12,6 +12,14 @@ Read first: docs/DESIGN.md, src/sim/types.ts, src/sim/rules.ts, src/sim/world.ts
 - Report under 300 words: files, exported API as built, test names and counts, anything you had to define locally, anything you could not do.
 - UI strings: plain English, US spelling, sentence case, no em dashes or hyphens used as dashes.
 
+## Review and capture discipline (Matt, 2026-09-26, permanent)
+
+- One review per package, once, at its commit: one reviewer does the design verify and the itworks lens in the same pass. No re-verify agent, no second lens pass on a close commit.
+- Only CRITICAL and IMPORTANT get a fix round now. ADVISORY findings are logged and batched into one close commit at the end of the run, before any ship.
+- A senior implementer decides small things within the finding and reports what it chose; it stops only when two readings would look different to the player.
+- Screenshots: the capture script's fixed shot list, one run, is the only capture. A state the script cannot reach is a NOT-CAPTURED line and the finding stands on its tests. Nobody proposes or tries another capture mechanism, adds a shot mid-run, or spends a round on it.
+- One full test run and one typecheck per run, at the end.
+
 ## Common helpers you may rely on
 - `createWorld(seed)`, `allocId`, `log`, `addRoom/removeRoom`, `addShaft/removeShaft`, `addSim/removeSim`, `rebuildFloorIndex`, `roomsOnFloor`, `shaftsOnFloor`, `roomAt`, `shaftAt`, `groundLobby`, `roomsOfKind` from world.ts.
 - `clockOf(minute)` from types.ts.
