@@ -4,9 +4,9 @@ Subject: a cross section of a downtown high rise, seen the way an architect's di
 
 ## The one bold element
 
-The tower cross section. Living windows, tenants moving, cars sliding in the shafts, a sky that turns. All lighting and motion budget goes here. The chrome around it is quiet, flat, and disciplined so the tower reads as the hero at every zoom level.
+The tower cross section. Living windows, tenants moving, cars sliding in the shafts, a sky that turns. All lighting and motion budget goes here. The chrome floats over it, quiet and disciplined: glass controls and near solid cards at the edges, no motion of its own, so the tower reads as the hero at every zoom level.
 
-Second, small signature: the status readouts (clock, cash, floor under cursor) are drawn as segmented elevator indicator displays. Nowhere else uses that face.
+Second, small signature: the readout face (Share Tech Mono, tabular figures) on cash, the clock, the floor under the cursor and money in the panels; the clock and the floor readout also take the indicator green of an elevator's segmented display. Nowhere else uses that face.
 
 ## Tokens
 
@@ -49,38 +49,68 @@ Two texture classes (src/render/art.ts TEXTURE_CLASS):
 - ghost green `#5fd38a`, refused red `#ff5c4d`; the chrome keeps the steel tokens above, and the contrast between dark chrome and bright world is the composition
 
 Type:
-- Display and UI: Bricolage Grotesque (Google Fonts), weights 400 and 600. Panel titles at 600, everything else 400.
-- Readouts only: Share Tech Mono, for clock, cash, floor and population numbers in the top bar.
-- Scale: 12, 14, 16, 20, 28. Line height 1.4 for UI, 1.1 for readouts. Sentence case everywhere. No tracked out caps, no eyebrows.
+- Display and UI: Bricolage Grotesque, weights 400 and 600, self-hosted from public/fonts/ (src/fonts.css) under the CSP's `font-src 'self'`; no page and no app build asks a font host for anything. Panel titles at 600, everything else 400.
+- The readout face, Share Tech Mono with tabular figures: cash and the clock in the status pill, the Floor readout (the floor under the cursor) and money in the panels (`.hs-money`). The clock and the Floor readout are in indicator green; cash stays ink, since green would read as a gain. Population, stars and every label stay in the UI face.
+- Scale: 12, 14, 16, 20, 28, each multiplied by `--ui-scale` (1.25 under Larger text, which grows the touch targets and the bars with the type). Status values 16, their meta line 12, the clock 28 where it stands alone. Line height 1.4 for UI, 1.1 for readouts. Sentence case everywhere. No tracked out caps, no eyebrows.
+
+Chrome (the 0.5 chrome, per docs/reviews/2026-09-24-ui-polish-spec.md and src/ui/ui.css):
+- Two surfaces. Glass for the controls layer (the status pill, the speed pill, the round buttons, the news toasts): `rgba(22, 28, 38, 0.88)` under `blur(20px) saturate(1.4)`, with a hairline inset edge `rgba(232, 236, 242, 0.10)` so a pill keeps its edge over a night sky; the clear look (Settings) is `0.72`. A nearly solid surface for anything that holds text (sheets, cards, the dock, alert toasts): `rgba(28, 35, 46, 0.99)`. The light theme remaps the same names.
+- Corners from one family: radii 12, 16, 20 and pill (999 px); a child's radius is its parent's minus the padding it sits in.
+- Shadows, soft and never a hard edge: `--shadow-1` on controls, `--shadow-2` on cards, `--shadow-3` on bottom sheets (cast upward). No hard borders; an alert's colour is a 3 px inset edge drawn as a shadow.
+- Touch: every control is at least 44 px (`--touch`); the focus ring is 3 px in amber text colour at a 2 px offset.
 
 Layout:
 ```
-+-------------------------------------------------------------+
-| [cash, delta] [pop, trend] [stars] [dial clock day] [speed] |  status bar, 56px
-+------+------------------------------------------------------+
-| pal  |                                                      |
-| ette |                 TOWER VIEW (canvas)                   |
-| 232  |                                                      |
-| px   |                                            [query]   |  right panel slides in on click
-+------+------------------------------------------------------+
-| event ticker (one line, newest, click to open the log)      |  28px
-+-------------------------------------------------------------+
+desk (721 px and wider)
++------------------------------------------------------------------------+
+| (status pill: cash  pop  stars  dial clock  weather  Floor)            |
+|                                  (speed pill) (Views) (Share) (Menu)   |
+| +----+-----------+                                  +----------------+ |
+| |rail| dock      |   TOWER VIEW (canvas, full bleed) | card, 360 px   | |
+| | 56 | 288 px    |                                  | (goals, query) | |
+| +----+-----------+                                  +----------------+ |
+|                     (news toasts, centred)       (alerts) (minimap)    |
++------------------------------------------------------------------------+
+
+phone (720 px and narrower)
++--------------------------------------+
+| (status pill, one row)               |
+|                          (map, while |
+|            TOWER VIEW     the camera |
+|                           moves)     |
+| (speed pill) (Menu)          (Build) |
++--------------------------------------+
 ```
-Left aligned. The palette is a building directory board: groups as bold rows, then a tile per tool (since 0.4.3): the room as the world draws it by day, its shell with the illustrated interior composited over it (package 8b), smoothed down to a 72 by 36 thumbnail, the name at 14 px, the footprint and cost at 12 px, 88 px tall. Selected is amber with `aria-pressed`; locked is dim with `aria-disabled`, still focusable, showing the stars needed and a 4 px bar of stars now over stars needed; unaffordable shows the cost in alert with "Short $X" and stays selectable. On phone width the palette becomes a bottom sheet with two tiles to a row, 104 px tall.
+The tower fills the screen edge to edge and the chrome floats over it, 12 px from the edges (8 px on a phone).
+- The dock (desk): a 288 px card on the solid surface under the status pill on the left: a 56 px rail of category tabs (the hammer header, then one tab per group) beside the tiles of the picked category, two to a row. Folded, it is the rail alone, and a tab opens it again. Each tile (since 0.4.3) is the room as the world draws it by day, its shell with the illustrated interior composited over it (package 8b), smoothed down to a 72 by 36 thumbnail, the name at 14 px, the footprint and cost at 12 px. Selected is amber with `aria-pressed`; locked is dim with `aria-disabled`, still focusable, showing the stars needed and a bar of stars now over stars needed; unaffordable shows the cost in alert with "Short $X" and stays selectable.
+- The phone build sheet: the round amber Build button (60 px, bottom right) opens the dock as a bottom sheet, the rail across its top and the tiles two to a row, with a drag handle and its own close.
+- The phone's bottom left corner: the speed pill and a round Menu in one row under the left thumb, the night mode label over the pill; under 390 px or with Larger text the corner stacks, My tower and Menu over the speed pill. The corner hides while the build sheet or a panel is open. Views and Share become rows in Settings.
+- Cards and sheets: at 900 px and wider a panel is a 360 px card on the right under the status pill (radius 20, `--shadow-2`); below 900 px it is a bottom sheet with a handle that snaps to half (55 percent) and full height. The goals card sits top right under Share and Menu and folds to a pill ("Goals, 2 of 5", or "Next: 2 stars" with Show).
+- Toasts and News, in place of the old event ticker: routine news is up to two small glass toasts centred above the bottom edge, each fading after 4 s; alerts (fire, bomb) are solid cards bottom right, left of the map, with an alert edge, and stay until tapped (on a phone they sit under the status pill, in the top quarter). The News panel keeps every line, newest first, with when it happened.
+- The minimap: bottom right on a desk (96 px, hidden while a card is open at 900 px and wider), top right on a phone (64 px) and only while the camera moves. Its rooms take the far zoom's district colours (palette.ts BLOCK) mixed 30 percent toward `#8a9099`.
+- Watch mode (Settings, off by default): after 20 s without input and with nothing open, everything but the clock fades out over 400 ms, the clock keeping a glass of its own; any input brings it all back at once.
 
-Status bar (since 0.4.3), 56 px, readouts as hairline separated columns of label, value (20 px readout face) and meta (12 px): cash with its change since the quarter began, population with an arrow and its change since midnight (a dash until the first boundary on an older save), six star icons with a tooltip of the next star's requirements, a 24 hour dial (midnight at the top, 23:00 to 06:00 shaded) with the time and date, then the night mode ("Night x8, effective x16") beside the speed buttons, Share and Menu. On a phone: two 56 px rows, cash, population and stars, then the clock and the controls.
+Status bar: one floating glass pill, 52 px tall (48 on a phone). Each readout is an icon, a value and a meta line: cash with its change this quarter, population with an arrow and its change today (a dash until the first boundary on an older save), six stars with "Next: n stars" and a tooltip of the next star's needs, a 24 hour dial (midnight at the top, 23:00 to 06:00 shaded) with the time and the date line, the weather icon, and the Floor readout while the cursor is over the tower. Beside it on a desk: the speed pill (Pause, filled amber while paused, then Play, Fast and Fastest, icon only), the night mode as a small label over it ("Paused, night x8"), and round glass buttons with icon and word: Views, Share and Menu. On a phone the pill is one row: cash, population, one star and the count, the time and the weather icon; the date line and both changes move into the tooltips and the dial goes.
 
-Icons: one inline SVG symbol sheet in the DOM, referenced by `<use>`, no icon font, 16 px line drawings in the current color. Every panel header is section icon, title and Close; the icon never stands without its words.
+Icons: one inline SVG symbol sheet in the DOM, referenced by `<use>`, no icon font, 16 px drawings with 1.5 px lines in the current colour, `aria-hidden`. The words carry the meaning: a visible label beside the icon, or, on an icon-only button (the speed pill everywhere, the dock rail, and every round button on a phone), the button's `aria-label` and its `title` tooltip. Every panel header is section icon, title and Close.
 
 Motion:
 - One page-load moment: the tower view fades from the chrome steel (#1c232e) as the sky rises to the current hour, 900 ms of wall clock time from the first drawn frame. Nothing else animates on load.
-- Motion that answers an action: build ghost snaps to grid, placed room drops 4 px with a 120 ms settle, panels slide 160 ms.
-- Ambient motion only in the world: cars, people, sky, window flicker at dusk. Never in the chrome.
-- `prefers-reduced-motion`: no inertia, no particles, no fades; panels appear instantly; the sim still runs.
+- Motion that answers an action: the build ghost snaps to the grid; a placed room drops 4 px with a 120 ms settle; sheets, cards and the dock move in 200 to 280 ms on a spring that overshoots about 4 percent (the standard ease where the browser has no `linear()`); a card enters 16 px from the right, a sheet from below; a pressed button scales to 0.96; fades take 200 ms. News arrives without moving; an alert rises 8 px, since it asks for a tap.
+- Ambient motion only in the world: cars, people, sky and clouds, rooms lighting one by one at dusk (D-15). Never in the chrome, except watch mode's fade.
+- `prefers-reduced-motion` (the system or the setting): the world has no inertia, no particles and no fades (the load fade is skipped, ambient motion stops); every chrome move becomes a plain 200 ms opacity fade, with no slide, no overshoot and no press scale, and watch mode hides at once; the sim still runs.
 
 Principles:
-1. The chrome is a directory board, not a dashboard. Flat surfaces, hairline structure, no cards, no shadows, no gradients in the UI.
-2. Every number is a readout, every label is a sentence-case word. No icons without a label.
+1. The tower is the hero and the chrome floats over it: glass for controls, a near solid surface for text, soft corners and soft shadows, no hard borders, no gradients in the UI.
+2. Every number is a readout, every label is a sentence-case word. An icon stands without its word only on an icon-only button, named by its `aria-label` and `title`.
 3. Copy speaks in the interface's voice: "Not enough cash. Offices cost $40,000." not "Oops!".
 4. US spelling. No em dashes, no spaced hyphens as dashes, anywhere in UI text.
 5. Structural pixel art at integer scales (illustrated textures are smooth by design and sample linear): `antialias: false`, `roundPixels: true`, zoom steps snap to 0.5, 1, 2, 3 for crisp rendering, free zoom between them allowed while the wheel is moving. BB-1: the game opens on the whole tower at zoom 0.5 when it fits the free band, else at zoom 1 with the opening ground line; zoom 1 (a floor 72 css px) stays the working view, and the furthest out is 0.175 (a floor 12.6 css px, unchanged).
+
+### Drift log
+
+Logged 2026-09-26 (design pass D-43): what this document said, against what shipped.
+- 2026-09-24, the 0.5 chrome (the UI polish spec, then packages P4 and P5): "a directory board... flat surfaces, hairline structure, no cards, no shadows, no gradients" became floating glass controls and near solid cards with soft shadows and radii; the 56 px full width status bar became the 52 px floating status pill; the 232 px palette column became the 288 px dock with its 56 px rail, and on a phone a bottom sheet behind a 60 px Build button; the right panel became 360 px cards at 900 px and wider and bottom sheets below; the 28 px event ticker became news toasts and the News panel; "panels slide 160 ms" became 200 to 280 ms on a spring with a 0.96 press scale; "panels appear instantly" under reduced motion became 200 ms opacity fades; "no icons without a label" became icon-only buttons on phones and in the speed pill, named by aria-label and title.
+- 2026-09-24: the readout face left population (now the UI face) and took in money in the panels; the fonts moved from Google Fonts to self-hosted under `font-src 'self'`.
+- 2026-09-25 (P5): the phone status bar, two 56 px rows in this document and in the approved spec, shipped as one row, with the speed pill and Menu moved to the bottom left corner.
+- 2026-09-26: "window flicker at dusk" in Motion predated anything that drew it; it now names what D-15 built, rooms lighting on their own minute from 18:15 to 19:00.
