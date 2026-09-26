@@ -13,7 +13,8 @@ import { describe, expect, it } from 'vitest';
 import { MIN_ZOOM, createCamera, nearestSnap, openingGroundLine } from '../../src/render/camera';
 import { OPENING_WHOLE_TOWER, OPENING_ZOOM, builtFloorExtents, towerSpan, wholeTowerGroundLine } from '../../src/render/renderer';
 import { deserialize } from '../../src/sim/save';
-import { formatClock } from '../../src/ui/format';
+import { formatClock, formatMoney } from '../../src/ui/format';
+import { createWorld } from '../../src/sim/world';
 import type { World } from '../../src/sim/types';
 
 const ROOT = join(__dirname, '..', '..');
@@ -87,6 +88,8 @@ interface SheetModule {
   fixtureAtMinute(saveText: string, minuteOfDay: number): string;
   shotMinuteOfDay(shot: Shot): number;
   clockText(minuteOfDay: number): string;
+  cashText(dollars: number): string;
+  seedTook(save: { cash: number }, shownCash: string): boolean;
   parseArgs(argv: string[]): { only: string[] | null; out: string; build: boolean; textures: boolean };
   pickRoom(save: unknown, geo: Geo): Pick;
   pickPerson(save: unknown, geo: Geo): Pick;
@@ -202,6 +205,23 @@ describe('fixtureAtHour', () => {
   it('never writes the committed fixture', () => {
     sheet.fixtureAtHour(text, 13);
     expect(readFileSync(FIXTURE, 'utf8')).toBe(text);
+  });
+});
+
+describe('the seed check', () => {
+  const fixture = JSON.parse(readFileSync(FIXTURE, 'utf8'));
+
+  it('formats cash the way the status bar does (src/ui/format.ts formatMoney)', () => {
+    for (const dollars of [0, 7, 999, 1000, 47_522_007, 2_000_000, -500_000, 1234.6]) expect(sheet.cashText(dollars)).toBe(formatMoney(dollars));
+  });
+
+  it('takes the seed when the status bar shows the fixture cash, and not otherwise', () => {
+    expect(sheet.seedTook(fixture, formatMoney(fixture.cash))).toBe(true);
+    expect(sheet.seedTook(fixture, `  ${formatMoney(fixture.cash)} `)).toBe(true);
+    // an empty lot opened instead: a fresh world's starting cash
+    expect(sheet.seedTook(fixture, formatMoney(createWorld(1).cash))).toBe(false);
+    expect(sheet.seedTook(fixture, formatMoney(fixture.cash + 1))).toBe(false);
+    expect(sheet.seedTook(fixture, '')).toBe(false);
   });
 });
 

@@ -27,7 +27,10 @@
 // never written. The game is paused before its first tick (a script injected ahead of the page
 // clicks Pause the moment the ui mounts), so the tower is the fixture as seeded and the clock reads
 // the shot's time exactly; a clock that does not is one line in NOT-CAPTURED.md, and the shot is
-// still taken. The room and person shots click a target the fixture puts inside the canvas band
+// still taken. The seed step's ?new page is paused at mount the same way, so it never saves its
+// empty lot over the fixture when it unloads. The seed is checked too: the status bar cash must read the fixture's cash, or the
+// page is loaded once more, and a tower that still is not the fixture is one line in
+// NOT-CAPTURED.md ("fixture did not seed") and no capture. The room and person shots click a target the fixture puts inside the canvas band
 // the chrome leaves free at the opening view, and the ghost and place shots aim at the same view:
 // openingView models renderer.ts frameInitial (since design pass package P1, the whole tower at
 // zoom 0.5 when it fits the band, else zoom 1 with the street at camera.ts openingGroundLine). The
@@ -191,6 +194,30 @@ export function clockText(minuteOfDay) {
   const hour = Math.floor(minuteOfDay / 60) % 24;
   const hour12 = hour % 12 === 0 ? 12 : hour % 12;
   return `${hour12}:${String(minuteOfDay % 60).padStart(2, '0')} ${hour < 12 ? 'AM' : 'PM'}`;
+}
+
+/**
+ * What the status bar cash reads for an amount: src/ui/format.ts formatMoney (lines 21 to 25, over
+ * formatCount), which src/ui/status.ts (line 333) writes into .hs-status-cash .hs-readout-value.
+ * tests/design/sheet.test.ts holds this copy to the original.
+ */
+export function cashText(dollars) {
+  const whole = Math.round(dollars);
+  const digits = String(Math.abs(whole));
+  let grouped = '';
+  for (let i = 0; i < digits.length; i += 1) {
+    if (i > 0 && (digits.length - i) % 3 === 0) grouped += ',';
+    grouped += digits.charAt(i);
+  }
+  return `${whole < 0 ? '-' : ''}$${grouped}`;
+}
+
+/**
+ * Did the seed take: does the status bar cash, read after the pause at mount (before any tick),
+ * show the seeded save's cash? A game that opened some other tower (an empty lot) does not.
+ */
+export function seedTook(save, shownCash) {
+  return String(shownCash ?? '').trim() === cashText(save.cash);
 }
 
 /** Moves a minute stamp by delta; null and absent stay as they are. */
@@ -594,16 +621,36 @@ const PREFS = {
   'hs.tips': JSON.stringify(['longWait', 'tenantLeft', 'firstRent', 'firstEvent', 'nightSpeed', 'firstPanel']),
 };
 
+/**
+ * Writes the save into the game's IndexedDB slot from a `?new` page. That page runs a fresh game
+ * in the same My tower slot (src/game/storage.ts SLOT_KEYS, key autosave), and a game that has
+ * moved saves on unload (src/game/game.ts onPageHide, line 415): left running, it wrote its empty
+ * lot over the fixture when openGame navigated away. So the page is paused at mount, before its
+ * first tick (PAUSE_AT_MOUNT); a game that never ticked is not dirty (game.ts line 236), and
+ * saveNow (lines 467 and 468) writes nothing, so the fixture written here is the last write.
+ * Waiting for that pause also means the page has finished booting before the write. Returns
+ * whether the pause took; if it did not, the cash check in openGame is still the guard.
+ */
 async function seed(browser, base, saveText) {
   const { send, evaluate } = browser;
-  await send('Page.navigate', { url: `${base}/?new&cb=${Date.now()}` });
-  await sleep(1500);
+  const { identifier } = await send('Page.addScriptToEvaluateOnNewDocument', { source: PAUSE_AT_MOUNT });
+  let paused = false;
+  try {
+    await send('Page.navigate', { url: `${base}/?new&cb=${Date.now()}` });
+    for (let i = 0; i < 30 && !paused; i++) {
+      await sleep(500);
+      paused = await evaluate('window.__hsSheetPaused === true').catch(() => false);
+    }
+  } finally {
+    await send('Page.removeScriptToEvaluateOnNewDocument', { identifier }).catch(() => {});
+  }
   await evaluate(`(() => { const p = ${JSON.stringify(PREFS)}; for (const k in p) localStorage.setItem(k, p[k]); return true; })()`);
   await evaluate(`new Promise((res, rej) => { const q = indexedDB.open('hundred-stories', 1);
     q.onupgradeneeded = () => q.result.createObjectStore('saves');
     q.onsuccess = () => { const tx = q.result.transaction('saves', 'readwrite'); tx.objectStore('saves').put(${JSON.stringify(saveText)}, 'autosave');
       tx.oncomplete = () => { q.result.close(); res(true); }; tx.onerror = () => rej(tx.error); };
     q.onerror = () => rej(q.error); })`);
+  return { paused };
 }
 
 async function setViewport(browser, vp) {
@@ -635,23 +682,27 @@ const PAUSE_AT_MOUNT = `(() => {
 
 /**
  * Opens the seeded game and stops its clock before the first tick (PAUSE_AT_MOUNT), so the tower
- * shows the fixture as seeded at the shot's minute. Returns { clock, early }: the status bar's
- * clock text after the pause, and whether the early pause took (if not, Pause is clicked after
- * the fade as before, and the game has run meanwhile).
+ * shows the fixture as seeded at the shot's minute. Then the seed check: the status bar cash must
+ * read the seeded save's cash (seedTook); if it does not, the page is loaded once more and read
+ * again. This checks the seed, it does not retry any state. Returns { clock, cash, early, seeded,
+ * reloaded }: the clock and cash texts after the pause, whether the early pause took (if not,
+ * Pause was clicked after the fade as before, and the game ran meanwhile), whether the seed took,
+ * and whether the one reload was needed.
  *
  * `theme` sets hs.theme (public/theme.js reads it on the game page too) before the game loads; a
  * shot with none clears it, so one shot's theme never carries into the next on the same origin.
  * hs.watchMode (src/ui/prefs.ts) is cleared the same way: the watch shot turns it on itself.
  */
-async function openGame(browser, base, vp, name, theme = null) {
+async function openGame(browser, base, vp, name, save, theme = null) {
   const { send, evaluate } = browser;
   await setViewport(browser, vp);
   await evaluate(`(() => { const p = ${JSON.stringify(PREFS)}; for (const k in p) localStorage.setItem(k, p[k]);
     const t = ${JSON.stringify(theme)}; if (t) localStorage.setItem('hs.theme', t); else localStorage.removeItem('hs.theme');
     localStorage.removeItem('hs.watchMode'); return true; })()`);
-  const { identifier } = await send('Page.addScriptToEvaluateOnNewDocument', { source: PAUSE_AT_MOUNT });
-  let mounted = false;
-  try {
+
+  /** Loads the game page, waits for the ui and the fade, makes sure it is paused, reads the bar. */
+  const load = async () => {
+    let mounted = false;
     for (let attempt = 0; attempt < 3 && !mounted; attempt++) {
       await send('Page.navigate', { url: `${base}/?cb=${Date.now()}` });
       for (let i = 0; i < 30 && !mounted; i++) {
@@ -659,16 +710,28 @@ async function openGame(browser, base, vp, name, theme = null) {
         mounted = await evaluate(`!!document.querySelector('#view canvas') && [...document.querySelectorAll('button')].some((b) => ${PAUSE_BUTTON})`).catch(() => false);
       }
     }
+    if (!mounted) throw new Error(`the game did not mount at ${name}: ${browser.errors.slice(-3).join(' | ')}`);
+    await sleep(2500); // the fade in; the clock is already stopped
+    const early = await evaluate('window.__hsSheetPaused === true').catch(() => false);
+    if (!early) await evaluate(`(() => { const b = [...document.querySelectorAll('button')].find((b) => ${PAUSE_BUTTON}); b && b.click(); return !!b; })()`);
+    await sleep(600);
+    const bar = await evaluate(`(() => { const t = (s) => (document.querySelector(s)?.textContent ?? '').trim();
+      return { clock: t('.hs-status-clock .hs-readout-value'), cash: t('.hs-status-cash .hs-readout-value') }; })()`).catch(() => ({ clock: '', cash: '' }));
+    return { ...bar, early };
+  };
+
+  const { identifier } = await send('Page.addScriptToEvaluateOnNewDocument', { source: PAUSE_AT_MOUNT });
+  try {
+    let opened = await load();
+    let reloaded = false;
+    if (!seedTook(save, opened.cash)) {
+      reloaded = true;
+      opened = await load();
+    }
+    return { ...opened, seeded: seedTook(save, opened.cash), reloaded };
   } finally {
     await send('Page.removeScriptToEvaluateOnNewDocument', { identifier }).catch(() => {});
   }
-  if (!mounted) throw new Error(`the game did not mount at ${name}: ${browser.errors.slice(-3).join(' | ')}`);
-  await sleep(2500); // the fade in; the clock is already stopped
-  const early = await evaluate('window.__hsSheetPaused === true').catch(() => false);
-  if (!early) await evaluate(`(() => { const b = [...document.querySelectorAll('button')].find((b) => ${PAUSE_BUTTON}); b && b.click(); return !!b; })()`);
-  await sleep(600);
-  const clock = await evaluate(`(document.querySelector('.hs-status-clock .hs-readout-value')?.textContent ?? '').trim()`).catch(() => '');
-  return { clock, early };
 }
 
 async function capture(browser, vp) {
@@ -782,11 +845,17 @@ async function gameShot(browser, base, shot, fixtureText, ctx) {
   // The temp copy the spec asks for, in this run's own temp dir; the committed fixture is not touched.
   const tmp = join(ctx.tmp, `fixture-${shot.name}.json`);
   writeFileSync(tmp, saveText);
-  await seed(browser, base, readFileSync(tmp, 'utf8'));
+  const seeded = await seed(browser, base, readFileSync(tmp, 'utf8'));
   rmSync(tmp, { force: true });
-  const opened = await openGame(browser, base, vp, shot.name, shot.theme ?? null);
+  const opened = await openGame(browser, base, vp, shot.name, save, shot.theme ?? null);
+  if (!opened.seeded) {
+    // The game opened some other tower (an empty lot at 6 AM, say): no capture of it.
+    skip(`fixture did not seed (cash ${opened.cash || 'unread'})`);
+    out.note = `clock ${opened.clock || 'unread'}, loaded twice${seeded.paused ? '' : ', the ?new page did not pause at mount'}`;
+    return out;
+  }
   const expectClock = clockText(shotMinuteOfDay(shot));
-  out.note = `clock ${opened.clock || 'unread'}${opened.early ? '' : ', paused late'}`;
+  out.note = `clock ${opened.clock || 'unread'}${opened.early ? '' : ', paused late'}${opened.reloaded ? ', seeded on the reload' : ''}${seeded.paused ? '' : ', the ?new page did not pause at mount'}`;
   // A clock that moved means the game ticked before the pause: the tower is not the fixture as
   // seeded. The shot is still taken, and the line says so.
   if (opened.clock !== expectClock) out.skipped.push({ name: shot.name, taken: true, why: `the status bar clock reads "${opened.clock}" after the pause, not "${expectClock}"${opened.early ? '' : ' (the pause at mount did not take; Pause was clicked after the fade)'}; the shot was taken anyway` });
