@@ -48,7 +48,7 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { CHROME_PATH, FIXTURE, dropAlpha, pngInfo } from './make-store-shots.mjs';
+import { CHROME_PATH, DEMO_FIXTURE as FIXTURE, dropAlpha, pngInfo } from './make-store-shots.mjs';
 import { TILE_PX, FLOOR_PX, SLAB_PX, SIM_H } from '../src/render/grid.ts';
 import { weatherAt } from '../src/game/weather.ts';
 

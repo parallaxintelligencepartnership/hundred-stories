@@ -11,6 +11,7 @@ import {
   minimapGeometry,
   minimapVisible,
   readView,
+  roomColor,
   towerExtent,
   viewportRect,
 } from '../../src/ui/minimap';
@@ -332,5 +333,25 @@ describe('on a phone and beside a card', () => {
     const body = /@media \(min-width: 900px\) \{\s*\.hs-ui\.is-panel-open \.hs-minimap \{([^}]*)\}/.exec(css)?.[1] ?? '';
     expect(body).toContain('display: none;');
     expect(body).not.toContain('right');
+  });
+});
+
+describe('room colors (design pass D-45)', () => {
+  // The far zoom's district color mixed 30 percent toward the map's slate #8a9099, by hand:
+  // office 0x4f78b0 -> r 79 + (138 - 79) * 0.3 = 96.7, g 120 + (144 - 120) * 0.3 = 127.2,
+  // b 176 + (153 - 176) * 0.3 = 169.1.
+  it('draws an office in the far zoom office blue, mixed toward the slate', () => {
+    expect(roomColor('office')).toBe('#617fa9');
+  });
+
+  it('follows BLOCK for every kind, so homes read warm and offices blue', async () => {
+    const { BLOCK } = await import('../../src/render/palette');
+    for (const [kind, color] of Object.entries(BLOCK)) {
+      const mix = (shift: number) => Math.round(((color >> shift) & 0xff) * 0.7 + ((0x8a9099 >> shift) & 0xff) * 0.3);
+      const hex = `#${[16, 8, 0].map((s) => mix(s).toString(16).padStart(2, '0')).join('')}`;
+      expect(roomColor(kind as keyof typeof BLOCK), kind).toBe(hex);
+    }
+    const [r, , b] = [16, 8, 0].map((s) => parseInt(roomColor('condo').slice(1), 16) >> s & 0xff);
+    expect(r).toBeGreaterThan(b!);
   });
 });

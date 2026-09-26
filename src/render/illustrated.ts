@@ -650,6 +650,9 @@ export function carIndicator(w: number, top: number): { x: number; y: number; w:
   return { x: w / 2 - 11, y: top + 3, w: 22, h: 8 };
 }
 
+/** The passenger car body's top colour; the site's --w-car token holds to it (tests/site/tokens.test.ts). */
+export const CAR_BODY_TOP = 0xf7d34d;
+
 /**
  * The car: a shaped cab with a rounded crown, a warm lit interior behind two brushed metal door
  * panels that slide out by `door` (0 closed, 1 open), the indicator housing above the doors, a
@@ -659,7 +662,7 @@ export function drawCarIllustrated(ctx: Ctx, kind: CarKind, w: number, bodyH: nu
   ctx.fillStyle = 'rgba(51,51,51,0.25)';
   ctx.fillRect(2, 0, w - 4, shadowPx);
   const top = shadowPx;
-  const body = kind === 'service' ? ['#b6bec8', '#8a939e'] : ['#f7d34d', '#dcae1c'];
+  const body = kind === 'service' ? ['#b6bec8', '#8a939e'] : [css(CAR_BODY_TOP), '#dcae1c'];
   rrPath(ctx, 1, top + 1, w - 2, bodyH - 2, 5);
   ctx.fillStyle = vgrad(ctx, top, top + bodyH, body[0] as string, body[1] as string);
   ctx.fill();

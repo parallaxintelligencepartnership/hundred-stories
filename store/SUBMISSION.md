@@ -67,7 +67,7 @@ The screenshot script, scripts/make-store-shots.mjs:
 
 - `npm run store:shots` builds dist-app/, serves it with `vite preview --mode app`, opens one
   headless Chrome (Metal, falling back to SwiftShader if WebGL fails), seeds
-  store/fixtures/demo-tower.json into the save slot, and writes 5 views per screenshot size plus
+  store/fixtures/store-tower.json into the save slot, and writes 5 views per screenshot size plus
   the Steam and Play graphics into store/shots/<store>/, with store/shots/manifest.json. About
   three minutes on this Mac.
 - `node scripts/make-store-shots.mjs --no-build` reuses dist-app/; `BASE=<url>` shoots a preview
@@ -75,8 +75,10 @@ The screenshot script, scripts/make-store-shots.mjs:
 - The sizes live in the script's SCREENSHOTS and GRAPHICS tables and in the size tables of
   ios.md, android.md and steam.md; tests/store/shots.test.ts fails if the two disagree.
   `STORE_SHOTS_E2E=1 npx vitest run tests/store` also runs the script end to end.
-- The demo tower is eight floors. A taller fixture would make stronger store shots; replace
-  store/fixtures/demo-tower.json with any exported save.
+- The store tower is a three star tower of 17 floors and 3 basements, built through the game's own
+  commands by `npx vite-node@6.0.0 scripts/make-store-tower.ts`, saved at 13:00 on a weekday with
+  the quarter and day baselines set. tests/store/store-fixture.test.ts holds it to what a player
+  could build. store/fixtures/demo-tower.json, every room kind, stays for the art captures.
 
 Fonts: the two typefaces are bundled (public/fonts/, SIL Open Font License texts alongside). The
 game makes no network requests, which is what the privacy forms on all three stores state.

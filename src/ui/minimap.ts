@@ -10,7 +10,7 @@
 
 import type { Camera } from '../render/camera';
 import { FLOOR_PX, TILE_PX } from '../render/grid';
-import { ROOMS } from '../sim/rules';
+import { BLOCK } from '../render/palette';
 import type { RoomKind, World } from '../sim/types';
 
 /** The minimap's width in css pixels: a desktop, and a phone. */
@@ -163,25 +163,24 @@ export function readView(camera: Camera, chrome: { top: number; bottom: number }
   };
 }
 
-/** A colour per room kind, low saturation so the map reads as a diagram, not a second tower. */
-const GROUP_COLORS: Record<string, string> = {
-  structure: '#a3a39b',
-  residential: '#8497ab',
-  hotel: '#9c8fab',
-  commercial: '#b0a283',
-  services: '#88a08f',
-};
-const KIND_COLORS: Partial<Record<RoomKind, string>> = {
-  office: '#a9b1bd',
-  parkingRamp: '#7d8189',
-  parkingSpace: '#7d8189',
-};
+/**
+ * The map's slate. Each room's far zoom district colour (BLOCK) is mixed MAP_MIX of the way toward
+ * it, so the map reads as a diagram of the same districts, not a second tower (design pass D-45).
+ */
+const MAP_SLATE = 0x8a9099;
+const MAP_MIX = 0.3;
 const SHAFT_COLOR = '#5d6574';
 const GROUND_COLOR = '#3a4556';
 const OUTLINE_COLOR = '#f4b942';
 
 export function roomColor(kind: RoomKind): string {
-  return KIND_COLORS[kind] ?? GROUP_COLORS[ROOMS[kind]?.group ?? ''] ?? '#9aa0a8';
+  const color = BLOCK[kind];
+  const channel = (shift: number): string => {
+    const from = (color >> shift) & 0xff;
+    const to = (MAP_SLATE >> shift) & 0xff;
+    return Math.round(from + (to - from) * MAP_MIX).toString(16).padStart(2, '0');
+  };
+  return `#${channel(16)}${channel(8)}${channel(0)}`;
 }
 
 export interface MinimapOptions {

@@ -6,15 +6,16 @@
 //
 // It serves dist-app/ with `vite preview --mode app` (the game at the root, no landing page and
 // no service worker, the same bundle the shells load), drives headless Chrome over the DevTools
-// protocol, seeds the committed demo tower (store/fixtures/demo-tower.json) into the game's
-// IndexedDB save slot, and captures each store size at the device pixel ratio that makes the
-// exact pixel size. The Steam and Play graphics are drawn from public/og.png and
+// protocol, seeds the committed store tower (store/fixtures/store-tower.json, a three star tower
+// built by scripts/make-store-tower.ts) into the game's IndexedDB save slot, and captures each
+// store size at the device pixel ratio that makes the exact pixel size. The Steam and Play graphics are drawn from public/og.png and
 // public/wordmark-dark.png on a canvas in the same browser. Output: store/shots/ (gitignored),
 // plus store/shots/manifest.json with every file and its size.
 //
-// It also writes the link preview, public/og.png (OG below, design pass D-36): the game itself at
-// 1200 by 630 on a clear afternoon, the chrome hidden, with the wordmark and the tagline on a navy
-// panel at the left. It runs before the graphics, which are cut from it. ONLY=og makes just that
+// Asked with --og (or ONLY=og), it also writes the link preview, public/og.png (OG below, design
+// pass D-36), a tracked file a plain run never touches: the game itself at 1200 by 630 on a clear
+// afternoon, the chrome hidden, with the wordmark and the tagline on a navy panel at the left, from
+// the demo tower. It runs before the graphics, which are cut from it. ONLY=og makes just that
 // file (plus ONLY=og,steam-header-capsule,... for the graphics after it). scripts/make-og.mjs, the
 // wordmark card drawn in Node, stays as the offline fallback for a machine with no Chrome.
 //
@@ -32,7 +33,11 @@ import { weatherAt } from '../src/game/weather.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 export const CHROME_PATH = process.env.CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-export const FIXTURE = join(ROOT, 'store', 'fixtures', 'demo-tower.json');
+export const FIXTURE = join(ROOT, 'store', 'fixtures', 'store-tower.json');
+/** The demo tower, every room kind: the art captures (make-design-sheet.mjs) seed it. */
+export const DEMO_FIXTURE = join(ROOT, 'store', 'fixtures', 'demo-tower.json');
+/** The link preview (public/og.png, the P7 card) keeps the demo tower it was captured from. */
+export const OG_FIXTURE = DEMO_FIXTURE;
 export const OUT_DIR = join(ROOT, 'store', 'shots');
 
 /**
@@ -132,6 +137,14 @@ export function ogFixture(saveText) {
     shiftStamp(sim.collector, 'until', delta);
   }
   return JSON.stringify(save);
+}
+
+/**
+ * Whether a run rewrites public/og.png, a tracked file: only when asked, with --og or ONLY=og,
+ * so a plain `npm run store:shots` touches nothing in the repository.
+ */
+export function shootsOg(args, only) {
+  return args.has('--og') || Boolean(only && only.has(OG.id));
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -461,7 +474,7 @@ async function drawGraphic(browser, g) {
  * bundled Bricolage Grotesque (src/fonts.css) is already declared.
  */
 async function shootOg(browser, base) {
-  await seed(browser, base, ogFixture(readFileSync(FIXTURE, 'utf8')));
+  await seed(browser, base, ogFixture(readFileSync(OG_FIXTURE, 'utf8')));
   await openGame(browser, base, OG);
   await browser.evaluate(`(() => { for (const el of document.querySelectorAll('.hs-ui')) el.style.visibility = 'hidden'; return true; })()`);
   await sleep(600);
@@ -534,16 +547,20 @@ async function main() {
     manifest.angle = browser.angle;
     const only = process.env.ONLY ? new Set(process.env.ONLY.split(',')) : null;
     // The link preview first: the Steam and Play graphics below are cut from it.
-    if (!only || only.has(OG.id)) await shootOg(browser, base);
-    await seed(browser, base);
+    if (shootsOg(args, only)) await shootOg(browser, base);
     for (const spec of SCREENSHOTS) {
       if (only && !only.has(spec.id)) continue;
-      await openGame(browser, base, spec);
       for (const [i, scene] of SCENES.entries()) {
-        // Each scene starts from the opening view, so one scene's zoom never carries into the next.
-        if (i > 0) await openGame(browser, base, spec);
+        // Each scene starts from the fixture, seeded afresh, and the opening view: the clock
+        // holds the fixture's 13:00 instead of running on across the whole run (past midnight,
+        // where the day's population change resets), and one scene's zoom never carries into
+        // the next.
+        await seed(browser, base);
+        await openGame(browser, base, spec);
         await toScene(browser, spec, scene);
         const png = await capture(browser, spec);
+        const clock = await browser.evaluate(`(() => { const d = document.querySelector('.hs-clock-digits'); const a = document.querySelector('.hs-clock-ampm'); return (d ? d.textContent : '?') + ' ' + (a ? a.textContent : ''); })()`).catch(() => '?');
+        console.log(`${spec.id} ${scene}: clock ${clock}`);
         const file = join(OUT_DIR, spec.store, `${spec.id}-${i + 1}-${scene}.png`);
         mkdirSync(dirname(file), { recursive: true });
         writeFileSync(file, png);
