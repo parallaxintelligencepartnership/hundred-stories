@@ -9,6 +9,7 @@
 import { TILE_PX } from '../render/grid';
 import { createRenderer, type Renderer } from '../render/renderer';
 import { animateDemo, buildHeroWorld } from '../render/smoke';
+import { markHeroSettled } from './hero-ready';
 import './challenge';
 import './platforms';
 import './stores';
@@ -90,8 +91,8 @@ async function start(): Promise<void> {
   const hero = document.getElementById('hero');
   const view = document.getElementById('hero-view');
   const shot = document.getElementById('hero-shot');
-  if (!hero || !view) return;
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  if (!hero || !view) return markHeroSettled(document, 'none');
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return markHeroSettled(document, 'none');
 
   const world = buildHeroWorld();
   world.time.minute = heroMinute(0);
@@ -109,6 +110,7 @@ async function start(): Promise<void> {
   } catch (e) {
     hero.classList.remove('has-canvas');
     console.warn('hero: no tower today', e);
+    markHeroSettled(document, 'none');
     return;
   }
 
@@ -147,6 +149,8 @@ async function start(): Promise<void> {
     renderer.camera.clearKeys();
     renderer.camera.centerOn(driftFloor(elapsed, top), centerTile);
     renderer.render(world, 1);
+    // The first frame is on screen: the page's other work (the room specimens) may start.
+    markHeroSettled(document, 'drawn');
 
     frameHandle = requestAnimationFrame(frame);
   };
@@ -202,5 +206,6 @@ if (typeof document !== 'undefined') {
     const shot = document.getElementById('hero-shot');
     if (shot) shot.style.display = '';
     console.warn('hero: disabled', e);
+    markHeroSettled(document, 'none');
   });
 }

@@ -6,8 +6,9 @@
 //
 // Each `<canvas class="specimen" data-specimen="...">` is sized to SPECIMEN_W by SPECIMEN_H css px
 // at the device pixel ratio, drawn once, then swapped for an img of its own pixels with the
-// canvas's aria-label as alt, so nothing stays live on the page. site.css hides a canvas until it
-// is drawn, so a page with no JavaScript shows no empty box.
+// canvas's aria-label as alt, so nothing stays live on the page. Nothing is drawn at load: each
+// specimen waits for the landing hero's first frame, then for its section to near the viewport
+// (scheduleSpecimens). site.css keeps an undrawn canvas's space but shows nothing in it.
 
 import { FRAME } from '../render/anim';
 import { drawPerson, drawPortrait, drawStressMark, lookCode, markBottomAboveFeet, MARK_H, MARK_W, type Ctx2D } from '../render/figure';
@@ -16,6 +17,7 @@ import { css, drawCarIllustrated, drawSign, drawVenueFixtures, INK, signBoard } 
 import { PALETTE } from '../render/palette';
 import { VENUE_ACCENTS, VENUE_NAMES } from '../render/venue';
 import { SHAFTS } from '../sim/rules';
+import { whenHeroSettled } from './hero-ready';
 
 export const SPECIMEN_KINDS = ['stress', 'office', 'shop', 'car', 'people'] as const;
 export type SpecimenKind = (typeof SPECIMEN_KINDS)[number];
@@ -198,44 +200,120 @@ export interface SpecimenDocument {
   createElement(tag: 'img'): SpecimenImage;
 }
 
-/** Draws every specimen canvas on the page and swaps it for an img. Returns how many were drawn. */
-export function mountSpecimens(doc: SpecimenDocument, dpr: number): number {
-  const ratio = Math.min(3, Math.max(1, Number.isFinite(dpr) ? dpr : 1));
-  const canvases = Array.from(doc.querySelectorAll('canvas.specimen[data-specimen]'));
-  let drawn = 0;
-  for (const canvas of canvases) {
-    const kind = canvas.dataset.specimen;
-    if (!isSpecimenKind(kind)) continue;
-    canvas.width = Math.round(SPECIMEN_W * ratio);
-    canvas.height = Math.round(SPECIMEN_H * ratio);
-    const ctx = canvas.getContext('2d');
-    if (!ctx) continue;
-    ctx.scale(ratio * specimenScene(kind).scale, ratio * specimenScene(kind).scale);
-    drawSpecimen(ctx, kind);
-    const alt = canvas.getAttribute('aria-label') ?? '';
-    try {
-      const img = doc.createElement('img');
-      img.src = canvas.toDataURL('image/png');
-      img.alt = alt;
-      img.width = SPECIMEN_W;
-      img.height = SPECIMEN_H;
-      img.className = 'specimen is-drawn';
-      canvas.replaceWith(img);
-    } catch {
-      // No image out of the canvas: the drawn canvas stays and shows.
-      canvas.classList.add('is-drawn');
-    }
-    drawn += 1;
+/** The pixel ratio a specimen is drawn at: the device's, between 1 and 3, 1 when it is not a number. */
+export function specimenRatio(dpr: number): number {
+  return Math.min(3, Math.max(1, Number.isFinite(dpr) ? dpr : 1));
+}
+
+const SELECTOR = 'canvas.specimen[data-specimen]';
+
+/**
+ * Draws one specimen canvas and swaps it for an img of its pixels, the same size in css px so
+ * nothing shifts. Returns whether it drew: an unknown kind or no 2D context draws nothing.
+ */
+export function drawSpecimenCanvas(doc: SpecimenDocument, canvas: SpecimenCanvas, dpr: number): boolean {
+  const kind = canvas.dataset.specimen;
+  if (!isSpecimenKind(kind)) return false;
+  const ratio = specimenRatio(dpr);
+  canvas.width = Math.round(SPECIMEN_W * ratio);
+  canvas.height = Math.round(SPECIMEN_H * ratio);
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return false;
+  ctx.scale(ratio * specimenScene(kind).scale, ratio * specimenScene(kind).scale);
+  drawSpecimen(ctx, kind);
+  const alt = canvas.getAttribute('aria-label') ?? '';
+  try {
+    const img = doc.createElement('img');
+    img.src = canvas.toDataURL('image/png');
+    img.alt = alt;
+    img.width = SPECIMEN_W;
+    img.height = SPECIMEN_H;
+    img.className = 'specimen is-drawn';
+    canvas.replaceWith(img);
+  } catch {
+    // No image out of the canvas: the drawn canvas stays and shows.
+    canvas.classList.add('is-drawn');
   }
+  return true;
+}
+
+/** Draws every specimen canvas on the page now. Returns how many were drawn. */
+export function mountSpecimens(doc: SpecimenDocument, dpr: number): number {
+  let drawn = 0;
+  for (const canvas of Array.from(doc.querySelectorAll(SELECTOR))) if (drawSpecimenCanvas(doc, canvas, dpr)) drawn += 1;
   return drawn;
+}
+
+/** The observer this module asks for: the IntersectionObserver surface it uses. */
+export interface SpecimenObserver {
+  observe(target: SpecimenCanvas): void;
+  unobserve(target: SpecimenCanvas): void;
+}
+export type SpecimenObserverFactory = (
+  callback: (entries: ReadonlyArray<{ isIntersecting: boolean; target: unknown }>) => void,
+  options: { rootMargin: string },
+) => SpecimenObserver;
+
+export interface SpecimenSchedule {
+  doc: SpecimenDocument;
+  dpr: number;
+  /** Resolves once the landing hero has drawn its first frame or given up (hero-ready.ts). */
+  heroSettled: Promise<void>;
+  /** css px: the observer draws a specimen this far before it scrolls into view. */
+  viewportHeight: number;
+  /** An IntersectionObserver maker, or null where the browser has none. */
+  observe: SpecimenObserverFactory | null;
+  /** Runs work when the page is idle (requestIdleCallback, or a timeout where there is none). */
+  idle: (work: () => void) => void;
+}
+
+/**
+ * Nothing is drawn at load. Once the hero has settled, each specimen is drawn when its section
+ * comes within about one viewport of the screen (one observer, each canvas unobserved once drawn).
+ * With no IntersectionObserver, all of them are drawn on the first idle callback after the hero.
+ */
+export async function scheduleSpecimens(s: SpecimenSchedule): Promise<void> {
+  await s.heroSettled;
+  const canvases = Array.from(s.doc.querySelectorAll(SELECTOR));
+  if (canvases.length === 0) return;
+  if (!s.observe) {
+    s.idle(() => {
+      for (const canvas of canvases) drawSpecimenCanvas(s.doc, canvas, s.dpr);
+    });
+    return;
+  }
+  const observer = s.observe(
+    (entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        const canvas = entry.target as SpecimenCanvas;
+        observer.unobserve(canvas);
+        drawSpecimenCanvas(s.doc, canvas, s.dpr);
+      }
+    },
+    { rootMargin: `${Math.max(0, Math.round(s.viewportHeight))}px 0px` },
+  );
+  for (const canvas of canvases) observer.observe(canvas);
 }
 
 // Guarded so the drawing imports cleanly into tests, which run with no `document`.
 if (typeof document !== 'undefined') {
   const fonts = (document as Document & { fonts?: { ready: Promise<unknown> } }).fonts;
-  // The shop's sign is lettered in Bricolage Grotesque: wait for the page's fonts first.
-  (fonts ? fonts.ready : Promise.resolve())
-    .catch(() => undefined)
-    .then(() => mountSpecimens(document as unknown as SpecimenDocument, window.devicePixelRatio))
-    .catch((e: unknown) => console.warn('specimens: not drawn', e));
+  // The shop's sign is lettered in Bricolage Grotesque: the page's fonts come first, then the hero.
+  const heroSettled = (fonts ? fonts.ready : Promise.resolve()).catch(() => undefined).then(() => whenHeroSettled(document));
+  const idle = (work: () => void): void => {
+    const w = window as Window & { requestIdleCallback?: (cb: () => void) => number };
+    if (w.requestIdleCallback) w.requestIdleCallback(() => work());
+    else setTimeout(work, 0);
+  };
+  scheduleSpecimens({
+    doc: document as unknown as SpecimenDocument,
+    dpr: window.devicePixelRatio,
+    heroSettled,
+    viewportHeight: window.innerHeight,
+    observe: 'IntersectionObserver' in window
+      ? (callback, options) => new IntersectionObserver(callback, options) as unknown as SpecimenObserver
+      : null,
+    idle,
+  }).catch((e: unknown) => console.warn('specimens: not drawn', e));
 }

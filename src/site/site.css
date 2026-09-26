@@ -472,8 +472,10 @@ p {
   line-height: 1.1;
 }
 
-/* A room specimen (D-39): the game's own drawing of a room, a car or its people. Hidden until
-   specimens.ts has drawn it, so a page with no JavaScript never shows an empty box. */
+/* A room specimen (D-39): the game's own drawing of a room, a car or its people. Until
+   specimens.ts has drawn it (after the hero, as it nears the screen) the canvas keeps its
+   288 by 144 space but shows nothing, so the page never shifts when the picture arrives and the
+   observer has a box to watch. */
 .specimen {
   display: block;
   width: 288px;
@@ -483,7 +485,7 @@ p {
 }
 
 .specimen:not(.is-drawn) {
-  display: none;
+  visibility: hidden;
 }
 
 .card .specimen {

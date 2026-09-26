@@ -6,10 +6,15 @@ import { drawPerson, drawPortrait, drawStressMark, lookCode, type Ctx2D } from '
 import { drawCarIllustrated, drawSign, drawVenueFixtures, signBoard } from '../../src/render/illustrated';
 import { VENUE_ACCENTS } from '../../src/render/venue';
 import { PORTRAIT_PX as CARD_PX } from '../../src/ui/panels';
+import heroSource from '../../src/site/hero.ts?raw';
+import { HERO_SETTLED_ATTR, markHeroSettled, whenHeroSettled, type HeroDocument } from '../../src/site/hero-ready';
 import {
   CARD_PORTRAIT_PX,
   drawSpecimen,
   mountSpecimens,
+  scheduleSpecimens,
+  specimenRatio,
+  type SpecimenObserverFactory,
   PORTRAIT_PX,
   SPECIMEN_H,
   SPECIMEN_KINDS,
@@ -220,5 +225,132 @@ describe('mountSpecimens', () => {
     expect(stuck.replacedBy).toBeNull();
     expect(stuck.added).toEqual(['is-drawn']);
     expect([stuck.width, stuck.height]).toEqual([288, 144]);
+  });
+
+  it('keeps going past a canvas with no 2D context: the later specimens still draw', () => {
+    const lost = fakeCanvas('office', 'An office', () => 'data:,a');
+    lost.getContext = () => null;
+    const after = fakeCanvas('shop', 'A shop', () => 'data:,b');
+    expect(mountSpecimens(fakeDocument([lost, after]), 1)).toBe(1);
+    expect(lost.replacedBy).toBeNull();
+    expect(after.replacedBy?.src).toBe('data:,b');
+  });
+
+  it('holds the pixel ratio between 1 and 3: NaN draws at 1, 10 draws at 3', () => {
+    expect(specimenRatio(Number.NaN)).toBe(1);
+    expect(specimenRatio(10)).toBe(3);
+    const nan = fakeCanvas('office', 'An office', () => 'data:,a');
+    const big = fakeCanvas('office', 'An office', () => 'data:,b');
+    mountSpecimens(fakeDocument([nan]), Number.NaN);
+    mountSpecimens(fakeDocument([big]), 10);
+    expect([nan.width, nan.height]).toEqual([288, 144]);
+    expect([big.width, big.height]).toEqual([864, 432]);
+  });
+
+  describe('scheduleSpecimens: nothing at load, then after the hero and near the screen', () => {
+    type Entry = { isIntersecting: boolean; target: unknown };
+    function harness(withObserver: boolean) {
+      let settle: () => void = () => undefined;
+      const heroSettled = new Promise<void>((resolve) => (settle = resolve));
+      const office = fakeCanvas('office', 'An office', () => 'data:,a');
+      const car = fakeCanvas('car', 'A car', () => 'data:,b');
+      const seen = { observed: [] as unknown[], unobserved: [] as unknown[], margin: '', fire: (_e: Entry[]) => undefined as void, idle: [] as (() => void)[] };
+      const observe: SpecimenObserverFactory = (callback, options) => {
+        seen.margin = options.rootMargin;
+        seen.fire = (entries) => callback(entries);
+        return { observe: (t) => void seen.observed.push(t), unobserve: (t) => void seen.unobserved.push(t) };
+      };
+      const done = scheduleSpecimens({
+        doc: fakeDocument([office, car]),
+        dpr: 1,
+        heroSettled,
+        viewportHeight: 900,
+        observe: withObserver ? observe : null,
+        idle: (work) => void seen.idle.push(work),
+      });
+      return { settle, done, office, car, seen };
+    }
+    const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+
+    it('draws nothing and watches nothing until the hero has drawn its first frame', async () => {
+      const h = harness(true);
+      await flush();
+      expect(h.seen.observed).toEqual([]);
+      expect(h.office.ctx.calls).toEqual([]);
+      h.settle();
+      await h.done;
+      expect(h.seen.observed).toEqual([h.office, h.car]);
+      expect(h.seen.margin).toBe('900px 0px');
+      // Watched is not drawn: nothing until the observer says a section is near.
+      expect(h.office.ctx.calls).toEqual([]);
+      expect(h.car.ctx.calls).toEqual([]);
+    });
+
+    it('draws a specimen once its section nears the screen, then stops watching it', async () => {
+      const h = harness(true);
+      h.settle();
+      await h.done;
+      h.seen.fire([{ isIntersecting: false, target: h.car }, { isIntersecting: true, target: h.office }]);
+      expect(h.office.replacedBy?.src).toBe('data:,a');
+      expect(h.seen.unobserved).toEqual([h.office]);
+      expect(h.car.ctx.calls).toEqual([]);
+      expect(h.car.replacedBy).toBeNull();
+    });
+
+    it('with no IntersectionObserver, draws them all on the first idle callback after the hero', async () => {
+      const h = harness(false);
+      await flush();
+      expect(h.seen.idle).toHaveLength(0);
+      h.settle();
+      await h.done;
+      expect(h.seen.idle).toHaveLength(1);
+      expect(h.office.replacedBy).toBeNull();
+      h.seen.idle[0]!();
+      expect(h.office.replacedBy?.src).toBe('data:,a');
+      expect(h.car.replacedBy?.src).toBe('data:,b');
+    });
+  });
+});
+
+describe('the hero settled signal', () => {
+  function fakeDoc(hasHero: boolean) {
+    const attrs = new Map<string, string>();
+    const listeners: (() => void)[] = [];
+    let events = 0;
+    const doc: HeroDocument = {
+      documentElement: { getAttribute: (n) => attrs.get(n) ?? null, setAttribute: (n, v) => void attrs.set(n, v) },
+      getElementById: (id) => (hasHero && id === 'hero' ? {} : null),
+      addEventListener: (_type, listener) => void listeners.push(listener),
+      dispatchEvent: () => {
+        events += 1;
+        for (const l of listeners.splice(0)) l();
+        return true;
+      },
+    };
+    return { doc, attrs, events: () => events };
+  }
+
+  it('is settled at once on a page with no hero', async () => {
+    await expect(whenHeroSettled(fakeDoc(false).doc)).resolves.toBeUndefined();
+  });
+
+  it('waits for the hero, then marks it once, as drawn or as none', async () => {
+    const f = fakeDoc(true);
+    let settled = false;
+    const waiting = whenHeroSettled(f.doc).then(() => (settled = true));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(settled).toBe(false);
+    markHeroSettled(f.doc, 'drawn');
+    await waiting;
+    expect(f.attrs.get(HERO_SETTLED_ATTR)).toBe('drawn');
+    markHeroSettled(f.doc, 'none');
+    expect(f.attrs.get(HERO_SETTLED_ATTR)).toBe('drawn');
+    expect(f.events()).toBe(1);
+    await expect(whenHeroSettled(f.doc)).resolves.toBeUndefined();
+  });
+
+  it('is marked by hero.ts after its first rendered frame and on every way it gives up', () => {
+    expect(heroSource).toMatch(/renderer\.render\(world, 1\);\s*\/\/[^\n]*\n\s*markHeroSettled\(document, 'drawn'\);/);
+    expect(heroSource.match(/markHeroSettled\(document, 'none'\)/g)).toHaveLength(4);
   });
 });

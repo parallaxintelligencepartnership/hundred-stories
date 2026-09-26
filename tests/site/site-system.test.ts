@@ -139,8 +139,8 @@ describe('D-39: specimens drawn by the game below the fold', () => {
     }
   });
 
-  it('hides a specimen until it is drawn, so no JavaScript means no empty box', () => {
-    expect(rule('.specimen:not(.is-drawn)')).toBe('display: none;');
+  it('keeps an undrawn specimen\'s space but shows nothing in it, so nothing shifts when it is drawn', () => {
+    expect(rule('.specimen:not(.is-drawn)')).toBe('visibility: hidden;');
   });
 });
 

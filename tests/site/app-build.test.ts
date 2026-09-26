@@ -102,6 +102,10 @@ describe('web build precache', () => {
       expect(precached.some((url) => url.startsWith('assets/main-'))).toBe(false);
       expect(precached.some((url) => url.startsWith('assets/site-'))).toBe(false);
       expect(precached.some((url) => url.startsWith('assets/theme-init-'))).toBe(false);
+      // The room specimens are the landing site's alone (D-39); the theme chunk is shared with the
+      // game (src/ui/panels.ts imports src/site/theme.ts), so it stays.
+      expect(precached.some((url) => url.startsWith('assets/specimens-'))).toBe(false);
+      expect(precached.some((url) => url.startsWith('assets/theme-') && !url.startsWith('assets/theme-init-'))).toBe(true);
     },
     120_000,
   );
