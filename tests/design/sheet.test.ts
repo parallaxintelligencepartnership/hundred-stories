@@ -251,10 +251,13 @@ describe('the opening view', () => {
   const save = JSON.parse(text);
   const loaded = deserialize(text);
   if (!loaded.ok) throw new Error(loaded.reason);
+  const deskGeo: Geo = { left: 0, top: 0, width: 1440, height: 900, bar: 64, bottomCover: 0 };
+  const shortGeo: Geo = { left: 0, top: 0, width: 1440, height: 700, bar: 64, bottomCover: 0 };
+  const phoneGeo: Geo = { left: 0, top: 0, width: 390, height: 844, bar: 96, bottomCover: 120 };
   const geos: [string, Geo][] = [
-    ['desk', { left: 0, top: 0, width: 1440, height: 900, bar: 64, bottomCover: 0 }],
-    ['desk, short', { left: 0, top: 0, width: 1440, height: 700, bar: 64, bottomCover: 0 }],
-    ['phone', { left: 0, top: 0, width: 390, height: 844, bar: 96, bottomCover: 120 }],
+    ['desk', deskGeo],
+    ['desk, short', shortGeo],
+    ['phone', phoneGeo],
   ];
 
   it('copies the renderer constants it cannot import', () => {
@@ -263,9 +266,9 @@ describe('the opening view', () => {
   });
 
   it('opens the demo tower whole at 0.5 on the desk and at zoom 1 on the phone', () => {
-    expect(sheet.openingView(save, geos[0][1]).zoom).toBe(0.5);
-    expect(sheet.openingView(save, geos[1][1]).zoom).toBe(1);
-    expect(sheet.openingView(save, geos[2][1]).zoom).toBe(1);
+    expect(sheet.openingView(save, deskGeo).zoom).toBe(0.5);
+    expect(sheet.openingView(save, shortGeo).zoom).toBe(1);
+    expect(sheet.openingView(save, phoneGeo).zoom).toBe(1);
   });
 
   it('puts every world point where the renderer camera does', () => {
