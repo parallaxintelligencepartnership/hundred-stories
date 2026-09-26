@@ -47,6 +47,8 @@ const PASS_NAMES = [
   'game-desk-z1-1300-dock-light',
   'game-desk-z1-1300-watch',
   'game-desk-z1-1300-place',
+  'site-home-desk-light-specimens',
+  'site-guide-desk-light-specimens',
 ];
 
 interface Shot {
@@ -107,7 +109,7 @@ const sheet = (await import(/* @vite-ignore */ url)) as SheetModule;
 describe('design sheet shot list', () => {
   const shots = sheet.SHOTS;
 
-  it('is the 17 shots the brief lists, then the five design pass shots', () => {
+  it('is the 17 shots the brief lists, then the seven design pass shots', () => {
     expect(shots.map((s) => s.name)).toEqual([...BRIEF_NAMES, ...PASS_NAMES]);
   });
 

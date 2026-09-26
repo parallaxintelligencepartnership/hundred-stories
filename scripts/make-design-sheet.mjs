@@ -64,7 +64,9 @@ export const VIEWPORTS = {
  * The fixed shot list: brief section 3, then the design pass shots. Game shots carry an hour (or
  * a minute of the day) and a state; site shots a page and a theme. `ghost` writes two files,
  * -ghost-ok and -ghost-refused, and `place` three, -place-0, -place-200 and -place-600; each
- * counts as one shot. `theme` on a game shot sets hs.theme before the game loads.
+ * counts as one shot. `theme` on a game shot sets hs.theme before the game loads. `scrollTo` on a
+ * site shot scrolls that element id to the top of the viewport before the capture (the room
+ * specimens below the fold, D-39).
  */
 export const SHOTS = [
   { name: 'game-desk-z1-1300', viewport: 'desk', hour: 13, state: 'opening' },
@@ -89,6 +91,8 @@ export const SHOTS = [
   { name: 'game-desk-z1-1300-dock-light', viewport: 'desk', hour: 13, state: 'dock', theme: 'light' },
   { name: 'game-desk-z1-1300-watch', viewport: 'desk', hour: 13, state: 'watch' },
   { name: 'game-desk-z1-1300-place', viewport: 'desk', hour: 13, state: 'place' },
+  { name: 'site-home-desk-light-specimens', viewport: 'desk', page: '/', theme: 'light', state: 'site', scrollTo: 'features' },
+  { name: 'site-guide-desk-light-specimens', viewport: 'desk', page: '/how-to-play/', theme: 'light', state: 'site', scrollTo: 'elevators' },
 ];
 
 const STATE_TIMEOUT_MS = 5000;
@@ -1005,6 +1009,14 @@ async function siteShot(browser, base, shot, ctx) {
         out.skipped.push({ name: shot.name, why: `wrangler dev served "${title}" at /nothing-here, not the 404 page` });
         return out;
       }
+    }
+    if (shot.scrollTo) {
+      const found = await browser.evaluate(`(() => { const el = document.getElementById(${JSON.stringify(shot.scrollTo)}); if (el) el.scrollIntoView({ block: 'start' }); return !!el; })()`);
+      if (!found) {
+        out.skipped.push({ name: shot.name, why: `no element #${shot.scrollTo} on ${shot.page}` });
+        return out;
+      }
+      await sleep(500);
     }
     writeFileSync(join(ctx.outDir, `${shot.name}.png`), await capture(browser, vp));
     out.files.push(shot.name);

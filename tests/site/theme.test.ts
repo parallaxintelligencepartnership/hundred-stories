@@ -101,8 +101,8 @@ describe('cycleTheme', () => {
 });
 
 describe('themeLabel', () => {
-  it('names each state', () => {
-    expect(themeLabel('system')).toBe('Theme: System');
+  it('names each state, the system choice Auto as the game does (D-41)', () => {
+    expect(themeLabel('system')).toBe('Theme: Auto');
     expect(themeLabel('light')).toBe('Theme: Light');
     expect(themeLabel('dark')).toBe('Theme: Dark');
   });
@@ -142,14 +142,14 @@ describe('storage that throws', () => {
     expect(documentElement.getAttribute('data-theme')).toBeNull();
   });
 
-  it('mountThemeToggle does not throw and labels the button Theme: System', () => {
+  it('mountThemeToggle does not throw and labels the button Theme: Auto', () => {
     const button = {
       textContent: '',
       addEventListener: () => undefined,
     } as unknown as HTMLButtonElement;
 
     expect(() => mountThemeToggle(button)).not.toThrow();
-    expect(button.textContent).toBe('Theme: System');
+    expect(button.textContent).toBe('Theme: Auto');
   });
 });
 
@@ -164,7 +164,7 @@ describe('mountThemeToggle', () => {
     } as unknown as HTMLButtonElement;
 
     mountThemeToggle(button);
-    expect(button.textContent).toBe('Theme: System');
+    expect(button.textContent).toBe('Theme: Auto');
 
     clickHandler?.();
     expect(button.textContent).toBe('Theme: Light');
@@ -175,7 +175,7 @@ describe('mountThemeToggle', () => {
     expect(documentElement.getAttribute('data-theme')).toBe('dark');
 
     clickHandler?.();
-    expect(button.textContent).toBe('Theme: System');
+    expect(button.textContent).toBe('Theme: Auto');
     expect(documentElement.getAttribute('data-theme')).toBeNull();
   });
 });

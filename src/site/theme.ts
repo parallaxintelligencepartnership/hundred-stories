@@ -40,7 +40,8 @@ export function cycleTheme(theme: Theme): Theme {
 export function themeLabel(theme: Theme): string {
   if (theme === 'light') return 'Theme: Light';
   if (theme === 'dark') return 'Theme: Dark';
-  return 'Theme: System';
+  // The game's Settings call this choice Auto (D-41): the same choice, the same name.
+  return 'Theme: Auto';
 }
 
 export function mountThemeToggle(button: HTMLButtonElement): void {

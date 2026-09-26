@@ -6,9 +6,10 @@
    dark outlines, and the footer is bedrock. Chrome (nav, footer) uses the steel
    tokens from src/ui/ui.css; everything between hero and footer uses the world
    colours from docs/VISUAL.md, which are fixed, because the game world has no
-   dark mode. Flat surfaces, hairline structure, no radius, no blur, no shadows
-   except the pixel drop under a button, no gradients except pixel patterns.
-   No JavaScript is needed for any of it. */
+   dark mode. The building is flat, hairline and square; the controls are the
+   game's (D-38): sentence case, pill buttons in the one amber, a soft lift.
+   No JavaScript is needed for any of it; the room specimens (specimens.ts)
+   are drawn by the game's own art code and hidden until they are. */
 
 :root {
   --steel: #1c232e;
@@ -94,7 +95,7 @@
 *::before,
 *::after {
   box-sizing: border-box;
-  /* The world is drawn on a pixel grid: nothing on this page is ever rounded. */
+  /* The building is square; only the controls are rounded, as in the game (D-38). */
   border-radius: 0;
 }
 
@@ -125,9 +126,13 @@ a:hover {
   text-decoration-color: var(--amber-text);
 }
 
+/* Two tone: the amber outline clears 3:1 on the header in both schemes and on everything in light;
+   the inner ring in the world ink clears it on the marble panels and the floors, where amber does
+   not in dark. One of the two always reads. The buttons set their own rings below. */
 :focus-visible {
   outline: 2px solid var(--amber-text);
   outline-offset: 2px;
+  box-shadow: 0 0 0 2px var(--w-text);
 }
 
 img {
@@ -226,22 +231,17 @@ p {
   gap: 16px;
 }
 
-.site-nav a {
-  font-family: var(--font-readout);
-  font-size: var(--size-12);
+.site-nav a,
+.theme-toggle {
+  font-family: var(--font-ui);
+  font-size: var(--size-14);
   line-height: 1.1;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  text-transform: none;
+  letter-spacing: 0;
   color: var(--ink);
 }
 
 .theme-toggle {
-  font-family: var(--font-readout);
-  font-size: var(--size-12);
-  line-height: 1.1;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--ink);
   background: none;
   border: none;
   padding: 0;
@@ -256,12 +256,15 @@ p {
   text-decoration-color: var(--amber-text);
 }
 
-/* The one lit sign on the strip, the same amber as the app icon. */
-.nav-play {
-  padding: 4px 10px;
+/* The one lit sign on the strip: the game's amber pill (D-38). Scoped to the nav so it outranks
+   `.site-nav a` and keeps its dark text on the amber in the dark scheme too. */
+.site-nav .nav-play {
+  padding: 6px 14px;
+  border: 0;
+  border-radius: 999px;
   background: var(--amber);
   color: var(--on-amber);
-  border: 1px solid #222222;
+  font-weight: 600;
   text-decoration: none;
 }
 
@@ -335,6 +338,17 @@ p {
   color: var(--w-text);
 }
 
+/* The panel is marble white in either scheme, so a plain link in it takes the world's ink, not the
+   page's (the dark page ink would vanish on it: the 404's Back to the lobby, D-40). */
+.hero-panel a:not(.button) {
+  color: var(--w-text);
+  text-decoration-color: var(--w-text-dim);
+}
+
+.hero-panel a:not(.button):hover {
+  text-decoration-color: var(--w-outline);
+}
+
 .hero-panel .fineprint {
   margin-top: 8px;
   margin-bottom: 0;
@@ -351,15 +365,16 @@ p {
   padding: 24px 0 28px;
 }
 
-/* Buttons: a pixel slab with a hard drop, the way the game draws a placed room. */
+/* Buttons: the game's pill in the one amber, lifted by a soft shadow (D-38). */
 .button {
   display: inline-block;
   margin-top: 4px;
   padding: 12px 20px;
-  background: var(--w-car);
-  color: #14181f;
-  border: 2px solid var(--w-outline);
-  box-shadow: 3px 3px 0 var(--w-outline);
+  background: var(--amber);
+  color: var(--on-amber);
+  border: 0;
+  border-radius: 999px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2), 0 8px 20px rgba(0, 0, 0, 0.18);
   font-family: var(--font-ui);
   font-size: var(--size-16);
   font-weight: 600;
@@ -372,18 +387,30 @@ p {
 }
 
 .button:hover {
-  transform: translate(1px, 1px);
-  box-shadow: 2px 2px 0 var(--w-outline);
+  transform: translateY(-1px);
 }
 
+/* The focus ring is the button's own ink, not amber: an amber ring would vanish against the amber
+   fill in the dark scheme. The buttons sit on the marble panel or a floor in every scheme. */
 .button:focus-visible {
-  outline: 2px solid var(--amber-text);
+  outline: 2px solid var(--on-amber);
+  outline-offset: 2px;
+}
+
+.button-secondary:focus-visible {
+  outline-color: var(--w-text);
+}
+
+/* Play sits on the header strip, which is dark in the dark scheme: its ring takes the strip's ink. */
+.site-nav .nav-play:focus-visible {
+  outline: 2px solid var(--ink);
   outline-offset: 2px;
 }
 
 .button-secondary {
   background: var(--w-lobby);
   color: var(--w-text);
+  box-shadow: inset 0 0 0 2px var(--w-outline);
 }
 
 /* The hero's Play today's tower sits on its own line under Play in your browser. */
@@ -432,7 +459,7 @@ p {
   margin-top: 36px;
 }
 
-/* The floor number, drawn as an elevator indicator readout. */
+/* The floor number alone, drawn as an elevator indicator readout; the h2 names the section. */
 .floor-tag {
   display: inline-block;
   margin: 0 0 12px 0;
@@ -443,8 +470,25 @@ p {
   font-family: var(--font-readout);
   font-size: var(--size-12);
   line-height: 1.1;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+}
+
+/* A room specimen (D-39): the game's own drawing of a room, a car or its people. Hidden until
+   specimens.ts has drawn it, so a page with no JavaScript never shows an empty box. */
+.specimen {
+  display: block;
+  width: 288px;
+  max-width: 100%;
+  height: auto;
+  margin: 4px 0 16px 0;
+}
+
+.specimen:not(.is-drawn) {
+  display: none;
+}
+
+.card .specimen {
+  margin: 16px 18px 0;
+  max-width: calc(100% - 36px);
 }
 
 /* No blanket `.floor p` rule: it would outrank .floor-tag and put dark text on
@@ -696,12 +740,12 @@ p {
 }
 
 .foot-col h2 {
-  font-family: var(--font-readout);
-  font-size: var(--size-12);
-  font-weight: 400;
+  font-family: var(--font-ui);
+  font-size: var(--size-14);
+  font-weight: 600;
   line-height: 1.1;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  text-transform: none;
+  letter-spacing: 0;
   color: #f4b942;
   margin: 0 0 4px 0;
 }
@@ -733,11 +777,12 @@ p {
 
 .foot-mark {
   margin: 0;
-  font-family: var(--font-readout);
-  font-size: var(--size-12);
+  font-family: var(--font-ui);
+  font-size: var(--size-14);
+  font-weight: 600;
   line-height: 1.1;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  text-transform: none;
+  letter-spacing: 0;
   white-space: nowrap;
 }
 
@@ -841,8 +886,8 @@ p {
 .store-link-top {
   font-size: var(--size-12);
   font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .store-link-name {

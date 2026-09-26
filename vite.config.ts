@@ -132,6 +132,7 @@ export default defineConfig(({ mode }) => {
                 'og.png',
                 'wordmark-*',
                 'assets/site-*',
+                'assets/specimens-*',
                 'assets/main-*',
                 'assets/theme-init-*',
               ],

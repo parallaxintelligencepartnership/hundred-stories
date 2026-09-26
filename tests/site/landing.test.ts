@@ -32,11 +32,12 @@ describe('landing page', () => {
     expect(landing).toContain('application/ld+json');
   });
 
-  it('loads the site stylesheet, the hero module and the theme init module, and nothing else', () => {
+  it('loads the site stylesheet, the hero module, the theme init module and the specimens module, and nothing else', () => {
     expect(landing).toContain('href="/src/site/site.css"');
-    expect(landing.match(/<script type="module"[^>]*>/g)).toHaveLength(2);
+    expect(landing.match(/<script type="module"[^>]*>/g)).toHaveLength(3);
     expect(landing).toContain('src="/src/site/hero.ts"');
     expect(landing).toContain('src="/src/site/theme-init.ts"');
+    expect(landing).toContain('src="/src/site/specimens.ts"');
   });
 
   it('describes the illustrated cross section the game draws, not the old pixel art', () => {
@@ -88,15 +89,9 @@ describe('the page is the building in cross section', () => {
   it('sends the landing page underground below the hero, one floor per section', () => {
     expect(landing).toContain('<div class="underground">');
     expect(landing.match(/<section class="floor"/g)).toHaveLength(5);
-    for (const tag of [
-      'B1 &middot; THE NAME',
-      'B2 &middot; WHAT IT IS',
-      'B3 &middot; YOUR SAVE',
-      'B4 &middot; HOW IT PLAYS',
-      'B5 &middot; PHONE, TABLET OR DESKTOP',
-    ]) {
-      expect(landing).toContain(`<p class="floor-tag">${tag}</p>`);
-    }
+    // The tag is the floor alone; the h2 names the section (D-38).
+    const tags = [...landing.matchAll(/<p class="floor-tag">([^<]*)<\/p>/g)].map((m) => m[1]);
+    expect(tags).toEqual(['B1', 'B2', 'B3', 'B4', 'B5']);
     // The floors carry the sections; no bare .wrap column of copy is left behind.
     expect(flat(landing)).not.toContain('<div class="wrap"> <section aria-labelledby="features">');
   });
@@ -115,11 +110,9 @@ describe('the page is the building in cross section', () => {
   it('gives the guide the same shell, numbered B1 upward', () => {
     expect(guide).toContain('<div class="underground">');
     expect(guide.match(/<section class="floor guide"/g)).toHaveLength(15);
-    expect(guide).toContain('<p class="floor-tag">B1 &middot; ROOMS</p>');
-    expect(guide).toContain('<p class="floor-tag">B15 &middot; CONTROLS</p>');
-    // Numbered in order, one floor each, with no gaps.
-    const tags = [...guide.matchAll(/<p class="floor-tag">B(\d+) &middot;/g)].map((m) => Number(m[1]));
-    expect(tags).toEqual(Array.from({ length: 15 }, (_, i) => i + 1));
+    // Numbered in order, one floor each, with no gaps, and the tag is the floor alone (D-38).
+    const tags = [...guide.matchAll(/<p class="floor-tag">([^<]*)<\/p>/g)].map((m) => m[1]);
+    expect(tags).toEqual(Array.from({ length: 15 }, (_, i) => `B${i + 1}`));
     // Heading order survives the rebuild: one h1, then the topic h2s.
     expect(guide.match(/<h1>/g)).toHaveLength(1);
   });
@@ -248,16 +241,11 @@ describe('theme', () => {
     }
   });
 
-  it('gives the landing page and the guide a toggle in the nav', () => {
-    for (const page of [landing, guide]) {
+  it('gives the landing page, the guide and the 404 a toggle in the nav (D-40)', () => {
+    for (const page of [landing, guide, notfound]) {
       expect(page).toContain('<button type="button" class="theme-toggle" id="theme-toggle">Theme</button>');
       expect(page).toContain('src="/src/site/theme-init.ts"');
     }
-  });
-
-  it('leaves the 404 page without a toggle, since it has no nav', () => {
-    expect(notfound).not.toContain('theme-toggle');
-    expect(notfound).not.toContain('theme-init');
   });
 });
 
