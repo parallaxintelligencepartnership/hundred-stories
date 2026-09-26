@@ -1,8 +1,10 @@
 // The minimap: when it shows, what it spans, where a click sends the camera, and what it redraws.
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createCamera, floorTopY } from '../../src/render/camera';
 import { FLOOR_PX } from '../../src/render/grid';
 import {
+  MINIMAP_MOVE_MS,
   MINIMAP_W,
   cameraTarget,
   createMinimap,
@@ -165,5 +167,60 @@ describe('redraws', () => {
     expect((map.node as unknown as FakeElement).classList.contains('is-hidden')).toBe(true);
     expect(dom.measures).toBe(0);
     map.destroy();
+  });
+});
+
+describe('on a phone and beside a card', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('shows the phone map only while the camera moves and 1.5 s after, then goes at once', () => {
+    (globalThis as { window: { matchMedia: unknown } }).window.matchMedia = () => ({ matches: true }); // a phone
+    let now = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+    const camera = createCamera();
+    camera.setViewport(390, 844);
+    const world = tower(30); // far taller than the screen at zoom 1
+    const map = createMinimap({ camera, getWorld: () => world as never, getChrome: () => ({ top: 64, bottom: 0 }) });
+    const hidden = (): boolean => (map.node as unknown as FakeElement).classList.contains('is-hidden');
+
+    map.refresh();
+    expect([map.isVisible(), hidden()]).toEqual([false, true]); // the player is watching, not travelling
+    now = 100;
+    camera.panBy(0, -200);
+    map.refresh();
+    expect([map.isVisible(), hidden()]).toEqual([true, false]);
+    now = 100 + MINIMAP_MOVE_MS - 1;
+    map.refresh();
+    expect(map.isVisible()).toBe(true);
+    now = 100 + MINIMAP_MOVE_MS;
+    map.refresh();
+    expect([map.isVisible(), hidden()]).toEqual([false, true]); // no fade: gone on the frame
+    now = 5000;
+    camera.panBy(40, 0);
+    map.refresh();
+    expect(map.isVisible()).toBe(true);
+    expect(MINIMAP_MOVE_MS).toBe(1500);
+    map.destroy();
+  });
+
+  it('keeps the desktop map up while the camera is still', () => {
+    let now = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+    const camera = createCamera();
+    camera.setViewport(1440, 900);
+    const world = tower(30);
+    const map = createMinimap({ camera, getWorld: () => world as never, getChrome: () => ({ top: 56, bottom: 28 }) });
+    map.refresh();
+    now = 60_000;
+    map.refresh();
+    expect(map.isVisible()).toBe(true);
+    map.destroy();
+  });
+
+  it('hides the map behind an open card on a wide screen instead of stepping it left onto the tower', () => {
+    const css = readFileSync(new URL('../../src/ui/ui.css', import.meta.url), 'utf8');
+    const body = /@media \(min-width: 900px\) \{\s*\.hs-ui\.is-panel-open \.hs-minimap \{([^}]*)\}/.exec(css)?.[1] ?? '';
+    expect(body).toContain('display: none;');
+    expect(body).not.toContain('right');
   });
 });

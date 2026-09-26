@@ -1,9 +1,10 @@
-// The top bar at phone width (390 px): two rows. The glass pill of cash, people, stars, the
-// clock and the weather is the whole first row; the speed pill, Views, Share and Menu sit on the
-// right of the second, every one a 44 px target. The active view's chip hangs under the bar,
-// out of its flow. The fake DOM has
-// no layout, so the placement is read from the shell's DOM order and from the phone block of
-// ui.css, which is what puts each group on its row.
+// The top bar at phone width (390 px): one row. The glass pill of cash, people, stars, the clock
+// and the weather is the whole bar; the speed pill and Menu sit in the bottom left corner under
+// the left thumb, clear of Build, every one a 44 px target, and step aside while the build sheet
+// or a panel is open. Views and Share are rows in Settings there, and the star count opens the
+// goals. The active view's chip hangs under the bar, out of its flow. The fake DOM has no
+// layout, so the placement is read from the shell's DOM order and from the phone block of
+// ui.css, which is what puts each group where it is.
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createUi } from '../../src/ui/ui';
@@ -66,6 +67,43 @@ const find = (root: FakeElement, c: string): FakeElement => {
   if (!node) throw new Error(`no ${c}`);
   return node;
 };
+const fire = (node: FakeElement, type: string): void =>
+  (node.listeners.get(type) ?? []).forEach((fn) => fn({ stopPropagation() {}, preventDefault() {} }));
+const click = (node: FakeElement): void => fire(node, 'click');
+/** A button by its aria-label: the top bar's icon buttons. */
+const named = (root: FakeElement, label: string): FakeElement => {
+  const node = root.descendants().find((n) => n.tagName === 'BUTTON' && n.getAttribute('aria-label') === label);
+  if (!node) throw new Error(`no button named ${label}`);
+  return node;
+};
+/** A button by its words. */
+const buttonText = (root: FakeElement, text: string): FakeElement => {
+  const node = root.descendants().find((n) => n.tagName === 'BUTTON' && n.textContent === text);
+  if (!node) throw new Error(`no ${text} button`);
+  return node;
+};
+/** A Settings row by its words. */
+const rowNamed = (root: FakeElement, text: string): FakeElement => {
+  const node = root.descendants().find((n) => has(n, 'hs-set-action') && n.textContent === text);
+  if (!node) throw new Error(`no ${text} row`);
+  return node;
+};
+/** The title of the sheet on screen. */
+const sheetTitle = (root: FakeElement): string => find(find(root, 'hs-sheet'), 'hs-panel-title-text').textContent;
+
+function setWidth(width: number): void {
+  (globalThis as { window: { innerWidth?: number } }).window.innerWidth = width;
+}
+
+function store(): { getItem(k: string): string | null; setItem(k: string, v: string): void } {
+  return (globalThis as unknown as { window: { localStorage: { getItem(k: string): string | null; setItem(k: string, v: string): void } } }).window
+    .localStorage;
+}
+
+/** A returning player: the intro and the guide are done, so the side card carries the goals. */
+function returning(extra: Record<string, string> = {}): void {
+  for (const [key, value] of Object.entries({ 'hs.intro.seen': 'true', 'hs.guide.done': 'true', ...extra })) store().setItem(key, value);
+}
 
 function mount(minute: number, extra: Record<string, unknown> = {}): FakeElement {
   const world = {
@@ -117,11 +155,11 @@ describe('top bar at phone width', () => {
       'hs-status-clock',
     ]);
     expect(rule(wide(), '.hs-status-pill')['flex-wrap']).toBe('nowrap');
-    // Row one is the pill alone; the controls are row two, and nothing else is in the flow: the
-    // chip is placed under the bar, so the bar is two rows with or without a view on.
+    // The pill is the bar's one row: the controls leave its flow for the bottom left corner, and
+    // the chip is placed under the bar, so the bar is one row with or without a view on.
     expect(rule(phoneBlock(), '.hs-status-pill').flex).toBe('1 1 100%');
     expect(has(actions, 'hs-top-actions')).toBe(true);
-    expect(rule(phoneBlock(), '.hs-top-actions').order).toBe('2');
+    expect(rule(phoneBlock(), '.hs-top-actions').position).toBe('fixed');
     expect(has(chip, 'hs-view-chip')).toBe(true);
     expect(rule(wide(), '.hs-view-chip').position).toBe('absolute');
     expect(top.children).toHaveLength(3);
@@ -171,9 +209,11 @@ describe('top bar at phone width', () => {
     expect(face['font-family']).toBe('var(--font-readout)');
     expect(face['font-variant-numeric']).toBe('tabular-nums');
     expect(rule(wide(), '.hs-status-cash .hs-readout-value')['font-family']).toBe('var(--font-readout)');
-    // Every other use of the readout face is gone: one rule (cash, the clock, panel money), and the token.
+    // Every other use of the readout face is gone: one rule (cash, the clock, panel money), the
+    // floor under the cursor (design pass D-21), and the token.
     const uses = css.match(/font-family: var\(--font-readout\)/g) ?? [];
-    expect(uses).toHaveLength(1);
+    expect(uses).toHaveLength(2);
+    expect(rule(wide(), '.hs-status-hover .hs-readout-value')['font-family']).toBe('var(--font-readout)');
     expect(rule(wide(), '.hs-readout-value')['font-family']).toBeUndefined();
   });
 
@@ -219,24 +259,136 @@ describe('top bar at phone width', () => {
     expect(css).toMatch(/:root \{\s*(\/\*[\s\S]*?\*\/\s*)?--ui-scale: 1;/);
   });
 
-  it('fits row two at 390 px: the speed pill, Views, Share and Menu, all 44 px or more', () => {
+  it('puts the speed pill and Menu bottom left at 390 px, clear of Build, with Views and Share out of the bar', () => {
     const root = mount(9 * 60);
     const actions = find(root, 'hs-top-actions');
+    // Views and Share stay in the tree for a wide screen; a phone hides them (Settings has them).
     const rounds = actions.children.filter((n) => n.tagName === 'BUTTON' && has(n, 'hs-round') && !n.hidden);
     expect(rounds.map((n) => n.getAttribute('aria-label'))).toEqual(['Views', 'Share', 'Menu']);
+    expect(rule(phoneBlock(), '.hs-views-btn').display).toBe('none');
+    expect(rule(phoneBlock(), ".hs-round[aria-label='Share']").display).toBe('none');
     const speed = find(actions, 'hs-speed');
     expect(speed.children).toHaveLength(4);
-    // The sizes the css gives them on a phone.
+    // Fixed in the bottom left corner, inside the safe area.
+    expect(rule(phoneBlock(), '.hs-top-actions')).toMatchObject({
+      position: 'fixed',
+      top: 'auto',
+      left: 'calc(var(--edge) + var(--safe-left))',
+      bottom: 'calc(var(--edge) + var(--safe-bottom))',
+      margin: '0',
+      'min-height': '0',
+    });
+    // The sizes the css gives them on a phone: every speed button a 44 px target.
     expect(rule(phoneBlock(), '.hs-speed-btn')['min-width']).toBe('var(--touch)');
+    expect(rule(wide(), '.hs-icon-btn')['min-height']).toBe('var(--touch)');
     expect(rule(wide(), '.hs-round')['min-width']).toBe('calc(var(--touch) + 8px)');
-    expect(rule(phoneBlock(), '.hs-top').gap).toBe('6px');
+    expect(rule(phoneBlock(), '.hs-top')['--edge']).toBe('8px');
     const touch = 44;
     const speedW = 4 * touch + 3 * 2 + 2 * 4; // four buttons, 2 px apart, in 4 px padding
-    const roundsW = 3 * (touch + 8);
-    const gaps = 3 * 6;
-    const room = 390 - 2 * 8; // the phone's 8 px edges
-    expect(speedW + roundsW + gaps).toBeLessThanOrEqual(room);
-    // The night mode label hangs off the speed pill, out of the row.
-    expect(rule(phoneBlock(), '.hs-speed-mode').position).toBe('absolute');
+    const menuW = touch + 8;
+    const cluster = 8 + speedW + 8 + menuW; // the 8 px edge, the pill, the 8 px --gap-float, Menu
+    const buildLeft = 390 - 12 - 60; // Build: 60 px round, 12 px in from the right edge
+    expect(cluster).toBe(258);
+    expect(cluster).toBeLessThan(buildLeft);
+    // The night mode label sits over the speed pill, out of the row.
+    expect(rule(phoneBlock(), '.hs-speed-mode')).toMatchObject({ position: 'absolute', top: 'auto', bottom: 'calc(100% + 4px)', left: '0', right: 'auto' });
+  });
+
+  it('steps the speed pill and Menu aside while the build sheet or a panel owns the bottom', () => {
+    for (const selector of ['.hs-ui.is-building .hs-top-actions', '.hs-ui.is-panel-open .hs-top-actions']) {
+      expect(rule(phoneBlock(), selector).display).toBe('none');
+    }
+    returning();
+    setWidth(390);
+    const root = mount(9 * 60);
+    const shell = find(root, 'hs-ui');
+    click(find(root, 'hs-build-fab'));
+    expect(has(shell, 'is-building')).toBe(true);
+    click(find(root, 'hs-build-close'));
+    expect(has(shell, 'is-building')).toBe(false);
+    click(named(root, 'Menu'));
+    expect(has(shell, 'is-panel-open')).toBe(true);
+  });
+
+  it('gives focus back to Menu when Settings closes, once the controls are back', () => {
+    returning();
+    setWidth(390);
+    const root = mount(9 * 60);
+    const shell = find(root, 'hs-ui');
+    const menu = named(root, 'Menu');
+    let hiddenWhenFocused: boolean | null = null;
+    const focus = menu.focus.bind(menu);
+    menu.focus = () => {
+      hiddenWhenFocused = has(shell, 'is-panel-open');
+      focus();
+    };
+    focus(); // the player is on Menu
+    click(menu);
+    expect(has(shell, 'is-panel-open')).toBe(true);
+    click(find(find(root, 'hs-settings'), 'hs-panel-close'));
+    expect(dom.activeElement).toBe(menu);
+    expect(hiddenWhenFocused).toBe(false);
+  });
+
+  it('moves Views and Share into Settings on a phone: Views opens the list, Share the share card', () => {
+    returning();
+    setWidth(390);
+    const root = mount(9 * 60);
+    click(named(root, 'Menu'));
+    const settings = find(root, 'hs-settings');
+    const gameRows = (settings.descendants().find((n) => has(n, 'hs-set-list')) as FakeElement).children.map((r) => r.textContent);
+    expect(gameRows.slice(-2)).toEqual(['Views', 'Share']);
+    click(rowNamed(settings, 'Share'));
+    expect(sheetTitle(root)).toBe('Share');
+
+    click(named(root, 'Menu'));
+    click(rowNamed(find(root, 'hs-settings'), 'Views'));
+    // The menu steps aside so the view picked is not behind it, and the list is open.
+    expect(root.descendants().some((n) => has(n, 'hs-settings'))).toBe(false);
+    expect(find(root, 'hs-views-menu').hidden).toBe(false);
+    expect(named(root, 'Views').getAttribute('aria-expanded')).toBe('true');
+    // With the button hidden the list has no anchor, so a phone hangs it under the bar.
+    expect(rule(phoneBlock(), '.hs-views-menu').top).toBe('calc(var(--top-actual, calc(var(--top-h) + var(--safe-top))) + var(--gap-float))');
+  });
+
+  it('keeps Views and Share out of Settings on a wide screen, where the bar has them', () => {
+    returning();
+    setWidth(1280);
+    const root = mount(9 * 60);
+    click(named(root, 'Menu'));
+    const rows = find(root, 'hs-settings')
+      .descendants()
+      .filter((n) => has(n, 'hs-set-action'))
+      .map((n) => n.textContent);
+    expect(rows).toContain('Stories');
+    expect(rows).not.toContain('Views');
+    expect(rows).not.toContain('Share');
+  });
+});
+
+describe('goals at phone width', () => {
+  it('opens the goals from the star count, where the folded card is not shown, and Hide folds them away', () => {
+    expect(rule(phoneBlock(), '.hs-card.is-collapsed').display).toBe('none');
+    returning({ 'hs.goals.collapsed': 'true' });
+    setWidth(390);
+    const root = mount(9 * 60);
+    const card = find(root, 'hs-card');
+    expect(has(card, 'is-collapsed')).toBe(true);
+    fire(find(root, 'hs-status-stars'), 'click');
+    expect(has(card, 'is-collapsed')).toBe(false);
+    expect(store().getItem('hs.goals.collapsed')).toBe('false');
+    click(buttonText(card, 'Hide'));
+    expect(has(card, 'is-collapsed')).toBe(true);
+    expect(store().getItem('hs.goals.collapsed')).toBe('true');
+  });
+
+  it('leaves the star count to its tooltip on a wide screen', () => {
+    returning({ 'hs.goals.collapsed': 'true' });
+    setWidth(1280);
+    const root = mount(9 * 60);
+    const card = find(root, 'hs-card');
+    fire(find(root, 'hs-status-stars'), 'click');
+    expect(has(card, 'is-collapsed')).toBe(true);
+    expect(store().getItem('hs.goals.collapsed')).toBe('true');
   });
 });

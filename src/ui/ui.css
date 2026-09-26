@@ -880,6 +880,11 @@ button.hs-readout:hover {
   display: none;
 }
 
+/* Nor has the phone sheet's own close (the phone block shows it on the open sheet). */
+.hs-build-close {
+  display: none;
+}
+
 /* The header: the hammer, the word, the tool in hand and the fold arrow. */
 .hs-palette-toggle {
   grid-column: 1 / -1;
@@ -2965,8 +2970,9 @@ button.hs-news-toast {
 /* Phone width ---------------------------------------------------------- */
 
 @media (max-width: 720px) {
-  /* The top bar on a phone is two rows: the pill takes the first, whole, so it stays one row;
-     the speed pill, Views, Share and Menu sit on the right of the second. */
+  /* The top bar on a phone is one row: the pill, whole. The speed pill and Menu sit in the bottom
+     left corner, under the left thumb, with Build under the right; Views and Share are rows in
+     Settings (ui.ts). */
   .hs-top {
     --edge: 8px;
     top: calc(var(--safe-top) + 8px);
@@ -2988,8 +2994,25 @@ button.hs-news-toast {
     padding: 2px 6px;
   }
 
+  /* The controls leave the bar's flow for the bottom left corner. */
   .hs-top-actions {
-    order: 2;
+    position: fixed;
+    top: auto;
+    left: calc(var(--edge) + var(--safe-left));
+    bottom: calc(var(--edge) + var(--safe-bottom));
+    margin: 0;
+    min-height: 0;
+  }
+
+  .hs-views-btn,
+  .hs-round[aria-label='Share'] {
+    display: none;
+  }
+
+  /* The open build sheet and an open panel own the bottom of the screen. */
+  .hs-ui.is-building .hs-top-actions,
+  .hs-ui.is-panel-open .hs-top-actions {
+    display: none;
   }
 
   /* The time stamp goes on a phone: the log keeps it. */
@@ -3040,8 +3063,8 @@ button.hs-news-toast {
     display: none;
   }
 
-  /* Row two at 390 px: the speed pill (4 x 44 + 3 x 2 + 8 = 190), Views, Share and Menu
-     (3 x 52 = 156) and three 6 px gaps make 364 of the 374 px inside the 8 px edges. */
+  /* Bottom left at 390 px: the speed pill (4 x 44 + 3 x 2 + 8 = 190), an 8 px gap and Menu (52)
+     end 258 px from the left edge, clear of Build's 318. */
   .hs-speed-btn {
     min-width: var(--touch);
   }
@@ -3064,12 +3087,13 @@ button.hs-news-toast {
     }
   }
 
-  /* The night mode hangs just under the speed pill. */
+  /* The night mode sits just over the speed pill. */
   .hs-speed-mode {
     position: absolute;
-    top: 100%;
-    right: 0;
-    margin-top: 4px;
+    top: auto;
+    bottom: calc(100% + 4px);
+    left: 0;
+    right: auto;
   }
 
   .hs-tip {
@@ -3078,8 +3102,8 @@ button.hs-news-toast {
     right: 0;
   }
 
-  /* The Build button: bottom right, always there, in the same place. It sits over the sheet
-     and turns into its close button while the sheet is open. */
+  /* The Build button: bottom right, in the same place. While the sheet is open it steps aside
+     (below) and the sheet's own close, top right, takes its place, so it covers no tile. */
   .hs-build-fab {
     --r: 50%;
     position: absolute;
@@ -3122,6 +3146,25 @@ button.hs-news-toast {
 
   .hs-build-fab[aria-expanded='true'] .hs-build-fab-close {
     display: block;
+  }
+
+  .hs-build-fab[aria-expanded='true'] {
+    display: none;
+  }
+
+  /* The open sheet's close: a 44 px round button in its top right corner. */
+  .hs-palette:is(.is-sheet-row, .is-sheet-full) .hs-build-close {
+    display: inline-flex;
+    position: absolute;
+    top: 2px;
+    right: calc(8px + var(--safe-right));
+    width: var(--touch);
+    height: var(--touch);
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: 50%;
+    background: var(--press-tint);
   }
 
   .hs-build-fab-label {
@@ -3213,12 +3256,12 @@ button.hs-news-toast {
     display: inline;
   }
 
-  /* One row that scrolls sideways; the Build button's corner is left clear at the end. */
+  /* One row that scrolls sideways, 12 px in from each side: the Build button is out of the way. */
   .hs-build-items {
     display: flex;
     flex-direction: row;
     gap: 8px;
-    padding: 0 calc(var(--fab) + 2 * var(--edge)) 12px 12px;
+    padding: 0 12px 12px;
     overflow-x: auto;
     overflow-y: hidden;
     touch-action: pan-x;
@@ -3329,7 +3372,10 @@ button.hs-news-toast {
     padding-bottom: 6px;
   }
 
+  /* The Views button is hidden here (Settings opens the list), so the list has no anchor: it
+     hangs under the top bar on the right, as it does where anchors are not supported. */
   .hs-views-menu {
+    top: calc(var(--top-actual, calc(var(--top-h) + var(--safe-top))) + var(--gap-float));
     right: calc(8px + var(--safe-right));
   }
 
@@ -3364,6 +3410,11 @@ button.hs-news-toast {
 
   .hs-palette.is-sheet-row ~ .hs-card,
   .hs-palette.is-sheet-full ~ .hs-card {
+    display: none;
+  }
+
+  /* Folded, the goals card leaves the bottom edge to the tower: the star count opens it (ui.ts). */
+  .hs-card.is-collapsed {
     display: none;
   }
 
@@ -3479,10 +3530,11 @@ button.hs-news-toast {
   image-rendering: pixelated;
 }
 
-/* A card owns the right edge on a wide screen, so the map steps left of it. */
+/* A card owns the right edge on a wide screen, so the map goes while one is open rather than
+   step left onto the tower. */
 @media (min-width: 900px) {
   .hs-ui.is-panel-open .hs-minimap {
-    right: calc(var(--panel-w) + 2 * var(--edge) + var(--safe-right));
+    display: none;
   }
 }
 
@@ -3493,7 +3545,8 @@ button.hs-news-toast {
 
 @media (max-width: 720px) {
   /* A phone's bottom belongs to the sheet and the side card, so the map sits top right,
-     under the status bar and clear of the controls hint while it shows. */
+     under the status bar and clear of the controls hint while it shows. It shows only while
+     the camera moves (minimap.ts). */
   .hs-minimap {
     top: calc(var(--top-actual, calc(var(--top-h) * 2 + var(--safe-top))) + var(--gap-float));
     bottom: auto;

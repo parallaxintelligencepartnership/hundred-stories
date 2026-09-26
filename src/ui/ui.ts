@@ -273,7 +273,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   const top = el('header', 'hs-top');
   // The top bar floats over the tower: one glass pill of cash, people, stars, the clock and
   // the weather; then the speed pill, Views, Share and Menu, which never hide or move. A phone
-  // gives the pill its own row and the controls the second.
+  // keeps the pill alone on one row at the top and puts the speed pill and Menu in the bottom
+  // left corner, under the left thumb (ui.css); Views and Share move into Settings there.
   const pill = el('div', 'hs-status-pill');
   pill.setAttribute('role', 'group');
   pill.setAttribute('aria-label', 'Your tower');
@@ -283,6 +284,14 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   // Readouts: the mono readout type is kept for cash and the clock only.
   const status = createStatusBar();
   status.cash.addEventListener('click', () => setPanel(panelKind === 'finances' ? 'none' : 'finances'));
+  // A phone shows no folded goals card (ui.css), so the star count that names them opens them:
+  // the phone's goals card, whose Hide folds it out of sight again.
+  status.stars.addEventListener('click', () => {
+    if (!inSheetLayout()) return;
+    goalsCollapsed = false;
+    setFlag(PREF_KEYS.goalsCollapsed, false);
+    update();
+  });
 
   const hoverValue = el('span', 'hs-readout-value');
   const hoverReadout = el('div', 'hs-readout hs-status-hover is-hidden');
@@ -360,6 +369,9 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
       update();
     },
     changed: () => {
+      // The open phone sheet owns the bottom: the speed pill and Menu step aside (ui.css).
+      const sheet = build.sheet();
+      shell.classList.toggle('is-building', sheet === 'row' || sheet === 'full');
       chromeWatch?.measure();
       queueThumbnails(); // the category shown may be new: draw its tiles
     },
@@ -588,6 +600,15 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     },
     openMyTower() {
       openMyTower();
+    },
+    // Settings on a phone, where the top bar has no Views or Share button. The modal menu steps
+    // aside first, so the view picked is not left behind it.
+    openViews() {
+      setPanel('none');
+      view.open();
+    },
+    openShare() {
+      setPanel('share');
     },
     setDisplay(name) {
       // The switch is already stored; Larger text and the color-blind views follow at once.
@@ -984,8 +1005,16 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   }
 
   function drawThumbnailsSoon(): void {
-    if (thumbRaf || destroyed || thumbQueue.length === 0 || paletteCollapsed) return;
+    if (thumbRaf || destroyed || thumbQueue.length === 0 || boardHidden()) return;
     thumbRaf = requestAnimationFrame(drawSomeThumbnails);
+  }
+
+  /**
+   * Are the tiles out of sight? On a phone that is the sheet shut or shrunk to the placing bar;
+   * on a wide screen the folded dock. The fold is the dock's alone: the phone sheet never reads it.
+   */
+  function boardHidden(): boolean {
+    return inSheetLayout() ? !(build.sheet() === 'row' || build.sheet() === 'full') : paletteCollapsed;
   }
 
   function drawSomeThumbnails(): void {
@@ -1189,6 +1218,9 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     }
     mountedKey = key;
     cardEdge = null;
+    // Closing: the controls an open panel hides on a phone (ui.css) come back before it goes,
+    // so focus can return to the button that opened it (Menu, now bottom left).
+    if (key === '') shell.classList.remove('is-panel-open');
     // A panel rebuilt in place (new numbers, another room) keeps focus where the player had it,
     // and still sends it back to where it came from when the panel finally closes.
     const old = mountedPanel?.sheet ?? null;

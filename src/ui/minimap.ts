@@ -2,9 +2,10 @@
 // of the view, the viewport as an outline, click or drag to move the camera there.
 //
 // It shows only while the tower is taller than the free band (the part of the view no chrome
-// covers) at the current zoom. Two stacked canvases keep the work small: the tower layer is
-// drawn from the world when world.structureVersion changes, the outline layer on the frames
-// the camera moved. It reads the camera through its public fields and never touches the
+// covers) at the current zoom, and on a phone only while the camera moves and for
+// MINIMAP_MOVE_MS after, with no fade. Two stacked canvases keep the work small: the tower
+// layer is drawn from the world when world.structureVersion changes, the outline layer on the
+// frames the camera moved. It reads the camera through its public fields and never touches the
 // renderer, and it measures nothing: the view size comes from the camera's own arithmetic.
 
 import type { Camera } from '../render/camera';
@@ -15,6 +16,8 @@ import type { RoomKind, World } from '../sim/types';
 /** The minimap's width in css pixels: a desktop, and a phone. */
 export const MINIMAP_W = 96;
 export const MINIMAP_W_COMPACT = 64;
+/** On a phone the map shows while the camera moves and this many ms after its last move. */
+export const MINIMAP_MOVE_MS = 1500;
 /** A floor row is at most this many css pixels tall, so a short tower still reads. */
 const MAX_ROW_PX = 4;
 /** The phone breakpoint the css uses. */
@@ -224,6 +227,10 @@ export function createMinimap(options: MinimapOptions): Minimap {
   let raf = 0;
   let dragging = false;
   let destroyed = false;
+  /** The camera centre the last frame saw, and when it last differed: a phone's map follows it. */
+  let lastX = camera.x;
+  let lastY = camera.y;
+  let lastMoveMs = Number.NEGATIVE_INFINITY;
 
   const onResize = (): void => {
     compact = readCompact();
@@ -272,9 +279,17 @@ export function createMinimap(options: MinimapOptions): Minimap {
       extent = towerExtent(world);
       towerDirty = true;
     }
+    const now = performance.now();
+    if (camera.x !== lastX || camera.y !== lastY) {
+      lastX = camera.x;
+      lastY = camera.y;
+      lastMoveMs = now;
+    }
     const view = readView(camera, options.getChrome());
     const band = freeBandPx(view);
-    const show = extent !== null && minimapVisible(towerFloors(extent), view.zoom, band);
+    // A phone keeps the map for travel: it leaves the tower alone while the player watches.
+    const travelling = !compact || now - lastMoveMs < MINIMAP_MOVE_MS;
+    const show = travelling && extent !== null && minimapVisible(towerFloors(extent), view.zoom, band);
     if (show !== visible) {
       visible = show;
       node.classList.toggle('is-hidden', !show);

@@ -35,6 +35,23 @@ function setWidth(width: number): void {
   (globalThis as { window: { innerWidth?: number } }).window.innerWidth = width;
 }
 
+/** The body of the first `@media (max-width: 720px)` block: the phone's rules. */
+function phoneBlock(): string {
+  const start = css.indexOf('@media (max-width: 720px) {');
+  let depth = 0;
+  for (let i = css.indexOf('{', start); i < css.length; i += 1) {
+    if (css[i] === '{') depth += 1;
+    if (css[i] === '}' && --depth === 0) return css.slice(css.indexOf('{', start) + 1, i);
+  }
+  throw new Error('no phone block');
+}
+
+/** The body of the rule whose selector, on its own line, is exactly `selector`. */
+function ruleIn(block: string, selector: string): string {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`\\n[ \\t]*${escaped} \\{([^}]*)\\}`).exec(block)?.[1] ?? '';
+}
+
 describe('sheet rules', () => {
   it('calls 720 px and under a phone, and an unknown width not', () => {
     expect([isPhoneWidth(390), isPhoneWidth(720), isPhoneWidth(721), isPhoneWidth(undefined), isPhoneWidth(0)]).toEqual([
@@ -128,6 +145,48 @@ describe('build dock on its own', () => {
     fire(nav, 'pointerup', { clientY: 240, timeStamp: 2400, pointerId: 3 });
     expect(build.sheet()).toBe('closed');
     expect(has(nav, 'is-sheet-closed')).toBe(true);
+  });
+
+  it('closes from its own button, right after the handle, and gives focus to the Build button', () => {
+    const { build, nav } = dock(true);
+    const fab = build.fab as unknown as FakeElement;
+    const [handle, close] = nav.children as [FakeElement, FakeElement];
+    expect(has(handle, 'hs-build-handle')).toBe(true);
+    expect([close.tagName, has(close, 'hs-build-close'), close.getAttribute('aria-label')]).toEqual(['BUTTON', true, 'Close build']);
+    click(fab);
+    expect(build.sheet()).toBe('row');
+    // A tap does not always focus a button (Safari): focus still lands on the Build button.
+    dom.activeElement = dom.body;
+    click(close);
+    expect([build.sheet(), dom.activeElement]).toEqual(['closed', fab]);
+    build.open('full');
+    dom.activeElement = dom.body;
+    click(close);
+    expect([build.sheet(), dom.activeElement]).toEqual(['closed', fab]);
+  });
+
+  it('shows that close only on the open phone sheet, 44 px round in its top right, with the Build button hidden', () => {
+    expect(css).toMatch(/\n\.hs-build-close \{\s*display: none;\s*\}/);
+    const phone = phoneBlock();
+    const close = ruleIn(phone, '.hs-palette:is(.is-sheet-row, .is-sheet-full) .hs-build-close');
+    for (const line of [
+      'display: inline-flex;',
+      'position: absolute;',
+      'top: 2px;',
+      'right: calc(8px + var(--safe-right));',
+      'width: var(--touch);',
+      'height: var(--touch);',
+      'align-items: center;',
+      'justify-content: center;',
+      'border: 0;',
+      'border-radius: 50%;',
+      'background: var(--press-tint);',
+    ]) {
+      expect(close).toContain(line);
+    }
+    expect(ruleIn(phone, ".hs-build-fab[aria-expanded='true']")).toContain('display: none;');
+    // The row keeps no corner clear for the Build button any more: 12 px on the right as on the left.
+    expect(ruleIn(phone, '.hs-build-items')).toContain('padding: 0 12px 12px;');
   });
 
   it('closes on Escape and gives focus back to the Build button', () => {
@@ -231,6 +290,37 @@ describe('build in the shell', () => {
     click(find(root, 'hs-build-placing-cancel'));
     expect(g.tools.at(-1)).toEqual({ kind: 'none' });
     expect(has(nav, 'is-sheet-row')).toBe(true);
+  });
+
+  it('on a phone: draws the tile pictures when the sheet opens, even with the dock folded on an earlier visit', () => {
+    setWidth(390);
+    (globalThis as unknown as { window: { localStorage: { setItem(k: string, v: string): void } } }).window.localStorage.setItem(
+      'hs.palette.collapsed',
+      'true',
+    );
+    const g = game();
+    const drawn: string[] = [];
+    const renderer = {
+      thumbnail: (kind: string) => {
+        drawn.push(kind);
+        return { width: 224, height: 112 };
+      },
+    };
+    const root = dom.createElement('div');
+    createUi(root as never, g.api, renderer as never);
+    const frames = (): void => {
+      for (let i = 0; i < 20; i += 1) dom.runFrame();
+    };
+    frames();
+    expect(drawn).toEqual([]); // the sheet is shut: nothing to draw yet
+    click(find(root, 'hs-build-fab'));
+    frames();
+    // Every Structure tile with a picture got one: the queue drained.
+    const pictured = root
+      .descendants()
+      .filter((n) => has(n, 'hs-tool') && n.dataset['group'] === '0' && n.descendants().some((d) => d.tagName === 'CANVAS' && has(d, 'hs-tool-thumb')));
+    expect(pictured.length).toBeGreaterThan(0);
+    expect(drawn).toHaveLength(pictured.length);
   });
 
   it('on a wide screen: the dock is there from the start, folds to its icons, and a tab opens it on that category', () => {

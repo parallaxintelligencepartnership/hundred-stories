@@ -61,6 +61,7 @@ import {
   stressBandOf,
 } from './format';
 import { type IconName } from './icons';
+import { isPhoneWidth } from './build';
 import { createSheet, type Sheet } from './sheet';
 import { vipView, vipViewKey, type VipView } from './vip';
 import { chevron, controlsDevice, currentDeviceEnv, fillControlsPage } from './controls';
@@ -92,6 +93,10 @@ export interface PanelContext {
   openDaily?: () => void;
   /** Go back to My tower, from the settings panel outside it. */
   openMyTower?: () => void;
+  /** Open the list of views, from the settings panel on a phone, where the top bar has no Views. */
+  openViews?: () => void;
+  /** Open the share panel, from the settings panel on a phone, where the top bar has no Share. */
+  openShare?: () => void;
   /** Put another person or room in the query panel, closing whichever panel asked. */
   select?: (sel: Selection) => void;
   /**
@@ -1368,6 +1373,15 @@ function themeRow(): HTMLDivElement {
   return row;
 }
 
+/** Is the window a phone's, by the same 720 px break as ui.css (src/ui/build.ts)? */
+function phoneWidth(): boolean {
+  try {
+    return isPhoneWidth(typeof window === 'undefined' ? undefined : (window as { innerWidth?: number }).innerWidth);
+  } catch {
+    return false;
+  }
+}
+
 /** The title words in a sheet's head, to name the page the settings sheet is on. */
 function titleText(panel: PanelElement): HTMLElement | null {
   const heading = panel.sheet?.head.firstElementChild as HTMLElement | null | undefined;
@@ -1379,7 +1393,8 @@ export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElem
   panel.classList.add('hs-settings');
   const main = el('div', 'hs-set-main');
 
-  // Game: Today's tower, then New game in My tower or My tower anywhere else, then Stories.
+  // Game: Today's tower, then New game in My tower or My tower anywhere else, then Stories, then
+  // on a phone Views and Share.
   // A new tower always gets a fresh random start; the starting number is only in the page
   // address (?seed=, read in main.ts) for testing, never in this panel. New game only ever
   // replaces My tower, so outside it the row is My tower instead.
@@ -1401,6 +1416,13 @@ export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElem
   const openStories = ctx.openStories;
   if (openStories) {
     gameGroup.list.append(actionRow('Stories', () => openStories(), 'The people you follow and the latest from around the tower'));
+  }
+  // A phone's top bar is the pill alone (ui.css), so Views and Share live here instead.
+  if (phoneWidth()) {
+    const openViews = ctx.openViews;
+    if (openViews) gameGroup.list.append(actionRow('Views', () => openViews(), 'Stress, noise, vacancy and elevator wait'));
+    const openShare = ctx.openShare;
+    if (openShare) gameGroup.list.append(actionRow('Share', () => openShare(), 'Share your tower'));
   }
   if (gameGroup.list.children.length > 0) main.append(gameGroup.node);
 

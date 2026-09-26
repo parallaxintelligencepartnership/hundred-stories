@@ -5,8 +5,10 @@
 //
 // Phone: nothing until the round Build button in the bottom right corner, which never moves.
 // It opens a bottom sheet: the category row and a sideways row of tiles. Drag up for the full
-// grid, swipe down to close. With a tool in hand the sheet shrinks to a small bar that names
-// the item and its cost, with Cancel. Nothing here is remembered: every load starts closed.
+// grid, swipe down to close. The open sheet carries its own close in its top right corner, and
+// the Build button steps aside until it shuts, so no tile sits under it. With a tool in hand the
+// sheet shrinks to a small bar that names the item and its cost, with Cancel. Nothing here is
+// remembered: every load starts closed.
 //
 // The DOM work is plain enough for tests/ui/fake-dom.ts.
 
@@ -88,7 +90,14 @@ export function createBuildDock(options: BuildDockOptions): BuildDock {
   // The grab handle: the phone sheet's first row. A tap toggles the row and the full grid.
   const handle = el('button', 'hs-build-handle');
   handle.type = 'button';
-  palette.prepend(handle);
+  // The sheet's own close, right after the handle: ui.css shows it only on the open phone sheet,
+  // top right, while the Build button is hidden.
+  const sheetClose = el('button', 'hs-build-close');
+  sheetClose.type = 'button';
+  sheetClose.setAttribute('aria-label', 'Close build');
+  sheetClose.title = 'Close build';
+  sheetClose.append(icon('close', 'hs-icon') as unknown as HTMLElement);
+  palette.prepend(handle, sheetClose);
 
   // The placing bar: the item's picture, its name and cost, and Cancel.
   const placeBar = el('div', 'hs-build-placing');
@@ -113,7 +122,8 @@ export function createBuildDock(options: BuildDockOptions): BuildDock {
   fab.type = 'button';
   fab.setAttribute('aria-label', 'Build');
   fab.title = 'Build';
-  // The hammer while shut, an x while the sheet is open (ui.css swaps them on aria-expanded).
+  // The hammer while shut. While the sheet is open ui.css hides the button and the sheet's own
+  // close stands in, so the x it swaps to on aria-expanded does not show on a phone.
   fab.append(
     icon('build', 'hs-icon hs-build-fab-icon hs-build-fab-open') as unknown as HTMLElement,
     icon('close', 'hs-icon hs-build-fab-icon hs-build-fab-close') as unknown as HTMLElement,
@@ -129,6 +139,12 @@ export function createBuildDock(options: BuildDockOptions): BuildDock {
     if (swallowClick) return;
     if (sheet === 'row') setSheet('full');
     else if (sheet === 'full') setSheet('row');
+  });
+
+  // Close: the sheet shuts and focus goes to the Build button, which is back in its corner.
+  sheetClose.addEventListener('click', () => {
+    setSheet('closed');
+    (fab as { focus?: () => void }).focus?.();
   });
 
   // Drag: anywhere on the open sheet but the tiles of the full grid, which scroll up and down.
