@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest';
 import { MIN_ZOOM, createCamera, nearestSnap, openingGroundLine } from '../../src/render/camera';
 import { OPENING_WHOLE_TOWER, OPENING_ZOOM, builtFloorExtents, towerSpan, wholeTowerGroundLine } from '../../src/render/renderer';
 import { deserialize } from '../../src/sim/save';
+import { formatClock } from '../../src/ui/format';
 import type { World } from '../../src/sim/types';
 
 const ROOT = join(__dirname, '..', '..');
@@ -85,6 +86,7 @@ interface SheetModule {
   fixtureAtHour(saveText: string, hour: number): string;
   fixtureAtMinute(saveText: string, minuteOfDay: number): string;
   shotMinuteOfDay(shot: Shot): number;
+  clockText(minuteOfDay: number): string;
   parseArgs(argv: string[]): { only: string[] | null; out: string; build: boolean; textures: boolean };
   pickRoom(save: unknown, geo: Geo): Pick;
   pickPerson(save: unknown, geo: Geo): Pick;
@@ -128,6 +130,12 @@ describe('design sheet shot list', () => {
     const dusk = shots.find((s) => s.name === 'game-desk-z1-1830') as Shot;
     expect(sheet.shotMinuteOfDay(dusk)).toBe(1110);
     expect(shots.find((s) => s.name === 'game-desk-z1-1300-dock-light')).toMatchObject({ state: 'dock', theme: 'light' });
+  });
+
+  it('the clock a paused game shot must read is the status bar text for its minute (src/ui/format.ts formatClock)', () => {
+    expect(sheet.clockText(780)).toBe('1:00 PM');
+    for (let m = 0; m < 1440; m++) expect(sheet.clockText(m)).toBe(formatClock(1440 * 3 + m));
+    for (const s of shots) if (s.name.startsWith('game-')) expect(sheet.clockText(sheet.shotMinuteOfDay(s))).toBe(formatClock(sheet.shotMinuteOfDay(s)));
   });
 
   it('the viewports are 1440 by 900 and 390 by 844, both at DPR 2', () => {

@@ -24,7 +24,10 @@
 // Each game shot seeds a temporary copy of the fixture with the clock moved to the shot's time,
 // and every per-person minute stamp (waitStart, stayUntil, storyTripStart, a guard's pauseUntil,
 // a collector's until) moved by the same delta, so a wait keeps its age; the committed fixture is
-// never written. The room and person shots click a target the fixture puts inside the canvas band
+// never written. The game is paused before its first tick (a script injected ahead of the page
+// clicks Pause the moment the ui mounts), so the tower is the fixture as seeded and the clock reads
+// the shot's time exactly; a clock that does not is one line in NOT-CAPTURED.md, and the shot is
+// still taken. The room and person shots click a target the fixture puts inside the canvas band
 // the chrome leaves free at the opening view, and the ghost and place shots aim at the same view:
 // openingView models renderer.ts frameInitial (since design pass package P1, the whole tower at
 // zoom 0.5 when it fits the band, else zoom 1 with the street at camera.ts openingGroundLine). The
@@ -177,6 +180,17 @@ export function parseArgs(argv) {
 /** The minute of the day a game shot asks for: its `minute`, or its `hour` on the hour. */
 export function shotMinuteOfDay(shot) {
   return shot.minute ?? shot.hour * 60;
+}
+
+/**
+ * What the status bar clock reads at a minute of the day: src/ui/format.ts formatClock, which
+ * src/ui/status.ts (lines 382 to 385) writes into .hs-status-clock .hs-readout-value as the digits
+ * and " AM" or " PM". tests/design/sheet.test.ts holds this copy to the original.
+ */
+export function clockText(minuteOfDay) {
+  const hour = Math.floor(minuteOfDay / 60) % 24;
+  const hour12 = hour % 12 === 0 ? 12 : hour % 12;
+  return `${hour12}:${String(minuteOfDay % 60).padStart(2, '0')} ${hour < 12 ? 'AM' : 'PM'}`;
 }
 
 /** Moves a minute stamp by delta; null and absent stay as they are. */
@@ -597,7 +611,34 @@ async function setViewport(browser, vp) {
   await browser.send('Emulation.setTouchEmulationEnabled', vp.mobile ? { enabled: true, maxTouchPoints: 5 } : { enabled: false });
 }
 
+/** The speed bar's Pause button (src/ui/ui.ts line 300): aria-label Pause, and its click is game.setSpeed(0), not a toggle. */
+const PAUSE_BUTTON = `b.textContent.trim() === 'Pause' || b.getAttribute('aria-label') === 'Pause'`;
+
 /**
+ * Stops the clock before the first tick. src/main.ts mounts the ui (createUi, line 141) and starts
+ * the loop (game.start(), line 142) in one synchronous step, and a tick only ever runs inside an
+ * animation frame (src/game/game.ts advance, line 351; the 50 ms timer ticks only in a hidden tab).
+ * This runs before the page's own scripts on every new document: a MutationObserver whose callback,
+ * a microtask, runs right after that step and before any frame, and clicks Pause.
+ */
+const PAUSE_AT_MOUNT = `(() => {
+  if (window.top !== window) return;
+  const mo = new MutationObserver(() => {
+    const b = [...document.querySelectorAll('button')].find((b) => ${PAUSE_BUTTON});
+    if (!b) return;
+    mo.disconnect();
+    b.click();
+    window.__hsSheetPaused = true;
+  });
+  mo.observe(document, { childList: true, subtree: true });
+})();`;
+
+/**
+ * Opens the seeded game and stops its clock before the first tick (PAUSE_AT_MOUNT), so the tower
+ * shows the fixture as seeded at the shot's minute. Returns { clock, early }: the status bar's
+ * clock text after the pause, and whether the early pause took (if not, Pause is clicked after
+ * the fade as before, and the game has run meanwhile).
+ *
  * `theme` sets hs.theme (public/theme.js reads it on the game page too) before the game loads; a
  * shot with none clears it, so one shot's theme never carries into the next on the same origin.
  * hs.watchMode (src/ui/prefs.ts) is cleared the same way: the watch shot turns it on itself.
@@ -608,18 +649,26 @@ async function openGame(browser, base, vp, name, theme = null) {
   await evaluate(`(() => { const p = ${JSON.stringify(PREFS)}; for (const k in p) localStorage.setItem(k, p[k]);
     const t = ${JSON.stringify(theme)}; if (t) localStorage.setItem('hs.theme', t); else localStorage.removeItem('hs.theme');
     localStorage.removeItem('hs.watchMode'); return true; })()`);
+  const { identifier } = await send('Page.addScriptToEvaluateOnNewDocument', { source: PAUSE_AT_MOUNT });
   let mounted = false;
-  for (let attempt = 0; attempt < 3 && !mounted; attempt++) {
-    await send('Page.navigate', { url: `${base}/?cb=${Date.now()}` });
-    for (let i = 0; i < 30 && !mounted; i++) {
-      await sleep(500);
-      mounted = await evaluate(`!!document.querySelector('#view canvas') && [...document.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Pause' || b.getAttribute('aria-label') === 'Pause')`).catch(() => false);
+  try {
+    for (let attempt = 0; attempt < 3 && !mounted; attempt++) {
+      await send('Page.navigate', { url: `${base}/?cb=${Date.now()}` });
+      for (let i = 0; i < 30 && !mounted; i++) {
+        await sleep(500);
+        mounted = await evaluate(`!!document.querySelector('#view canvas') && [...document.querySelectorAll('button')].some((b) => ${PAUSE_BUTTON})`).catch(() => false);
+      }
     }
+  } finally {
+    await send('Page.removeScriptToEvaluateOnNewDocument', { identifier }).catch(() => {});
   }
   if (!mounted) throw new Error(`the game did not mount at ${name}: ${browser.errors.slice(-3).join(' | ')}`);
-  await sleep(2500); // the fade in, and a few ticks so the people are out
-  await evaluate(`(() => { const b = [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Pause' || b.getAttribute('aria-label') === 'Pause'); b && b.click(); return !!b; })()`);
+  await sleep(2500); // the fade in; the clock is already stopped
+  const early = await evaluate('window.__hsSheetPaused === true').catch(() => false);
+  if (!early) await evaluate(`(() => { const b = [...document.querySelectorAll('button')].find((b) => ${PAUSE_BUTTON}); b && b.click(); return !!b; })()`);
   await sleep(600);
+  const clock = await evaluate(`(document.querySelector('.hs-status-clock .hs-readout-value')?.textContent ?? '').trim()`).catch(() => '');
+  return { clock, early };
 }
 
 async function capture(browser, vp) {
@@ -735,7 +784,12 @@ async function gameShot(browser, base, shot, fixtureText, ctx) {
   writeFileSync(tmp, saveText);
   await seed(browser, base, readFileSync(tmp, 'utf8'));
   rmSync(tmp, { force: true });
-  await openGame(browser, base, vp, shot.name, shot.theme ?? null);
+  const opened = await openGame(browser, base, vp, shot.name, shot.theme ?? null);
+  const expectClock = clockText(shotMinuteOfDay(shot));
+  out.note = `clock ${opened.clock || 'unread'}${opened.early ? '' : ', paused late'}`;
+  // A clock that moved means the game ticked before the pause: the tower is not the fixture as
+  // seeded. The shot is still taken, and the line says so.
+  if (opened.clock !== expectClock) out.skipped.push({ name: shot.name, taken: true, why: `the status bar clock reads "${opened.clock}" after the pause, not "${expectClock}"${opened.early ? '' : ' (the pause at mount did not take; Pause was clicked after the fade)'}; the shot was taken anyway` });
 
   const shoot = async (name) => {
     writeFileSync(join(ctx.outDir, `${name}.png`), await capture(browser, vp));
@@ -756,7 +810,7 @@ async function gameShot(browser, base, shot, fixtureText, ctx) {
         await browser.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: c.x, y: c.y, deltaX: 0, deltaY: WHEEL_NOTCH, modifiers: CDP_CTRL });
       }
       await sleep(SNAP_SETTLE_MS);
-      out.note = `zoom ${opening} to ${plan.zoom} after ${plan.notches} notches of ${WHEEL_NOTCH}`;
+      out.note += `; zoom ${opening} to ${plan.zoom} after ${plan.notches} notches of ${WHEEL_NOTCH}`;
       await shoot(shot.name);
       break;
     }
@@ -811,7 +865,7 @@ async function gameShot(browser, base, shot, fixtureText, ctx) {
         const shown = await browser.evaluate(`[...document.querySelectorAll('.hs-panel')].filter((p) => p.getBoundingClientRect().height > 0).map((p) => (p.querySelector('.hs-panel-title-text')?.textContent ?? '').trim()).join(', ')`).catch(() => '');
         skip(`clicked ${target.what} at css (${target.x}, ${target.y}), no ${shot.state === 'room' ? '.hs-panel titled Restaurant' : 'person .hs-panel'} in 5 s (open: ${shown || 'none'})`);
       }
-      else { await sleep(400); out.note = target.what; await shoot(shot.name); }
+      else { await sleep(400); out.note += `; ${target.what}`; await shoot(shot.name); }
       break;
     }
     case 'ghost': {
@@ -845,7 +899,7 @@ async function gameShot(browser, base, shot, fixtureText, ctx) {
         started.push(Date.now() - t0);
         await shoot(`${shot.name}-${at}`);
       }
-      out.note = `captures began ${started.join(', ')} ms after the click`;
+      out.note += `; captures began ${started.join(', ')} ms after the click`;
       break;
     }
     default:
@@ -997,11 +1051,13 @@ async function shootAll(args, tmp) {
       }
       for (const s of result.skipped) appendFileSync(notCaptured, `${s.name} | ${s.why}\n`);
       if (result.files.length > 0) {
-        const partial = result.skipped.length > 0 ? `; skipped ${result.skipped.map((s) => s.name).join(', ')}` : '';
-        const note = result.note ? `; ${result.note}` : '';
+        const missed = result.skipped.filter((s) => !s.taken);
+        const warned = result.skipped.filter((s) => s.taken);
+        const partial = missed.length > 0 ? `; skipped ${missed.map((s) => s.name).join(', ')}` : '';
+        const note = `${result.note ? `; ${result.note}` : ''}${warned.map((s) => `; ${s.why}`).join('')}`;
         console.log(`captured ${shot.name}${result.files.length > 1 || partial ? ` (${result.files.join(', ')})` : ''}${partial}${note}`);
       } else {
-        console.log(`skipped ${shot.name} | ${result.skipped.map((s) => s.why).join('; ')}`);
+        console.log(`skipped ${shot.name} | ${result.skipped.map((s) => s.why).join('; ')}${result.note ? ` (${result.note})` : ''}`);
       }
     }
     const pngs = readdirSync(outDir).filter((f) => f.endsWith('.png'));
