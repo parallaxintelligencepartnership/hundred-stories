@@ -840,6 +840,11 @@ button.hs-readout:hover {
   display: none;
 }
 
+/* A wide screen names it in words; the house is the phone's (the phone block). */
+.hs-my-tower .hs-btn-icon {
+  display: none;
+}
+
 .hs-btn:hover:not(:disabled) {
   border-color: var(--amber);
 }
@@ -2998,6 +3003,15 @@ button.hs-news-toast {
     padding: 2px 6px;
   }
 
+  /* The bottom left cluster: one row as tall as the speed pill and Menu (a 44 px target in 4 px
+     of padding), with the night speed label (32 px, 4 px up) over it. The side card sits on
+     top of all of it (below). */
+  .hs-ui {
+    --cluster-row: calc(var(--touch) + 8px);
+    --cluster-label: calc(32px + 4px);
+    --cluster-h: calc(var(--cluster-row) + var(--cluster-label));
+  }
+
   /* The controls leave the bar's flow for the bottom left corner. */
   .hs-top-actions {
     position: fixed;
@@ -3011,6 +3025,57 @@ button.hs-news-toast {
   .hs-views-btn,
   .hs-round[aria-label='Share'] {
     display: none;
+  }
+
+  /* Where one row would reach Build (under 390 px, or with Larger text at any phone width) the
+     cluster stacks in the same corner: My tower and Menu over the speed pill. It is then as wide
+     as the speed pill, and two rows tall for the side card. My tower and Menu keep their own
+     round size at the start of their row rather than stretch across the pill's width. These come before the build and
+     panel rule below, which still hides the cluster at the same specificity. */
+  :root.hs-large-text .hs-ui {
+    --cluster-h: calc(2 * var(--cluster-row) + var(--gap-float) + var(--cluster-label));
+  }
+
+  :root.hs-large-text .hs-top-actions {
+    display: grid;
+    grid-template-columns: repeat(2, auto);
+    justify-content: start;
+    align-items: center;
+  }
+
+  :root.hs-large-text .hs-top-actions .hs-speed {
+    grid-row: 2;
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+
+  :root.hs-large-text .hs-top-actions :is(.hs-my-tower, .hs-round) {
+    grid-row: 1;
+    justify-self: start;
+  }
+
+  @media (max-width: 389px) {
+    .hs-ui {
+      --cluster-h: calc(2 * var(--cluster-row) + var(--gap-float) + var(--cluster-label));
+    }
+
+    .hs-top-actions {
+      display: grid;
+      grid-template-columns: repeat(2, auto);
+      justify-content: start;
+      align-items: center;
+    }
+
+    .hs-top-actions .hs-speed {
+      grid-row: 2;
+      grid-column: 1 / -1;
+      justify-self: start;
+    }
+
+    .hs-top-actions :is(.hs-my-tower, .hs-round) {
+      grid-row: 1;
+      justify-self: start;
+    }
   }
 
   /* The open build sheet and an open panel own the bottom of the screen. */
@@ -3067,6 +3132,30 @@ button.hs-news-toast {
     display: none;
   }
 
+  /* My tower, outside it, is the house alone: a 44 px round target between the speed pill and
+     Menu, so at 390 px the corner stays one row 8 px clear of Build (310 against 318). The
+     aria-label and the tooltip name it. */
+  .hs-my-tower {
+    --r: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: var(--touch);
+    min-height: var(--touch);
+    padding: 0;
+    border: 0;
+  }
+
+  .hs-my-tower .hs-btn-icon {
+    display: block;
+    width: 18px;
+    height: 18px;
+  }
+
+  .hs-my-tower .hs-btn-label {
+    display: none;
+  }
+
   /* Bottom left at 390 px: the speed pill (4 x 44 + 3 x 2 + 8 = 190), an 8 px gap and Menu (52)
      end 258 px from the left edge, clear of Build's 318. */
   .hs-speed-btn {
@@ -3106,8 +3195,16 @@ button.hs-news-toast {
     right: 0;
   }
 
+  /* A finger on the star count opens the goals card (ui.ts), and a tap leaves the button
+     hovered and focused: the tooltip stays shut under it, the card says the same. */
+  @media (pointer: coarse) {
+    .hs-status-stars:is(:hover, :focus-within) .hs-tip {
+      display: none;
+    }
+  }
+
   /* The Build button: bottom right, in the same place. While the sheet is open it steps aside
-     (below) and the sheet's own close, top right, takes its place, so it covers no tile. */
+     (below) and the sheet's own close, right of its tabs, takes its place, so it covers no tile. */
   .hs-build-fab {
     --r: 50%;
     position: absolute;
@@ -3156,12 +3253,22 @@ button.hs-news-toast {
     display: none;
   }
 
-  /* The open sheet's close: a 44 px round button in its top right corner. */
+  /* The open sheet is a grid: the handle across the top, then the tab strip with the close in
+     its own column at the right end of the tab row, then the tiles across. The strip scrolls
+     inside its own column, so no tab passes under the close. */
+  .hs-palette:is(.is-sheet-row, .is-sheet-full) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto auto minmax(0, 1fr);
+  }
+
+  /* The open sheet's close: a 44 px round button, its own cell right of the tabs. */
   .hs-palette:is(.is-sheet-row, .is-sheet-full) .hs-build-close {
     display: inline-flex;
-    position: absolute;
-    top: 2px;
-    right: calc(8px + var(--safe-right));
+    grid-column: 2;
+    grid-row: 2;
+    align-self: start;
+    margin-right: 8px;
     width: var(--touch);
     height: var(--touch);
     align-items: center;
@@ -3216,6 +3323,8 @@ button.hs-news-toast {
   .hs-build-handle {
     position: relative;
     display: block;
+    grid-column: 1 / -1;
+    grid-row: 1;
     flex: 0 0 auto;
     width: 100%;
     min-height: 28px;
@@ -3239,6 +3348,8 @@ button.hs-news-toast {
   }
 
   .hs-build-tabs {
+    grid-column: 1;
+    grid-row: 2;
     flex: 0 0 auto;
     flex-direction: row;
     gap: 6px;
@@ -3262,6 +3373,8 @@ button.hs-news-toast {
 
   /* One row that scrolls sideways, 12 px in from each side: the Build button is out of the way. */
   .hs-build-items {
+    grid-column: 1 / -1;
+    grid-row: 3;
     display: flex;
     flex-direction: row;
     gap: 8px;
@@ -3400,9 +3513,11 @@ button.hs-news-toast {
   }
 
   /* The side card is a sheet on the folded palette; the open palette takes its place. */
+  /* Open, it stands 8 px over the speed pill and Menu in the corner (8 px up, --cluster-h tall),
+     or over the placing bar where that reaches higher, so it never covers them. */
   .hs-card {
     top: auto;
-    bottom: calc(var(--chrome-bottom, var(--safe-bottom)) + var(--gap-float));
+    bottom: calc(max(var(--chrome-bottom, 0px), 8px + var(--safe-bottom) + var(--cluster-h)) + var(--gap-float));
     left: calc(var(--edge) + var(--safe-left));
     right: calc(var(--fab) + 2 * var(--edge) + var(--safe-right));
     width: auto;
@@ -3567,12 +3682,14 @@ button.hs-news-toast {
   }
 
   /* On a phone the alerts sit under the status bar and never take more than the top quarter of
-     the view; they scroll inside that band, and step left of the map in the corner. */
+     the view; they scroll inside that band, left of the map's corner. */
   .hs-toasts {
     top: calc(var(--top-actual, calc(var(--top-h) * 2 + var(--safe-top))) + var(--gap-float) + var(--chip-h, 0px));
     bottom: auto;
     left: calc(var(--pad) + var(--safe-left));
-    right: calc(var(--pad) + var(--safe-right));
+    /* The map's corner stays free whether it shows or not: the map comes and goes with every
+       pan, and the alerts keep one right edge instead of jumping sideways with it. */
+    right: calc(64px + 2 * var(--edge) + var(--safe-right));
     width: auto;
     max-height: 25vh;
     overflow-y: auto;
@@ -3580,6 +3697,7 @@ button.hs-news-toast {
     gap: 4px;
   }
 
+  /* The same edge with the map up: this outranks the wide screen's step left of a 96 px map. */
   .hs-minimap:not(.is-hidden) ~ .hs-toasts {
     right: calc(64px + 2 * var(--edge) + var(--safe-right));
   }

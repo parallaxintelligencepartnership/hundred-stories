@@ -165,15 +165,16 @@ describe('build dock on its own', () => {
     expect([build.sheet(), dom.activeElement]).toEqual(['closed', fab]);
   });
 
-  it('shows that close only on the open phone sheet, 44 px round in its top right, with the Build button hidden', () => {
+  it('shows that close only on the open phone sheet, 44 px round in its own cell right of the tabs, with the Build button hidden', () => {
     expect(css).toMatch(/\n\.hs-build-close \{\s*display: none;\s*\}/);
     const phone = phoneBlock();
     const close = ruleIn(phone, '.hs-palette:is(.is-sheet-row, .is-sheet-full) .hs-build-close');
     for (const line of [
       'display: inline-flex;',
-      'position: absolute;',
-      'top: 2px;',
-      'right: calc(8px + var(--safe-right));',
+      'grid-column: 2;',
+      'grid-row: 2;',
+      'align-self: start;',
+      'margin-right: 8px;',
       'width: var(--touch);',
       'height: var(--touch);',
       'align-items: center;',
@@ -184,9 +185,37 @@ describe('build dock on its own', () => {
     ]) {
       expect(close).toContain(line);
     }
+    // Not laid over the sheet: a slot of its own, so padding is not what keeps the tabs off it.
+    expect(close).not.toContain('position: absolute');
     expect(ruleIn(phone, ".hs-build-fab[aria-expanded='true']")).toContain('display: none;');
     // The row keeps no corner clear for the Build button any more: 12 px on the right as on the left.
     expect(ruleIn(phone, '.hs-build-items')).toContain('padding: 0 12px 12px;');
+  });
+
+  it('gives the close a column of its own beside the tab strip, so no tab scrolls under it at 390 px', () => {
+    const phone = phoneBlock();
+    // The open sheet is a grid: the handle across, the tabs and the close, the tiles across.
+    const sheet = ruleIn(phone, '.hs-palette:is(.is-sheet-row, .is-sheet-full)');
+    expect(sheet).toContain('display: grid;');
+    expect(sheet).toContain('grid-template-columns: minmax(0, 1fr) auto;');
+    expect(sheet).toContain('grid-template-rows: auto auto minmax(0, 1fr);');
+    expect(ruleIn(phone, '.hs-build-handle')).toContain('grid-column: 1 / -1;');
+    expect(ruleIn(phone, '.hs-build-handle')).toContain('grid-row: 1;');
+    const tabs = ruleIn(phone, '.hs-build-tabs');
+    expect(tabs).toContain('grid-column: 1;');
+    expect(tabs).toContain('grid-row: 2;');
+    expect(tabs).toContain('overflow-x: auto;'); // the strip scrolls inside its own column
+    expect(ruleIn(phone, '.hs-build-items')).toContain('grid-column: 1 / -1;');
+    expect(ruleIn(phone, '.hs-build-items')).toContain('grid-row: 3;');
+    // At 390 px, from the css: the close's column is its width and its right margin, and the
+    // strip's box, which clips every tab, ends where that column starts. The close keeps 44 px.
+    const close = ruleIn(phone, '.hs-palette:is(.is-sheet-row, .is-sheet-full) .hs-build-close');
+    const touch = 44 * Number(/--ui-scale: ([\d.]+);/.exec(css)?.[1]);
+    expect(css).toMatch(/--touch: calc\(44px \* var\(--ui-scale\)\);/);
+    expect(/width: var\(--touch\);/.test(close)).toBe(true);
+    const margin = Number(/margin-right: (\d+)px;/.exec(close)?.[1]);
+    expect(390 - margin - touch).toBe(338); // the close spans 338 to 382, its column's start
+    expect(touch).toBeGreaterThanOrEqual(44);
   });
 
   it('closes on Escape and gives focus back to the Build button', () => {
@@ -290,6 +319,29 @@ describe('build in the shell', () => {
     click(find(root, 'hs-build-placing-cancel'));
     expect(g.tools.at(-1)).toEqual({ kind: 'none' });
     expect(has(nav, 'is-sheet-row')).toBe(true);
+  });
+
+  it('on a phone: the speed pill and Menu stay aside while the placing bar is up, and come back when the sheet shuts', () => {
+    setWidth(390);
+    const g = game();
+    const root = dom.createElement('div');
+    createUi(root as never, g.api, {} as never);
+    const shell = find(root, 'hs-ui');
+    const nav = find(root, 'hs-palette');
+    expect(has(shell, 'is-building')).toBe(false);
+    click(find(root, 'hs-build-fab'));
+    expect(has(shell, 'is-building')).toBe(true);
+    click(tile(root, 'Lobby'));
+    expect(has(nav, 'is-sheet-placing')).toBe(true);
+    // The placing bar owns the bottom left, where the speed pill and Menu would be.
+    expect(has(shell, 'is-building')).toBe(true);
+    // Cancel: the tool goes down and the row comes back, still the sheet's bottom.
+    click(find(root, 'hs-build-placing-cancel'));
+    expect(has(nav, 'is-sheet-row')).toBe(true);
+    expect(has(shell, 'is-building')).toBe(true);
+    click(find(root, 'hs-build-close'));
+    expect(has(nav, 'is-sheet-closed')).toBe(true);
+    expect(has(shell, 'is-building')).toBe(false);
   });
 
   it('on a phone: draws the tile pictures when the sheet opens, even with the dock folded on an earlier visit', () => {

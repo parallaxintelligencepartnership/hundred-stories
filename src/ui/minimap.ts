@@ -2,8 +2,8 @@
 // of the view, the viewport as an outline, click or drag to move the camera there.
 //
 // It shows only while the tower is taller than the free band (the part of the view no chrome
-// covers) at the current zoom, and on a phone only while the camera moves and for
-// MINIMAP_MOVE_MS after, with no fade. Two stacked canvases keep the work small: the tower
+// covers) at the current zoom, and on a phone only while the camera moves, through the rest of
+// that press, and for MINIMAP_MOVE_MS after the pointer lifts, with no fade. Two stacked canvases keep the work small: the tower
 // layer is drawn from the world when world.structureVersion changes, the outline layer on the
 // frames the camera moved. It reads the camera through its public fields and never touches the
 // renderer, and it measures nothing: the view size comes from the camera's own arithmetic.
@@ -231,11 +231,32 @@ export function createMinimap(options: MinimapOptions): Minimap {
   let lastX = camera.x;
   let lastY = camera.y;
   let lastMoveMs = Number.NEGATIVE_INFINITY;
+  /**
+   * Pointers down anywhere, and when the first went down. A pan held still keeps the map: the
+   * MINIMAP_MOVE_MS count starts when the last pointer lifts, never in the middle of a drag.
+   */
+  const pointersDown = new Set<number>();
+  let pressStartMs = Number.POSITIVE_INFINITY;
 
   const onResize = (): void => {
     compact = readCompact();
   };
+  const onPointerDown = (event: unknown): void => {
+    const id = (event as { pointerId?: number }).pointerId ?? 0;
+    if (pointersDown.size === 0) pressStartMs = performance.now();
+    pointersDown.add(id);
+  };
+  const onPointerUp = (event: unknown): void => {
+    const id = (event as { pointerId?: number }).pointerId ?? 0;
+    if (!pointersDown.delete(id) || pointersDown.size > 0) return;
+    // The camera moved during this press: the count runs from the lift.
+    if (lastMoveMs >= pressStartMs) lastMoveMs = performance.now();
+    pressStartMs = Number.POSITIVE_INFINITY;
+  };
   window.addEventListener('resize', onResize);
+  window.addEventListener('pointerdown', onPointerDown, { capture: true });
+  window.addEventListener('pointerup', onPointerUp, { capture: true });
+  window.addEventListener('pointercancel', onPointerUp, { capture: true });
 
   overlay.addEventListener('pointerdown', (event: unknown) => {
     const e = event as PointerEvent;
@@ -288,7 +309,8 @@ export function createMinimap(options: MinimapOptions): Minimap {
     const view = readView(camera, options.getChrome());
     const band = freeBandPx(view);
     // A phone keeps the map for travel: it leaves the tower alone while the player watches.
-    const travelling = !compact || now - lastMoveMs < MINIMAP_MOVE_MS;
+    const held = pointersDown.size > 0 && lastMoveMs >= pressStartMs;
+    const travelling = !compact || held || now - lastMoveMs < MINIMAP_MOVE_MS;
     const show = travelling && extent !== null && minimapVisible(towerFloors(extent), view.zoom, band);
     if (show !== visible) {
       visible = show;
@@ -339,6 +361,9 @@ export function createMinimap(options: MinimapOptions): Minimap {
       if (raf) cancelAnimationFrame(raf);
       raf = 0;
       window.removeEventListener('resize', onResize);
+      window.removeEventListener('pointerdown', onPointerDown, { capture: true });
+      window.removeEventListener('pointerup', onPointerUp, { capture: true });
+      window.removeEventListener('pointercancel', onPointerUp, { capture: true });
       node.remove();
     },
   };

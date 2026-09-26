@@ -282,7 +282,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   top.append(pill, actions);
 
   // Readouts: the mono readout type is kept for cash and the clock only.
-  const status = createStatusBar();
+  // A phone's tap on the stars opens the goals (below), never the tooltip over them.
+  const status = createStatusBar({ starsTip: () => !inSheetLayout() });
   status.cash.addEventListener('click', () => setPanel(panelKind === 'finances' ? 'none' : 'finances'));
   // A phone shows no folded goals card (ui.css), so the star count that names them opens them:
   // the phone's goals card, whose Hide folds it out of sight again.
@@ -336,8 +337,12 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   const menuButton = iconButton('menu', 'Menu', 'Open the menu', 'hs-round', () =>
     setPanel(panelKind === 'settings' ? 'none' : 'settings'),
   );
-  // Outside My tower (today's tower, a friend's tower) one tap goes back to it.
-  const myTowerButton = button('My tower', 'hs-btn hs-pill-btn', () => openMyTower());
+  // Outside My tower (today's tower, a friend's tower) one tap goes back to it. The word on a
+  // wide screen; a phone shows the house alone (ui.css), named by the aria-label.
+  const myTowerButton = button('', 'hs-btn hs-pill-btn hs-my-tower', () => openMyTower());
+  myTowerButton.append(icon('home', 'hs-icon hs-btn-icon') as unknown as HTMLElement, el('span', 'hs-btn-label', 'My tower'));
+  myTowerButton.setAttribute('aria-label', 'My tower');
+  myTowerButton.title = 'Back to My tower';
   myTowerButton.hidden = true;
   actions.append(status.mode, speedBar, myTowerButton, view.button, shareButton, menuButton);
 
@@ -369,9 +374,9 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
       update();
     },
     changed: () => {
-      // The open phone sheet owns the bottom: the speed pill and Menu step aside (ui.css).
-      const sheet = build.sheet();
-      shell.classList.toggle('is-building', sheet === 'row' || sheet === 'full');
+      // The open phone sheet and its placing bar own the bottom: the speed pill and Menu step
+      // aside (ui.css) and come back when the sheet shuts.
+      shell.classList.toggle('is-building', build.sheet() !== 'closed');
       chromeWatch?.measure();
       queueThumbnails(); // the category shown may be new: draw its tiles
     },

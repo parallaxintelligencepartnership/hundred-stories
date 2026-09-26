@@ -43,6 +43,104 @@ function nestedBlock(outer: string, head: string): string {
   throw new Error(`unclosed ${head}`);
 }
 
+/** A block with its nested @media blocks cut out: the rules that hold at every width inside it. */
+function flat(block: string): string {
+  let out = block;
+  for (let at = out.indexOf('@media'); at >= 0; at = out.indexOf('@media')) {
+    let depth = 0;
+    for (let i = out.indexOf('{', at); i < out.length; i += 1) {
+      if (out[i] === '{') depth += 1;
+      if (out[i] === '}' && --depth === 0) {
+        out = out.slice(0, at) + out.slice(i + 1);
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+/** The px value of a css length: tokens and env() safe areas resolved, calc and max worked out. */
+function px(expr: string, vars: Record<string, number>): number {
+  let e = expr
+    .replace(/var\(--([\w-]+)(?:,\s*[^()]*)?\)/g, (_m, name: string) => {
+      if (!(name in vars)) throw new Error(`no --${name} for ${expr}`);
+      return `(${vars[name]})`;
+    })
+    .replace(/calc\(/g, '(')
+    .replace(/max\(/g, 'Math.max(')
+    .replace(/(\d+(?:\.\d+)?)px/g, '$1');
+  e = e.trim();
+  if (!/^(Math\.max|[\d\s.+\-*/(),])+$/.test(e)) throw new Error(`cannot work out ${expr} (${e})`);
+  return Function(`return ${e}`)() as number;
+}
+
+/** The page tokens at a text scale, read from :root: 1 or Larger text's. */
+function tokens(large: boolean): Record<string, number> {
+  const root = /\n:root \{([^}]*)\}/.exec(css)?.[1] ?? '';
+  const decl = (name: string): string => new RegExp(`--${name}: ([^;]+);`).exec(root)?.[1] ?? '';
+  const scale = large ? Number(/:root\.hs-large-text \{\s*--ui-scale: ([\d.]+);/.exec(css)?.[1]) : Number(decl('ui-scale'));
+  const vars: Record<string, number> = { 'ui-scale': scale, 'safe-left': 0, 'safe-right': 0, 'safe-bottom': 0, 'chrome-bottom': 0 };
+  for (const name of ['edge', 'gap-float', 'touch', 'fab']) vars[name] = px(decl(name), vars);
+  return vars;
+}
+
+/**
+ * The bottom left cluster outside My tower (speed pill, My tower, Menu) at a width and text
+ * scale, laid out by the phone block's rules: where its right edge falls, where Build starts,
+ * its targets, whether it stacks, and the card's gap over its box (the night label included).
+ */
+function cornerAt(width: number, large: boolean) {
+  const wideCss = css.slice(0, css.indexOf('@media (max-width: 720px) {'));
+  const phone = phoneBlock();
+  const outer = flat(phone);
+  const breakAt = Number(/@media \(max-width: (\d+)px\) \{\s*\.hs-ui \{\s*--cluster-h/.exec(phone)?.[1]);
+  const narrow = nestedBlock(phone, `@media (max-width: ${breakAt}px)`);
+  const vars = tokens(large);
+  const stacksLarge = rule(outer, ':root.hs-large-text .hs-top-actions').display === 'grid';
+  const stacked = (width <= breakAt && rule(narrow, '.hs-top-actions').display === 'grid') || (large && stacksLarge);
+  // The cluster lives in the top bar, whose --edge is the phone's own.
+  const inBar = { ...vars, edge: px(rule(outer, '.hs-top')['--edge']!, vars) };
+  const left = px(rule(outer, '.hs-top-actions').left!, inBar);
+  const bottom = px(rule(outer, '.hs-top-actions').bottom!, inBar);
+  const gap = px(rule(wideCss, '.hs-top-actions').gap!, vars);
+  const pill = rule(wideCss, '.hs-speed');
+  const button = px(rule(outer, '.hs-speed-btn')['min-width']!, vars);
+  const buttonH = px(rule(wideCss, '.hs-icon-btn')['min-height']!, vars);
+  const speedW = 4 * button + 3 * px(pill.gap!, vars) + 2 * px(pill.padding!, vars);
+  const speedH = buttonH + 2 * px(pill.padding!, vars);
+  const mineW = px(rule(outer, '.hs-my-tower')['min-width']!, vars);
+  const mineH = px(rule(outer, '.hs-my-tower')['min-height']!, vars);
+  const menuW = px(rule(wideCss, '.hs-round')['min-width']!, vars);
+  const menuH = px(rule(wideCss, '.hs-round')['min-height']!, vars);
+  const rowH = Math.max(speedH, mineH, menuH);
+  const clusterW = stacked ? Math.max(speedW, mineW + gap + menuW) : speedW + gap + mineW + gap + menuW;
+  const clusterH = stacked ? 2 * rowH + gap : rowH;
+  // The night speed label hangs over the cluster: its height and the gap under it.
+  const label = px(rule(wideCss, '.hs-speed-mode')['min-height']!, vars) + px(/calc\(100% \+ ([\d.]+px)\)/.exec(rule(outer, '.hs-speed-mode').bottom!)![1]!, vars);
+  const fab = rule(outer, '.hs-build-fab');
+  const buildLeft = width - px(fab.right!, vars) - px(fab.width!, vars);
+  // The card's inset, from the --cluster-h of the branch in force.
+  const hs = { ...vars };
+  hs['cluster-row'] = px(rule(outer, '.hs-ui')['--cluster-row']!, hs);
+  hs['cluster-label'] = px(rule(outer, '.hs-ui')['--cluster-label']!, hs);
+  const clusterVar = large ? rule(outer, ':root.hs-large-text .hs-ui')['--cluster-h']! : width <= breakAt ? rule(narrow, '.hs-ui')['--cluster-h']! : rule(outer, '.hs-ui')['--cluster-h']!;
+  hs['cluster-h'] = px(clusterVar, hs);
+  const cardBottom = px(rule(outer, '.hs-card').bottom!, hs);
+  // Stacked, the upper row keeps My tower and Menu at their own size, not the pill's width.
+  const upper = large ? outer : narrow;
+  const prefix = large ? ':root.hs-large-text ' : '';
+  const upperRule = new RegExp(`${prefix.replace(/\./g, '\\.')}\\.hs-top-actions :is\\(\\.hs-my-tower, \\.hs-round\\) \\{([^}]*)\\}`).exec(upper)?.[1] ?? '';
+  const round = !stacked || (/justify-self: start;/.test(upperRule) && mineW === mineH && menuW === menuH);
+  return {
+    stacked,
+    round,
+    clear: buildLeft - (left + clusterW),
+    targets: [button, buttonH, mineW, mineH, menuW, menuH],
+    cardGap: cardBottom - (bottom + clusterH + label),
+    breakAt,
+  };
+}
+
 /** Every declaration for an exact selector inside a block, later rules winning. */
 function rule(block: string, selector: string): Record<string, string> {
   const out: Record<string, string> = {};
@@ -105,7 +203,7 @@ function returning(extra: Record<string, string> = {}): void {
   for (const [key, value] of Object.entries({ 'hs.intro.seen': 'true', 'hs.guide.done': 'true', ...extra })) store().setItem(key, value);
 }
 
-function mount(minute: number, extra: Record<string, unknown> = {}): FakeElement {
+function mount(minute: number, extra: Record<string, unknown> = {}, apiExtra: Record<string, unknown> = {}): FakeElement {
   const world = {
     cash: 2_000_000,
     population: 0,
@@ -131,6 +229,7 @@ function mount(minute: number, extra: Record<string, unknown> = {}): FakeElement
     getSelection: () => null,
     setChrome: () => {},
     setReducedMotion: () => {},
+    ...apiExtra,
   } as never;
   const root = dom.createElement('div');
   createUi(root as never, api, {} as never);
@@ -283,15 +382,73 @@ describe('top bar at phone width', () => {
     expect(rule(wide(), '.hs-icon-btn')['min-height']).toBe('var(--touch)');
     expect(rule(wide(), '.hs-round')['min-width']).toBe('calc(var(--touch) + 8px)');
     expect(rule(phoneBlock(), '.hs-top')['--edge']).toBe('8px');
-    const touch = 44;
-    const speedW = 4 * touch + 3 * 2 + 2 * 4; // four buttons, 2 px apart, in 4 px padding
-    const menuW = touch + 8;
-    const cluster = 8 + speedW + 8 + menuW; // the 8 px edge, the pill, the 8 px --gap-float, Menu
-    const buildLeft = 390 - 12 - 60; // Build: 60 px round, 12 px in from the right edge
-    expect(cluster).toBe(258);
-    expect(cluster).toBeLessThan(buildLeft);
+    // Worked out from the css: one row at 390 px, clear of Build even with My tower in it.
+    const corner = cornerAt(390, false);
+    expect(corner.stacked).toBe(false);
+    expect(corner.clear).toBeGreaterThanOrEqual(8);
     // The night mode label sits over the speed pill, out of the row.
     expect(rule(phoneBlock(), '.hs-speed-mode')).toMatchObject({ position: 'absolute', top: 'auto', bottom: 'calc(100% + 4px)', left: '0', right: 'auto' });
+  });
+
+  it('outside My tower keeps the corner one row at 390 px: My tower is the house alone, still named', () => {
+    const root = mount(9 * 60, {}, { getSlot: () => 'daily' });
+    const actions = find(root, 'hs-top-actions');
+    const mine = named(actions, 'My tower');
+    expect(mine.hidden).toBe(false);
+    expect(has(mine, 'hs-my-tower')).toBe(true);
+    expect(mine.title).toBe('Back to My tower');
+    // The house, and the words kept in the tree for a wide screen (and the aria-label for a reader).
+    const glyph = mine.children.find((n) => n.getAttribute('class') === 'hs-icon hs-btn-icon') as FakeElement;
+    expect(glyph.children[0]?.getAttribute('href')).toMatch(/home$/);
+    expect(find(mine, 'hs-btn-label').textContent).toBe('My tower');
+    // A wide screen shows the words only; a phone the house only, a 44 px round target.
+    expect(rule(wide(), '.hs-my-tower .hs-btn-icon').display).toBe('none');
+    expect(rule(phoneBlock(), '.hs-my-tower .hs-btn-label').display).toBe('none');
+    expect(rule(phoneBlock(), '.hs-my-tower .hs-btn-icon').display).toBe('block');
+    expect(rule(phoneBlock(), '.hs-my-tower')).toMatchObject({ '--r': '50%', 'min-width': 'var(--touch)', 'min-height': 'var(--touch)', padding: '0' });
+    // My tower stays in the corner at every phone width: no rule hides it there.
+    expect(Object.values(rule(flat(phoneBlock()), '.hs-my-tower'))).not.toContain('none');
+    expect(phoneBlock()).not.toMatch(/\.hs-my-tower \{\s*display: none/);
+  });
+
+  it.each([
+    [390, false],
+    [360, false],
+    [390, true],
+    [360, true],
+  ])('at %i px (Larger text %s) in a daily tower the corner clears Build by 8 px, every target 44 px or more', (width, large) => {
+    returning();
+    setWidth(width);
+    const root = mount(9 * 60, {}, { getSlot: () => 'daily' });
+    const actions = find(root, 'hs-top-actions');
+    // What the corner holds outside My tower: the four speed buttons, My tower and Menu.
+    expect(find(actions, 'hs-speed').children).toHaveLength(4);
+    expect(named(actions, 'My tower').hidden).toBe(false);
+    expect(named(actions, 'Menu').hidden).toBe(false);
+    const corner = cornerAt(width, large);
+    // One row only where it fits: 390 px at the normal scale. Else two rows in the corner.
+    expect(corner.stacked).toBe(width <= corner.breakAt || large);
+    expect(corner.clear).toBeGreaterThanOrEqual(8);
+    for (const size of corner.targets) expect(size).toBeGreaterThanOrEqual(44);
+    // My tower and Menu stay round: each as wide as it is tall, never stretched across the row.
+    expect(corner.round).toBe(true);
+    // The open card stands 8 px over the whole cluster, the night label included.
+    expect(corner.cardGap).toBe(8);
+  });
+
+  it('stacks the corner with My tower and Menu over the speed pill, one rule for narrow and Larger text', () => {
+    const phone = phoneBlock();
+    const narrow = nestedBlock(phone, `@media (max-width: ${cornerAt(360, false).breakAt}px)`);
+    expect(cornerAt(360, false).breakAt).toBe(389);
+    for (const [block, prefix] of [
+      [narrow, ''],
+      [flat(phone), ':root.hs-large-text '],
+    ] as const) {
+      expect(rule(block, `${prefix}.hs-top-actions .hs-speed`)).toMatchObject({ 'grid-row': '2', 'grid-column': '1 / -1' });
+      expect(block).toContain(`${prefix}.hs-top-actions :is(.hs-my-tower, .hs-round) {\n${prefix ? '    ' : '      '}grid-row: 1;`);
+    }
+    // The stacked rules come before the build and panel rule, so that still hides the corner.
+    expect(phone.indexOf(':root.hs-large-text .hs-top-actions {')).toBeLessThan(phone.indexOf('.hs-ui.is-building .hs-top-actions'));
   });
 
   it('steps the speed pill and Menu aside while the build sheet or a panel owns the bottom', () => {
@@ -367,6 +524,46 @@ describe('top bar at phone width', () => {
 });
 
 describe('goals at phone width', () => {
+  it('stands the open goals and guide card 8 px over the cluster and its night label, or over the placing bar', () => {
+    expect(rule(flat(phoneBlock()), '.hs-card').bottom).toBe(
+      'calc(max(var(--chrome-bottom, 0px), 8px + var(--safe-bottom) + var(--cluster-h)) + var(--gap-float))',
+    );
+    // Worked out from the css in each branch: one row, stacked, and Larger text.
+    expect([cornerAt(390, false), cornerAt(360, false), cornerAt(390, true)].map((c) => c.cardGap)).toEqual([8, 8, 8]);
+    // The side card holds both the guide's steps and the goals: one rule places both.
+    returning();
+    setWidth(390);
+    const root = mount(9 * 60);
+    const card = find(root, 'hs-card');
+    expect(has(card, 'is-collapsed') || has(card, 'is-hidden')).toBe(false);
+  });
+
+  it('at phone width a tap on the star count opens the goals card only, never the tooltip', () => {
+    returning({ 'hs.goals.collapsed': 'true' });
+    setWidth(390);
+    const root = mount(9 * 60);
+    const stars = find(root, 'hs-status-stars');
+    const button = find(stars, 'hs-stars-button');
+    // The tap reaches the button, then the readout around it.
+    click(button);
+    click(stars);
+    expect(has(find(root, 'hs-card'), 'is-collapsed')).toBe(false);
+    expect([has(stars, 'is-open'), button.getAttribute('aria-expanded')]).toEqual([false, 'false']);
+    click(button);
+    expect(has(stars, 'is-open')).toBe(false);
+    // A finger leaves the button hovered and focused: the tooltip stays shut there too.
+    expect(nestedBlock(phoneBlock(), '@media (pointer: coarse)')).toMatch(/\.hs-status-stars:is\(:hover, :focus-within\) \.hs-tip \{\s*display: none;/);
+  });
+
+  it('keeps the star tooltip on a tap on a wide screen', () => {
+    returning();
+    setWidth(1280);
+    const root = mount(9 * 60);
+    const stars = find(root, 'hs-status-stars');
+    click(find(stars, 'hs-stars-button'));
+    expect(has(stars, 'is-open')).toBe(true);
+  });
+
   it('opens the goals from the star count, where the folded card is not shown, and Hide folds them away', () => {
     expect(rule(phoneBlock(), '.hs-card.is-collapsed').display).toBe('none');
     returning({ 'hs.goals.collapsed': 'true' });

@@ -5,7 +5,7 @@
 //
 // Phone: nothing until the round Build button in the bottom right corner, which never moves.
 // It opens a bottom sheet: the category row and a sideways row of tiles. Drag up for the full
-// grid, swipe down to close. The open sheet carries its own close in its top right corner, and
+// grid, swipe down to close. The open sheet carries its own close at the end of its tab row, and
 // the Build button steps aside until it shuts, so no tile sits under it. With a tool in hand the
 // sheet shrinks to a small bar that names the item and its cost, with Cancel. Nothing here is
 // remembered: every load starts closed.
@@ -91,7 +91,7 @@ export function createBuildDock(options: BuildDockOptions): BuildDock {
   const handle = el('button', 'hs-build-handle');
   handle.type = 'button';
   // The sheet's own close, right after the handle: ui.css shows it only on the open phone sheet,
-  // top right, while the Build button is hidden.
+  // in its own cell right of the tabs, while the Build button is hidden.
   const sheetClose = el('button', 'hs-build-close');
   sheetClose.type = 'button';
   sheetClose.setAttribute('aria-label', 'Close build');

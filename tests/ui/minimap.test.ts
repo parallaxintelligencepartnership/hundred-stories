@@ -203,6 +203,55 @@ describe('on a phone and beside a card', () => {
     map.destroy();
   });
 
+  it('keeps the phone map through a pan held still, and counts the 1.5 s from the lift', () => {
+    (globalThis as { window: { matchMedia: unknown } }).window.matchMedia = () => ({ matches: true }); // a phone
+    let now = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+    const camera = createCamera();
+    camera.setViewport(390, 844);
+    const world = tower(30);
+    const map = createMinimap({ camera, getWorld: () => world as never, getChrome: () => ({ top: 64, bottom: 0 }) });
+    map.refresh();
+    // A finger goes down and pans, then holds still for far longer than 1.5 s.
+    now = 100;
+    dom.fireWindow('pointerdown', { pointerId: 7 });
+    now = 150;
+    camera.panBy(0, -200);
+    map.refresh();
+    expect(map.isVisible()).toBe(true);
+    now = 150 + 3 * MINIMAP_MOVE_MS;
+    map.refresh();
+    expect(map.isVisible()).toBe(true); // mid drag: never hidden
+    // The lift starts the count.
+    const lift = now;
+    dom.fireWindow('pointerup', { pointerId: 7 });
+    now = lift + MINIMAP_MOVE_MS - 1;
+    map.refresh();
+    expect(map.isVisible()).toBe(true);
+    now = lift + MINIMAP_MOVE_MS;
+    map.refresh();
+    expect(map.isVisible()).toBe(false);
+    // A press that moves nothing does not bring the map up.
+    now = 20_000;
+    dom.fireWindow('pointerdown', { pointerId: 8 });
+    map.refresh();
+    expect(map.isVisible()).toBe(false);
+    dom.fireWindow('pointercancel', { pointerId: 8 });
+    map.destroy();
+  });
+
+  it('keeps the phone alerts on one right edge whether the map shows or not', () => {
+    const css = readFileSync(new URL('../../src/ui/ui.css', import.meta.url), 'utf8');
+    const start = css.indexOf('/* On a phone the alerts sit under the status bar');
+    const phone = css.slice(start, css.indexOf('.hs-toast {', start));
+    const always = /\.hs-toasts \{[^}]*?\n\s*right: ([^;]+);/.exec(phone)?.[1];
+    const withMap = /\.hs-minimap:not\(\.is-hidden\) ~ \.hs-toasts \{\s*right: ([^;]+);/.exec(phone)?.[1];
+    expect(always).toBe('calc(64px + 2 * var(--edge) + var(--safe-right))');
+    expect(withMap).toBe(always);
+    // The edge leaves the phone map's 64 px column free.
+    expect(/\.hs-minimap \{[^}]*width: (\d+)px;/.exec(css.slice(css.indexOf('@media (max-width: 720px) {\n  /* A phone\'s bottom belongs')))?.[1]).toBe('64');
+  });
+
   it('keeps the desktop map up while the camera is still', () => {
     let now = 0;
     vi.spyOn(performance, 'now').mockImplementation(() => now);

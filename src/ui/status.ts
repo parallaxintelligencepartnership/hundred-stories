@@ -234,7 +234,15 @@ function setAttr(node: Element, name: string, value: string): void {
 
 let tooltipIds = 0;
 
-export function createStatusBar(): StatusBar {
+export interface StatusBarOptions {
+  /**
+   * May a tap on the stars open their tooltip? False at phone width, where the tap opens the
+   * goals card instead (ui.ts) and the tooltip never shows over it. Always, when not given.
+   */
+  starsTip?: () => boolean;
+}
+
+export function createStatusBar(options: StatusBarOptions = {}): StatusBar {
   // Each readout leads with its icon, so a player who does not read yet can still tell cash
   // from people; the word stays in the label, which ui.css keeps for screen readers only.
   const lead = (name: IconName): HTMLElement => icon(name, 'hs-icon hs-readout-icon') as unknown as HTMLElement;
@@ -286,7 +294,13 @@ export function createStatusBar(): StatusBar {
     stars.classList.toggle('is-open', open);
     setAttr(starsButton, 'aria-expanded', open ? 'true' : 'false');
   };
-  const onStarsClick = (): void => setOpen(!stars.classList.contains('is-open'));
+  const onStarsClick = (): void => {
+    if (options.starsTip && !options.starsTip()) {
+      setOpen(false);
+      return;
+    }
+    setOpen(!stars.classList.contains('is-open'));
+  };
   const onStarsBlur = (): void => setOpen(false);
   starsButton.addEventListener('click', onStarsClick);
   starsButton.addEventListener('blur', onStarsBlur);
