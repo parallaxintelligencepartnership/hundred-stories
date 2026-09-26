@@ -532,3 +532,29 @@ Scope: checkpoint, diff 388d128..f464377 (P7: the five HTML pages, src/site hero
 - [x] ADVISORY | testing | the no-WebGL fallback that drops has-canvas so the panel keeps its width has no test (src/site/hero.ts:110) | Evidence: deleting the line stayed green | Evidence to close: a jsdom case where createRenderer rejects and has-canvas is absent, red with the line deleted | Closed 2026-09-25: 693bbe3 mocks the renderer to reject and expects has-canvas absent; red with hero.ts:110 deleted
 
 Seven scoped files: 91 passed, 1 skipped (the STORE_SHOTS_E2E run). Failure paths named to tests. Four mutations plus one extra each went red; green after checkout, tree clean. Live evidence: og.png and icon-48.png match the commit byte for byte; P7-after-2 site shots for the composition.
+
+## Checkpoint 2026-09-26 - design pass P5 phone, diff 9280b9c..e5f5a67 - lenses: testing
+
+Scope: checkpoint, diff 9280b9c..e5f5a67 (P5: src/ui build.ts, minimap.ts, status.ts, ui.ts, ui.css, plus panels.ts from WIP 51ec385; tests/ui build, minimap, status-phone), lens testing, run in a clean worktree at e5f5a67. Not covered: code outside the diff, application logic, the full suite (once at closeout), the live browser failure probe (the Rendering row wants a real browser; the reviewer may start none), and PROJECT.md has no Verification expectations row for the phone chrome, so the failure paths were named by the reviewer. Last audit: 2026-09-25 @7b4e60f.
+
+### Findings
+
+- [x] IMPORTANT | testing | the held-pan map's pointercancel listener (src/ui/minimap.ts:259) can be deleted with all 71 scoped tests green; minimap.test.ts fired a cancel and asserted nothing, and without the listener a cancelled press leaves its id in pointersDown so the phone map never hides after any later pan | Evidence: mutation M8 71/71 green; a scratch probe (down, cancel, pan later, refresh) fails only with the line removed | Evidence to close: a cancel-then-pan case red with :259 removed | Closed 2026-09-26: 26b802e adds the case; red with the listener removed in a scratch copy
+- [x] ADVISORY | testing | the "wait for the last finger" early return (minimap.ts:251) can be removed with the suite green; lifting one finger of a pinch would start the hide count | Evidence: mutation M3 green; probe differs | Evidence to close: a two-pointer case red under M3 | Closed 2026-09-26: 26b802e, pinch case, red under M3
+- [x] ADVISORY | testing | build.test.ts ruleIn read only the first matching css rule, so a later .hs-build-tabs override putting the tabs back under the close stayed green | Evidence: mutation C8 green | Evidence to close: read the merged declarations | Closed 2026-09-26: 26b802e, ruleIn merges every matching rule of the block, later wins; red under C8
+- [x] ADVISORY | testing | claim and proof disagreed: the star tap is gated on phone width (src/ui/ui.ts:286), not pointer type, and the tests set width only | Evidence: code read | Evidence to close: restate the claim or pin the pointer type | Closed 2026-09-26: 26b802e, the test and the comment say phone width; the tooltip suppression stays on the touch media query
+
+Four scoped files at e5f5a67: build 20, minimap 17, status-phone 21, status 13, 71 passed; 73 after the close. Seventeen mutations one at a time, fourteen red (held pan, star tap, is-building, the corner and card fit read from ui.css, the alert edge, the close cell); the three green ones are the findings above, all closed. Worktree clean after every restore and removed.
+
+## Checkpoint 2026-09-26 - design pass P8 site system, diff e5f5a67..972e4a0 - lenses: testing
+
+Scope: checkpoint, diff e5f5a67..972e4a0 (P8: the four site pages, src/site site.css, theme.ts, theme-init.ts, specimens.ts; vite.config.ts; scripts/make-design-sheet.mjs; tests/site landing, theme, site-system, specimens; tests/design/sheet.test.ts), lens testing, run in a clean worktree at 972e4a0. Not covered: code outside the diff, application logic, the full suite (once at closeout), a live browser failure probe (mountSpecimens was probed in node; the Theme row's reload on all four pages was not exercised in a browser). Last audit: 2026-09-25 @7b4e60f.
+
+### Findings
+
+- [x] ADVISORY | testing | the specimen mount's null-context guard (src/site/specimens.ts:212) and its dpr clamp (:203) had no tests; without the guard one null context stops the loop and every later specimen stays hidden | Evidence: mutations M6 and M7 green at 206/206 | Evidence to close: mountSpecimens tests for a null context and for dpr NaN and 10, red with the guard removed | Closed 2026-09-26: 368aa65 adds both; each red with its guard removed
+- [x] ADVISORY | testing | the precache check matched text in vite.config.ts only; app-build.test.ts reads the built sw.js and asserted nothing about the specimens or theme chunks | Evidence: the scratch build's sw.js names the theme chunk and no specimens chunk, but no test read it | Evidence to close: app-build asserts both | Closed 2026-09-26: 368aa65, app-build asserts no specimens chunk and the theme chunk present
+
+tests/site and tests/design at 972e4a0: 16 files, 206 passed; 217 after the follow-up. No dependency change, vetting not run. Failure paths: unknown specimen kind, toDataURL throwing, storage that throws for the theme. Five of seven mutations red (portrait clip, the globIgnores line, the inner focus ring, the 404 theme script tag, the Auto label); the two green ones are closed above. Precache proof from a scratch build: 24 entries, the theme chunk in, the specimens chunk out and imported only by the site pages. CSP: no inline executable script or handler on any page. Worktree clean and removed.
+
+The P8 follow-up 368aa65 (specimens draw lazily after the hero's first frame; the two-second load-time image work that delayed the hero is gone) is checked by its own lens pass below.
