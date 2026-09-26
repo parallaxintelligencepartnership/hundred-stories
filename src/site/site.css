@@ -18,6 +18,8 @@
   --ink-dim: #98a3b3;
   --amber: #f4b942;
   --on-amber: #14181f;
+  /* Amber as words or a line; the fill stays --amber (src/ui/ui.css keeps the same names). */
+  --amber-text: #f4b942;
   --indicator: #8ff0c0;
   --alert: #ff5c4d;
 
@@ -63,9 +65,10 @@
     --line: #c2ccda;
     --ink: #151c25;
     --ink-dim: #5a6673;
-    --amber: #b57a04;
-    --on-amber: #fdf6e6;
-    --indicator: #0c7a53;
+    --amber: #f4b942;
+    --on-amber: #14181f;
+    --amber-text: #8a5a00;
+    --indicator: #0a6a48;
     --alert: #c22a1c;
 
     --page: #ffffff;
@@ -78,9 +81,10 @@
   --line: #c2ccda;
   --ink: #151c25;
   --ink-dim: #5a6673;
-  --amber: #b57a04;
-  --on-amber: #fdf6e6;
-  --indicator: #0c7a53;
+  --amber: #f4b942;
+  --on-amber: #14181f;
+  --amber-text: #8a5a00;
+  --indicator: #0a6a48;
   --alert: #c22a1c;
 
   --page: #ffffff;
@@ -118,11 +122,11 @@ a {
 }
 
 a:hover {
-  text-decoration-color: var(--amber);
+  text-decoration-color: var(--amber-text);
 }
 
 :focus-visible {
-  outline: 2px solid var(--amber);
+  outline: 2px solid var(--amber-text);
   outline-offset: 2px;
 }
 
@@ -249,7 +253,7 @@ p {
 
 .theme-toggle:hover {
   text-decoration: underline;
-  text-decoration-color: var(--amber);
+  text-decoration-color: var(--amber-text);
 }
 
 /* The one lit sign on the strip, the same amber as the app icon. */
@@ -311,7 +315,7 @@ p {
 
 .challenge {
   margin: 0 0 8px;
-  color: var(--amber);
+  color: var(--amber-text);
   font-weight: 600;
 }
 
@@ -366,7 +370,7 @@ p {
 }
 
 .button:focus-visible {
-  outline: 2px solid var(--amber);
+  outline: 2px solid var(--amber-text);
   outline-offset: 2px;
 }
 
