@@ -15,6 +15,8 @@ import { addRoom, addShaft, addSim, allocId, createWorld, markStructureChanged, 
 import { floorTopY } from '../../src/render/camera';
 import { interiorVariants } from '../../src/render/interiors';
 import { venueOf } from '../../src/render/venue';
+import { REVEAL_COLOUR } from '../../src/render/buildfx';
+import { LINE_PX, WIN_SILL, WIN_TOP } from '../../src/render/grid';
 
 // Every fake application, newest last, so a test can walk the stage createRenderer built.
 const apps = vi.hoisted(
@@ -661,6 +663,37 @@ describe('motion (look round L3)', () => {
     frame(500);
     expect(effectsSprites(stage)).toHaveLength(0);
     expect(priceFloaters(stage)).toHaveLength(0);
+  });
+
+  it('D-14: the reveal covers each floor\'s window band only, not the whole floor', async () => {
+    const { world } = officeWorld(NOON);
+    const { renderer, stage } = await mount(world);
+    renderer.render(world, 1);
+    const added = makeRoom(world, 'office', 4, 180);
+    markStructureChanged(world);
+    renderer.render(world, 1);
+    const sprite = spritesWith(stage, 'room|office').find((s) => s.y < floorTopY(4))!;
+    const settle = floorTopY(added.floor) - sprite.y; // the room and its band move up together
+    const covers = effectsSprites(stage).filter((s) => s.tint === REVEAL_COLOUR);
+    expect(covers).toHaveLength(1);
+    expect(covers[0]!.y).toBe(floorTopY(added.floor) + WIN_TOP - settle);
+    expect(covers[0]!.height).toBe(WIN_SILL + LINE_PX - WIN_TOP);
+  });
+
+  it('D-14: reduced motion turned on mid effect lands the reveal and the price at once', async () => {
+    const { world } = officeWorld(NOON);
+    const { renderer, stage, frame } = await mount(world);
+    renderer.render(world, 1);
+    makeRoom(world, 'office', 4, 180);
+    markStructureChanged(world);
+    renderer.render(world, 1);
+    frame(16);
+    expect(priceFloaters(stage)).toHaveLength(1);
+    expect(effectsSprites(stage).length).toBeGreaterThan(0);
+    renderer.setReducedMotion(true);
+    frame(16);
+    expect(priceFloaters(stage)).toHaveLength(0);
+    expect(effectsSprites(stage)).toHaveLength(0);
   });
 
   it('D-14: rooms placed in one frame (a lobby drag) share one price, the summed cost, over their middle', async () => {

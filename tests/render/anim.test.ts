@@ -74,6 +74,12 @@ describe('door frames', () => {
 });
 
 describe('walk cycle', () => {
+  it('spreads the walkers in the tower over the whole four beat cycle (D-16), as the curb does', () => {
+    const at0 = new Set<number>();
+    for (let id = 1; id <= 200; id++) at0.add(poseAt('walk', id, 0, false).frame);
+    expect([...at0].sort()).toEqual([FRAME.stand, FRAME.stride, FRAME.strideMirrored].sort());
+  });
+
   it('D-16: walks on four beats, stand, stride, stand, mirrored stride, at 120 ms a frame', () => {
     expect(WALK_FRAME_MS).toBe(120);
     const frames: number[] = [];

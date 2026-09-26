@@ -325,3 +325,35 @@ describe('BB-2: the far zoom facade', () => {
     expect(fills(find(stage, 'facade') as Graphics).filter((d) => d.color === PALETTE.windowDay)).toEqual([]);
   });
 });
+
+describe('BB-2: the facade pane at a shaft, a flight and a floor end', () => {
+  it('cuts the pane back to one tile where a shaft, a flight or the floor end takes the second tile', async () => {
+    const world = createWorld(7);
+    world.time.minute = 22 * 60;
+    makeRoom(world, 'office', 3, 180); // cells 180 to 188; a shaft from 189
+    addShaft(world, {
+      id: allocId(world), kind: 'standard', x: 189, width: 4, floorMin: 3, floorMax: 3,
+      stops: new Set([3]), homeFloor: 3, cars: [], hallCalls: new Map(),
+    });
+    makeRoom(world, 'office', 5, 200); // cells 200 to 208; a flight from 209
+    makeRoom(world, 'stairs', 5, 209);
+    makeRoom(world, 'office', 7, 180); // the floor ends at 189
+    const renderer = await createRenderer({ appendChild: () => {} } as unknown as HTMLElement, world);
+    renderers.push(renderer);
+    const app = apps[apps.length - 1]!;
+    renderer.render(world, 1);
+    renderer.camera.setReducedMotion(true);
+    renderer.camera.zoomAt(0.4 / renderer.camera.zoom, 400, 300);
+    for (const fn of app.frames) fn();
+    renderer.render(world, 1);
+    const lit = fills(find(app.stage, 'facade lit') as Graphics).filter((d) => d.color === PALETTE.windowLit);
+    const paneAt = (floor: number, cell: number): Drawn | undefined =>
+      lit.find((d) => d.y === floorTopY(floor) + WIN_PANE_TOP && d.x === cell * TILE_PX + 2);
+    for (const [floor, last] of [[3, 188], [5, 208], [7, 188]] as const) {
+      expect(paneAt(floor, last)?.w, `floor ${floor} cell ${last}`).toBe(WIN_PANE);
+      expect(paneAt(floor, last - 2)?.w).toBe(FACADE_PANE_W);
+      // Nothing reaches past the room's last tile onto the shaft, the flight or the sky.
+      for (const d of lit.filter((p) => p.y === floorTopY(floor) + WIN_PANE_TOP)) expect(d.x + d.w).toBeLessThanOrEqual((last + 1) * TILE_PX);
+    }
+  });
+});
