@@ -113,7 +113,8 @@ import {
 } from './illustrated';
 import { PALETTE, shade } from './palette';
 import { isVenueKind, venueOf, type Venue } from './venue';
-import { createBuildFx } from './buildfx';
+import { createBuildFx, priceLabel, type RevealBand } from './buildfx';
+import { drawLedText } from './led';
 import { Motion, TELEPORT_TILES } from './interpolate';
 import { floorsWithPeople, inLightWindow, LIGHT_ALPHA, lightBand, lightTintAt, NIGHT_GRADE, roomNight, windowStateOf, windowStatesFor, type WindowState } from './light';
 import { createOverlayPass, drawBlocks, type OverlayKind, type ViewRect } from './overlays';
@@ -270,7 +271,8 @@ const LOAD_FADE_MS = 900;
 const FADE_COLOR = 0x1c232e;
 const SLAB_TOP_PX = SLAB_PX; // art.ts draws the slab as the bottom SLAB_PX of a floor band
 const STRIP_ABOVE = 0xeaeaea;
-const STRIP_BELOW = 0x7d818a;
+/** A basement floor's tone, in the floor strips and on the far facade below the street. */
+export const STRIP_BELOW = 0x7d818a;
 const STRIP_EDGE = 0x333333;
 const STRIP_CEILING = 0xcfcfcf;
 const TELEPORT_PX = TELEPORT_TILES * TILE_PX; // a jump past this in one tick is a teleport, so snap instead of lerp
@@ -278,6 +280,8 @@ const TELEPORT_PX = TELEPORT_TILES * TILE_PX; // a jump past this in one tick is
 const SELECT_PAD_PX = 2 * LINE_PX;
 const FRAME_GRACE_MS = 2000; // after this the opening framing never reasserts itself
 const CABLE_PX = LINE_PX; // the hoist cable, one art line wide
+/** D-18: a car sits 1 px low for the first half of this after its doors open. */
+const CAR_SETTLE_MS = 120;
 const CABLE_COLOR = 0x3b3f47;
 const NO_FLOORS: ReadonlySet<number> = new Set<number>();
 /** A room on fire is tinted this, day or night. */
@@ -433,6 +437,8 @@ interface CarEntry {
   open: boolean;
   /** Set when the sim opens the doors, cleared once they are fully open: a one tick flap still opens them all the way. */
   latch: boolean;
+  /** D-18: ms left of the arrival settle; the car sits 1 px low while more than 60 remain. */
+  settle: number;
 }
 
 interface SimEntry extends PersonSprites {
@@ -1068,12 +1074,15 @@ export async function createRenderer(
   app.stage.addChild(fadeCover);
 
   // Ambient life (shop signs, restaurant steam, the cinema marquee) and build feedback, both in
-  // the effects layer over the rooms and both off under reduced motion.
+  // the effects layer over the rooms and both off under reduced motion. The price a placement
+  // floats (D-14) goes on the overlay, above the light layer, so it is never graded by the hour.
   const ambientLayer = new Container();
   const buildFxLayer = new Container();
+  const priceLayer = new Container();
+  priceLayer.label = 'build prices';
   layers.effects.addChild(ambientLayer, buildFxLayer);
   const ambient = createAmbient(ambientLayer);
-  const buildFx = createBuildFx(buildFxLayer);
+  const buildFx = createBuildFx(buildFxLayer, priceLayer);
 
   let art: Art;
   const backup = fallbackArt(app.renderer as PixiRenderer);
@@ -1214,12 +1223,15 @@ export async function createRenderer(
   // their colours read the same at midnight as at noon.
   const overlayTint = new Graphics();
   overlayTint.visible = false;
-  layers.overlay.addChild(overlayTint, ghostSprite, selectionBox);
+  layers.overlay.addChild(overlayTint, ghostSprite, selectionBox, priceLayer);
   const overlayPass = createOverlayPass(overlayTint);
   const overlayView: ViewRect = { left: 0, top: 0, right: 0, bottom: 0 };
 
   // Sim particle mode: one shared atlas (art.crowd) so every particle draws from one source.
   let particles: ParticleContainer | null = null;
+  // Crowd mode's stress marks: their own particle container in the marks layer, so a mark sits on
+  // the emissive layer above the night tint whatever the crowd size, as a sprite mark does (D-4).
+  let crowdMarks: ParticleContainer | null = null;
   let crowdAtlas: CrowdAtlas | null = null;
   let particleMode = false;
   const simParticles = new Map<Id, Particle>();
@@ -1246,6 +1258,14 @@ export async function createRenderer(
       boundsArea: new Rectangle(-4000, -4000, 20000, 20000),
     });
     layers.sims.addChild(particles);
+    crowdMarks = new ParticleContainer({
+      texture: atlas.frameOf('worker', 0, FRAME.stand),
+      dynamicProperties: { position: true, uvs: true, color: false, rotation: false, vertex: false },
+      roundPixels: true,
+      boundsArea: new Rectangle(-4000, -4000, 20000, 20000),
+    });
+    crowdMarks.label = 'crowd marks';
+    markLayer.addChild(crowdMarks);
     for (const [id, entry] of simSprites) dropSimEntry(id, entry);
     simSpriteLayer.removeChildren();
     particleMode = true;
@@ -1256,6 +1276,8 @@ export async function createRenderer(
     if (!particles) return;
     particles.destroy();
     particles = null;
+    crowdMarks?.destroy();
+    crowdMarks = null;
     simParticles.clear();
     propParticles.clear();
     markParticles.clear();
@@ -1268,8 +1290,9 @@ export async function createRenderer(
    */
   function syncCrowdExtras(id: Id, kind: SimKind, look: number, frame: PersonFrame, band: StressBand, x: number, y: number): void {
     const container = particles;
+    const marks = crowdMarks;
     const atlas = crowdAtlas;
-    if (!container || !atlas) return;
+    if (!container || !marks || !atlas) return;
     const atlasFrame = frame === FRAME.stride || frame === FRAME.strideMirrored ? FRAME.stride : FRAME.stand;
     const place = atlas.propOf ? propPlacement(kind, look, atlasFrame) : null;
     let prop = propParticles.get(id);
@@ -1289,7 +1312,7 @@ export async function createRenderer(
     const mark = atlas.markOf ? stressMarkOf(band) : null;
     let held = markParticles.get(id);
     if (held && held.mark !== mark) {
-      container.removeParticle(held.particle);
+      marks.removeParticle(held.particle);
       markParticles.delete(id);
       held = undefined;
     }
@@ -1297,7 +1320,7 @@ export async function createRenderer(
       if (!held) {
         held = { particle: new Particle({ texture: atlas.markOf(mark), anchorX: 0.5, anchorY: 1, scaleX: CROWD_EXTRA_SCALE, scaleY: CROWD_EXTRA_SCALE }), mark };
         markParticles.set(id, held);
-        container.addParticle(held.particle);
+        marks.addParticle(held.particle);
       }
       held.particle.x = x;
       held.particle.y = y - markBottomAboveFeet(look);
@@ -1379,6 +1402,8 @@ export async function createRenderer(
     // D-15: each room keeps its own night (roomNight), so across the dusk and dawn windows the
     // lobbies need the people too, not only once the tower's night has fallen.
     const peopleFloors = night || inLightWindow(minuteOfDay) ? floorsWithPeople(w) : NO_FLOORS;
+    // D-14: the rooms placed in this pass (a lobby drag places many in one move) share one price.
+    const placedNow: { nodes: Sprite[]; x: number; y: number; w: number; h: number; bands: RevealBand[]; cost: number }[] = [];
     // Every room's look, neighbors considered: one pass per reconcile, from ids and positions.
     const looks = art.interior ? interiorVariants(w.seed, w.rooms.values()) : null;
     for (const room of w.rooms.values()) {
@@ -1434,10 +1459,24 @@ export async function createRenderer(
       entry.node.tint = grade;
       // A room the player just placed settles, puffs dust and flashes; one loaded with the
       // world, or drawn on the first pass, simply appears. Nothing under reduced motion.
-      if (placed && animateNew && !reducedMotion) buildFx.start([entry.node, slab.node], px, py, pw, ph);
+      if (placed && animateNew && !reducedMotion) {
+        // D-14: each floor's window band lights left to right, and the price rises out of the room.
+        const bands = hasWindowBand(room.kind)
+          ? spanFloors(room.floor, room.height).map((f) => ({ y: floorTopY(f) + WIN_TOP, h: WIN_SILL + LINE_PX - WIN_TOP }))
+          : [];
+        placedNow.push({ nodes: [entry.node, slab.node], x: px, y: py, w: pw, h: ph, bands, cost: ROOMS[room.kind].cost });
+      }
       if (art.interior && !INTERIORS[room.kind].overlay) syncVenue(w, room, px, py, looks?.get(room.id) ?? interiorVariant(w.seed, room));
       const venue = venueSprites.get(room.id);
       if (venue) gradeVenue(venue, grade);
+    }
+    if (placedNow.length > 0) {
+      // One price for the batch, the summed cost, centred over the union of what was placed.
+      const left = Math.min(...placedNow.map((p) => p.x));
+      const right = Math.max(...placedNow.map((p) => p.x + p.w));
+      const over = { x: left, y: Math.min(...placedNow.map((p) => p.y)), w: right - left };
+      const label = priceLabel(placedNow.reduce((sum, p) => sum + p.cost, 0));
+      placedNow.forEach((p, i) => buildFx.start(p.nodes, p.x, p.y, p.w, p.h, p.bands, i === 0 ? label : '', over));
     }
 
     for (const [id, entry] of roomSprites) {
@@ -1503,7 +1542,8 @@ export async function createRenderer(
     let obstacles: Map<number, [number, number][]> | null = null;
     for (const room of w.rooms.values()) {
       const entry = roomSprites.get(room.id);
-      if (!entry || (entry.state !== 'lit' && entry.state !== 'housekeeping') || !hasWindowBand(room.kind)) continue;
+      // A burning room shows its flames, not its windows: nothing of it goes over the fire.
+      if (!entry || room.onFire || (entry.state !== 'lit' && entry.state !== 'housekeeping') || !hasWindowBand(room.kind)) continue;
       obstacles ??= paneObstacles(w);
       const lit = entry.state === 'lit';
       const px = room.x * TILE_PX;
@@ -1688,7 +1728,9 @@ export async function createRenderer(
       const spec = INTERIORS[v.kind];
       const open = interiorOpen(v.kind, w.time.minute);
       const occupied = room.occupancy > 0;
-      const key = `${open ? 1 : 0}${night ? 1 : 0}${occupied ? 1 : 0}`;
+      // A burning room gives no light: its pools and its lit sign go out while it burns.
+      const burning = room.onFire;
+      const key = `${open ? 1 : 0}${night ? 1 : 0}${occupied ? 1 : 0}${burning ? 1 : 0}`;
       if (key === v.state) continue;
       v.state = key;
       const width = v.width * TILE_PX;
@@ -1710,12 +1752,12 @@ export async function createRenderer(
         venueStaffLayer.addChild(v.staff);
       }
       if (v.closed) v.closed.visible = !open;
-      if (v.pool) v.pool.visible = night && (occupied || (manned && post?.when === 'open'));
+      if (v.pool) v.pool.visible = night && !burning && (occupied || (manned && post?.when === 'open'));
       if (v.staff) v.staff.visible = manned;
       const sign: SignState = !open ? 'dark' : night ? 'lit' : 'day';
       if (v.sign) v.sign.tint = sign === 'dark' ? SIGN_DARK_TINT : 0xffffff;
-      if (v.signGlow) v.signGlow.visible = sign === 'lit';
-      if (v.signLit) v.signLit.visible = sign === 'lit';
+      if (v.signGlow) v.signGlow.visible = sign === 'lit' && !burning;
+      if (v.signLit) v.signLit.visible = sign === 'lit' && !burning;
     }
   }
 
@@ -1744,6 +1786,8 @@ export async function createRenderer(
     connectorLayer.alpha = plan.connectors;
     windowVeil.visible = plan.windowVeil > 0;
     windowVeil.alpha = plan.windowVeil;
+    // The veil mutes the lit windows too: the emissive layer dims by the same share at the muted tier.
+    emissiveRoot.alpha = 1 - plan.windowVeil;
     blockLayer.visible = plan.blocks;
     if (plan.blocks) blocksDirty = true;
     else blockGlow.visible = false;
@@ -1795,6 +1839,9 @@ export async function createRenderer(
     facadeLit.clear();
     const extents = builtFloorExtents(w);
     const obstacles = paneObstacles(w);
+    // At night the wall takes the grade an empty room takes (D-4), so the facade is a dark slab and
+    // its lit panes, on the emissive layer and never graded, carry it.
+    facade.tint = isNight(clockOf(w.time.minute).minuteOfDay) ? NIGHT_GRADE.vacant : 0xffffff;
     const cells = new Map<number, Map<number, Room>>();
     for (const room of w.rooms.values()) {
       if (drawsOverRooms(room.kind) || !hasWindowBand(room.kind)) continue;
@@ -1809,6 +1856,14 @@ export async function createRenderer(
       const x = extent.min * TILE_PX;
       const width = (extent.max - extent.min) * TILE_PX;
       if (width <= 0) continue;
+      // The facade stops at the street: a basement floor draws as the underground does, the
+      // basement tone of the floor strips with no panes.
+      if (floor < 0) {
+        facade.rect(x, top, width, FLOOR_PX).fill(STRIP_BELOW);
+        facade.rect(x, top, width, LINE_PX).fill(STRIP_CEILING);
+        facade.rect(x, top + FLOOR_PX - SLAB_TOP_PX, width, LINE_PX).fill(STRIP_EDGE);
+        continue;
+      }
       facade.rect(x, top, width, FLOOR_PX).fill(FACADE_WALL);
       const row = cells.get(floor);
       const spans = obstacles.get(floor);
@@ -1822,7 +1877,8 @@ export async function createRenderer(
           const px = t * TILE_PX + WIN_PANE_X;
           const py = top + WIN_PANE_TOP;
           if (state === 'day') facade.rect(px, py, paneW, WIN_PANE).fill(PALETTE.windowDay);
-          else facadeLit.rect(px, py, paneW, WIN_PANE).fill(state === 'lit' ? PALETTE.windowLit : PALETTE.windowUnlit);
+          // A burning room shows no lit light at any zoom: its panes stay dark while it burns.
+          else facadeLit.rect(px, py, paneW, WIN_PANE).fill(state === 'lit' && !room.onFire ? PALETTE.windowLit : PALETTE.windowUnlit);
         }
       }
       facade.rect(x, top + FLOOR_PX - SLAB_PX, width, LINE_PX).fill(FACADE_SLAB);
@@ -1834,20 +1890,6 @@ export async function createRenderer(
 
   // ---------------------------------------------------------------- car indicators
 
-  /** A three by five segment face per digit, one bit a cell, top row first. */
-  const DIGITS: Record<string, readonly number[]> = {
-    '0': [7, 5, 5, 5, 7],
-    '1': [2, 6, 2, 2, 7],
-    '2': [7, 1, 7, 4, 7],
-    '3': [7, 1, 3, 1, 7],
-    '4': [5, 5, 7, 1, 1],
-    '5': [7, 4, 7, 1, 7],
-    '6': [7, 4, 7, 5, 7],
-    '7': [7, 1, 1, 2, 2],
-    '8': [7, 5, 7, 5, 7],
-    '9': [7, 5, 7, 1, 7],
-    B: [6, 5, 6, 5, 6],
-  };
   const LED = 0xffb347;
 
   /** The car's floor and direction, lit in the housing baked above its doors. */
@@ -1872,13 +1914,7 @@ export async function createRenderer(
       g.poly(up ? [cx, cy + 3.5, cx + 1.5, cy + 0.5, cx + 3, cy + 3.5] : [cx, cy + 1.5, cx + 3, cy + 1.5, cx + 1.5, cy + 4.5]).fill(LED);
       cx += arrowW;
     }
-    for (const ch of text) {
-      const rows = DIGITS[ch];
-      if (rows) rows.forEach((bits, r) => {
-        for (let c = 0; c < 3; c++) if (bits & (4 >> c)) g.rect(cx + c, cy + r, 1, 1).fill(LED);
-      });
-      cx += 4;
-    }
+    drawLedText(g, text, cx, cy, 1, LED);
   }
 
   /**
@@ -2035,25 +2071,30 @@ export async function createRenderer(
       cableLayer.addChild(cable);
       const indicator = new Graphics();
       indicatorLayer.addChild(indicator);
-      entry = { node: sprite, cable, indicator, indicatorKey: '', kind: shaft.kind, finish, door, frame: doorFrameOf(door), open, latch: false };
+      entry = { node: sprite, cable, indicator, indicatorKey: '', kind: shaft.kind, finish, door, frame: doorFrameOf(door), open, latch: false, settle: 0 };
       carSprites.set(car.id, entry);
     } else if (entry.kind !== shaft.kind || entry.finish !== finish) {
       entry.kind = shaft.kind;
       entry.finish = finish;
       entry.node.texture = art.car(shaft.kind, DOOR_FRAMES[entry.frame], finish); // texture swap only
     }
+    const wasOpen = entry.open;
     entry.open = open;
+    // D-18: the car lands, settling a pixel as its doors open. Not under reduced motion.
+    if (open && !wasOpen && !reducedMotion) entry.settle = CAR_SETTLE_MS;
     if (open) entry.latch = true; // seen open once, even for a tick: the doors open all the way
     if (reducedMotion) stepCarDoors(entry, 0); // doors snap, as they always did
     const target = interpolated(carMotion, car.id, carX(shaft), carY(car), alpha);
-    entry.node.position.set(target.x, target.y);
+    // The indicator and the cable move with the car, so the digits stay in their housing.
+    const y = target.y + (entry.settle > CAR_SETTLE_MS / 2 ? 1 : 0);
+    entry.node.position.set(target.x, y);
     // From the car's roof (under its cast shadow) up to the top of the shaft.
-    const roof = target.y - (FLOOR_PX - CAR_CLEAR_PX);
+    const roof = y - (FLOOR_PX - CAR_CLEAR_PX);
     const shaftTop = floorTopY(shaft.floorMax);
     entry.cable.position.set(target.x, shaftTop);
     entry.cable.scale.y = Math.max(0, roof - shaftTop);
     entry.cable.visible = roof > shaftTop;
-    drawIndicator(entry, car, target.x, target.y);
+    drawIndicator(entry, car, target.x, y);
   }
 
   /** The stress mark over one person's head: a pink dot, a red exclamation, or nothing. */
@@ -2192,7 +2233,7 @@ export async function createRenderer(
         if (prop) particles.removeParticle(prop);
         propParticles.delete(id);
         const held = markParticles.get(id);
-        if (held) particles.removeParticle(held.particle);
+        if (held) crowdMarks?.removeParticle(held.particle);
         markParticles.delete(id);
       }
     }
@@ -2679,7 +2720,10 @@ export async function createRenderer(
       lastBackground = background;
     }
 
-    for (const entry of carSprites.values()) stepCarDoors(entry, dt);
+    for (const entry of carSprites.values()) {
+      stepCarDoors(entry, dt);
+      entry.settle = Math.max(0, entry.settle - dt);
+    }
     if (reducedMotion !== ambientReduced) {
       // Everything ambient stops at once when reduced motion comes on: the emitters go and
       // running build feedback lands. (Their sprites live in layers.effects, so app.destroy

@@ -9,9 +9,15 @@ import {
   DOWNTOWN_MAX_H,
   DOWNTOWN_MIN_H,
   DOWNTOWN_PARALLAX,
+  DOWNTOWN_WINDOW_ALPHAS,
+  DOWNTOWN_WINDOW_H,
   DOWNTOWN_WINDOW_PX,
   downtownLook,
+  downtownLookAt,
+  downtownStrength,
+  hillsColorAt,
   downtownTowers,
+  skyDarkness,
   HILLS_PARALLAX,
   ROOFS_PARALLAX,
   bandBaseY,
@@ -31,6 +37,7 @@ import {
   starsX,
 } from '../../src/render/sky';
 import { DEFAULT_GROUND_LINE } from '../../src/render/camera';
+import { lerpColor } from '../../src/render/light';
 import type { WeatherView } from '../../src/render/weather';
 
 const at = (h: number, m = 0): number => h * 60 + m;
@@ -195,10 +202,46 @@ describe('BB-4: a distant downtown after dark', () => {
   });
 
   it('is #aebdd0 at 35 percent by day and #243457 with its windows at 60 percent at night', () => {
+    // P3 fix wave, judgment 1: the windows carry their own strengths, 60 percent on average, and
+    // the layer comes in with the band's strength.
     expect(downtownLook(0)).toEqual({ tint: 0xaebdd0, alpha: 0.35, windows: 0 });
-    expect(downtownLook(1)).toEqual({ tint: 0x243457, alpha: 1, windows: 0.6 });
+    expect(downtownLook(1)).toEqual({ tint: 0x243457, alpha: 1, windows: 1 });
     const dusk = downtownLook(0.5);
-    expect(dusk.windows).toBeCloseTo(0.3);
+    expect(dusk.windows).toBeCloseTo(0.5);
+    const mean = DOWNTOWN_WINDOW_ALPHAS.reduce((a, b) => a + b, 0) / DOWNTOWN_WINDOW_ALPHAS.length;
+    expect(mean).toBeCloseTo(0.6);
+  });
+
+  it('judgment 1: from 18:00 until the sky is full night the band is never darker than the hills in front, faint at 18:30', () => {
+    const lin = (v: number): number => ((v /= 255) <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+    const lum = (c: number): number => 0.2126 * lin((c >> 16) & 255) + 0.7152 * lin((c >> 8) & 255) + 0.0722 * lin(c & 255);
+    for (let m = at(18); m <= at(19, 30); m += 5) {
+      // What shows: the band over the sky at the horizon, against the hills in their evening tint.
+      const look = downtownLookAt(m);
+      const band = lerpColor(skyAt(m).bottom, look.tint, look.alpha);
+      const hills = hillsColorAt(m);
+      if (skyAt(m).top !== 0x0d1b3d || m === at(19)) {
+        expect(lum(band), `${m}: band over hills`).toBeGreaterThanOrEqual(lum(hills));
+        // A cool blue grey of its own.
+        expect(look.tint & 255, `${m}`).toBeGreaterThan((look.tint >> 16) & 255);
+      }
+    }
+    // Full night: the night look, settled a quarter hour after the sky.
+    expect(downtownLookAt(at(19, 30))).toEqual(downtownLook(1));
+    expect(downtownLookAt(at(23))).toEqual(downtownLook(1));
+    // Faint at 18:30, the sky's own dark fraction driving it.
+    expect(downtownStrength(at(18, 30))).toBeLessThan(0.1);
+    expect(downtownStrength(at(18, 30))).toBeGreaterThan(0);
+    expect(downtownStrength(at(12))).toBe(0);
+    expect(skyDarkness(at(18, 45))).toBeGreaterThan(skyDarkness(at(18, 30)));
+    expect(downtownLookAt(at(12))).toEqual(downtownLook(0));
+  });
+
+  it('judgment 1: at night the windows are warm cream 2 by 1 px lights at varied strengths, in one Graphics', () => {
+    expect(DOWNTOWN_WINDOW_H).toBe(1);
+    const strengths = new Set(downtownTowers().flatMap((t) => t.windows.map((w) => w[2])));
+    expect([...strengths].sort()).toEqual([...DOWNTOWN_WINDOW_ALPHAS].sort());
+    expect(Math.max(...strengths) - Math.min(...strengths)).toBeGreaterThanOrEqual(0.4);
   });
 });
 
@@ -247,6 +290,24 @@ describe('createSky (D-6, BB-4)', () => {
     expect(stars.visible).toBe(false);
   });
 
+  it('covers a view wider than two fields with a third copy on the same geometry', () => {
+    const l = layers();
+    const sky = createSky(l);
+    const stars = l.sky.children[1] as Graphics;
+    const wide = byLabel(l.sky, 'stars wide') as Graphics;
+    expect(wide.context).toBe(stars.context);
+    // A camera that puts the field's left copy near -2048: two copies end short of a 5K view.
+    const camX = 2040 / (0.5 * 0.05);
+    sky.update(23 * 60, { x: camX, y: -300, zoom: 0.5 }, 2560, H, 16, { view: view('clear'), seed: 3 });
+    expect(stars.x + 2 * STAR_FIELD_W).toBeLessThan(2560);
+    expect(wide.visible).toBe(true);
+    expect(wide.x).toBe(stars.x + 2 * STAR_FIELD_W);
+    expect(wide.y).toBe(stars.y);
+    // At 1440 wide two copies cover it: the third stays off.
+    sky.update(23 * 60, { x: camX, y: -300, zoom: 0.5 }, 1440, H, 16, { view: view('clear'), seed: 3 });
+    expect(wide.visible).toBe(false);
+  });
+
   it('stands the downtown behind the hills at its own parallax, pale by day and lit at night', () => {
     const l = layers();
     const sky = createSky(l);
@@ -264,7 +325,18 @@ describe('createSky (D-6, BB-4)', () => {
     sky.update(22 * 60, cam, W, H, 16, { view: view('clear'), seed: 3 });
     expect([body!.tint, body!.alpha]).toEqual([0x243457, 1]);
     expect(windows!.visible).toBe(true);
-    expect(windows!.alpha).toBeCloseTo(0.6);
+    expect(windows!.alpha).toBeCloseTo(1);
+    // Warm cream, not olive: red over green over blue, blue well under red; 2 by 1 px each.
+    const lights = windows!.context.instructions.filter((i) => i.action === 'fill');
+    expect(lights.map((i) => (i.data as { style: { alpha: number } }).style.alpha)).toEqual([...DOWNTOWN_WINDOW_ALPHAS]);
+    for (const i of lights) {
+      const color = (i.data as { style: { color: number } }).style.color;
+      expect(color).toBe(0xffd9a0);
+      for (const p of (i.data as { path: GraphicsPath }).path.shapePath.shapePrimitives.slice(0, 5)) {
+        const r = p.shape as unknown as { width: number; height: number };
+        expect([r.width, r.height]).toEqual([2, 1]);
+      }
+    }
     // Only the camera moves it: no motion of its own.
     const before = downtown.x;
     sky.update(22 * 60, cam, W, H, 5000, { view: view('clear'), seed: 3 });

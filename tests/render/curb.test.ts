@@ -11,6 +11,7 @@ import {
   CURB_WAIT_PX,
   curbFigures,
   curbOffset,
+  curbWalkFrame,
   createCurb,
   emergencyVehicle,
   lobbyDoors,
@@ -46,6 +47,16 @@ function lobby(world: World, from: number, to: number): void {
 function view(rain: number, storm = 0): WeatherView {
   return { weights: { clear: 1 - rain - storm, overcast: 0, rain, storm }, intensity: 0.8 };
 }
+
+describe('the curb walk (D-16)', () => {
+  it('spreads commuters over the whole four beat cycle, so some are mid mirrored stride at any moment', () => {
+    const at0 = new Set<number>();
+    for (let id = 1; id <= 200; id++) at0.add(curbWalkFrame(id, 0));
+    expect([...at0].sort()).toEqual([0, 1, 2]);
+    // each commuter walks the four beats: 480 ms on, the same frame
+    for (let id = 1; id <= 20; id++) expect(curbWalkFrame(id, 480 + 37)).toBe(curbWalkFrame(id, 37));
+  });
+});
 
 describe('who is on the street', () => {
   it('caps the street at twelve commuters however many are outside', () => {

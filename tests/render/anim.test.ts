@@ -74,21 +74,29 @@ describe('door frames', () => {
 });
 
 describe('walk cycle', () => {
-  it('steps stand, stride, mirrored stride at 120 ms a frame', () => {
+  it('D-16: walks on four beats, stand, stride, stand, mirrored stride, at 120 ms a frame', () => {
     expect(WALK_FRAME_MS).toBe(120);
-    expect(walkFrameAt(0)).toBe(0);
+    const frames: number[] = [];
+    for (let t = 0; t < 960; t += WALK_FRAME_MS) frames.push(walkFrameAt(t));
+    expect(frames).toEqual([0, 1, 0, 2, 0, 1, 0, 2]);
     expect(walkFrameAt(119)).toBe(0);
-    expect(walkFrameAt(120)).toBe(1);
     expect(walkFrameAt(239)).toBe(1);
-    expect(walkFrameAt(240)).toBe(2);
-    expect(walkFrameAt(360)).toBe(0);
-    expect(walkFrameAt(360 * 100 + 250)).toBe(2);
+    expect(walkFrameAt(480 * 100 + 370)).toBe(2);
   });
 
-  it('walks a walker through all three frames and holds a standing person still', () => {
-    const seen = new Set<number>();
-    for (let t = 0; t < 360; t += 40) seen.add(poseAt('walk', 11, t, false).frame);
-    expect([...seen].sort()).toEqual([0, 1, 2]);
+  it('passes a walker through the standing frame between every stride, and holds a standing person still', () => {
+    const seen: number[] = [];
+    for (let t = 0; t < 960; t += WALK_FRAME_MS) seen.push(poseAt('walk', 11, t, false).frame);
+    expect(new Set(seen)).toEqual(new Set([0, 1, 2]));
+    // one full cycle is 480 ms: the frame 480 ms on is the same frame
+    for (let t = 0; t < 960; t += 40) expect(poseAt('walk', 11, t + 480, false).frame).toBe(poseAt('walk', 11, t, false).frame);
+    // every change of frame goes to or from standing: no stride straight into the mirrored stride
+    let prev = poseAt('walk', 11, 0, false).frame;
+    for (let t = 1; t < 2000; t++) {
+      const f = poseAt('walk', 11, t, false).frame;
+      if (f !== prev) expect(f === 0 || prev === 0).toBe(true);
+      prev = f;
+    }
     for (let t = 0; t < 2000; t += 50) expect(poseAt('still', 11, t, false)).toEqual({ frame: 0, dx: 0, dy: 0 });
   });
 

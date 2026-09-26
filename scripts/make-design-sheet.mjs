@@ -50,6 +50,7 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { CHROME_PATH, FIXTURE, dropAlpha, pngInfo } from './make-store-shots.mjs';
 import { TILE_PX, FLOOR_PX, SLAB_PX, SIM_H } from '../src/render/grid.ts';
+import { weatherAt } from '../src/game/weather.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 export const OUT_DIR = join(ROOT, 'docs', 'reviews', 'design-pass-2026-09-25', 'sheet');
@@ -59,6 +60,24 @@ export const VIEWPORTS = {
   desk: { w: 1440, h: 900, dpr: 2, mobile: false },
   phone: { w: 390, h: 844, dpr: 2, mobile: true },
 };
+
+/**
+ * The first minute at or after 22:00 where the fixture's tower is clear and not still blending out
+ * of other weather (src/game/weather.ts weatherAt, from the fixture's seed and its day), counted
+ * from the start of the fixture's day: 22:00 that day, or a later day's night. A game shot's
+ * `minute` past 1440 moves the fixture to that later day (fixtureAtMinute). For D-6's stars.
+ */
+export function firstClearNight(saveText) {
+  const save = JSON.parse(saveText);
+  const day = Math.floor(save.minute / 1440) * 1440;
+  for (let m = 22 * 60; m < 14 * 1440; m++) {
+    if (m % 1440 < 22 * 60) continue;
+    const w = weatherAt(save.seed, day + m);
+    if (w.kind === 'clear' && (w.from === 'clear' || w.blend >= 1)) return m;
+  }
+  throw new Error('no clear night in the fixture tower\'s next two weeks');
+}
+const NIGHT_CLEAR_MINUTE = firstClearNight(readFileSync(FIXTURE, 'utf8'));
 
 /**
  * The fixed shot list: brief section 3, then the design pass shots. Game shots carry an hour (or
@@ -93,9 +112,12 @@ export const SHOTS = [
   { name: 'game-desk-z1-1300-place', viewport: 'desk', hour: 13, state: 'place' },
   { name: 'site-home-desk-light-specimens', viewport: 'desk', page: '/', theme: 'light', state: 'site', scrollTo: 'features' },
   { name: 'site-guide-desk-light-specimens', viewport: 'desk', page: '/how-to-play/', theme: 'light', state: 'site', scrollTo: 'elevators' },
+  { name: 'game-desk-z1-night-clear', viewport: 'desk', minute: NIGHT_CLEAR_MINUTE, state: 'opening' },
 ];
 
 const STATE_TIMEOUT_MS = 5000;
+/** A site shot waits at most this long for the page, the hero's first frame and the specimens in view. */
+const SITE_WAIT_MS = 15_000;
 /** src/render/camera.ts DEFAULT_GROUND_LINE: the street sits at least this far down the free band. */
 const DEFAULT_GROUND_LINE = 0.68;
 /**
@@ -125,8 +147,22 @@ const OFFICE_TAB = 'Shops and fun';
 /** The Settings switch the watch shot turns on (the feature lands later in the design pass). */
 const WATCH_LABEL = 'Watch mode';
 const WATCH_IDLE_MS = 25000;
-/** The placement beat: captures this many ms after the click. */
+/**
+ * The placement beat: captures this many ms after the click. The place shot's Chrome runs under
+ * begin-frame control, so the captures are frames PLACE_FRAMES after the click, FRAME_MS apart
+ * (the renderer's frame loop, where src/render/buildfx.ts takes its dt, follows the frame time).
+ * Without it the captures fall back to real waits, which under swiftshader run long.
+ */
 const PLACE_OFFSETS_MS = [0, 200, 600];
+/** One frame at 60 Hz, and the frames after the click that the three captures take (0, 200 and 600 ms). */
+const FRAME_MS = 16.667;
+const PLACE_FRAMES = [1, 12, 36];
+/** src/sim/rules.ts ROOMS.office.width, and the demo cap's tiles, DEMO_X_MIN to DEMO_X_MAX. */
+export const OFFICE_WIDTH = 9;
+export const DEMO_X_MIN = 112;
+export const DEMO_X_MAX = 261;
+/** src/sim/build.ts CONNECTOR_KINDS: a room may overlap these. */
+const CONNECTOR_KINDS = new Set(['stairs', 'escalator']);
 /** src/ui/build.ts PHONE_MAX_WIDTH: at or under it the palette is the bottom sheet (ui.ts watchChrome). */
 const PHONE_MAX_WIDTH = 720;
 
@@ -382,6 +418,36 @@ export function pickRoom(save, geo) {
   return { target: candidates.find((c) => c.inView) ?? null, candidates };
 }
 
+/**
+ * Where the place shot builds its office: from the fixture, a run of OFFICE_WIDTH empty tiles on
+ * a floor above the ground, every tile of it over a room on the floor below, inside the demo cap
+ * (src/sim/build.ts canBuild: roomInTheWay, restsOnStructure, which asks only for an overlap, so
+ * this is stricter). A room tool puts the room's left tile under the cursor (game.ts
+ * placementFor), so the aim is that tile's middle. Lowest floor first, then nearest the band's
+ * centre; the target is the first whose aim point and whole span lie inside the band.
+ */
+export function pickPlaceSpot(save, geo) {
+  const mid = { x: geo.left + geo.width / 2, y: geo.top + (geo.bar + geo.height - (geo.bottomCover ?? 0)) / 2 };
+  const covers = (f, x) => save.rooms.some((r) => f >= r.floor && f < r.floor + r.height && x >= r.x && x < r.x + r.width && !CONNECTOR_KINDS.has(r.kind));
+  const candidates = [];
+  const floors = [...new Set(save.rooms.map((r) => r.floor))];
+  const top = Math.max(1, ...save.rooms.map((r) => r.floor + r.height - 1)) + 1;
+  for (let f = 2; f <= top; f++) {
+    if (!floors.some((g) => g <= f - 1)) continue;
+    for (let x = DEMO_X_MIN; x + OFFICE_WIDTH - 1 <= DEMO_X_MAX; x++) {
+      let fits = true;
+      for (let t = x; t < x + OFFICE_WIDTH && fits; t++) fits = !covers(f, t) && covers(f - 1, t);
+      if (!fits) continue;
+      const aim = projectPoint(save, geo, (x + 0.5) * TILE_PX, floorTopY(f) + FLOOR_PX / 2);
+      const end = projectPoint(save, geo, (x + OFFICE_WIDTH) * TILE_PX - 1, floorTopY(f) + FLOOR_PX / 2);
+      const centre = (aim.x + end.x) / 2;
+      candidates.push({ what: `office on floor ${f} x ${x}`, floor: f, tile: x, ...aim, inView: aim.inView && end.inView, d: Math.hypot(centre - mid.x, aim.y - mid.y) });
+    }
+  }
+  candidates.sort((a, b) => a.floor - b.floor || a.d - b.d);
+  return { target: candidates.find((c) => c.inView) ?? null, candidates };
+}
+
 /** renderer.ts inCrowd (lines 701 to 705): one sim in four is drawn, by id, plus the recurring characters. */
 const CROWD_ONE_IN = 4;
 const ALWAYS_DRAWN = new Set(['guard', 'collector', 'vip', 'thief']);
@@ -545,7 +611,26 @@ export default (env) => ({ ...(typeof base === 'function' ? base(env) : base), c
   return { base, stop: () => child.kill() };
 }
 
-async function launchChrome(angle) {
+/**
+ * The place shot's own Chrome, under begin-frame control when the binary has it. Chrome's new
+ * headless mode answers HeadlessExperimental.beginFrame with "wasn't found" (only
+ * chrome-headless-shell has it); then this Chrome closes and one without the flag opens, and the
+ * place state takes its captures on real waits.
+ */
+async function placeChrome() {
+  const framed = await launchChrome('swiftshader', { beginFrames: true });
+  const ok = await framed.frames.hold().then(() => framed.frames.step(false)).then(() => true, () => false);
+  if (ok) {
+    framed.frames.resume();
+    return framed;
+  }
+  await framed.close();
+  const plain = await launchChrome('swiftshader');
+  plain.note = 'begin-frame control not available (HeadlessExperimental.beginFrame not found), real waits';
+  return plain;
+}
+
+async function launchChrome(angle, options = {}) {
   const port = await freePort();
   const profile = join(tmpdir(), `hs-design-sheet-${port}`);
   rmSync(profile, { recursive: true, force: true });
@@ -554,7 +639,7 @@ async function launchChrome(angle) {
     ? ['--use-angle=metal', '--ignore-gpu-blocklist']
     : ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'];
   const proc = spawn(CHROME_PATH, ['--headless=new', ...gpu, '--hide-scrollbars', `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`,
-    '--window-size=1440,900', '--no-first-run', '--no-default-browser-check', 'about:blank'], { stdio: 'ignore' });
+    '--window-size=1440,900', '--no-first-run', '--no-default-browser-check', ...(options.beginFrames ? ['--enable-begin-frame-control'] : []), 'about:blank'], { stdio: 'ignore' });
   let targets = [];
   for (let i = 0; i < 75 && !targets.some((t) => t.type === 'page'); i++) {
     try {
@@ -611,7 +696,33 @@ async function launchChrome(angle) {
       console.log(`left the Chrome profile at ${profile}`);
     }
   };
-  return { send, evaluate, close, errors, angle };
+  // Begin-frame control: the page draws only when asked (HeadlessExperimental.beginFrame), each
+  // frame at a frame time this script chooses, so requestAnimationFrame (and pixi's ticker, which
+  // reads its timestamp) steps exactly FRAME_MS a frame. A pump draws frames while the page loads
+  // and the shot is set up; frames.hold() stops it and frames.step() draws one at a time.
+  let frames = null;
+  if (options.beginFrames) {
+    let tick = 1000;
+    let pumping = true;
+    let pump = null;
+    const step = async (screenshot) => {
+      tick += FRAME_MS;
+      return send('HeadlessExperimental.beginFrame', { frameTimeTicks: tick, interval: FRAME_MS, noDisplayUpdates: false, ...(screenshot ? { screenshot: { format: 'png' } } : {}) });
+    };
+    const run = async () => {
+      while (pumping) {
+        try { await step(false); } catch { await sleep(50); }
+      }
+    };
+    pump = run();
+    frames = {
+      step,
+      async hold() { pumping = false; await pump; },
+      resume() { if (!pumping) { pumping = true; pump = run(); } },
+    };
+  }
+  const closeAll = async () => { if (frames) await frames.hold(); await close(); };
+  return { send, evaluate, close: closeAll, errors, angle, frames };
 }
 
 // ------------------------------------------------------------------ the game (copied from the store script)
@@ -748,9 +859,9 @@ async function capture(browser, vp) {
 
 // ------------------------------------------------------------------ states
 
-/** Polls a page expression until it is truthy, for at most STATE_TIMEOUT_MS. */
-async function waitFor(browser, expression) {
-  const until = Date.now() + STATE_TIMEOUT_MS;
+/** Polls a page expression until it is truthy, for at most `ms` (STATE_TIMEOUT_MS by default). */
+async function waitFor(browser, expression, ms = STATE_TIMEOUT_MS) {
+  const until = Date.now() + ms;
   while (Date.now() < until) {
     if (await browser.evaluate(expression).catch(() => false)) return true;
     await sleep(100);
@@ -883,6 +994,10 @@ async function gameShot(browser, base, shot, fixtureText, ctx) {
         await browser.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: c.x, y: c.y, deltaX: 0, deltaY: WHEEL_NOTCH, modifiers: CDP_CTRL });
       }
       await sleep(SNAP_SETTLE_MS);
+      // Off the tower before the capture, onto the sky at the canvas's right edge, so no hover card sits over it.
+      const off = await browser.evaluate(`(() => { const r = document.querySelector('#view canvas').getBoundingClientRect(); return { x: Math.round(r.right - 12), y: Math.round(r.top + r.height * 0.3) }; })()`);
+      await browser.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: off.x, y: off.y, button: 'none', buttons: 0 });
+      await sleep(400);
       out.note += `; zoom ${opening} to ${plan.zoom} after ${plan.notches} notches of ${WHEEL_NOTCH}`;
       await shoot(shot.name);
       break;
@@ -957,13 +1072,50 @@ async function gameShot(browser, base, shot, fixtureText, ctx) {
     case 'place': {
       const why = await officeInHand(browser);
       if (why) { skip(why); break; }
-      const ok = await screenPoint(browser, save, (GHOST_OK.x + 0.5) * TILE_PX, floorTopY(GHOST_OK.floor) + FLOOR_PX / 2);
+      const spot = pickPlaceSpot(save, await measureGeo(browser));
+      if (!spot.target) { skip(spot.candidates.length === 0 ? `the fixture has no empty run of ${OFFICE_WIDTH} tiles over rooms on any floor` : `no empty run of ${OFFICE_WIDTH} tiles lies inside the canvas band (first: ${spot.candidates[0].what} at css (${spot.candidates[0].x}, ${spot.candidates[0].y}))`); break; }
+      const ok = spot.target;
       await browser.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: ok.x, y: ok.y, button: 'none', buttons: 0 });
-      if (!ok.inView || !(await waitFor(browser, chipShown(false)))) { skip(`office over floor ${GHOST_OK.floor} x ${GHOST_OK.x} at css (${ok.x}, ${ok.y}): no placeable .hs-place-chip in 5 s (${await browser.evaluate(CHIP_STATE).catch(() => 'chip unread')}), so no valid spot to click`); break; }
+      if (!(await waitFor(browser, chipShown(false)))) { skip(`${ok.what} at css (${ok.x}, ${ok.y}): no placeable .hs-place-chip in 5 s (${await browser.evaluate(CHIP_STATE).catch(() => 'chip unread')}), so no valid spot to click`); break; }
       await sleep(300);
+      // The ghost follows the pointer and would sit refused over the new room: once placed, the
+      // pointer goes off the canvas (game.ts pointerleave drops the hover ghost), onto the palette's header.
+      const off = await browser.evaluate(`(() => { const r = document.querySelector('.hs-palette')?.getBoundingClientRect(); return r && r.height > 0 ? { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + 12) } : null; })()`);
+      const mouse = (type, p, buttons) => browser.send('Input.dispatchMouseEvent', { type, x: p.x, y: p.y, button: type === 'mouseMoved' ? 'none' : 'left', buttons, ...(type === 'mouseMoved' ? {} : { clickCount: 1 }) });
+      if (browser.frames) {
+        // Frames drawn one at a time: the click and the pointer move go in, unawaited (their acks
+        // can wait on a frame), then frame 1 onward, each FRAME_MS on.
+        await browser.frames.hold();
+        const input = (async () => {
+          await mouse('mousePressed', ok, 1);
+          await mouse('mouseReleased', ok, 0);
+          if (off) await mouse('mouseMoved', off, 0);
+        })();
+        const got = [];
+        const last = PLACE_FRAMES[PLACE_FRAMES.length - 1];
+        for (let n = 1; n <= last; n++) {
+          const i = PLACE_FRAMES.indexOf(n);
+          const r = await browser.frames.step(i >= 0);
+          if (i < 0) continue;
+          const name = `${shot.name}-${PLACE_OFFSETS_MS[i]}`;
+          if (r.screenshotData) {
+            writeFileSync(join(ctx.outDir, `${name}.png`), dropAlpha(Buffer.from(r.screenshotData, 'base64')));
+            out.files.push(name);
+            got.push(`frame ${n}`);
+          } else {
+            got.push(`frame ${n} no damage, no picture`);
+            skip(`frame ${n} after the click drew nothing new, so beginFrame returned no screenshot`, name);
+          }
+        }
+        await Promise.race([input, sleep(5000)]);
+        browser.frames.resume();
+        out.note += `; ${ok.what}; begin-frame control, captures at ${got.join(', ')} (${FRAME_MS} ms a frame)`;
+        break;
+      }
       await clickAt(browser, ok);
-      // Real waits: the script runs on real time, not virtual time. Each capture starts at its
-      // offset from the click, or as soon as the one before it finished if that ran long.
+      if (off) await mouse('mouseMoved', off, 0);
+      // Real waits: each capture starts at its offset from the click, or as soon as the one
+      // before it finished if that ran long.
       const t0 = Date.now();
       const started = [];
       for (const at of PLACE_OFFSETS_MS) {
@@ -972,7 +1124,7 @@ async function gameShot(browser, base, shot, fixtureText, ctx) {
         started.push(Date.now() - t0);
         await shoot(`${shot.name}-${at}`);
       }
-      out.note += `; captures began ${started.join(', ')} ms after the click`;
+      out.note += `; ${ok.what}; ${browser.note ? `${browser.note}; ` : ''}captures began ${started.join(', ')} ms after the click`;
       break;
     }
     default:
@@ -1002,7 +1154,22 @@ async function siteShot(browser, base, shot, ctx) {
     await sleep(300);
     await browser.evaluate(`(() => { localStorage.setItem('hs.theme', ${JSON.stringify(shot.theme)}); return true; })()`);
     await browser.send('Page.navigate', { url: `${base}${shot.page}` });
-    await sleep(2500);
+    // No fixed wait: the page has loaded with its fonts, and on the landing page the hero has drawn
+    // its first frame (src/site/hero-ready.ts, data-hero-settled="drawn" with has-canvas on).
+    const skip = (why) => {
+      out.skipped.push({ name: shot.name, why });
+      return out;
+    };
+    if (!(await waitFor(browser, `document.readyState === 'complete' && (!document.fonts || document.fonts.status === 'loaded')`, SITE_WAIT_MS))) {
+      return skip(`the page did not finish loading in ${SITE_WAIT_MS / 1000} s`);
+    }
+    if (await browser.evaluate(`!!document.getElementById('hero')`)) {
+      await waitFor(browser, `!!document.documentElement.getAttribute('data-hero-settled')`, SITE_WAIT_MS);
+      const hero = await browser.evaluate(`(() => ({ settled: document.documentElement.getAttribute('data-hero-settled'), canvas: document.getElementById('hero').classList.contains('has-canvas') }))()`);
+      if (!hero.settled) return skip(`the hero drew no frame in ${SITE_WAIT_MS / 1000} s`);
+      if (hero.settled !== 'drawn' || !hero.canvas) return skip(`the hero gave up (data-hero-settled="${hero.settled}", has-canvas ${hero.canvas}): no tower to shoot`);
+      await sleep(300); // a few more frames, so the first one is not the one in the picture
+    }
     if (is404) {
       const title = await browser.evaluate('document.title');
       if (title !== 'Not found') {
@@ -1016,7 +1183,13 @@ async function siteShot(browser, base, shot, ctx) {
         out.skipped.push({ name: shot.name, why: `no element #${shot.scrollTo} on ${shot.page}` });
         return out;
       }
-      await sleep(500);
+      // Every specimen in view is drawn and its picture decoded: no undrawn canvas on screen, and
+      // each img complete with a width (src/site/specimens.ts draws them as they near the screen).
+      const inView = `((el) => { const r = el.getBoundingClientRect(); return r.bottom > 0 && r.top < innerHeight; })`;
+      const ready = `(() => { const v = ${inView}; const shown = [...document.querySelectorAll('.specimen')].filter(v);
+        return shown.length > 0 && shown.every((el) => el.tagName === 'IMG' && el.complete && el.naturalWidth > 0); })()`;
+      if (!(await waitFor(browser, ready, SITE_WAIT_MS))) return skip(`a specimen in view was not drawn in ${SITE_WAIT_MS / 1000} s`);
+      await sleep(200);
     }
     writeFileSync(join(ctx.outDir, `${shot.name}.png`), await capture(browser, vp));
     out.files.push(shot.name);
@@ -1050,6 +1223,9 @@ async function textures(tmp) {
     if (!last) throw new Error(`window.__hsRender.stats() gave nothing in ${TEXTURE_TIMEOUT_MS / 1000} s at ${dev.base}/play/?smoke: ${browser.errors.slice(-2).join(' | ')}`);
     const unsettled = steady ? '' : `, still changing after ${TEXTURE_TIMEOUT_MS / 1000} s`;
     console.log(`textures ${last.textures} bytes ${last.bytes} ratio ${(last.bytes / TEXTURE_BASELINE).toFixed(3)} (baseline 3,906,560 at DPR 2, budget 1.6${unsettled})`);
+    // Every baked key with its bytes, largest first, so a change in the total names its texture.
+    const keys = await browser.evaluate(`(() => JSON.stringify(window.__hsRender?.stats?.()?.byKey ?? {}))()`).catch(() => '{}');
+    for (const [key, bytes] of Object.entries(JSON.parse(keys)).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))) console.log(`  ${bytes} ${key}`);
   } finally {
     try {
       if (browser) await browser.close();
@@ -1126,7 +1302,13 @@ async function shootAll(args, tmp) {
     for (const shot of shots) {
       let result;
       try {
-        result = shot.state === 'site' ? await siteShot(browser, site?.base, shot, ctx) : await gameShot(browser, game.base, shot, fixtureText, ctx);
+        // The place shot runs on virtual time, which a page cannot leave: it gets its own Chrome.
+        const own = shot.state === 'place' ? await placeChrome() : null;
+        try {
+          result = shot.state === 'site' ? await siteShot(browser, site?.base, shot, ctx) : await gameShot(own ?? browser, game.base, shot, fixtureText, ctx);
+        } finally {
+          await own?.close();
+        }
       } catch (err) {
         result = { files: [], skipped: [{ name: shot.name, why: `error: ${(err instanceof Error ? err.message : String(err)).slice(0, 200)}` }], note: '' };
       }

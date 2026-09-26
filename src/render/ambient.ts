@@ -1,5 +1,7 @@
-// Ambient life in the rooms: a shop sign that blinks at night, steam off the restaurant's
-// kitchen pass, the cinema marquee cycling colour. A small list of emitters attached to rooms
+// Ambient life in the rooms: a shop sign that stutters at night, steam off the restaurant's
+// kitchen pass, the cinema marquee cycling colour. D-17: each emitter keeps its own phase from
+// its room id, so the signs and marquees read as separate businesses rather than one clock.
+// A small list of emitters attached to rooms
 // of those kinds, ticked on the frame with elapsed real time. Everything here is off under
 // reduced motion (docs/VISUAL.md Motion): no emitters exist at all, so nothing is drawn.
 //
@@ -10,17 +12,26 @@ import { Container, Sprite, Texture } from 'pixi.js';
 import type { Id, RoomKind, World } from '../sim/types';
 import { CINEMA_MARQUEE_COLOURS, cinemaMarquee } from './art';
 import { restaurantSteamPoint, shopSignStrip } from './illustrated';
+import { mix } from './anim';
 import { floorTopY } from './camera';
 import { TILE_PX } from './grid';
 import { PALETTE } from './palette';
 import { venueOpen } from './venue';
 
-export const SIGN_BLINK_MS = 900;
+/** A shop sign's neon stutter repeats this often; it is lit most of the time. */
+export const SIGN_CYCLE_MS = 3000;
+/** The two dark moments in each cycle, [from, to) ms: a neon stutter. */
+const SIGN_OFF_SPANS: readonly (readonly [number, number])[] = [
+  [2600, 2720],
+  [2840, 2920],
+];
 export const MARQUEE_STEP_MS = 600;
+/** A marquee's whole colour cycle, the span its phase is taken in. */
+const CINEMA_CYCLE_MS = 1800;
 export const STEAM_RISE_MS = 1200;
 export const STEAM_RISE_PX = 12;
 export const STEAM_PUFFS = 3;
-const STEAM_PX = 2;
+export const STEAM_PX = 3;
 const SIGN_OFF = PALETTE.detail.metalDark;
 const STEAM_COLOUR = 0xffffff;
 
@@ -69,9 +80,18 @@ export function ambientEmitters(world: World, reducedMotion: boolean): AmbientEm
   return out;
 }
 
-/** The shop sign's strip at `elapsedMs`: lit, then dark, 900 ms each. Only ever shown at night. */
+/** One emitter's own offset into every cycle, from its room id (anim.ts mix). */
+export function emitterPhase(roomId: Id): number {
+  return mix(roomId) % SIGN_CYCLE_MS;
+}
+
+/**
+ * The shop sign's strip at `elapsedMs` (the clock plus the sign's phase): lit but for 120 ms and
+ * then 80 ms near the end of every 3 s. Only ever shown at night.
+ */
 export function signLit(elapsedMs: number): boolean {
-  return (Math.floor(Math.max(0, elapsedMs) / SIGN_BLINK_MS) & 1) === 0;
+  const t = Math.max(0, elapsedMs) % SIGN_CYCLE_MS;
+  return !SIGN_OFF_SPANS.some(([from, to]) => t >= from && t < to);
 }
 
 /** The marquee's colour at `elapsedMs`, stepping through three colours every 600 ms. */
@@ -108,6 +128,7 @@ export interface Ambient {
 
 interface Live {
   emitter: AmbientEmitter;
+  phase: number;
   node: Container;
   sprites: Sprite[];
 }
@@ -154,11 +175,11 @@ export function createAmbient(layer: Container): Ambient {
             sprites.push(s);
           }
         } else {
-          sprites.push(strip(e, e.kind === 'sign' ? PALETTE.amber : marqueeColour(clock)));
+          sprites.push(strip(e, e.kind === 'sign' ? PALETTE.amber : marqueeColour(clock + (emitterPhase(e.roomId) % CINEMA_CYCLE_MS))));
         }
         node.addChild(...sprites);
         layer.addChild(node);
-        live.set(e.roomId, { emitter: e, node, sprites });
+        live.set(e.roomId, { emitter: e, phase: emitterPhase(e.roomId), node, sprites });
       }
       for (const id of [...live.keys()]) if (!seen.has(id)) drop(id);
     },
@@ -167,18 +188,16 @@ export function createAmbient(layer: Container): Ambient {
       const shopOpen = minute === undefined || venueOpen('shop', minute);
       if (live.size === 0) return;
       clock += Math.max(0, dtMs);
-      const lit = signLit(clock);
-      const colour = marqueeColour(clock);
       const puffs = steamPuffs(clock);
-      for (const { emitter: e, sprites } of live.values()) {
+      for (const { emitter: e, phase, sprites } of live.values()) {
         if (e.kind === 'sign') {
           const s = sprites[0];
           if (!s) continue;
           s.visible = night && shopOpen;
-          s.tint = lit ? PALETTE.amber : SIGN_OFF;
+          s.tint = signLit(clock + phase) ? PALETTE.amber : SIGN_OFF;
         } else if (e.kind === 'marquee') {
           const s = sprites[0];
-          if (s) s.tint = colour;
+          if (s) s.tint = marqueeColour(clock + (phase % CINEMA_CYCLE_MS));
         } else {
           for (let i = 0; i < sprites.length; i++) {
             const s = sprites[i];

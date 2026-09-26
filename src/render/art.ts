@@ -209,6 +209,8 @@ export interface TextureStats {
   illustrated: { textures: number; bytes: number };
   /** Bytes per texture family, the part of the key before the first colon. */
   byFamily: Record<string, number>;
+  /** Bytes per baked texture key, for the budget read (make-design-sheet.mjs --textures). */
+  byKey?: Record<string, number>;
 }
 
 /**
@@ -1902,9 +1904,13 @@ export function createArt(renderer: Renderer, options: { createCanvas?: CanvasFa
   const personUsed = new Map<string, number>();
   const personBytes = new Map<string, number>();
   const now = (): number => (typeof performance === 'undefined' ? Date.now() : performance.now());
+  const byKey = new Map<string, number>();
   const count = (key: string, bytes: number): void => {
     const family = key.slice(0, key.indexOf(':') >>> 0);
     byFamily[family] = (byFamily[family] ?? 0) + bytes;
+    const left = (byKey.get(key) ?? 0) + bytes;
+    if (left > 0) byKey.set(key, left);
+    else byKey.delete(key);
   };
   let crowdAtlas: CrowdAtlas | null | undefined;
   let noContextWarned = false;
@@ -2253,6 +2259,7 @@ export function createArt(renderer: Renderer, options: { createCanvas?: CanvasFa
         counts.illustrated.textures -= 1;
         counts.illustrated.bytes -= bytes;
         byFamily['person'] = (byFamily['person'] ?? 0) - bytes;
+        byKey.delete(key);
         freed += 1;
       }
       return freed;
@@ -2265,6 +2272,7 @@ export function createArt(renderer: Renderer, options: { createCanvas?: CanvasFa
         structural: { ...counts.structural },
         illustrated: { ...counts.illustrated },
         byFamily: { ...byFamily },
+        byKey: Object.fromEntries(byKey),
       };
     },
   };

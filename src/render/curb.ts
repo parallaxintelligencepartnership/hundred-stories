@@ -13,7 +13,7 @@
 import { Container, Sprite, type Texture } from 'pixi.js';
 import type { StoryBeat } from '../sim/story';
 import type { Id, Sim, SimKind, World } from '../sim/types';
-import { FRAME, mix, walkFrameAt, type PersonFrame } from './anim';
+import { FRAME, mix, walkFrameAt, type PersonFrame, type SimFrame } from './anim';
 import type { Art } from './art';
 import { headTopOf } from './figure';
 import { placePerson, type PersonSprites } from './person';
@@ -25,6 +25,14 @@ import { RAIN_ON, rainFalling, type WeatherView } from './weather';
 export const CURB_MAX = 12;
 /** Walking pace on the street, css px a second at zoom 1. */
 export const CURB_WALK_PX_PER_S = 30;
+
+/**
+ * A commuter's walk frame: the four beat cycle (anim.ts WALK_SEQUENCE, 480 ms) offset by their
+ * id across the whole cycle, so a crowd on the curb does not step in lockstep.
+ */
+export function curbWalkFrame(simId: number, nowMs: number): SimFrame {
+  return walkFrameAt(nowMs + (mix(simId) % 480));
+}
 /** How far out from a door a commuter's walk runs: past the edge of any screen at zoom 1. */
 export const CURB_PATH_PX = 720;
 /** A gap at the door end of each loop, so a commuter is not always mid street. */
@@ -268,7 +276,7 @@ export function createCurb(layer: Container, art: () => Art): Curb {
         if (x < f.viewLeft - SIM_W || x > f.viewRight + SIM_W) continue;
         seen.add(fig.simId);
         const code = f.lookOf(sim);
-        const frame: PersonFrame = f.reducedMotion || fig.heading === 'wait' ? FRAME.stand : walkFrameAt(f.nowMs + (mix(fig.simId) % 360));
+        const frame: PersonFrame = f.reducedMotion || fig.heading === 'wait' ? FRAME.stand : curbWalkFrame(fig.simId, f.nowMs);
         const key = `${fig.kind}|${code}|${frame}`;
         let w = walkers.get(fig.simId);
         if (!w) {

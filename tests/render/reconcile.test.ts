@@ -472,6 +472,17 @@ function shaftWorld(): { world: World; car: Car } {
   return { world, car };
 }
 
+/** D-14's price plates, on the overlay root (the stage's last layer, over the light). */
+function priceFloaters(stage: Container): Graphics[] {
+  const out: Graphics[] = [];
+  const walk = (node: Container): void => {
+    if (node instanceof Graphics && node.label?.startsWith('price')) out.push(node);
+    for (const child of node.children) walk(child as Container);
+  };
+  walk(stage.children[6] as Container);
+  return out;
+}
+
 function effectsSprites(stage: Container): Sprite[] {
   // the effects layer is the last child of the world root, which holds the room layers
   const out: Sprite[] = [];
@@ -546,6 +557,60 @@ describe('motion (look round L3)', () => {
     expect(sprite.texture.label).toBe('car|standard|0');
   });
 
+  it('D-18: sits the car 1 px low for the first 60 ms after its doors open, then level', async () => {
+    const { world, car } = shaftWorld();
+    const { renderer, stage, frame } = await mount(world);
+    renderer.render(world, 1);
+    const sprite = spritesWith(stage, 'car|')[0]!;
+    const level = sprite.y;
+    car.state = 'doorsOpen';
+    renderer.render(world, 1);
+    expect(sprite.y).toBe(level + 1);
+    frame(30);
+    renderer.render(world, 1);
+    expect(sprite.y).toBe(level + 1);
+    frame(29);
+    renderer.render(world, 1);
+    expect(sprite.y).toBe(level + 1);
+    frame(2);
+    renderer.render(world, 1);
+    expect(sprite.y).toBe(level);
+    frame(500);
+    renderer.render(world, 1);
+    expect(sprite.y).toBe(level); // held open, no second settle
+  });
+
+  it('D-18: settles the floor indicator and the cable with the car, so the digits stay in their housing', async () => {
+    const { world, car } = shaftWorld();
+    const { renderer, stage, frame } = await mount(world);
+    renderer.render(world, 1);
+    const sprite = spritesWith(stage, 'car|')[0]!;
+    const cable = (sprite.parent!.parent!.children[0] as Container).children[0]!;
+    const indicators = stage.children[5]!.children.find((c) => c.label === 'indicators') as Container;
+    const indicator = indicators.children[0]!;
+    const level = { indicator: indicator.y, cable: cable.scale.y };
+    car.state = 'doorsOpen';
+    renderer.render(world, 1);
+    expect(indicator.y).toBe(level.indicator + 1);
+    expect(cable.scale.y).toBe(level.cable + 1);
+    frame(61);
+    renderer.render(world, 1);
+    expect(indicator.y).toBe(level.indicator);
+    expect(cable.scale.y).toBe(level.cable);
+  });
+
+  it('D-18: does not settle the car under reduced motion', async () => {
+    const { world, car } = shaftWorld();
+    const { renderer, stage } = await mount(world);
+    renderer.setReducedMotion(true);
+    renderer.render(world, 1);
+    const sprite = spritesWith(stage, 'car|')[0]!;
+    const level = sprite.y;
+    car.state = 'doorsOpen';
+    renderer.render(world, 1);
+    expect(sprite.y).toBe(level);
+  });
+
   it('walks a walker through the three frames on real time, in its own outfit', async () => {
     const world = createWorld(9);
     world.time.minute = NOON;
@@ -587,10 +652,42 @@ describe('motion (look round L3)', () => {
     renderer.render(world, 1);
     const sprite = spritesWith(stage, 'room|office').find((s) => s.y < floorTopY(4))!;
     expect(sprite.y).toBe(floorTopY(added.floor) - 4); // four pixels up, settling
-    expect(effectsSprites(stage).length).toBe(1 + 6); // the flash and six specks
+    expect(effectsSprites(stage).length).toBe(1 + 6 + 1); // the flash, six specks and the window band's reveal
+    // D-14: the price floats on the overlay root, over the light layer, so the hour never grades it
+    expect(priceFloaters(stage)).toHaveLength(1);
     frame(400);
     expect(sprite.y).toBe(floorTopY(added.floor));
+    expect(priceFloaters(stage)).toHaveLength(1); // still rising
+    frame(500);
     expect(effectsSprites(stage)).toHaveLength(0);
+    expect(priceFloaters(stage)).toHaveLength(0);
+  });
+
+  it('D-14: rooms placed in one frame (a lobby drag) share one price, the summed cost, over their middle', async () => {
+    const { world } = officeWorld(NOON);
+    const { renderer, stage } = await mount(world);
+    renderer.render(world, 1);
+    for (const x of [200, 201, 202]) makeRoom(world, 'lobby', 1, x);
+    markStructureChanged(world);
+    renderer.render(world, 1);
+    const one = priceFloaters(stage);
+    expect(one.map((g) => g.label)).toEqual([`price -$${(3 * ROOMS.lobby.cost).toLocaleString('en-US')}`]);
+    const b = one[0]!.getBounds();
+    const mid = one[0]!.x + one[0]!.getLocalBounds().width / 2;
+    expect(mid).toBeCloseTo(201.5 * 16);
+    expect(b.width).toBeGreaterThan(0);
+  });
+
+  it('D-14: rooms placed in separate frames each float their own price', async () => {
+    const { world } = officeWorld(NOON);
+    const { renderer, stage } = await mount(world);
+    renderer.render(world, 1);
+    for (const x of [200, 201, 202]) {
+      makeRoom(world, 'lobby', 1, x);
+      markStructureChanged(world);
+      renderer.render(world, 1);
+    }
+    expect(priceFloaters(stage).map((g) => g.label)).toEqual(Array(3).fill(`price -$${ROOMS.lobby.cost.toLocaleString('en-US')}`));
   });
 
   it('skips the build feedback and the ambient emitters under reduced motion', async () => {

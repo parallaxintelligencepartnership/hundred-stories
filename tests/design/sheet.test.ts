@@ -14,6 +14,7 @@ import { MIN_ZOOM, createCamera, nearestSnap, openingGroundLine } from '../../sr
 import { OPENING_WHOLE_TOWER, OPENING_ZOOM, builtFloorExtents, towerSpan, wholeTowerGroundLine } from '../../src/render/renderer';
 import { deserialize } from '../../src/sim/save';
 import { formatClock, formatMoney } from '../../src/ui/format';
+import { weatherAt } from '../../src/game/weather';
 import { createWorld } from '../../src/sim/world';
 import type { World } from '../../src/sim/types';
 
@@ -49,6 +50,7 @@ const PASS_NAMES = [
   'game-desk-z1-1300-place',
   'site-home-desk-light-specimens',
   'site-guide-desk-light-specimens',
+  'game-desk-z1-night-clear',
 ];
 
 interface Shot {
@@ -124,11 +126,29 @@ describe('design sheet shot list', () => {
   it('game shot times match the time in the name, viewports match the name', () => {
     for (const s of shots) {
       expect(s.name.includes('-phone-') ? 'phone' : 'desk').toBe(s.viewport);
-      if (!s.name.startsWith('game-')) continue;
+      if (!s.name.startsWith('game-') || s.name.endsWith('-night-clear')) continue;
       const ofDay = sheet.shotMinuteOfDay(s);
       const hhmm = `${String(Math.floor(ofDay / 60)).padStart(2, '0')}${String(ofDay % 60).padStart(2, '0')}`;
       expect(s.name).toContain(`-${hhmm}`);
     }
+  });
+
+  it('the clear night shot is the first minute at or after 22:00 where the fixture tower is clear (D-6)', () => {
+    const shot = shots.find((s) => s.name === 'game-desk-z1-night-clear') as Shot;
+    expect(shot).toMatchObject({ viewport: 'desk', state: 'opening' });
+    const save = JSON.parse(readFileSync(join(ROOT, 'store', 'fixtures', 'demo-tower.json'), 'utf8')) as { seed: number; minute: number };
+    const day = Math.floor(save.minute / 1440) * 1440;
+    const clear = (m: number): boolean => {
+      const w = weatherAt(save.seed, day + m);
+      return w.kind === 'clear' && (w.from === 'clear' || w.blend >= 1);
+    };
+    const m = sheet.shotMinuteOfDay(shot);
+    expect(m % 1440).toBeGreaterThanOrEqual(22 * 60);
+    expect(clear(m)).toBe(true);
+    for (let e = 22 * 60; e < m; e++) if (e % 1440 >= 22 * 60) expect(clear(e), `minute ${e}`).toBe(false);
+    // The seeded save lands on that day and minute, and the clock reads it.
+    expect(JSON.parse(sheet.fixtureAtMinute(JSON.stringify(save), m)).minute).toBe(day + m);
+    expect(sheet.clockText(m)).toBe(formatClock(m));
   });
 
   it('the dusk shot sits at minute 1110 and the light dock asks for the light theme', () => {

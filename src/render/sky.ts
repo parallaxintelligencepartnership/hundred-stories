@@ -139,8 +139,10 @@ const DOWNTOWN_SEED = 0xd0e7e;
 const DOWNTOWN_DAY = 0xaebdd0;
 const DOWNTOWN_DAY_ALPHA = 0.35;
 const DOWNTOWN_NIGHT = 0x243457;
-const DOWNTOWN_WINDOWS_ALPHA = 0.6;
-const DOWNTOWN_WINDOW = 0xffd866;
+/** The lit windows: warm cream, 2 by 1 px, each at one of these strengths (60 percent on average). */
+const DOWNTOWN_WINDOW = 0xffd9a0;
+export const DOWNTOWN_WINDOW_H = 1;
+export const DOWNTOWN_WINDOW_ALPHAS: readonly number[] = [0.4, 0.6, 0.8];
 /** The window grid: a 2 px window every 6 px across and every 10 px down, inset 4 px; about one in nine lit. */
 const DOWNTOWN_PITCH_X = 6;
 const DOWNTOWN_PITCH_Y = 10;
@@ -153,8 +155,8 @@ export interface DowntownTower {
   x: number;
   width: number;
   height: number;
-  /** The lit windows' top left corners, band px (y is negative, up from the base line). */
-  windows: [number, number][];
+  /** The lit windows: top left corner, band px (y is negative, up from the base line), and strength. */
+  windows: [number, number, number][];
   /** How many window cells the tower has, lit or not. */
   cells: number;
 }
@@ -167,12 +169,12 @@ export function downtownTowers(): DowntownTower[] {
   while (x < BAND_RIGHT) {
     const width = rng.int(4, 12) * 8;
     const height = rng.int(DOWNTOWN_MIN_H / 8, DOWNTOWN_MAX_H / 8) * 8;
-    const windows: [number, number][] = [];
+    const windows: [number, number, number][] = [];
     let cells = 0;
     for (let wx = x + DOWNTOWN_INSET; wx + DOWNTOWN_WINDOW_PX <= x + width - DOWNTOWN_INSET; wx += DOWNTOWN_PITCH_X) {
       for (let wy = -height + DOWNTOWN_INSET + 2; wy + DOWNTOWN_WINDOW_PX <= -DOWNTOWN_PODIUM; wy += DOWNTOWN_PITCH_Y) {
         cells++;
-        if (rng.next() < DOWNTOWN_LIT) windows.push([wx, wy]);
+        if (rng.next() < DOWNTOWN_LIT) windows.push([wx, wy, DOWNTOWN_WINDOW_ALPHAS[rng.int(0, DOWNTOWN_WINDOW_ALPHAS.length - 1)] as number]);
       }
     }
     towers.push({ x, width, height, windows, cells });
@@ -181,10 +183,75 @@ export function downtownTowers(): DowntownTower[] {
   return towers;
 }
 
-/** The downtown by nightness: the body's tint and opacity, and the windows' opacity. */
-export function downtownLook(night: number): { tint: number; alpha: number; windows: number } {
-  const n = Math.max(0, Math.min(1, night));
-  return { tint: lerpColor(DOWNTOWN_DAY, DOWNTOWN_NIGHT, n), alpha: DOWNTOWN_DAY_ALPHA + (1 - DOWNTOWN_DAY_ALPHA) * n, windows: DOWNTOWN_WINDOWS_ALPHA * n };
+/** Relative luminance of a colour, 0 to 1. */
+function luminance(c: number): number {
+  const lin = (v: number): number => {
+    const x = v / 255;
+    return x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * lin((c >> 16) & 255) + 0.7152 * lin((c >> 8) & 255) + 0.0722 * lin(c & 255);
+}
+
+/** How dark the sky is, 0 at day to 1 at night: its top's luminance between the day and the night top. */
+export function skyDarkness(minuteOfDay: number): number {
+  const day = luminance(DAY_TOP);
+  const d = (day - luminance(skyAt(minuteOfDay).top)) / (day - luminance(NIGHT_TOP));
+  return Math.max(0, Math.min(1, d));
+}
+
+/**
+ * How strongly the downtown shows: the sky's dark fraction, cubed, so through dusk the band stays
+ * a faint haze behind the hills (at 18:30 about 3 percent of the way to night, lighter than the
+ * hills in front) and comes in as the sky itself goes dark.
+ */
+export function downtownStrength(minuteOfDay: number): number {
+  return skyDarkness(minuteOfDay) ** 3;
+}
+
+/** The downtown at a strength: the body's tint and opacity, and the windows' opacity. */
+export function downtownLook(strength: number): { tint: number; alpha: number; windows: number } {
+  const n = Math.max(0, Math.min(1, strength));
+  return { tint: lerpColor(DOWNTOWN_DAY, DOWNTOWN_NIGHT, n), alpha: DOWNTOWN_DAY_ALPHA + (1 - DOWNTOWN_DAY_ALPHA) * n, windows: n };
+}
+
+/** The far hills' colour at a minute: their base colour under their evening tint (createSky update). */
+export function hillsColorAt(minuteOfDay: number): number {
+  const t = lerpColor(0xffffff, HORIZON_NIGHT, nightness(minuteOfDay));
+  const ch = (shift: number): number => Math.round((((HILLS_COLOR >> shift) & 255) * ((t >> shift) & 255)) / 255);
+  return (ch(16) << 16) | (ch(8) << 8) | ch(0);
+}
+
+/** How far over the hills the band's floor sits: the hills' colour lifted this share toward white. */
+const DOWNTOWN_HAZE_LIFT = 0.12;
+/** After the sky reaches full night the band settles to its night look over this many minutes, and back before dawn. */
+const DOWNTOWN_SETTLE_MINUTES = 15;
+const FULL_NIGHT_FROM = 19 * 60;
+const FULL_NIGHT_UNTIL = 5 * 60 + 30;
+
+/**
+ * The downtown's look at a minute. Until the sky reaches full night it sits behind the hills in
+ * atmospheric perspective: never darker than the hills in front, so where its own ramp would
+ * show darker than the hills' colour lifted toward white, it shows that haze instead. Once the sky
+ * is full night it settles to its night look (#243457 and its lights) over a quarter hour, and
+ * comes back the same way before dawn.
+ */
+export function downtownLookAt(minuteOfDay: number): { tint: number; alpha: number; windows: number } {
+  const m = ((minuteOfDay % 1440) + 1440) % 1440;
+  const night = downtownLook(1);
+  let settle = 0;
+  if (m >= FULL_NIGHT_FROM) settle = Math.min(1, (m - FULL_NIGHT_FROM) / DOWNTOWN_SETTLE_MINUTES);
+  else if (m < FULL_NIGHT_UNTIL) settle = Math.min(1, (FULL_NIGHT_UNTIL - m) / DOWNTOWN_SETTLE_MINUTES);
+  if (settle >= 1) return night;
+  const haze = lerpColor(hillsColorAt(m), 0xffffff, DOWNTOWN_HAZE_LIFT);
+  let look = downtownLook(downtownStrength(m));
+  const shown = lerpColor(skyAt(m).bottom, look.tint, look.alpha);
+  if (luminance(shown) < luminance(haze)) look = { tint: haze, alpha: 1, windows: look.windows };
+  if (settle <= 0) return look;
+  return {
+    tint: lerpColor(look.tint, night.tint, settle),
+    alpha: look.alpha + (night.alpha - look.alpha) * settle,
+    windows: look.windows + (night.windows - look.windows) * settle,
+  };
 }
 
 /** The downtown band: the towers in white (tinted by the hour) and their windows. */
@@ -198,8 +265,11 @@ function buildDowntown(): { root: Container; body: Graphics; windows: Graphics }
   for (const t of towers) body.rect(t.x, -t.height, t.width, t.height - DOWNTOWN_PODIUM);
   body.rect(BAND_LEFT, -DOWNTOWN_PODIUM, BAND_RIGHT - BAND_LEFT, BAND_FILL + DOWNTOWN_PODIUM);
   body.fill(0xffffff);
-  for (const t of towers) for (const [wx, wy] of t.windows) windows.rect(wx, wy, DOWNTOWN_WINDOW_PX, DOWNTOWN_WINDOW_PX);
-  windows.fill(DOWNTOWN_WINDOW);
+  // One fill per strength, so the field of lights varies without a Graphics per window.
+  for (const alpha of DOWNTOWN_WINDOW_ALPHAS) {
+    for (const t of towers) for (const [wx, wy, a] of t.windows) if (a === alpha) windows.rect(wx, wy, DOWNTOWN_WINDOW_PX, DOWNTOWN_WINDOW_H);
+    windows.fill({ color: DOWNTOWN_WINDOW, alpha });
+  }
   windows.visible = false;
   root.addChild(body, windows);
   return { root, body, windows };
@@ -211,8 +281,8 @@ const HORIZON_NIGHT = 0x5c6f96;
 /** No weather handed in: a clear sky. */
 const CLEAR_WEIGHTS: WeatherView['weights'] = { clear: 1, overcast: 0, rain: 0, storm: 0 };
 
-const CONCRETE_COLOR = 0x6b6f78;
-const CONCRETE_LINE = 0x4c5058;
+export const CONCRETE_COLOR = 0x6b6f78;
+export const CONCRETE_LINE = 0x4c5058;
 const SIDEWALK_COLOR = 0x343a44;
 const STREET_EDGE_COLOR = 0x6b7482;
 
@@ -412,6 +482,7 @@ export function createSky(layers: SkyLayers): Sky {
   }
   stars.visible = false;
   const starsWide = new Graphics(stars.context);
+  starsWide.label = 'stars wide';
   starsWide.visible = false;
   layers.sky.addChild(gradient, stars, starsWide);
   // cityFar holds the downtown (BB-4), the clouds (screen space) and the far hills; cityNear the near roofs.
@@ -490,7 +561,7 @@ export function createSky(layers: SkyLayers): Sky {
         const tint = lerpColor(0xffffff, HORIZON_NIGHT, night);
         hills.tint = tint;
         roofs.tint = tint;
-        const look = downtownLook(night);
+        const look = downtownLookAt(minuteOfDay);
         downtown.body.tint = look.tint;
         downtown.body.alpha = look.alpha;
         downtown.windows.alpha = look.windows;

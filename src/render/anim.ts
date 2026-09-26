@@ -40,6 +40,11 @@ export function stepDoor(position: number, open: boolean, dtMs: number, reducedM
 /** The three walk frames: standing, stride, and the stride mirrored. */
 export type SimFrame = 0 | 1 | 2;
 export const SIM_FRAMES: readonly SimFrame[] = [0, 1, 2];
+/**
+ * D-16: the walk runs on four beats, stand, stride, stand, mirrored stride, so every step passes
+ * through the standing frame and no stride runs straight into the other.
+ */
+export const WALK_SEQUENCE: readonly SimFrame[] = [0, 1, 0, 2];
 
 /**
  * Every frame a person is baked in (figure.ts). 0 to 2 are the walk cycle, so a walker's frame
@@ -88,10 +93,10 @@ export function phaseOf(id: number, periodMs: number): number {
   return (mix(id) % 997) * (periodMs / 997);
 }
 
-/** The walk frame `elapsedMs` into the cycle: stand, stride, mirrored stride, 120 ms each. */
+/** The walk frame `elapsedMs` into the cycle: stand, stride, stand, mirrored stride, 120 ms each. */
 export function walkFrameAt(elapsedMs: number): SimFrame {
   const t = Math.max(0, Math.floor(elapsedMs / WALK_FRAME_MS));
-  return (t % SIM_FRAMES.length) as SimFrame;
+  return WALK_SEQUENCE[t % WALK_SEQUENCE.length] ?? 0;
 }
 
 /**
@@ -112,7 +117,7 @@ export function isStepping(lastMoveMs: number | undefined, nowMs: number): boole
 export type Pose = 'walk' | 'wait' | 'impatient' | 'sit' | 'browse' | 'still';
 
 /**
- * The frame one person shows at `nowMs`. walk: the three frame cycle. wait: the weight shift,
+ * The frame one person shows at `nowMs`. walk: the four beat cycle over the three walk frames. wait: the weight shift,
  * one side then the other every SHIFT_MS. impatient: the same shift, with a glance at the watch
  * for GLANCE_MS once every GLANCE_EVERY_MS. sit, browse, still: held.
  *
@@ -135,7 +140,7 @@ export function poseAt(
     case 'still':
       return still(FRAME.stand);
     case 'walk':
-      return still(reducedMotion ? FRAME.stand : walkFrameAt(nowMs + phaseOf(id, WALK_FRAME_MS * 3)));
+      return still(reducedMotion ? FRAME.stand : walkFrameAt(nowMs + phaseOf(id, WALK_FRAME_MS * WALK_SEQUENCE.length)));
     case 'wait':
     case 'impatient': {
       if (reducedMotion) return still(pose === 'impatient' ? FRAME.glance : FRAME.shiftLeft);
