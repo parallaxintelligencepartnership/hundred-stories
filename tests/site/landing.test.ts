@@ -11,6 +11,7 @@ import play from '../../play/index.html?raw';
 import privacy from '../../privacy/index.html?raw';
 import robots from '../../public/robots.txt?raw';
 import sitemap from '../../public/sitemap.xml?raw';
+import terms from '../../terms/index.html?raw';
 import { describe, expect, it } from 'vitest';
 
 /** Copy is wrapped in the markup, so read it the way a browser lays it out: one line. */
@@ -206,9 +207,9 @@ describe('crawler files', () => {
     );
   });
 
-  it('the sitemap lists all four pages', () => {
-    expect(sitemap.match(/<url>/g)).toHaveLength(4);
-    for (const path of ['/', '/how-to-play/', '/play/', '/privacy/']) {
+  it('the sitemap lists all five pages', () => {
+    expect(sitemap.match(/<url>/g)).toHaveLength(5);
+    for (const path of ['/', '/how-to-play/', '/play/', '/privacy/', '/terms/']) {
       expect(sitemap).toContain(`<loc>https://hundredstories.xyz${path}</loc>`);
     }
   });
@@ -229,7 +230,117 @@ describe('privacy page', () => {
       'The game makes no network requests of its own.',
     );
     expect(privacy).not.toMatch(/googleapis|gstatic|google\.com|googletagmanager|google-analytics/i);
-    expect(privacy).toContain('Last updated 2026-09-22.');
+    expect(privacy).toContain('Last updated 2026-09-26.');
+  });
+
+  it('covers purchases and links right after network requests', () => {
+    const tags = [...privacy.matchAll(/<p class="floor-tag">([^<]*)<\/p>/g)].map((m) => m[1]);
+    expect(tags).toEqual(Array.from({ length: tags.length }, (_, i) => `B${i + 1}`));
+    const heads = [...privacy.matchAll(/<h2 id="[^"]+">([^<]*)<\/h2>/g)].map((m) => m[1]);
+    expect(heads.indexOf('Purchases and links')).toBe(heads.indexOf('Network requests') + 1);
+    const text = flat(privacy);
+    expect(text).toContain('Buy me a coffee link');
+    expect(text).toContain('which has its own privacy policy');
+    expect(text).toContain('handled by that store (Apple or Google)');
+    expect(text).not.toMatch(/sponsor/i);
+    expect(text).toContain('No payment details reach us.');
+  });
+});
+
+describe('terms page', () => {
+  it('exists and carries the title', () => {
+    expect(terms).toContain('<title>Terms</title>');
+    expect(terms).toContain('<h1>Terms</h1>');
+  });
+
+  it('points at itself', () => {
+    expect(terms).toContain('<link rel="canonical" href="https://hundredstories.xyz/terms/" />');
+    expect(terms).toContain('<meta property="og:url" content="https://hundredstories.xyz/terms/" />');
+  });
+
+  it('has the sections, numbered B1 upward, and the last-updated date', () => {
+    const tags = [...terms.matchAll(/<p class="floor-tag">([^<]*)<\/p>/g)].map((m) => m[1]);
+    expect(tags).toEqual(Array.from({ length: 9 }, (_, i) => `B${i + 1}`));
+    const main = terms.slice(terms.indexOf('<main>'), terms.indexOf('</main>'));
+    const heads = [...main.matchAll(/<h2 id="[^"]+">([^<]*)<\/h2>/g)].map((m) => m[1]);
+    expect(heads).toEqual([
+      'Who runs this',
+      'Using the game',
+      'Your tower',
+      'Purchases',
+      'Links to other sites',
+      'No warranty',
+      'Who can play',
+      'Michigan law',
+      'Changes',
+    ]);
+    expect(terms).toContain('Last updated 2026-09-26.');
+  });
+
+  it('names who runs it, the license, and who handles purchases', () => {
+    const text = flat(terms);
+    expect(text).toContain('Parallax Intelligence Partnership');
+    expect(terms).toContain('href="https://github.com/parallaxintelligencepartnership/hundred-stories/issues/new"');
+    expect(terms).toContain('href="mailto:requests@hundredstories.xyz"');
+    expect(terms.split('href="https://polyformproject.org/licenses/strict/1.0.0"').length).toBeGreaterThan(2);
+    expect(text).toContain('through Apple or Google');
+    expect(text).toContain('We never see your payment details.');
+  });
+
+  it('carries the age rule (13 and up) and Michigan law', () => {
+    const text = flat(terms.slice(terms.indexOf('<main>'), terms.indexOf('</main>')));
+    expect(text).toContain('at least 13 years old');
+    expect(text).toContain('laws of the State of Michigan');
+    expect(text).toContain('Calhoun County, Michigan');
+  });
+
+  it('keeps the house style: no em dashes and no spaced hyphens as dashes', () => {
+    for (const page of [terms, privacy]) {
+      const text = flat(page.slice(page.indexOf('<main>'), page.indexOf('</main>')));
+      expect(text).not.toContain('\u2014');
+      expect(text).not.toMatch(/ - /);
+    }
+  });
+});
+
+describe('sponsor slot', () => {
+  const features = (): string => {
+    const start = landing.indexOf('aria-labelledby="features"');
+    return landing.slice(start, landing.indexOf('</section>', start));
+  };
+
+  it('sits in the B2 section after the cards, holding the house card', () => {
+    const html = features();
+    expect(html).toContain('<aside class="sponsor"');
+    expect(html.indexOf('<div class="cards">')).toBeLessThan(html.indexOf('<aside class="sponsor"'));
+    const aside = html.slice(html.indexOf('<aside class="sponsor"'), html.indexOf('</aside>'));
+    expect(flat(aside)).toContain('The full game is coming to the App Store and Google Play, with no ads and no tracking.');
+    // The house card is ours, so it carries no Sponsor label.
+    expect(aside).not.toContain('Sponsor');
+    expect(aside).not.toMatch(/\$\d|20\d\d/);
+  });
+
+  it('carries no sponsor wording or swap-in comment', () => {
+    expect(landing).not.toMatch(/sponsor-label|rel="sponsored|Sponsor slot/);
+    expect(features()).not.toContain('<!--');
+  });
+
+  it('adds no script, no outside image and no iframe to the page', () => {
+    expect(landing.match(/<script\b/g)).toHaveLength(5);
+    expect(landing).not.toContain('<iframe');
+    expect(landing).not.toMatch(/<img[^>]*src="https?:/);
+  });
+
+  it('keeps the floors as they were', () => {
+    const tags = [...landing.matchAll(/<p class="floor-tag">([^<]*)<\/p>/g)].map((m) => m[1]);
+    expect(tags).toEqual(['B1', 'B2', 'B3', 'B4', 'B5']);
+  });
+
+  it('says in the web panel that the game tracks nothing', () => {
+    const web = landing.slice(landing.indexOf('id="platform-panel-web"'), landing.indexOf('id="platform-panel-ios"'));
+    expect(flat(web)).toContain(
+      '<dd> None: the game tracks nothing, and nothing leaves your device. </dd>',
+    );
   });
 });
 
@@ -254,6 +365,7 @@ describe('favicon', () => {
     ['landing', landing],
     ['guide', guide],
     ['privacy', privacy],
+    ['terms', terms],
     ['404', notfound],
     ['game shell', play],
   ];
@@ -272,12 +384,14 @@ describe('footer', () => {
     ['landing', landing],
     ['guide', guide],
     ['404', notfound],
+    ['privacy', privacy],
+    ['terms', terms],
   ];
 
   it.each(pages)('gives the %s page the site footer with the contact address', (_name, html) => {
     expect(html.match(/<footer class="site-foot">/g)).toHaveLength(1);
-    expect(html).toContain('href="mailto:hello@parallaxintelligence.ai"');
-    expect(html).toContain('>hello@parallaxintelligence.ai<');
+    expect(html).toContain('href="mailto:requests@hundredstories.xyz"');
+    expect(html).toContain('>requests@hundredstories.xyz<');
     expect(html).toContain('href="https://polyformproject.org/licenses/strict/1.0.0"');
     expect(flat(html)).toContain('Hundred Stories is a from-scratch homage to SimTower');
     expect(html).toContain('src="/wordmark-line-dark.svg"');
@@ -290,6 +404,11 @@ describe('footer', () => {
   it.each(pages)('links to /privacy/ from the %s footer', (_name, html) => {
     const footer = html.slice(html.indexOf('<footer class="site-foot">'));
     expect(footer).toContain('href="/privacy/"');
+  });
+
+  it.each(pages)('links to /terms/ right after Privacy in the %s footer', (_name, html) => {
+    const footer = flat(html.slice(html.indexOf('<footer class="site-foot">')));
+    expect(footer).toContain('<a href="/privacy/">Privacy</a> <a href="/terms/">Terms</a>');
   });
 });
 

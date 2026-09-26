@@ -39,6 +39,7 @@ describe('bundled fonts: sources', () => {
       'index.html',
       'how-to-play',
       'privacy',
+      'terms',
       '404.html',
       'play',
       'src-tauri',

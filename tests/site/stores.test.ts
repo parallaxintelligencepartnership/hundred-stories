@@ -7,6 +7,7 @@ import landing from '../../index.html?raw';
 import notFoundPage from '../../404.html?raw';
 import howToPlayPage from '../../how-to-play/index.html?raw';
 import privacyPage from '../../privacy/index.html?raw';
+import termsPage from '../../terms/index.html?raw';
 import viteConfigSource from '../../vite.config.ts?raw';
 import { mountStoreRow, STORE_LINKS, storeEntries, storeNamesText } from '../../src/site/stores';
 import { FakeDom } from '../ui/fake-dom';
@@ -81,11 +82,12 @@ describe('the landing store row', () => {
 });
 
 describe('Steam and the source link are off every public page and the install manifest', () => {
-  it('keeps 404, how-to-play and privacy free of Steam and the source link text', () => {
+  it('keeps 404, how-to-play, privacy and terms free of Steam and the source link text', () => {
     for (const [name, page] of [
       ['404.html', notFoundPage],
       ['how-to-play/index.html', howToPlayPage],
       ['privacy/index.html', privacyPage],
+      ['terms/index.html', termsPage],
     ] as const) {
       for (const phrase of FORBIDDEN) {
         expect(page, `${name} should not contain "${phrase}"`).not.toContain(phrase);

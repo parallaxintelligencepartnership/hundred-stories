@@ -7,6 +7,7 @@ import notfound from '../../404.html?raw';
 import guide from '../../how-to-play/index.html?raw';
 import landing from '../../index.html?raw';
 import privacy from '../../privacy/index.html?raw';
+import terms from '../../terms/index.html?raw';
 import { describe, expect, it } from 'vitest';
 
 // Read off disk: vitest hands a .css?raw import over empty.
@@ -97,8 +98,8 @@ describe('D-38: the site controls are the game controls, with one amber', () => 
     expect(tag).not.toContain('letter-spacing');
   });
 
-  it('writes each floor tag as the floor alone on the landing page, the guide and the privacy page', () => {
-    for (const page of [landing, guide, privacy]) {
+  it('writes each floor tag as the floor alone on the landing page, the guide, the privacy page and the terms page', () => {
+    for (const page of [landing, guide, privacy, terms]) {
       const tags = [...page.matchAll(/<p class="floor-tag">([^<]*)<\/p>/g)].map((m) => m[1] as string);
       expect(tags.length).toBeGreaterThan(0);
       for (const tag of tags) expect(tag).toMatch(/^B\d+$/);

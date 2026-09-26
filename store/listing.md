@@ -147,7 +147,7 @@ privacyUrl: https://hundredstories.xyz/privacy/
 
 ## Support and contact
 
-- Support email: hello@parallaxintelligence.ai (the address on the landing page).
+- Support email: requests@hundredstories.xyz (the address on the landing page).
 - Developer name: Parallax Intelligence Partnership (the copyright line in LICENSE and in
   src-tauri/tauri.conf.json). The seller name on each store is the account holder's legal name
   and is set when the account is opened.

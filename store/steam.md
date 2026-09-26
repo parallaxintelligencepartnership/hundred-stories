@@ -55,7 +55,7 @@ made by the script: they want drawn star art.
 | Price | | (blank: Matt's call) |
 | Legal line | optional | Copyright 2026 Parallax Intelligence Partnership |
 | Privacy policy URL | optional | (blank until the page exists) |
-| Support email or URL | | hello@parallaxintelligence.ai (Matt's call) |
+| Support email or URL | | requests@hundredstories.xyz (Matt's call) |
 
 System requirements (suggested; check at submission against a real Windows and Linux build):
 

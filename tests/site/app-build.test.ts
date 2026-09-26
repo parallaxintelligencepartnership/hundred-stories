@@ -78,7 +78,7 @@ describe('web build precache', () => {
   );
 
   // The worker's scope is /play/, so it only ever gets fetch events from clients under /play/.
-  // Landing-only files (the landing page, 404, privacy, how-to-play, and the assets only they
+  // Landing-only files (the landing page, 404, privacy, terms, how-to-play, and the assets only they
   // reference) are outside that scope and must not be precached.
   it(
     'never precaches landing-only pages or assets',
@@ -96,6 +96,7 @@ describe('web build precache', () => {
       expect(precached).not.toContain('index.html');
       expect(precached).not.toContain('404.html');
       expect(precached.some((url) => url.startsWith('privacy/'))).toBe(false);
+      expect(precached.some((url) => url.startsWith('terms/'))).toBe(false);
       expect(precached.some((url) => url.startsWith('how-to-play/'))).toBe(false);
       expect(precached).not.toContain('og.png');
       expect(precached.some((url) => url.startsWith('wordmark-'))).toBe(false);

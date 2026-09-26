@@ -47,7 +47,7 @@ question stops coming back (a one line Info.plist change, not made here).
 | Promotional text | 170 characters | listing.md, promotional line |
 | Description | 4,000 characters | listing.md, long description |
 | Keywords | 100 characters | listing.md, keywords |
-| Support URL | required | (blank until Matt picks the page; the landing page contact is hello@parallaxintelligence.ai) |
+| Support URL | required | (blank until Matt picks the page; the landing page contact is requests@hundredstories.xyz) |
 | Marketing URL | optional | (blank: Matt's call) |
 | Privacy policy URL | required | (blank: no privacy page exists yet, see listing.md) |
 | What's new | per version, not on 1.0 | |

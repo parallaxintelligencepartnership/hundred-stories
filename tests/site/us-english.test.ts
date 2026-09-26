@@ -6,6 +6,7 @@ import guide from '../../how-to-play/index.html?raw';
 import landing from '../../index.html?raw';
 import play from '../../play/index.html?raw';
 import privacy from '../../privacy/index.html?raw';
+import terms from '../../terms/index.html?raw';
 import { describe, expect, it } from 'vitest';
 import { controlLines } from '../../src/ui/controls';
 import { speedModeText } from '../../src/ui/status';
@@ -27,6 +28,7 @@ const PAGES: Record<string, string> = {
   'how-to-play/index.html': guide,
   'play/index.html': play,
   'privacy/index.html': privacy,
+  'terms/index.html': terms,
   '404.html': notfound,
 };
 

@@ -80,6 +80,9 @@ type PanelKind = 'none' | 'finances' | 'log' | 'settings' | 'share' | 'intro' | 
 export const STAR_CARD_LINGER_MS = 20_000;
 /** A followed person's story line becomes a news toast at most this often, in real time. */
 export const STORY_TOAST_GAP_MS = 30_000;
+/** Give-up lines ("Gave up waiting for an elevator...") fold into one toast at most this often. */
+export const GIVE_UP_TOAST_GAP_MS = 20_000;
+const GIVE_UP_PREFIX = 'Gave up waiting for an elevator';
 
 /** The live measurement of the chrome: stop it, or ask it to measure again. */
 interface ChromeWatch {
@@ -241,6 +244,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   let newsStorySeq = 0;
   let newsShowsAlert = false;
   let storyShownAt = Number.NEGATIVE_INFINITY;
+  let giveUps = 0;
+  let giveUpShownAt = Number.NEGATIVE_INFINITY;
   /** The last refusal shown as a notice, so its log line does not show a second time. */
   let lastNoticeText = '';
   /**
@@ -1337,12 +1342,27 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     const newest = log.length > 0 ? log[log.length - 1] : undefined;
     const logMoved = world.logTotal !== newsLogSeen;
     const first = newsLogSeen < 0;
+    const fresh = first ? 0 : Math.min(world.logTotal - newsLogSeen, log.length);
     newsLogSeen = world.logTotal;
+    for (const line of log.slice(log.length - fresh)) if (line.text.startsWith(GIVE_UP_PREFIX)) giveUps += 1;
     const beat = newFollowedBeat(world);
     if (logMoved && newest) {
       newsShowsAlert = newest.level === 'alert';
       // The first look is the tower as loaded: its old lines are history, not news.
       if (first || newsShowsAlert) return;
+      // A busy rush has many people give up at once: one folded toast now and then, not one each.
+      if (newest.text.startsWith(GIVE_UP_PREFIX)) {
+        const at = performance.now();
+        if (at - giveUpShownAt < GIVE_UP_TOAST_GAP_MS) return;
+        giveUpShownAt = at;
+        const count = giveUps;
+        giveUps = 0;
+        toastLayer.show(count > 1 ? `${count} people gave up waiting for an elevator.` : newest.text, {
+          onTap: openLog,
+          tapLabel: 'Open the news',
+        });
+        return;
+      }
       // A refusal of the player's own command is said as a notice where they acted.
       if (acting && newest.level === 'warn') return;
       // A refusal was already said as a notice where the player acted.

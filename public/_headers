@@ -31,3 +31,6 @@
 
 /privacy/
   Cache-Control: no-cache, must-revalidate
+
+/terms/
+  Cache-Control: no-cache, must-revalidate

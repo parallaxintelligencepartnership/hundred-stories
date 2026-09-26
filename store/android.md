@@ -38,7 +38,7 @@ check.
 | App or game | | Game |
 | Category | | Simulation |
 | Tags | up to 5, picked from Play's list | Simulation, Tycoon, Building, Management, Offline (check at submission: the tag list is Play's own) |
-| Contact email | required | hello@parallaxintelligence.ai (the landing page address; Matt's call) |
+| Contact email | required | requests@hundredstories.xyz (the landing page address; Matt's call) |
 | Website | optional | (blank: Matt's call) |
 | Privacy policy URL | required | (blank: no privacy page exists yet, see listing.md) |
 | Price | | (blank: Matt's call; a paid app needs a payments profile, and an app published free can never become paid) |

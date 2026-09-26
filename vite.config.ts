@@ -120,7 +120,7 @@ export default defineConfig(({ mode }) => {
               globPatterns: ['**/*.{js,css,html,png,svg,woff2}'],
               // App-only chunks (nativeChunk above): the web never loads them. The rest of this
               // list is the landing site: pages, assets and images only index.html, 404.html,
-              // privacy/ and how-to-play/ reference. The worker's scope is /play/, so it never
+              // privacy/, terms/ and how-to-play/ reference. The worker's scope is /play/, so it never
               // gets a fetch event for any of them and precaching them only wastes bandwidth.
               globIgnores: [
                 '**/node_modules/**',
@@ -128,6 +128,7 @@ export default defineConfig(({ mode }) => {
                 'index.html',
                 '404.html',
                 'privacy/**',
+                'terms/**',
                 'how-to-play/**',
                 'og.png',
                 'wordmark-*',
@@ -151,6 +152,7 @@ export default defineConfig(({ mode }) => {
               howto: 'how-to-play/index.html',
               play: 'play/index.html',
               privacy: 'privacy/index.html',
+              terms: 'terms/index.html',
               notfound: '404.html',
             },
         output: { codeSplitting: { groups: CHUNK_GROUPS } },

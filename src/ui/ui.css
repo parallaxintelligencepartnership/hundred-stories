@@ -3301,7 +3301,11 @@ button.hs-news-toast {
     border-radius: var(--radius-20) var(--radius-20) 0 0;
     box-shadow: var(--shadow-3);
     transform: translateY(max(-24px, var(--sheet-drag, 0px)));
-    transition: transform var(--motion-med) var(--ease-spring);
+    height: auto;
+    interpolate-size: allow-keywords;
+    transition:
+      transform var(--motion-med) var(--ease-spring),
+      height var(--motion-med) var(--ease-standard);
     overscroll-behavior: contain;
   }
 
@@ -3395,13 +3399,14 @@ button.hs-news-toast {
 
   /* Dragged up: every tile of the category as a grid that scrolls up and down. */
   .hs-palette.is-sheet-full {
-    top: calc(var(--top-actual, calc(var(--top-h) * 2)) + var(--gap-float));
+    height: calc(100% - var(--top-actual, calc(var(--top-h) * 2)) - var(--gap-float));
   }
 
   .hs-palette.is-sheet-full .hs-build-items {
     flex: 1 1 auto;
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 8px;
     align-content: start;
     padding: 0 12px calc(var(--fab) + 2 * var(--edge));
     overflow-x: hidden;
