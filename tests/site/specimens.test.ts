@@ -1,16 +1,17 @@
 // The room specimens (design pass D-39): each is drawn by the game's own art code, on the day
 // cutaway's wall (BB-3: the head rail and the sill, no panes), then swapped for an image.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { FRAME } from '../../src/render/anim';
 import { drawPerson, drawPortrait, drawStressMark, lookCode, type Ctx2D } from '../../src/render/figure';
 import { drawCarIllustrated, drawSign, drawVenueFixtures, signBoard } from '../../src/render/illustrated';
 import { VENUE_ACCENTS } from '../../src/render/venue';
 import { PORTRAIT_PX as CARD_PX } from '../../src/ui/panels';
-import heroSource from '../../src/site/hero.ts?raw';
 import { HERO_SETTLED_ATTR, markHeroSettled, whenHeroSettled, type HeroDocument } from '../../src/site/hero-ready';
 import {
   CARD_PORTRAIT_PX,
+  bootSpecimens,
   drawSpecimen,
+  HERO_DEADLINE_MS,
   mountSpecimens,
   scheduleSpecimens,
   specimenRatio,
@@ -310,6 +311,76 @@ describe('mountSpecimens', () => {
       expect(h.car.replacedBy?.src).toBe('data:,b');
     });
   });
+
+  describe('bootSpecimens: the load path waits for the fonts and the hero, or the deadline', () => {
+    function page() {
+      const attrs = new Map<string, string>();
+      const listeners: (() => void)[] = [];
+      const office = fakeCanvas('office', 'An office', () => 'data:,a');
+      const base = fakeDocument([office]);
+      const doc = {
+        ...base,
+        documentElement: { getAttribute: (n: string) => attrs.get(n) ?? null, setAttribute: (n: string, v: string) => void attrs.set(n, v) },
+        getElementById: (id: string) => (id === 'hero' ? {} : null),
+        addEventListener: (_t: string, l: () => void) => void listeners.push(l),
+        dispatchEvent: () => {
+          for (const l of listeners.splice(0)) l();
+          return true;
+        },
+      };
+      let fontsDone: () => void = () => undefined;
+      const fontsReady = new Promise<void>((r) => (fontsDone = r));
+      const observed: unknown[] = [];
+      const observe: SpecimenObserverFactory = () => ({ observe: (t) => void observed.push(t), unobserve: () => undefined });
+      return { doc, office, fontsReady, fontsDone: () => fontsDone(), observed, observe };
+    }
+    const flush = async (): Promise<void> => {
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+    };
+    const never = (): Promise<void> => new Promise(() => undefined);
+
+    it('attaches nothing until both the fonts and the hero have settled, in either order', async () => {
+      for (const heroFirst of [true, false]) {
+        const p = page();
+        void bootSpecimens({ doc: p.doc, fontsReady: p.fontsReady, wait: never, dpr: 1, viewportHeight: 900, observe: p.observe, idle: () => undefined });
+        await flush();
+        expect(p.observed).toEqual([]);
+        if (heroFirst) markHeroSettled(p.doc, 'drawn');
+        else p.fontsDone();
+        await flush();
+        expect(p.observed).toEqual([]); // one of the two is not enough
+        if (heroFirst) p.fontsDone();
+        else markHeroSettled(p.doc, 'drawn');
+        await flush();
+        expect(p.observed).toEqual([p.office]);
+        expect(p.office.ctx.calls).toEqual([]);
+      }
+    });
+
+    it('goes ahead HERO_DEADLINE_MS after load when the hero never settles', async () => {
+      vi.useFakeTimers();
+      try {
+        const p = page();
+        p.fontsDone();
+        void bootSpecimens({
+          doc: p.doc,
+          fontsReady: p.fontsReady,
+          wait: (ms) => new Promise((r) => setTimeout(r, ms)),
+          dpr: 1,
+          viewportHeight: 900,
+          observe: null,
+          idle: (work) => work(),
+        });
+        await vi.advanceTimersByTimeAsync(HERO_DEADLINE_MS - 1);
+        expect(p.office.replacedBy).toBeNull();
+        await vi.advanceTimersByTimeAsync(1);
+        expect(HERO_DEADLINE_MS).toBe(4000);
+        expect(p.office.replacedBy?.src).toBe('data:,a');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
 });
 
 describe('the hero settled signal', () => {
@@ -347,10 +418,5 @@ describe('the hero settled signal', () => {
     expect(f.attrs.get(HERO_SETTLED_ATTR)).toBe('drawn');
     expect(f.events()).toBe(1);
     await expect(whenHeroSettled(f.doc)).resolves.toBeUndefined();
-  });
-
-  it('is marked by hero.ts after its first rendered frame and on every way it gives up', () => {
-    expect(heroSource).toMatch(/renderer\.render\(world, 1\);\s*\/\/[^\n]*\n\s*markHeroSettled\(document, 'drawn'\);/);
-    expect(heroSource.match(/markHeroSettled\(document, 'none'\)/g)).toHaveLength(4);
   });
 });

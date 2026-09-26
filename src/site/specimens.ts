@@ -17,7 +17,7 @@ import { css, drawCarIllustrated, drawSign, drawVenueFixtures, INK, signBoard } 
 import { PALETTE } from '../render/palette';
 import { VENUE_ACCENTS, VENUE_NAMES } from '../render/venue';
 import { SHAFTS } from '../sim/rules';
-import { whenHeroSettled } from './hero-ready';
+import { whenHeroSettled, type HeroDocument } from './hero-ready';
 
 export const SPECIMEN_KINDS = ['stress', 'office', 'shop', 'car', 'people'] as const;
 export type SpecimenKind = (typeof SPECIMEN_KINDS)[number];
@@ -296,24 +296,47 @@ export async function scheduleSpecimens(s: SpecimenSchedule): Promise<void> {
   for (const canvas of canvases) observer.observe(canvas);
 }
 
+/** If the hero has not settled this long after load, the specimens go ahead anyway. */
+export const HERO_DEADLINE_MS = 4000;
+
+/**
+ * Resolves when the specimens may start: the page's fonts are ready (the shop's sign is lettered
+ * in Bricolage Grotesque) and the hero has settled, or HERO_DEADLINE_MS has passed since this was
+ * called, whichever comes first for the hero. The deadline runs from load, not from the fonts.
+ */
+export function specimensReady(fontsReady: Promise<unknown>, heroDoc: HeroDocument, wait: (ms: number) => Promise<void>): Promise<void> {
+  const hero = Promise.race([whenHeroSettled(heroDoc), wait(HERO_DEADLINE_MS)]);
+  return fontsReady.catch(() => undefined).then(() => hero);
+}
+
+/** What the page hands the load path: the real globals, or a test's stand ins. */
+export interface SpecimenBoot extends Omit<SpecimenSchedule, 'heroSettled' | 'doc'> {
+  doc: SpecimenDocument & HeroDocument;
+  fontsReady: Promise<unknown>;
+  wait: (ms: number) => Promise<void>;
+}
+
+/** The load path: wait for the fonts and the hero (or the deadline), then schedule the drawing. */
+export function bootSpecimens(b: SpecimenBoot): Promise<void> {
+  return scheduleSpecimens({ ...b, heroSettled: specimensReady(b.fontsReady, b.doc, b.wait) });
+}
+
 // Guarded so the drawing imports cleanly into tests, which run with no `document`.
 if (typeof document !== 'undefined') {
   const fonts = (document as Document & { fonts?: { ready: Promise<unknown> } }).fonts;
-  // The shop's sign is lettered in Bricolage Grotesque: the page's fonts come first, then the hero.
-  const heroSettled = (fonts ? fonts.ready : Promise.resolve()).catch(() => undefined).then(() => whenHeroSettled(document));
-  const idle = (work: () => void): void => {
-    const w = window as Window & { requestIdleCallback?: (cb: () => void) => number };
-    if (w.requestIdleCallback) w.requestIdleCallback(() => work());
-    else setTimeout(work, 0);
-  };
-  scheduleSpecimens({
-    doc: document as unknown as SpecimenDocument,
+  const w = window as Window & { requestIdleCallback?: (cb: () => void) => number };
+  bootSpecimens({
+    doc: document as unknown as SpecimenDocument & HeroDocument,
+    fontsReady: fonts ? fonts.ready : Promise.resolve(),
+    wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     dpr: window.devicePixelRatio,
-    heroSettled,
     viewportHeight: window.innerHeight,
     observe: 'IntersectionObserver' in window
       ? (callback, options) => new IntersectionObserver(callback, options) as unknown as SpecimenObserver
       : null,
-    idle,
+    idle: (work) => {
+      if (w.requestIdleCallback) w.requestIdleCallback(() => work());
+      else setTimeout(work, 0);
+    },
   }).catch((e: unknown) => console.warn('specimens: not drawn', e));
 }

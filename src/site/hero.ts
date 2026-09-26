@@ -141,14 +141,20 @@ async function start(): Promise<void> {
     last = now;
     elapsed += dt;
 
-    // The clock is set, not run: the loop holds the tower in daylight with the evening as the payoff.
-    world.time.minute = heroMinute(elapsed);
-    animateDemo(world, dt, { minutesPerMs: 0, fire: false });
-    // The camera is ours every frame: this also undoes any key panning the
-    // renderer's own window listeners picked up from someone reading the page.
-    renderer.camera.clearKeys();
-    renderer.camera.centerOn(driftFloor(elapsed, top), centerTile);
-    renderer.render(world, 1);
+    try {
+      // The clock is set, not run: the loop holds the tower in daylight with the evening as the payoff.
+      world.time.minute = heroMinute(elapsed);
+      animateDemo(world, dt, { minutesPerMs: 0, fire: false });
+      // The camera is ours every frame: this also undoes any key panning the
+      // renderer's own window listeners picked up from someone reading the page.
+      renderer.camera.clearKeys();
+      renderer.camera.centerOn(driftFloor(elapsed, top), centerTile);
+      renderer.render(world, 1);
+    } catch (e) {
+      // A frame that throws ends the loop; nothing may be left waiting on a tower that never drew.
+      markHeroSettled(document, 'none');
+      throw e;
+    }
     // The first frame is on screen: the page's other work (the room specimens) may start.
     markHeroSettled(document, 'drawn');
 
