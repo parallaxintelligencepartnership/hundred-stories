@@ -76,7 +76,7 @@ afterEach(() => {
 });
 
 /** Bakes one room shell and returns every rectangle drawn into it, with the colour it was filled in. */
-function bakeShell(kind: RoomKind, state: WindowState, variant = VENUE_SHELL): Rect[] {
+function bakeShell(kind: RoomKind, state: WindowState, variant = VENUE_SHELL, tiles = ROOMS[kind].width): Rect[] {
   const rects: Rect[] = [];
   Graphics.prototype.rect = function patched(this: Graphics, x: number, y: number, w: number, h: number) {
     rects.push({ x, y, w, h, color: -1, alpha: 1 });
@@ -95,8 +95,7 @@ function bakeShell(kind: RoomKind, state: WindowState, variant = VENUE_SHELL): R
       return {} as Texture;
     },
   } as unknown as PixiRenderer;
-  const rule = ROOMS[kind];
-  createArt(renderer, { resolution: 1 }).room(kind, rule.width, rule.height, variant, state);
+  createArt(renderer, { resolution: 1 }).room(kind, tiles, ROOMS[kind].height, variant, state);
   Graphics.prototype.rect = originalRect;
   Graphics.prototype.fill = originalFill;
   return rects;
@@ -146,10 +145,18 @@ describe('D-7: a floor line in the district colour', () => {
     expect(lines.map((r) => r.y)).toEqual([(party.height - 1) * FLOOR_PX + 64]);
   });
 
-  it('draws none in a lobby, a sky lobby, or the stairs and escalators', () => {
-    for (const kind of ['lobby', 'skyLobby', 'stairs', 'escalator'] as RoomKind[]) {
-      const rects = bakeShell(kind, 'day', 0);
-      expect(rects.some((r) => r.color === BLOCK[kind] && r.h === 2 && r.w > TILE_PX), kind).toBe(false);
+  it('draws none in a lobby or a sky lobby, whose one tile shells would carry a 12 px stub', () => {
+    const lineOf = (kind: RoomKind, tiles?: number): Rect[] => bakeShell(kind, 'day', VENUE_SHELL, tiles).filter((r) => r.color === BLOCK[kind] && r.h === 2);
+    // The check sees a one tile line: an office baked one tile wide carries it at x 2, 12 px long.
+    expect(lineOf('office', 1)).toEqual([{ x: LINE_PX, y: 64, w: TILE_PX - 2 * LINE_PX, h: 2, color: BLOCK.office, alpha: 1 }]);
+    expect(ROOMS.lobby.width).toBe(1);
+    expect(lineOf('lobby')).toEqual([]);
+    expect(lineOf('skyLobby')).toEqual([]); // it would sit on the bottom floor's slab, y 208
+  });
+
+  it('draws none under the stairs and escalators, which have no shell', () => {
+    for (const kind of ['stairs', 'escalator'] as RoomKind[]) {
+      expect(bakeShell(kind, 'day').filter((r) => r.color === BLOCK[kind] && r.h === 2), kind).toEqual([]);
     }
   });
 });

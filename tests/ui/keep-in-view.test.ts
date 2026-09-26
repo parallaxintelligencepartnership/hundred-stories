@@ -115,6 +115,16 @@ describe('in the shell', () => {
     expect(eased).toEqual([]);
   });
 
+  it('still looks on the third frame: a ring first drawn then eases the view', () => {
+    const { renderer, eased } = mount(1200, null);
+    dom.runFrame();
+    dom.runFrame();
+    expect(eased).toEqual([]);
+    renderer.box = { x: 800, y: 200, w: 60, h: 40 };
+    dom.runFrame();
+    expect(eased).toEqual([500 + 28 / 2]);
+  });
+
   it('gives up after a few frames when no ring is ever drawn', () => {
     const { renderer, eased } = mount(1200, null);
     for (let i = 0; i < 3; i++) dom.runFrame();
