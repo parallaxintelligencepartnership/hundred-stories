@@ -240,6 +240,67 @@ describe('on a phone and beside a card', () => {
     map.destroy();
   });
 
+  function phoneMap(now: { t: number }) {
+    (globalThis as { window: { matchMedia: unknown } }).window.matchMedia = () => ({ matches: true }); // a phone
+    vi.spyOn(performance, 'now').mockImplementation(() => now.t);
+    const camera = createCamera();
+    camera.setViewport(390, 844);
+    const world = tower(30);
+    const map = createMinimap({ camera, getWorld: () => world as never, getChrome: () => ({ top: 64, bottom: 0 }) });
+    map.refresh();
+    return { camera, map };
+  }
+
+  it('forgets a cancelled press: the next pan shows the map and it still goes 1.5 s after the lift', () => {
+    const now = { t: 100 };
+    const { camera, map } = phoneMap(now);
+    // The browser takes a press for its own scroll: the pointer is cancelled, never lifted.
+    dom.fireWindow('pointerdown', { pointerId: 3 });
+    now.t = 120;
+    dom.fireWindow('pointercancel', { pointerId: 3 });
+    // Later, a pan of its own, pressed and lifted.
+    now.t = 5000;
+    dom.fireWindow('pointerdown', { pointerId: 4 });
+    camera.panBy(0, -200);
+    map.refresh();
+    expect(map.isVisible()).toBe(true);
+    now.t = 5200;
+    dom.fireWindow('pointerup', { pointerId: 4 });
+    now.t = 5200 + MINIMAP_MOVE_MS - 1;
+    map.refresh();
+    expect(map.isVisible()).toBe(true);
+    now.t = 5200 + MINIMAP_MOVE_MS;
+    map.refresh();
+    expect(map.isVisible()).toBe(false);
+    map.destroy();
+  });
+
+  it('keeps the map through a pinch until the last finger lifts', () => {
+    const now = { t: 100 };
+    const { camera, map } = phoneMap(now);
+    dom.fireWindow('pointerdown', { pointerId: 1 });
+    dom.fireWindow('pointerdown', { pointerId: 2 });
+    now.t = 150;
+    camera.panBy(0, -200);
+    map.refresh();
+    // One finger lifts; the other still holds, still for a long while.
+    now.t = 200;
+    dom.fireWindow('pointerup', { pointerId: 1 });
+    now.t = 200 + 2 * MINIMAP_MOVE_MS;
+    map.refresh();
+    expect(map.isVisible()).toBe(true);
+    // The last finger lifts: the count starts there.
+    const lift = now.t;
+    dom.fireWindow('pointerup', { pointerId: 2 });
+    now.t = lift + MINIMAP_MOVE_MS - 1;
+    map.refresh();
+    expect(map.isVisible()).toBe(true);
+    now.t = lift + MINIMAP_MOVE_MS;
+    map.refresh();
+    expect(map.isVisible()).toBe(false);
+    map.destroy();
+  });
+
   it('keeps the phone alerts on one right edge whether the map shows or not', () => {
     const css = readFileSync(new URL('../../src/ui/ui.css', import.meta.url), 'utf8');
     const start = css.indexOf('/* On a phone the alerts sit under the status bar');

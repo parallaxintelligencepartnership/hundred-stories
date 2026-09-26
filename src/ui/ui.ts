@@ -282,7 +282,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   top.append(pill, actions);
 
   // Readouts: the mono readout type is kept for cash and the clock only.
-  // A phone's tap on the stars opens the goals (below), never the tooltip over them.
+  // At phone width, whatever the pointer, a tap on the stars opens the goals (below), never the
+  // tooltip over them. Only the css that keeps a hovered tooltip shut asks for touch.
   const status = createStatusBar({ starsTip: () => !inSheetLayout() });
   status.cash.addEventListener('click', () => setPanel(panelKind === 'finances' ? 'none' : 'finances'));
   // A phone shows no folded goals card (ui.css), so the star count that names them opens them:

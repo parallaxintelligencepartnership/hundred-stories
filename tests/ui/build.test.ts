@@ -46,10 +46,59 @@ function phoneBlock(): string {
   throw new Error('no phone block');
 }
 
-/** The body of the rule whose selector, on its own line, is exactly `selector`. */
+/** A block with its nested @media blocks cut out: the rules that hold at every width inside it. */
+function flat(block: string): string {
+  let out = block;
+  for (let at = out.indexOf('@media'); at >= 0; at = out.indexOf('@media')) {
+    let depth = 0;
+    for (let i = out.indexOf('{', at); i < out.length; i += 1) {
+      if (out[i] === '{') depth += 1;
+      if (out[i] === '}' && --depth === 0) {
+        out = out.slice(0, at) + out.slice(i + 1);
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+/** A selector list split on its top-level commas (the commas inside :is() stay). */
+function selectorsOf(list: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let from = 0;
+  for (let i = 0; i < list.length; i += 1) {
+    if (list[i] === '(') depth += 1;
+    if (list[i] === ')') depth -= 1;
+    if (list[i] === ',' && depth === 0) {
+      out.push(list.slice(from, i).trim());
+      from = i + 1;
+    }
+  }
+  out.push(list.slice(from).trim());
+  return out;
+}
+
+/**
+ * The declarations for an exact selector in a block's own rules (nested @media blocks left out),
+ * merged in source order so a later rule wins, one `name: value;` per line.
+ */
 function ruleIn(block: string, selector: string): string {
-  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`\\n[ \\t]*${escaped} \\{([^}]*)\\}`).exec(block)?.[1] ?? '';
+  const merged = new Map<string, string>();
+  const re = /([^{}]+)\{([^{}]*)\}/g;
+  const own = flat(block);
+  for (let m = re.exec(own); m; m = re.exec(own)) {
+    const list = (m[1] ?? '').replace(/\/\*[\s\S]*?\*\//g, '');
+    if (!selectorsOf(list).includes(selector)) continue;
+    for (const decl of (m[2] ?? '').replace(/\/\*[\s\S]*?\*\//g, '').split(';')) {
+      const colon = decl.indexOf(':');
+      if (colon < 0) continue;
+      const name = decl.slice(0, colon).trim();
+      merged.delete(name); // re-insert, so the order shows the winner last
+      merged.set(name, decl.slice(colon + 1).trim());
+    }
+  }
+  return [...merged].map(([name, value]) => `\n  ${name}: ${value};`).join('');
 }
 
 describe('sheet rules', () => {

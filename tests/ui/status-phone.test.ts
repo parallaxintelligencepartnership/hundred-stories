@@ -538,13 +538,15 @@ describe('goals at phone width', () => {
     expect(has(card, 'is-collapsed') || has(card, 'is-hidden')).toBe(false);
   });
 
-  it('at phone width a tap on the star count opens the goals card only, never the tooltip', () => {
+  it('at phone width (the layout, whatever the pointer) a tap on the star count opens the goals card only, never the tooltip', () => {
     returning({ 'hs.goals.collapsed': 'true' });
     setWidth(390);
     const root = mount(9 * 60);
     const stars = find(root, 'hs-status-stars');
     const button = find(stars, 'hs-stars-button');
-    // The tap reaches the button, then the readout around it.
+    // The gate is the phone width, where the goals card is the way in; only the css that keeps
+    // a hovered or focused tooltip shut asks for a touch pointer. The tap reaches the button,
+    // then the readout around it.
     click(button);
     click(stars);
     expect(has(find(root, 'hs-card'), 'is-collapsed')).toBe(false);
