@@ -302,7 +302,7 @@ const FULL_HEIGHT: ReadonlySet<RoomKind> = new Set<RoomKind>([
   'cathedral',
 ]);
 
-/** Lobby tiles are one tile wide, so their shadow face is half the usual strip. */
+/** Lobby tiles are one tile wide and laid in runs: the run has the shadow face and the side outlines (renderer.ts lobbyEdges). */
 const LOBBY_KINDS: ReadonlySet<RoomKind> = new Set<RoomKind>(['lobby', 'skyLobby']);
 
 /** The interior baseline: the first row of the slab, measured from the top of a floor band. */
@@ -524,8 +524,9 @@ function drawWindowBand(g: Graphics, kind: RoomKind, y0: number, w: number, stat
     vline(g, x - LINE_PX, gy, WIN_PANE); // mullions
     vline(g, x + WIN_PANE, gy, WIN_PANE);
   }
-  // Glass on the shadow face sits in the same shade as the wall around it.
-  if (shadeFrom < w) box(g, shadeFrom, gy, w - LINE_PX - shadeFrom, WIN_PANE, INK, 0.14);
+  // Glass on the shadow face sits in the same shade as the wall around it. A lobby tile has no
+  // shadow face of its own: its run draws one at the run's right end (renderer.ts lobbyEdges).
+  if (shadeFrom < w && !LOBBY_KINDS.has(kind)) box(g, shadeFrom, gy, w - LINE_PX - shadeFrom, WIN_PANE, INK, 0.14);
 }
 
 function drawShell(g: Graphics, kind: RoomKind, w: number, h: number, state: WindowState): void {
@@ -535,7 +536,8 @@ function drawShell(g: Graphics, kind: RoomKind, w: number, h: number, state: Win
   box(g, 0, 0, w, h, PALETTE.wall[kind]);
   const shadowW = LOBBY_KINDS.has(kind) ? LOBBY_SHADOW_PX : WALL_SHADOW_PX;
   const shadeFrom = w - LINE_PX - shadowW;
-  box(g, shadeFrom, 0, shadowW, h, wallShadow(kind)); // the shadow face
+  // The shadow face; a lobby run gets one at its right end instead, not one per tile (D-11).
+  if (!LOBBY_KINDS.has(kind)) box(g, shadeFrom, 0, shadowW, h, wallShadow(kind));
   const floors = Math.max(1, Math.round(h / FLOOR_PX));
   const perFloorSlabs = !FULL_HEIGHT.has(kind);
   for (let f = 0; f < floors; f++) {
@@ -549,7 +551,21 @@ function drawShell(g: Graphics, kind: RoomKind, w: number, h: number, state: Win
   }
 }
 
-function drawCellOutline(g: Graphics, w: number, h: number, floors: number, perFloor: boolean): void {
+function drawCellOutline(g: Graphics, kind: RoomKind, w: number, h: number, floors: number, perFloor: boolean): void {
+  // A lobby tile is one cell of a hall: only its top and bottom lines, so a run reads as one
+  // room. The run's two ends are outlined once, by the renderer (renderer.ts lobbyEdges).
+  if (LOBBY_KINDS.has(kind)) {
+    if (perFloor) {
+      for (let f = 0; f < floors; f++) {
+        hline(g, 0, f * FLOOR_PX, w, PALETTE.outline);
+        hline(g, 0, (f + 1) * FLOOR_PX - LINE_PX, w, PALETTE.outline);
+      }
+    } else {
+      hline(g, 0, 0, w, PALETTE.outline);
+      hline(g, 0, h - LINE_PX, w, PALETTE.outline);
+    }
+    return;
+  }
   if (perFloor) for (let f = 0; f < floors; f++) outline(g, 0, f * FLOOR_PX, w, FLOOR_PX, PALETTE.outline);
   else outline(g, 0, 0, w, h, PALETTE.outline);
 }
@@ -1859,7 +1875,7 @@ function roomContainer(kind: RoomKind, tiles: number, floors: number, v: number,
     if (full) drawNativeInterior(g, kind, 0, w, h, v, lit, lamp);
     else for (let f = 0; f < floors; f++) drawNativeInterior(g, kind, f * FLOOR_PX, w, FLOOR_PX, v, lit, lamp);
   }
-  drawCellOutline(g, w, h, floors, !full);
+  drawCellOutline(g, kind, w, h, floors, !full);
   root.addChild(g);
   return root;
 }

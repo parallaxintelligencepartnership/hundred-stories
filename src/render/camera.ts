@@ -26,6 +26,8 @@ export const SNAP_ZOOMS: readonly number[] = [0.5, 1, 2, 3];
 const SNAP_STOPS: readonly number[] = [MIN_ZOOM, ...SNAP_ZOOMS];
 
 const WHEEL_IDLE_MS = 160; // how long the wheel must rest before the zoom snaps
+/** Half a notch in log zoom: a gesture at least this long steps a stop, a lighter one snaps back. */
+const DIRECTIONAL_SNAP_MIN = 0.13;
 const SNAP_EASE_MS = 70;
 const KEY_PAN_PX_PER_SECOND = 900;
 const FRICTION_MS = 110; // inertia half life, roughly
@@ -42,6 +44,16 @@ const KEY_ZOOM_DELTA = 120; // one wheel notch, so the plus and minus keys feel 
  * the street two thirds down the part of the screen the player can actually see.
  */
 export const DEFAULT_GROUND_LINE = 0.68;
+
+/**
+ * Where the street sits in the opening shot for a tower whose top floor is `topFloor` (D-1):
+ * low enough that the roof and one floor of sky over it fit the band, never above the default
+ * two thirds, and never so low that no basement shows (0.9, or 0.8 on a phone). An empty lot
+ * or a short tower still gets DEFAULT_GROUND_LINE.
+ */
+export function openingGroundLine(topFloor: number, bandPx: number, zoom: number, phone: boolean): number {
+  return clamp(((topFloor + 1) * FLOOR_PX * zoom) / bandPx, DEFAULT_GROUND_LINE, phone ? 0.8 : 0.9);
+}
 
 const PAN_KEYS: Record<string, { dx: number; dy: number }> = {
   KeyW: { dx: 0, dy: -1 },
@@ -169,6 +181,10 @@ class TowerCamera implements Camera {
   private anchorY = 0;
   private snapping = false;
   private snapTarget = 1;
+  /** The zoom when the current wheel gesture began, so one notch always moves one stop. */
+  private gestureStartZoom = DEFAULT_ZOOM;
+  /** The actual zoom when the gesture began (mid-snap it is not a stop): the gesture's travel is measured from it. */
+  private gestureFromZoom = DEFAULT_ZOOM;
 
   setViewport(width: number, height: number): void {
     this.viewW = Math.max(1, width);
@@ -306,6 +322,11 @@ class TowerCamera implements Camera {
 
   wheel(deltaY: number, sx: number, sy: number): void {
     const factor = clamp(Math.exp(-deltaY * 0.0022), 0.5, 2);
+    // A new gesture begins: from the stop a snap still easing is headed for, else from here.
+    if (this.wheelIdleMs === 0) {
+      this.gestureStartZoom = this.snapping ? this.snapTarget : this.zoom;
+      this.gestureFromZoom = this.zoom;
+    }
     this.snapping = false;
     this.anchorX = sx;
     this.anchorY = sy;
@@ -418,6 +439,13 @@ class TowerCamera implements Camera {
       if (this.wheelIdleMs <= 0) {
         this.wheelIdleMs = 0;
         this.snapTarget = nearestSnap(this.zoom);
+        // One notch moves one stop: a gesture that moved the zoom by half a notch or more but
+        // would snap back to where it started goes on to the next stop the way it moved (none past
+        // the top or the bottom). A lighter touch settles on the nearest stop.
+        const travel = Math.log(this.zoom / this.gestureFromZoom);
+        if (this.snapTarget === this.gestureStartZoom && Math.abs(travel) >= DIRECTIONAL_SNAP_MIN) {
+          this.snapTarget = nextStop(this.gestureStartZoom, travel > 0 ? 1 : -1);
+        }
         this.snapping = Math.abs(this.snapTarget - this.zoom) > 0.0005;
         if (this.snapping && this.reducedMotion) this.applySnapTarget(this.snapTarget);
       }
@@ -462,6 +490,13 @@ class TowerCamera implements Camera {
 /** The vertical range the camera center may sit in, roof to basement plus the margin. */
 function clampY(y: number): number {
   return clamp(y, floorTopY(MAX_FLOOR) - PAN_MARGIN_PX, floorBaseY(MIN_FLOOR) + PAN_MARGIN_PX);
+}
+
+/** The snap stop next to `stop` in `direction`, or `stop` itself at the top or the bottom. */
+function nextStop(stop: number, direction: 1 | -1): number {
+  const i = SNAP_STOPS.indexOf(stop);
+  if (i < 0) return stop;
+  return SNAP_STOPS[clamp(i + direction, 0, SNAP_STOPS.length - 1)] as number;
 }
 
 /** The snap stop nearest to a zoom, measured in log space so 0.5 and 2 feel even. */

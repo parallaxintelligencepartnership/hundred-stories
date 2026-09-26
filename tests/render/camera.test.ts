@@ -14,6 +14,7 @@ import {
   MAX_ZOOM,
   MIN_ZOOM,
   nearestSnap,
+  openingGroundLine,
   xToTile,
   yToFloor,
 } from '../../src/render/camera';
@@ -386,5 +387,80 @@ describe('camera chrome obstruction', () => {
     cam.setObstruction(Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY);
     cam.setGroundLine(DEFAULT_GROUND_LINE);
     expect(Math.abs(cam.worldToScreen(0, 0).y - DEFAULT_GROUND_LINE * 844)).toBeLessThanOrEqual(0.5);
+  });
+});
+
+describe('opening ground line (D-1)', () => {
+  it('keeps a short tower at the default two thirds', () => {
+    expect(openingGroundLine(3, 810, 1, false)).toBe(DEFAULT_GROUND_LINE);
+    expect(openingGroundLine(1, 810, 1, false)).toBe(DEFAULT_GROUND_LINE); // an empty lot
+  });
+
+  it('lowers the street so the roof and a floor of sky fit', () => {
+    expect(openingGroundLine(7, 810, 1, false)).toBeCloseTo(0.711, 3);
+  });
+
+  it('never lowers the street past 0.9 of the band, 0.8 on a phone', () => {
+    expect(openingGroundLine(17, 810, 1, false)).toBe(0.9);
+    expect(openingGroundLine(17, 810, 1, true)).toBe(0.8);
+  });
+});
+
+describe('one wheel notch moves one zoom stop (BB-1)', () => {
+  /** A camera at `zoom`, one or more key notches, then the wheel settles and the snap lands. */
+  function afterNotches(zoom: number, direction: 1 | -1, notches = 1, reduced = false): number {
+    const cam = createCamera();
+    cam.setViewport(800, 600);
+    cam.setReducedMotion(reduced);
+    cam.zoom = zoom;
+    for (let i = 0; i < notches; i++) cam.zoomStep(direction);
+    // The 160 ms idle, then the 70 ms ease until it lands: a second of frames is plenty.
+    for (let t = 0; t < 1000; t += 16) cam.update(16);
+    return cam.zoom;
+  }
+
+  it('steps to the next stop from the stop it started on', () => {
+    expect(afterNotches(0.5, 1)).toBe(1);
+    expect(afterNotches(1, -1)).toBe(0.5);
+    expect(afterNotches(1, 1)).toBe(2);
+  });
+
+  it('stays put at the top and the bottom stop', () => {
+    expect(afterNotches(MAX_ZOOM, 1)).toBe(MAX_ZOOM);
+    expect(afterNotches(MIN_ZOOM, -1)).toBe(MIN_ZOOM);
+  });
+
+  it('still snaps a longer gesture to its nearest stop: two notches from 1 land on 2', () => {
+    expect(afterNotches(1, 1, 2)).toBe(2);
+  });
+
+  it('counts a notch pressed while a snap is still easing from the stop it is headed for', () => {
+    const cam = createCamera();
+    cam.setViewport(800, 600);
+    cam.zoom = 0.5;
+    cam.zoomStep(1);
+    for (let t = 0; t < 200; t += 16) cam.update(16);
+    cam.zoomStep(1);
+    for (let t = 0; t < 1000; t += 16) cam.update(16);
+    expect(cam.zoom).toBe(2);
+  });
+
+  it('settles a light touch, under half a notch, back on the nearest stop', () => {
+    const cam = createCamera();
+    cam.setViewport(800, 600);
+    cam.zoom = 0.5;
+    cam.wheel(-20, 400, 300);
+    for (let t = 0; t < 1000; t += 16) cam.update(16);
+    expect(cam.zoom).toBe(0.5);
+    cam.wheel(-120, 400, 300);
+    for (let t = 0; t < 1000; t += 16) cam.update(16);
+    expect(cam.zoom).toBe(1);
+  });
+
+  it('lands on the same stops at once under reduced motion', () => {
+    expect(afterNotches(0.5, 1, 1, true)).toBe(1);
+    expect(afterNotches(1, -1, 1, true)).toBe(0.5);
+    expect(afterNotches(MAX_ZOOM, 1, 1, true)).toBe(MAX_ZOOM);
+    expect(afterNotches(1, 1, 2, true)).toBe(2);
   });
 });

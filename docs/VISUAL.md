@@ -73,7 +73,7 @@ Status bar (since 0.4.3), 56 px, readouts as hairline separated columns of label
 Icons: one inline SVG symbol sheet in the DOM, referenced by `<use>`, no icon font, 16 px line drawings in the current color. Every panel header is section icon, title and Close; the icon never stands without its words.
 
 Motion:
-- One page-load moment: the tower view fades from black as the sky rises to the current hour, 900 ms. Nothing else animates on load.
+- One page-load moment: the tower view fades from the chrome steel (#1c232e) as the sky rises to the current hour, 900 ms of wall clock time from the first drawn frame. Nothing else animates on load.
 - Motion that answers an action: build ghost snaps to grid, placed room drops 4 px with a 120 ms settle, panels slide 160 ms.
 - Ambient motion only in the world: cars, people, sky, window flicker at dusk. Never in the chrome.
 - `prefers-reduced-motion`: no inertia, no particles, no fades; panels appear instantly; the sim still runs.
@@ -83,4 +83,4 @@ Principles:
 2. Every number is a readout, every label is a sentence-case word. No icons without a label.
 3. Copy speaks in the interface's voice: "Not enough cash. Offices cost $40,000." not "Oops!".
 4. US spelling. No em dashes, no spaced hyphens as dashes, anywhere in UI text.
-5. Structural pixel art at integer scales (illustrated textures are smooth by design and sample linear): `antialias: false`, `roundPixels: true`, zoom steps snap to 0.5, 1, 2, 3 for crisp rendering, free zoom between them allowed while the wheel is moving. Since 0.4.0 zoom 1 is the opening view (a floor is 72 css px, as zoom 2 was on the 8 px grid) and the furthest out is 0.175 (a floor 12.6 css px, unchanged).
+5. Structural pixel art at integer scales (illustrated textures are smooth by design and sample linear): `antialias: false`, `roundPixels: true`, zoom steps snap to 0.5, 1, 2, 3 for crisp rendering, free zoom between them allowed while the wheel is moving. BB-1: the game opens on the whole tower at zoom 0.5 when it fits the free band, else at zoom 1 with the opening ground line; zoom 1 (a floor 72 css px) stays the working view, and the furthest out is 0.175 (a floor 12.6 css px, unchanged).

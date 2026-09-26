@@ -47,11 +47,11 @@ import {
 } from './art';
 import {
   createCamera,
-  DEFAULT_GROUND_LINE,
   floorBand,
   floorBaseY,
   floorTopY,
   floorYFloat,
+  openingGroundLine,
   xToTile,
   yToFloor,
   type Camera,
@@ -259,6 +259,8 @@ export const CROWD_EXTRA_SCALE = 0.75;
 const CLICK_MS = 600;
 const FIRE_FLICKER_MS = 110;
 const LOAD_FADE_MS = 900;
+/** The load fade opens out of the chrome's steel, never black (D-2). */
+const FADE_COLOR = 0x1c232e;
 const SLAB_TOP_PX = SLAB_PX; // art.ts draws the slab as the bottom SLAB_PX of a floor band
 const STRIP_ABOVE = 0xeaeaea;
 const STRIP_BELOW = 0x7d818a;
@@ -772,8 +774,95 @@ export function inRoomSlot(world: World, sim: Sim, slots: Map<Id, number>): [num
   return [tile * TILE_PX, simFeetY(inside ? sim.pos.floor : room.floor)];
 }
 
-/** 'sample' draws one sim in four (the game); 'all' draws every sim (the landing hero's hand-built crowd). */
-export type RendererOptions = { crowd?: 'sample' | 'all' };
+/**
+ * 'sample' draws one sim in four (the game); 'all' draws every sim (the landing hero's hand-built crowd).
+ * fadeIn, default true: the view opens behind a cover in the chrome's steel that fades once the
+ * first frame is drawn; false shows no cover at all.
+ */
+export type RendererOptions = { crowd?: 'sample' | 'all'; fadeIn?: boolean };
+
+/**
+ * BB-1: the game opens on the whole tower at OPENING_ZOOM when it fits the free band, and the
+ * player zooms in. False restores the zoom 1 opening (D-1's framing) for every tower.
+ */
+export const OPENING_WHOLE_TOWER = true;
+export const OPENING_ZOOM = 0.5;
+
+/** The built tower's floor span: its top floor (D-1) and its lowest floor, 1 with no basement. */
+export function towerSpan(world: World): { top: number; bottom: number; built: boolean } {
+  let top = 1;
+  let bottom = 1;
+  for (const room of world.rooms.values()) {
+    top = Math.max(top, room.floor + room.height - 1);
+    bottom = Math.min(bottom, room.floor);
+  }
+  for (const shaft of world.shafts.values()) {
+    top = Math.max(top, shaft.floorMax);
+    bottom = Math.min(bottom, shaft.floorMin);
+  }
+  return { top, bottom, built: world.rooms.size + world.shafts.size > 0 };
+}
+
+/**
+ * BB-1's opening, or null when the tower does not fit: the ground line fraction that puts the
+ * middle of the tower (its top floor down to its lowest basement) in the middle of a free band
+ * `bandPx` tall at OPENING_ZOOM. It fits when the tower and one floor of sky over it do.
+ */
+export function wholeTowerGroundLine(top: number, bottom: number, bandPx: number): number | null {
+  const roof = floorTopY(top);
+  const base = floorBaseY(bottom);
+  if (!(bandPx > 0) || (base - roof + FLOOR_PX) * OPENING_ZOOM > bandPx) return null;
+  const middle = (roof + base) / 2;
+  return 0.5 - (middle * OPENING_ZOOM) / bandPx;
+}
+
+/** A run of lobby or sky lobby tiles side by side on one floor, in tiles: x to end (exclusive). */
+export interface LobbyRun {
+  floor: number;
+  height: number;
+  x: number;
+  end: number;
+}
+
+/**
+ * Lobby and sky lobby rooms grouped into runs by floor and height, where the next room starts
+ * at the run's end (D-11). The renderer outlines each run once, as the one hall the player sees.
+ */
+export function lobbyRuns(rooms: Iterable<Room>): LobbyRun[] {
+  const groups = new Map<string, Room[]>();
+  for (const room of rooms) {
+    if (room.kind !== 'lobby' && room.kind !== 'skyLobby') continue;
+    const key = `${room.floor}|${room.height}`;
+    const group = groups.get(key);
+    if (group) group.push(room);
+    else groups.set(key, [room]);
+  }
+  const runs: LobbyRun[] = [];
+  for (const group of groups.values()) {
+    group.sort((a, b) => a.x - b.x);
+    let run: LobbyRun | null = null;
+    for (const room of group) {
+      if (run && room.x === run.end) {
+        run.end = room.x + room.width;
+        continue;
+      }
+      run = { floor: room.floor, height: room.height, x: room.x, end: room.x + room.width };
+      runs.push(run);
+    }
+  }
+  return runs;
+}
+
+/** A lobby run's two end lines and its shadow face, one per floor, in world px (D-11). */
+function drawLobbyRun(g: Graphics, run: LobbyRun): void {
+  const xl = run.x * TILE_PX;
+  const xr = run.end * TILE_PX;
+  const y = floorTopY(run.floor + run.height - 1);
+  const h = run.height * FLOOR_PX;
+  g.rect(xl, y, 2, h).fill(0x222222);
+  g.rect(xr - 2, y, 2, h).fill(0x222222);
+  for (let f = 0; f < run.height; f++) g.rect(xr - 10, y + f * FLOOR_PX + 22, 8, 44).fill(0xd7d7d4);
+}
 
 export async function createRenderer(
   container: HTMLElement,
@@ -846,6 +935,9 @@ export async function createRenderer(
 
   const slabLayer = new Container();
   const roomLayer = new Container();
+  // A lobby run's two end lines and its shadow face, over the tiles, which draw neither (D-11).
+  const lobbyEdges = new Graphics();
+  lobbyEdges.label = 'lobby edges';
   const shaftLayer = new Container();
   // Stairs and escalators are rooms, but they overlay the rooms they cross, so they
   // are drawn last of all, with no backing fill (art.ts OVERLAY_KINDS).
@@ -875,6 +967,7 @@ export async function createRenderer(
   layers.tower.addChild(
     floorStrips,
     roomLayer,
+    lobbyEdges,
     windowVeil,
     venueWallLayer,
     venueStaffLayer,
@@ -901,7 +994,12 @@ export async function createRenderer(
   soloLayer.label = 'selected person';
   layers.sims.addChild(simSpriteLayer, propLayer, markLayer, soloLayer);
 
+  // The load fade: the chrome's steel over the whole stage until the first frame is drawn, then
+  // lifted over LOAD_FADE_MS of wall clock time (onFrame). fadeIn: false shows none of it.
   const fadeCover = new Graphics();
+  fadeCover.label = 'load fade';
+  fadeCover.visible = options.fadeIn !== false;
+  if (fadeCover.visible) fadeCover.rect(0, 0, app.screen.width, app.screen.height).fill({ color: FADE_COLOR, alpha: 1 });
   app.stage.addChild(fadeCover);
 
   // Ambient life (shop signs, restaurant steam, the cinema marquee) and build feedback, both in
@@ -964,16 +1062,43 @@ export async function createRenderer(
 
   let lastWorld: World = world;
 
-  // Opening composition: the street sits about two thirds down, so the empty lot
-  // reads as a stage with room for the tower to grow into the sky.
+  // Opening composition. A built tower that fits the free band at OPENING_ZOOM opens whole,
+  // centered in the band (BB-1). Otherwise zoom 1, with the street low enough that the roof and
+  // a floor of sky show when they fit (D-1), and two thirds down for an empty lot or a short tower.
   let userMoved = false;
   let framedOnce = false;
   const bornAt = performance.now();
+  // The chrome insets the ui last reported (setChrome). Until it reports, the free band is not
+  // known, so the whole tower opening waits for it; the landing hero never reports and stays at 1.
+  let chromeTop = 0;
+  let chromeBottom = 0;
+  let chromeKnown = false;
   function frameInitial(): void {
     camera.reset(); // zoom 1, no inertia, street at the default ground line
-    const x = lastWorld.rooms.size > 0 ? averageRoomX(lastWorld) : TOWER_WIDTH / 2;
-    camera.centerOn(6, Math.round(x));
-    camera.setGroundLine(DEFAULT_GROUND_LINE);
+    const span = towerSpan(lastWorld);
+    const whole =
+      OPENING_WHOLE_TOWER && chromeKnown && span.built
+        ? wholeTowerGroundLine(span.top, span.bottom, app.screen.height - chromeTop - chromeBottom)
+        : null;
+    if (whole !== null) {
+      const extents = builtFloorExtents(lastWorld);
+      let min = Infinity;
+      let max = -Infinity;
+      for (const e of extents.values()) {
+        min = Math.min(min, e.min);
+        max = Math.max(max, e.max);
+      }
+      camera.zoom = OPENING_ZOOM;
+      // centerOn aims at a tile's middle, so half a tile back puts the tower's middle in the middle.
+      camera.centerOn(6, (min + max) / 2 - 0.5);
+      camera.setGroundLine(whole);
+    } else {
+      const x = lastWorld.rooms.size > 0 ? averageRoomX(lastWorld) : TOWER_WIDTH / 2;
+      camera.centerOn(6, Math.round(x));
+      const bandPx = app.screen.height - chromeTop;
+      const phone = app.screen.width <= 720;
+      camera.setGroundLine(openingGroundLine(span.top, bandPx, camera.zoom, phone));
+    }
     if (app.screen.width > 1 && app.screen.height > 1) framedOnce = true;
   }
 
@@ -1244,6 +1369,8 @@ export async function createRenderer(
       entry.node.destroy();
       roomSprites.delete(id);
     }
+    lobbyEdges.clear();
+    for (const run of lobbyRuns(w.rooms.values())) drawLobbyRun(lobbyEdges, run);
     for (const [id, entry] of venueSprites) {
       const room = w.rooms.get(id);
       if (seenRooms.has(id) && room?.kind === entry.kind && room.height === entry.floors) continue;
@@ -1424,6 +1551,7 @@ export async function createRenderer(
     plan = layerPlan(tier);
     const rooms = plan.rooms;
     roomLayer.visible = rooms;
+    lobbyEdges.visible = rooms;
     slabLayer.visible = rooms;
     venueWallLayer.visible = rooms;
     venueStaffLayer.visible = rooms;
@@ -2245,7 +2373,9 @@ export async function createRenderer(
   window.addEventListener('blur', onBlur);
 
   // Per frame: camera, transforms, sky, ambient motion.
-  let fadeLeft = reducedMotion ? 0 : LOAD_FADE_MS;
+  // Set by the first render() call; the fade starts on the wall clock at the next frame.
+  let firstRendered = false;
+  let fadeStart: number | null = null;
   let ambientReduced = reducedMotion;
   let flickerLeft = 0;
   let lastBackground = -1;
@@ -2357,12 +2487,21 @@ export async function createRenderer(
       }
     }
 
-    if (fadeLeft > 0) {
-      fadeLeft -= dt;
-      const alpha = Math.max(0, fadeLeft / LOAD_FADE_MS);
+    // Wall clock time, not the ticker's capped frame time, so a slow first bake cannot stretch
+    // it. Under reduced motion there is no fade: the cover goes once the first frame is drawn.
+    if (fadeCover.visible) {
+      let alpha = 1;
+      if (firstRendered) {
+        if (reducedMotion) alpha = 0;
+        else {
+          const now = performance.now();
+          fadeStart ??= now;
+          alpha = Math.max(0, 1 - (now - fadeStart) / LOAD_FADE_MS);
+        }
+      }
       fadeCover.clear();
-      fadeCover.rect(0, 0, width, height).fill({ color: 0x000000, alpha });
-      if (fadeLeft <= 0) fadeCover.visible = false;
+      if (alpha > 0) fadeCover.rect(0, 0, width, height).fill({ color: FADE_COLOR, alpha });
+      else fadeCover.visible = false;
     }
   };
   app.ticker.add(onFrame);
@@ -2440,6 +2579,7 @@ export async function createRenderer(
       overlayView.top = camera.y - halfH;
       overlayView.bottom = camera.y + halfH;
       overlayPass.draw(w, overlayView, ghost);
+      firstRendered = true;
     },
     commitMotion,
     resetMotion(): void {
@@ -2518,14 +2658,18 @@ export async function createRenderer(
     },
     setChrome(topPx, bottomPx): void {
       camera.setObstruction(topPx, bottomPx);
+      chromeTop = Number.isFinite(topPx) ? Math.max(0, topPx) : 0;
+      chromeBottom = Number.isFinite(bottomPx) ? Math.max(0, bottomPx) : 0;
+      chromeKnown = true;
       // The opening shot is still the game's to compose until the player takes the view.
       if (!userMoved) frameInitial();
     },
     setReducedMotion(on): void {
       reducedMotion = on;
       camera.setReducedMotion(on);
-      if (on && fadeLeft > 0) {
-        fadeLeft = 0;
+      // No fade under reduced motion: a cover still up goes once the first frame is drawn.
+      if (on && firstRendered && fadeCover.visible) {
+        fadeCover.clear();
         fadeCover.visible = false;
       }
     },

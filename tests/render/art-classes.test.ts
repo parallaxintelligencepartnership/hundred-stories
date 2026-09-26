@@ -4,11 +4,12 @@
 // the byte count, and the sweep that frees poses nobody shows.
 
 import { describe, expect, it, vi } from 'vitest';
-import { Rectangle, Texture, type Renderer as PixiRenderer } from 'pixi.js';
+import { Container, Graphics, Rectangle, Texture, type Renderer as PixiRenderer } from 'pixi.js';
 import { createArt, FLOOR_PX, GHOST_KEEP, SHAFT_PIECE_FLOORS, CROWD_COLS, CROWD_KINDS, CROWD_ROWS, CROWD_STRIP_H, TEXTURE_CLASS, TEXTURE_SIZE, VENUE_SHELL } from '../../src/render/art';
 import { FRAME } from '../../src/render/anim';
 import { MARK_H, MARK_W, PROP_KINDS, PROP_SIZE } from '../../src/render/figure';
-import { SIM_H, SIM_W } from '../../src/render/grid';
+import { LINE_PX, SIM_H, SIM_W, TILE_PX } from '../../src/render/grid';
+import { INK, wallShadow } from '../../src/render/palette';
 import { VENUE_BAND } from '../../src/render/illustrated';
 import { ATLAS_BUDGET_PX, CROWD_EXTRA_SCALE } from '../../src/render/renderer';
 
@@ -262,5 +263,63 @@ describe('a canvas with no 2D context (audit 2026-09-25 F2 S3)', () => {
     } finally {
       warn.mockRestore();
     }
+  });
+});
+
+describe('a lobby tile is a cell of one hall (design pass D-11)', () => {
+  type Fill = { x: number; y: number; w: number; h: number; color: number; alpha: number };
+  /** Bakes one room and returns every rect its shell fills, read before the bake frees it. */
+  function shellFills(kind: 'lobby' | 'skyLobby' | 'office', tiles: number, floors: number): Fill[] {
+    const out: Fill[] = [];
+    const walk = (node: Container): void => {
+      if (node instanceof Graphics) {
+        for (const instruction of node.context.instructions) {
+          if (instruction.action !== 'fill') continue;
+          const { style, path } = instruction.data as unknown as { style: { color: number; alpha: number }; path: { instructions: { action: string; data: number[] }[] } };
+          for (const p of path.instructions) {
+            if (p.action !== 'rect') continue;
+            const [x, y, w, h] = p.data as [number, number, number, number];
+            out.push({ x, y, w, h, color: style.color, alpha: style.alpha });
+          }
+        }
+      }
+      for (const child of node.children) walk(child as Container);
+    };
+    const renderer = {
+      generateTexture(options: { target: Container }): Texture {
+        walk(options.target);
+        return new Texture();
+      },
+    } as unknown as PixiRenderer;
+    createArt(renderer, { resolution: 1 }).room(kind, tiles, floors, VENUE_SHELL, 'day');
+    return out;
+  }
+  /** A dark line down the whole height of a floor or more: a cell's side outline. */
+  const sideLines = (fills: Fill[]): Fill[] => fills.filter((f) => f.color === INK && f.w === LINE_PX && f.h >= FLOOR_PX);
+
+  it('draws no side outline, no shadow face and no shaded glass on a lobby tile', () => {
+    const fills = shellFills('lobby', 1, 1);
+    expect(sideLines(fills)).toEqual([]);
+    expect(fills.filter((f) => f.color === wallShadow('lobby'))).toEqual([]);
+    expect(fills.filter((f) => f.color === INK && f.alpha === 0.14)).toEqual([]);
+    // Only the top and the bottom line of the cell stay.
+    expect(fills).toEqual(expect.arrayContaining([
+      { x: 0, y: 0, w: TILE_PX, h: LINE_PX, color: INK, alpha: 1 },
+      { x: 0, y: FLOOR_PX - LINE_PX, w: TILE_PX, h: LINE_PX, color: INK, alpha: 1 },
+    ]));
+  });
+
+  it('outlines a sky lobby tile at its top and bottom only, across both floors', () => {
+    const fills = shellFills('skyLobby', 1, 2);
+    expect(sideLines(fills)).toEqual([]);
+    expect(fills.filter((f) => f.color === wallShadow('skyLobby'))).toEqual([]);
+    expect(fills).toEqual(expect.arrayContaining([
+      { x: 0, y: 0, w: TILE_PX, h: LINE_PX, color: INK, alpha: 1 },
+      { x: 0, y: 2 * FLOOR_PX - LINE_PX, w: TILE_PX, h: LINE_PX, color: INK, alpha: 1 },
+    ]));
+  });
+
+  it('still boxes every other room in its outline', () => {
+    expect(sideLines(shellFills('office', 9, 1))).toHaveLength(2);
   });
 });
