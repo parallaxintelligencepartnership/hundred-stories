@@ -510,3 +510,14 @@ Scope: checkpoint, diff 760acfa..fe7f65a (P4: src/ui ui.css, ui.ts, hover.ts, ca
 - [ ] ADVISORY | testing | the "not while open" rule of watch mode is tested only with the Menu panel; the Views list, the build sheet in row and full view, and the guide (ui.ts:1039 busy) are untested, and reduced motion, the pill ellipsis and the hover-card fade are checked as CSS strings only (tests/ui/watch.test.ts) | Evidence: the six test files read in full by the lens | Evidence to close: one case per open state and behavior checks for the three, green at HEAD
 
 Six touched files: 72 tests, 71 passed 1 failed at fe7f65a (the IMPORTANT above), 15 of 15 in design-pass-chrome at 09d0449. Failure paths each named to a test (off by default, no hide while open, no clicks and first input restores, reduced motion, pill ellipsis, tile picked early, touch follows selection). Three mutations (hide while open, pointer-events removed, touch hide) each turned one test red; green after checkout. Live evidence: P4-after watch shot (tower and clock only) and P4-after-fix dock shot (keycap plates, goals pill with chevron).
+
+## Checkpoint 2026-09-25 - design pass P2 daytime read, diff fe7f65a..93609f1 - lenses: testing
+
+Scope: checkpoint, diff fe7f65a..93609f1 (P2: src/render art, hierarchy, interiors, renderer, camera; tests/render hierarchy, camera, interiors, daytime-read, selection-rect; tests/ui keep-in-view; the ui lines rode in fe7f65a), lens testing, run in a clean worktree at 93609f1. Not covered: code outside the diff, application logic, the full suite (once at closeout), live probes of the camera ease and the 710 px card flip (the ring started clear in the shot; tests only). Last audit: 2026-09-25 @7b4e60f.
+
+### Findings
+
+- [ ] ADVISORY | testing | the "no floor line in a lobby" test cannot fail: a lobby is one tile wide so its 12 px line never passes the `r.w > TILE_PX` filter, and stairs return before the shell draws (tests/render/daytime-read.test.ts:149) | Evidence: deleting the lobby guard at src/render/art.ts:550 left all 98 tests green | Evidence to close: an assertion that the lobby shell has no 2 px line in BLOCK.lobby, red against that mutation
+- [ ] ADVISORY | testing | nothing pins the three-frame selection retry: SELECTION_CLEAR_FRAMES set to 2 leaves all 98 green (src/ui/ui.ts:161) | Evidence: the lens mutation run | Evidence to close: a case where the ring drawn on frame 3 still eases the view, red at 2
+
+Seven touched files, 98 passed. Failure paths each named to a test. Four mutations (day panes back, paint bottom back, init alpha removed, cardLeft one edge) each went red; green after checkout, tree clean. Live evidence: P2-after-person and P2-after phone shots (no day panes, district floor lines, ring clear of the card).
