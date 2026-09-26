@@ -14,7 +14,7 @@ import { unlocksText } from '../sim/chronicle';
 import { createAlertStack, type GameOverAction } from './alerts';
 import { importSaveWithDialog, savePlatform } from '../game/storage';
 import { createDemoCapCard, isDemoCapEntry } from './demo';
-import { formatFloorShort, formatMoney, formatTimestamp } from './format';
+import { formatFloorShort, formatMoney } from './format';
 import {
   GUIDE_DONE,
   TIP_OVER_GUIDE,
@@ -66,7 +66,8 @@ import { createBuildDock, isPhoneWidth } from './build';
 import { pageRoot, watchDisplayPrefs } from './display';
 import { createPageHaptics, hapticsEnabled } from './haptics';
 import { createGamepadInput, pageGamepadDeps, type GamepadInput, type PadDirection } from './gamepad';
-import { focusablesIn } from './sheet';
+import { focusablesIn, SHEET_CARD_MIN_WIDTH } from './sheet';
+import { createWatchMode } from './watch';
 
 export interface Ui {
   destroy(): void;
@@ -85,6 +86,9 @@ interface ChromeWatch {
   measure(): void;
   disconnect(): void;
 }
+
+/** ui.css --edge: how far a card open on the right sits from the edge. */
+const CARD_EDGE = 12;
 
 /** The controls hint rides along for the first three loads, then gets out of the way. */
 const HINT_LOADS = 3;
@@ -151,6 +155,33 @@ export function nextHintSeen(stored: string | null): { show: boolean; seen: numb
   return { show: seen < HINT_LOADS, seen: Math.min(seen + 1, HINT_LOADS) };
 }
 
+/** D-23: how much clear space the selection keeps from the left edge of the card open beside it. */
+export const SELECTION_CLEAR_PX = 24;
+/** Frames a new selection's check waits for the renderer to draw its ring, at most. */
+const SELECTION_CLEAR_FRAMES = 3;
+
+/**
+ * The left edge of the card open on the right, in the shell's css px (D-23): the shell's width
+ * less the card and two edges. The one rule for it: the hover card keeps out from under this
+ * edge (openCardLeft) and the selection keeps SELECTION_CLEAR_PX clear of it.
+ */
+export function cardLeft(shellWidth: number, panelWidth: number): number {
+  return shellWidth - (panelWidth + 2 * CARD_EDGE);
+}
+
+/**
+ * Where the view's center must go so the selection (`rect`, CSS px) sits left of a card whose
+ * left edge is `cardLeft` with SELECTION_CLEAR_PX clear, or null when it already does (D-23).
+ */
+export function selectionClearX(
+  rect: { x: number; w: number },
+  cardLeft: number,
+  camera: { x: number; zoom: number },
+): number | null {
+  const over = rect.x + rect.w - (cardLeft - SELECTION_CLEAR_PX);
+  return over > 0 ? camera.x + over / camera.zoom : null;
+}
+
 export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): Ui {
   let reducedMotion = readReducedMotion();
   // Sound is off by default and builds nothing until the player turns it on and touches the page.
@@ -178,6 +209,10 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   let barSize: Box | null = null;
   /** Where the chip and the bar were last put, so an unchanged frame writes no styles. */
   let placedKey = '';
+  /** The open card's left edge for the hover card, measured once per card (openCardLeft). */
+  let cardEdge: number | null = null;
+  /** The frame that looks at a new selection beside its card (keepSelectionClearSoon). */
+  let selectionRaf = 0;
   const timers = new Set<ReturnType<typeof setTimeout>>();
 
   // First run: the intro, the guided first tower, then the goals, and the tips once each.
@@ -326,14 +361,16 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     },
     changed: () => {
       chromeWatch?.measure();
-      drawThumbnailsSoon();
+      queueThumbnails(); // the category shown may be new: draw its tiles
     },
   });
-  // Thumbnails are cut from the renderer's art a few per frame, and only while the board is
-  // open, so opening the game does not stall on thirty GPU reads at once.
+  // Thumbnails are cut from the renderer's art a few per frame, only while the board is open and
+  // only for the category it shows, so opening the game does not stall on thirty GPU reads.
   let thumbQueue: PaletteRow[] = [];
   let thumbRaf = 0;
   let thumbDpr = 0;
+  /** The tiles already drawn at thumbDpr; a category shown again draws nothing. */
+  const thumbDrawn = new Set<PaletteRow>();
   const rows = paletteParts.rows;
   /** Each group's tile letters, in tile order, for the keyboard map. */
   const keyGroups = GROUPS.map((_, group) => rows.filter((row) => row.group === group).map((row) => row.letter));
@@ -501,9 +538,18 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   shell.append(toasts, toastLayer.news, view.menu, padCursor);
   root.append(shell);
 
-  // The hover card: a preview of the shaft or room under the pointer, or under the tap.
-  const hoverCard = createHoverCard(shell, game, () => chromeBand);
+  // The hover card: a preview of the shaft or room under the pointer, or under the tap. It
+  // keeps out from under the card open on the right.
+  const hoverCard = createHoverCard(shell, game, () => chromeBand, openCardLeft);
   shell.append(hoverCard.node);
+
+  // Watch mode (Settings, off by default): after 20 s idle with nothing open, the chrome steps
+  // aside, all but the clock. Any input brings it back.
+  const watch = createWatchMode({
+    shell,
+    busy: () =>
+      mountedPanel !== null || view.isOpen() || build.sheet() === 'row' || build.sheet() === 'full' || guideActive(),
+  });
 
   const ctx: PanelContext = {
     apply(cmd: Command) {
@@ -568,7 +614,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     viewSize = null; // the chrome moved, so the view may have too
     game.setChrome(band.top, band.bottom);
     refreshPlacement();
-  });
+  }, placeGoalsPill);
   // Larger text and color-blind friendly views, now and whenever Settings changes them.
   const display = watchDisplayPrefs({
     root: pageRoot(),
@@ -590,7 +636,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
       : null;
   // A controller, where the browser has the Gamepad API. It polls only while one is connected.
   const padDeps = pageGamepadDeps();
-  const pad: GamepadInput | null = padDeps ? createGamepadInput(padHandlers(), padDeps) : null;
+  const pad: GamepadInput | null = padDeps ? createGamepadInput(watchedPad(padHandlers()), padDeps) : null;
 
   lastLogTotal = game.world.logTotal;
   const unsubscribe = game.subscribe(() => update());
@@ -637,14 +683,15 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     build.sync(heldRow);
 
     refreshPlacement();
-    hoverCard.update();
     refreshPanel();
+    hoverCard.update(); // after the panel, so a card that just opened is kept clear of at once
     refreshOnboarding(world);
     watchForTips(world, speed);
     showNextTip();
     refreshNews();
     watchStars(world);
     drainAlerts();
+    watch.sync();
   }
 
   /**
@@ -920,11 +967,19 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     toasts.append(node);
   }
 
-  /** Queue every tile's thumbnail to be drawn (again), at the current device pixel ratio. */
+  /**
+   * Queue the shown category's thumbnails to be drawn at the current device pixel ratio. A new
+   * ratio draws every tile again, as each category is shown.
+   */
   function queueThumbnails(): void {
     if (typeof renderer.thumbnail !== 'function') return; // a renderer without art (tests, fallbacks)
-    thumbDpr = window.devicePixelRatio || 1;
-    thumbQueue = rows.filter((row) => row.thumb !== null);
+    const dpr = window.devicePixelRatio || 1;
+    if (dpr !== thumbDpr) {
+      thumbDpr = dpr;
+      thumbDrawn.clear();
+    }
+    const category = build.category();
+    thumbQueue = rows.filter((row) => row.group === category && row.thumb !== null && !thumbDrawn.has(row));
     drawThumbnailsSoon();
   }
 
@@ -936,17 +991,21 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   function drawSomeThumbnails(): void {
     thumbRaf = 0;
     if (destroyed) return;
-    for (let i = 0; i < 4 && thumbQueue.length > 0; i += 1) {
-      const row = thumbQueue.shift() as PaletteRow;
-      if (!row.thumb || !row.kind) continue;
-      try {
-        paintThumbnail(row.thumb, renderer.thumbnail(row.kind), thumbDpr);
-      } catch (error) {
-        // A failed read leaves the tile without a picture; its name and price still say it all.
-        console.warn('ui: palette thumbnail failed', row.kind, error);
-      }
-    }
+    for (let i = 0; i < 4 && thumbQueue.length > 0; i += 1) drawThumbnail(thumbQueue.shift() as PaletteRow);
     drawThumbnailsSoon();
+  }
+
+  /** Draw one tile's picture now, once per pixel ratio. */
+  function drawThumbnail(row: PaletteRow): void {
+    if (!row.thumb || !row.kind || thumbDrawn.has(row) || typeof renderer.thumbnail !== 'function') return;
+    if (thumbDpr === 0) thumbDpr = window.devicePixelRatio || 1;
+    thumbDrawn.add(row);
+    try {
+      paintThumbnail(row.thumb, renderer.thumbnail(row.kind), thumbDpr);
+    } catch (error) {
+      // A failed read leaves the tile without a picture; its name and price still say it all.
+      console.warn('ui: palette thumbnail failed', row.kind, error);
+    }
   }
 
   /** A move to a screen with another pixel ratio redraws the thumbnails sharp for it. */
@@ -1049,8 +1108,39 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     bar.style.top = `${boxes.bar.top}px`;
   }
 
+  /**
+   * The left edge of the card open on the right (a panel at SHEET_CARD_MIN_WIDTH and wider), by
+   * cardLeft, or null. Measured once per card: its width, since its position may still be sliding in.
+   */
+  function openCardLeft(): number | null {
+    const node = mountedPanel?.sheet?.node as HTMLElement | undefined;
+    const width = viewportWidth();
+    if (!mountedPanel || !node || width === undefined || width < SHEET_CARD_MIN_WIDTH) return null;
+    if (cardEdge === null) {
+      const view = viewSize ?? sizeOf(shell);
+      cardEdge = cardLeft(view.width, sizeOf(node).width);
+    }
+    return cardEdge;
+  }
+
+  /**
+   * The collapsed goals card lives under Share and Menu only, so a popover under Views never
+   * touches it: at most as wide as Share's left edge to Menu's right edge, right-aligned under
+   * Menu (ui.css reads both only for the pill above 720 px; its title ellipsizes). Runs with
+   * every chrome measure: after layout, on resize, and when the top bar changes size.
+   */
+  function placeGoalsPill(view: { left: number; right: number }): void {
+    const from = shareButton.getBoundingClientRect();
+    const to = menuButton.getBoundingClientRect();
+    const width = Math.round(to.right - from.left);
+    if (!(width > 0)) return; // not laid out: leave the css fallback
+    card.node.style.setProperty('--pill-max-w', `${width}px`);
+    card.node.style.setProperty('--pill-right', `${Math.round(view.right - to.right)}px`);
+  }
+
   /** The view, a media query or a font changed under the chip and the bar: measure them again. */
   function onPlacementResize(): void {
+    cardEdge = null;
     viewSize = null;
     chipSize = null;
     barSize = null;
@@ -1098,6 +1188,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
       return;
     }
     mountedKey = key;
+    cardEdge = null;
     // A panel rebuilt in place (new numbers, another room) keeps focus where the player had it,
     // and still sends it back to where it came from when the panel finally closes.
     const old = mountedPanel?.sheet ?? null;
@@ -1152,6 +1243,39 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     // The sheet slides in on its own (ui.css, @starting-style), a plain fade under reduced motion.
     if (panel.sheet) panel.sheet.mount(panelSlot, carried ?? {});
     else panelSlot.append(panel);
+    if (key.startsWith('query:')) keepSelectionClearSoon();
+  }
+
+  /**
+   * D-23: the thing clicked stays on screen beside its card. The renderer draws the new ring on
+   * its next frame, so the check waits for it: a frame at a time, SELECTION_CLEAR_FRAMES at most
+   * (a person the frame does not draw has no ring to keep clear).
+   */
+  function keepSelectionClearSoon(): void {
+    if (selectionRaf) cancelAnimationFrame(selectionRaf);
+    let frames = SELECTION_CLEAR_FRAMES;
+    const look = (): void => {
+      selectionRaf = 0;
+      if (destroyed || !mountedKey.startsWith('query:')) return;
+      frames -= 1;
+      if (!keepSelectionClear() && frames > 0) selectionRaf = requestAnimationFrame(look);
+    };
+    selectionRaf = requestAnimationFrame(look);
+  }
+
+  /**
+   * At SHEET_CARD_MIN_WIDTH and wider the query card stands on the right: ease the view so the
+   * selection's ring sits left of it with SELECTION_CLEAR_PX clear. False while no ring is drawn.
+   */
+  function keepSelectionClear(): boolean {
+    const edge = openCardLeft(); // null under SHEET_CARD_MIN_WIDTH, where the card is a bottom sheet
+    if (edge === null) return true;
+    if (typeof renderer.selectionScreenRect !== 'function' || !renderer.camera) return true;
+    const rect = renderer.selectionScreenRect();
+    if (!rect) return false;
+    const x = selectionClearX(rect, edge, renderer.camera);
+    if (x !== null) renderer.camera.easeToX(x);
+    return true;
   }
 
   /** A demolished room or a sim that went home rebuilds the panel instead of showing stale numbers. */
@@ -1188,7 +1312,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
         lastNoticeText = '';
         return;
       }
-      toastLayer.show(newest.text, { time: formatTimestamp(newest.minute), onTap: openLog, tapLabel: 'Open the news' });
+      // Only the sentence, in the News panel's plain voice; the panel keeps when it happened.
+      toastLayer.show(newest.text, { onTap: openLog, tapLabel: 'Open the news' });
       return;
     }
     if (!beat || newsShowsAlert || beat.simId === undefined) return;
@@ -1196,7 +1321,6 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     if (now - storyShownAt < STORY_TOAST_GAP_MS) return;
     storyShownAt = now;
     toastLayer.show(`${storyName(world, beat.simId)}: ${describeBeat(beat, world)}`, {
-      time: formatTimestamp(beat.minute),
       className: 'is-story',
       onTap: openLog,
       tapLabel: 'Open the news',
@@ -1385,6 +1509,38 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     };
   }
 
+  /**
+   * Every pad input but the connect and disconnect is the player's hand: watch mode hears it,
+   * and while the chrome is hidden the first one only brings it back and does nothing else.
+   */
+  function watchedPad(handlers: ReturnType<typeof padHandlers>): ReturnType<typeof padHandlers> {
+    return {
+      ...handlers,
+      pan(dx, dy) {
+        if (!watch.input()) handlers.pan(dx, dy);
+      },
+      zoom(factor) {
+        if (!watch.input()) handlers.zoom(factor);
+      },
+      a() {
+        if (!watch.input()) handlers.a();
+      },
+      b() {
+        if (!watch.input()) handlers.b();
+      },
+      speed(step) {
+        if (!watch.input()) handlers.speed(step);
+      },
+      start() {
+        if (!watch.input()) handlers.start();
+      },
+      dpad(direction) {
+        // A press that only restored the chrome is spent: it does not pan either.
+        return watch.input() || handlers.dpad(direction);
+      },
+    };
+  }
+
   /** B: close the nearest thing open, else put the tool down. */
   function padBack(): void {
     if (view.isOpen()) {
@@ -1426,6 +1582,9 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   function pickRow(row: PaletteRow, toggle: boolean): void {
     lastGroup = row.group;
     build.setCategory(row.group);
+    // Picked before its category's pictures were drawn (a key, a quick tap): draw this one now,
+    // so the phone's placing bar copies a picture, not a blank.
+    drawThumbnail(row);
     if (game.world.stars < row.star) {
       notice(`${row.label} ${row.star === 1 ? 'needs 1 star' : `needs ${row.star} stars`}.`);
       if (hapticsEnabled()) haptics.play('refuse');
@@ -1509,6 +1668,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     update,
     destroy() {
       destroyed = true;
+      if (selectionRaf) cancelAnimationFrame(selectionRaf);
+      watch.destroy();
       display.stop();
       unsubscribeHaptics?.();
       pad?.destroy();
@@ -1581,11 +1742,13 @@ function setPressed(node: HTMLElement, pressed: boolean): void {
 function watchChrome(
   parts: { strip: HTMLElement; palette: HTMLElement; shell: HTMLElement },
   onChrome: (view: { top: number; bottom: number }, keepOut: { top: number; bottom: number }) => void,
+  onMeasure: (shell: { left: number; right: number }) => void = () => {},
 ): ChromeWatch {
   let lastKey = '';
   const measure = (): void => {
     const strip = parts.strip.getBoundingClientRect();
     const shell = parts.shell.getBoundingClientRect();
+    onMeasure(shell);
     const barBottom = strip.bottom - shell.top;
     parts.shell.style.setProperty('--top-actual', `${Math.round(barBottom)}px`);
     const paletteRect = parts.palette.getBoundingClientRect();

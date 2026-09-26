@@ -6,6 +6,7 @@ import type { Car, Room, RoomKind, Shaft, Sim, World } from '../../src/sim/types
 import { addRoom, addShaft, addSim, allocId, createWorld } from '../../src/sim/world';
 import { createHoverCard, hoverCardBox, hoverTargetAt, roomCard, shaftCard } from '../../src/ui/hover';
 import { hallQueues } from '../../src/render/overlays';
+import { createUi } from '../../src/ui/ui';
 import { FakeDom, type FakeElement } from './fake-dom';
 
 let dom: FakeDom;
@@ -170,6 +171,14 @@ describe('hover card placement', () => {
     expect(hoverCardBox({ point: { x: 900, y: 750 }, card, view, chrome })).toEqual({ left: 900 - 16 - 248, top: 750 - 16 - 120 });
     expect(hoverCardBox({ point: { x: 300, y: 10 }, card, view, chrome }).top).toBe(56 + 16);
   });
+
+  it('flips left of the pointer rather than run under an open card on the right', () => {
+    // The card's left edge at 628: 300 + 16 + 248 = 564 clears it by more than the gutter.
+    expect(hoverCardBox({ point: { x: 300, y: 300 }, card, view, chrome, keepOutRight: 628 }).left).toBe(316);
+    // At 400 the card would end at 664, under the open card: it goes left of the pointer.
+    expect(hoverCardBox({ point: { x: 400, y: 300 }, card, view, chrome, keepOutRight: 628 }).left).toBe(400 - 16 - 248);
+    expect(hoverCardBox({ point: { x: 400, y: 300 }, card, view, chrome, keepOutRight: null }).left).toBe(416);
+  });
 });
 
 describe('hover card on the fake DOM', () => {
@@ -232,6 +241,72 @@ describe('hover card on the fake DOM', () => {
     move(10, 10);
     expect(node.classList.contains('is-hidden')).toBe(true);
     card.destroy();
+  });
+
+  it('keeps out from under the open card: the box flips left of its edge', () => {
+    const { world, shaft } = shaftWorld();
+    const game = fakeGame(world);
+    const shell = dom.createElement('div');
+    shell.className = 'hs-ui';
+    let edge: number | null = null;
+    const card = createHoverCard(shell as never, game.api, () => ({ top: 56, bottom: 28 }), () => edge);
+    const node = card.node as unknown as FakeElement;
+    game.state.hover = { floor: 3, x: shaft.x };
+    move(600, 300);
+    expect(node.style['left']).toBe('616px'); // the fake card is 120 wide: nothing open, it goes right
+    edge = 640;
+    move(601, 300);
+    expect(node.style['left']).toBe(`${601 - 16 - 120}px`);
+    card.destroy();
+  });
+
+  it('in the shell, keeps clear of an open card on a wide screen', () => {
+    const { world, shaft } = shaftWorld();
+    const win = (globalThis as unknown as { window: { innerWidth?: number } }).window;
+    win.innerWidth = 1200;
+    const api = {
+      world,
+      subscribe: () => () => {},
+      getHover: () => ({ floor: 3, x: shaft.x }),
+      getSpeed: () => 0,
+      setSpeed: () => {},
+      getTool: () => ({ kind: 'none' }),
+      setTool: () => {},
+      getPlacement: () => null,
+      getPlacementRect: () => null,
+      getSelection: () => null,
+      setChrome: () => {},
+      setReducedMotion: () => {},
+      getSlot: () => 'mine',
+    } as never;
+    const root = dom.createElement('div');
+    createUi(root as never, api, {} as never);
+    const node = root.descendants().find((n) => n.className.split(' ').includes('hs-hover-card')) as FakeElement;
+    move(730, 300);
+    expect(node.style['left']).toBe('746px'); // nothing open: right of the pointer
+    const menu = root.descendants().find((n) => n.tagName === 'BUTTON' && n.getAttribute('aria-label') === 'Menu') as FakeElement;
+    (menu.listeners.get('click') ?? []).forEach((f) => f({}));
+    // The card is 120 wide in the fake and stands two edges in from the right of a 1000 wide shell
+    // (ui.ts cardLeft, D-23): its edge is 1000 - (120 + 24) = 856. At 710 the preview would end at
+    // 846, past 856 less the 16 px gutter, so it flips; one edge (868) would have left it right.
+    move(710, 300);
+    expect(node.style['left']).toBe(`${710 - 16 - 120}px`);
+  });
+
+  it('under a mouse, never previews the selection: its full card is already open', () => {
+    const { world, shaft } = shaftWorld();
+    const game = fakeGame(world);
+    const card = createHoverCard(dom.createElement('div') as never, game.api, () => ({ top: 0, bottom: 0 }));
+    const node = card.node as unknown as FakeElement;
+    game.state.hover = { floor: 3, x: shaft.x };
+    move(200, 300);
+    expect(node.classList.contains('is-hidden')).toBe(false);
+    game.state.selection = { shaftId: shaft.id };
+    move(201, 300);
+    expect(node.classList.contains('is-hidden')).toBe(true);
+    game.state.selection = { roomId: 999 }; // something else selected: the shaft previews again
+    move(202, 300);
+    expect(node.classList.contains('is-hidden')).toBe(false);
   });
 
   it('stays away while a tool is in hand, since the ghost and its chip own the pointer', () => {

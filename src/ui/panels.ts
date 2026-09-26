@@ -1484,6 +1484,11 @@ export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElem
       applyGlassClear(on);
       ctx.setDisplay?.('glassClear', on);
     }).row,
+    // Watch mode: after 20 s idle the chrome steps aside, all but the clock (src/ui/watch.ts,
+    // which hears the write). Off by default.
+    switchRow('hs-watch-mode', 'Watch mode', getFlag(PREF_KEYS.watchMode) === true, (on) => {
+      setFlag(PREF_KEYS.watchMode, on);
+    }).row,
     // Vibration (haptics), last: on by default (src/ui/haptics.ts).
     switchRow('hs-haptics', 'Vibration', hapticsEnabled(), (on) => setHapticsEnabled(on)).row,
   );

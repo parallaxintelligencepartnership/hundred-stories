@@ -14,9 +14,9 @@ import { formatMoney } from './format';
 import { icon, type IconName } from './icons';
 import { assignLetters, keysLabel } from './keys';
 
-/** The thumbnail box, in css pixels. */
-export const THUMB_W = 72;
-export const THUMB_H = 36;
+/** The thumbnail box, in css pixels: 224 by 112 device pixels at a pixel ratio of 2. */
+export const THUMB_W = 112;
+export const THUMB_H = 56;
 
 export interface PaletteRow {
   node: HTMLButtonElement;

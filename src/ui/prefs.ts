@@ -20,6 +20,8 @@ export const PREF_KEYS = {
   glassClear: 'hs.glassClear',
   // Haptics on or off; on unless the player turned them off.
   haptics: 'hs.haptics',
+  /** Watch mode (Settings, Display): the chrome steps aside after 20 s idle. Off by default. */
+  watchMode: 'hs.watchMode',
 } as const;
 
 export type PrefKey = (typeof PREF_KEYS)[keyof typeof PREF_KEYS];

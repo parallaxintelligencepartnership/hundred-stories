@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Tool } from '../../src/game/api';
 import { ROOMS, SHAFTS } from '../../src/sim/rules';
-import { applyRowState, buildPalette, fitRect, footprintText, toolRowState, type PaletteRow } from '../../src/ui/palette';
+import { applyRowState, buildPalette, fitRect, footprintText, GROUPS, paintThumbnail, THUMB_H, THUMB_W, toolRowState, type PaletteRow } from '../../src/ui/palette';
 import { createUi } from '../../src/ui/ui';
 import { FakeDom, type FakeElement } from './fake-dom';
 
@@ -168,7 +168,7 @@ describe('palette in the shell', () => {
     expect(g.tools).toEqual([{ kind: 'room', room: 'office' }]);
   });
 
-  it('asks the renderer for each thumbnail once, a few per frame', () => {
+  it('asks the renderer for the shown category only, a few per frame, and the next category when it is picked', () => {
     const g = game(1);
     const root = dom.createElement('div');
     const asked: string[] = [];
@@ -180,11 +180,48 @@ describe('palette in the shell', () => {
     };
     createUi(root as never, g.api, renderer as never);
     expect(asked).toEqual([]); // nothing on the first call stack
-    dom.runFrame();
-    expect(asked.length).toBe(4);
+    const structure = Object.keys(ROOMS).filter((kind) => ROOMS[kind as keyof typeof ROOMS].group === GROUPS[0]?.group);
     for (let i = 0; i < 20; i += 1) dom.runFrame();
-    const kinds = Object.keys(ROOMS).length + Object.keys(SHAFTS).length;
-    expect(asked.length).toBe(kinds);
-    expect(new Set(asked).size).toBe(kinds);
+    expect(asked.sort()).toEqual([...structure].sort());
+
+    // The Elevators tab: its tiles are drawn now, the others still wait.
+    asked.length = 0;
+    const tab = root.descendants().find((n) => n.className === 'hs-build-tab' && n.dataset['group'] === '1') as FakeElement;
+    click(tab);
+    dom.runFrame();
+    expect(asked.length).toBe(Math.min(4, Object.keys(SHAFTS).length));
+    for (let i = 0; i < 20; i += 1) dom.runFrame();
+    expect(asked.sort()).toEqual(Object.keys(SHAFTS).sort());
+
+    // Back to Structure: already drawn, so nothing is asked again.
+    asked.length = 0;
+    click(root.descendants().find((n) => n.className === 'hs-build-tab' && n.dataset['group'] === '0') as FakeElement);
+    for (let i = 0; i < 5; i += 1) dom.runFrame();
+    expect(asked).toEqual([]);
+  });
+
+  it('draws a tile picked before its category was drawn at once, so the placing bar has its picture', () => {
+    const g = game(1);
+    const root = dom.createElement('div');
+    const asked: string[] = [];
+    const renderer = {
+      thumbnail: (kind: string) => {
+        asked.push(kind);
+        return { width: 144, height: 72 };
+      },
+    };
+    createUi(root as never, g.api, renderer as never);
+    // The Elevators tile, picked straight away (a key, a tap on the phone sheet): no frame has run.
+    click(tool(root, SHAFTS.standard.label));
+    expect(asked).toEqual(['standard']);
+    for (let i = 0; i < 20; i += 1) dom.runFrame();
+    expect(asked.filter((kind) => kind === 'standard')).toHaveLength(1); // and not drawn a second time
+  });
+
+  it('draws each thumbnail 112 by 56 css px, 224 by 112 device px at a pixel ratio of 2', () => {
+    expect([THUMB_W, THUMB_H]).toEqual([112, 56]);
+    const target = { width: 0, height: 0, getContext: () => ({ clearRect() {}, drawImage() {}, imageSmoothingEnabled: false, imageSmoothingQuality: 'low' }) };
+    expect(paintThumbnail(target as never, { width: 496, height: 144 } as never, 2)).toBe(true);
+    expect([target.width, target.height]).toEqual([224, 112]);
   });
 });

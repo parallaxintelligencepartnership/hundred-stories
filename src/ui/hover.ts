@@ -95,22 +95,33 @@ export function cardContent(world: World, target: HoverTarget, queuesOf: (id: Id
   return target.kind === 'shaft' ? shaftCard(world, target.shaft, queuesOf(target.shaft.id)) : roomCard(target.room);
 }
 
+/** Is this target the shaft or room the player has selected? */
+function isSelected(target: HoverTarget, selection: ReturnType<GameApi['getSelection']>): boolean {
+  if (!selection) return false;
+  return target.kind === 'shaft' ? selection.shaftId === target.shaft.id : selection.roomId === target.room.id;
+}
+
 /** The gap between the pointer and the card, so the card never sits under the cursor. */
 export const HOVER_GAP = 16;
 
 /**
  * Where the card goes: below and to the right of the pointer, flipped to the left or above
- * when it would run off the view or under the chrome.
+ * when it would run off the view, under the chrome, or under an open card on the right
+ * (`keepOutRight`, that card's left edge; null when none is open).
  */
 export function hoverCardBox(frame: {
   point: { x: number; y: number };
   card: Box;
   view: Box;
   chrome: { top: number; bottom: number };
+  keepOutRight?: number | null;
 }): { left: number; top: number } {
   const { point, card, view } = frame;
+  const keepOut = frame.keepOutRight ?? null;
   let left = point.x + HOVER_GAP;
-  if (left + card.width > view.width - PLACE_GUTTER) left = point.x - HOVER_GAP - card.width;
+  if (left + card.width > view.width - PLACE_GUTTER || (keepOut !== null && left + card.width > keepOut - PLACE_GUTTER)) {
+    left = point.x - HOVER_GAP - card.width;
+  }
   left = clampSpan(left, card.width, view.width);
   const topLimit = Math.max(0, frame.chrome.top) + PLACE_GUTTER;
   const bottomLimit = view.height - Math.max(0, frame.chrome.bottom) - PLACE_GUTTER;
@@ -142,9 +153,15 @@ function setText(node: Element, text: string): void {
 
 /**
  * The card, appended to the ui shell by the caller. It listens to the pointer on the window
- * for where to sit and for which kind of pointer is in use.
+ * for where to sit and for which kind of pointer is in use. `keepOutRight` is the left edge of
+ * the card open on the right, if any, so the preview never sits under it.
  */
-export function createHoverCard(shell: HTMLElement, game: GameApi, chrome: () => { top: number; bottom: number }): HoverCard {
+export function createHoverCard(
+  shell: HTMLElement,
+  game: GameApi,
+  chrome: () => { top: number; bottom: number },
+  keepOutRight: () => number | null = () => null,
+): HoverCard {
   const node = h('div', 'hs-hover-card is-hidden');
   node.setAttribute('role', 'status');
   const title = h('p', 'hs-hover-title');
@@ -196,7 +213,10 @@ export function createHoverCard(shell: HTMLElement, game: GameApi, chrome: () =>
       return null;
     }
     const hover = game.getHover();
-    return hover ? hoverTargetAt(world, hover.floor, hover.x) : null;
+    const found = hover ? hoverTargetAt(world, hover.floor, hover.x) : null;
+    // A mouse over the selection gets no preview: its full card is open, and cards never stack.
+    // A finger's card follows the selection (above), as shipped.
+    return found && isSelected(found, game.getSelection()) ? null : found;
   }
 
   function show(on: boolean): void {
@@ -235,7 +255,7 @@ export function createHoverCard(shell: HTMLElement, game: GameApi, chrome: () =>
       const box = node.getBoundingClientRect();
       cardSize = { width: box.width, height: box.height };
     }
-    const at = hoverCardBox({ point, card: cardSize, view: viewSize, chrome: chrome() });
+    const at = hoverCardBox({ point, card: cardSize, view: viewSize, chrome: chrome(), keepOutRight: keepOutRight() });
     const key = `${at.left},${at.top}`;
     if (key === placedKey) return;
     placedKey = key;

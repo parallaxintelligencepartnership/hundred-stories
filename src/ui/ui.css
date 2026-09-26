@@ -17,6 +17,13 @@
   --ink-dim: #98a3b3;
   --amber: #f4b942;
   --on-amber: #14181f;
+  /* Amber as words or a line (text, icons, outlines, the focus ring). The fill stays --amber;
+     the light theme darkens only this one, so text on and in amber passes in both themes. */
+  --amber-text: #f4b942;
+  /* The tile keycaps: a solid plate in the dark top bar's steel and ink, the same in both themes
+     (the light theme never remaps these two), 13.3:1, so a letter reads over any picture. */
+  --keycap: #1c232e;
+  --on-keycap: #e8ecf2;
   --indicator: #8ff0c0;
   --alert: #ff5c4d;
   --eval-good: #4f9df0;
@@ -74,11 +81,13 @@
   --enter-x: 16px;
   --enter-y: 100%;
   --toast-rise: 8px;
+  /* Watch mode (Settings): the chrome's one fade out, after 20 s without input. */
+  --watch-fade: 400ms;
 
   /* Touch and focus. */
   --touch: calc(44px * var(--ui-scale));
   --focus-width: 3px;
-  --focus-color: var(--amber);
+  --focus-color: var(--amber-text);
   --focus-offset: 2px;
   --focus-ring: var(--focus-width) solid var(--focus-color);
 
@@ -131,9 +140,10 @@
     --line: #c2ccda;
     --ink: #151c25;
     --ink-dim: #5a6673;
-    --amber: #b57a04;
-    --on-amber: #fdf6e6;
-    --indicator: #0c7a53;
+    --amber: #f4b942;
+    --on-amber: #14181f;
+    --amber-text: #8a5a00;
+    --indicator: #0a6a48;
     --alert: #c22a1c;
     --eval-good: #1f6fc4;
     --eval-fair: #b57a04;
@@ -156,9 +166,10 @@
   --line: #c2ccda;
   --ink: #151c25;
   --ink-dim: #5a6673;
-  --amber: #b57a04;
-  --on-amber: #fdf6e6;
-  --indicator: #0c7a53;
+  --amber: #f4b942;
+  --on-amber: #14181f;
+  --amber-text: #8a5a00;
+  --indicator: #0a6a48;
   --alert: #c22a1c;
   --eval-good: #1f6fc4;
   --eval-fair: #b57a04;
@@ -233,9 +244,9 @@ body {
   box-sizing: border-box;
 }
 
-.hs-ui button,
-.hs-ui input,
-.hs-ui select {
+/* No specificity, so a class that sets a size or a color on a button (a settings row, the rent
+   stepper) keeps it. */
+.hs-ui :where(button, input, select) {
   font: inherit;
   color: inherit;
 }
@@ -484,6 +495,19 @@ button.hs-readout:hover {
   color: var(--indicator);
 }
 
+/* The elevator indicator face marks the two readouts that tell time and place: the clock and
+   the floor under the cursor. Cash stays ink, since green would read as a gain. */
+.hs-clock-digits {
+  color: var(--indicator);
+}
+
+.hs-status-hover .hs-readout-value {
+  font-family: var(--font-readout);
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  color: var(--indicator);
+}
+
 .hs-readout.is-hidden {
   display: none;
 }
@@ -528,7 +552,7 @@ button.hs-readout:hover {
 
 .hs-star.is-earned {
   fill: var(--amber);
-  color: var(--amber);
+  color: var(--amber-text);
 }
 
 /* The phone's stand-in for the row: one star and the count. */
@@ -543,7 +567,7 @@ button.hs-readout:hover {
 
 .hs-count-glyph {
   fill: var(--amber);
-  color: var(--amber);
+  color: var(--amber-text);
 }
 
 /* What the next star needs: text, so the solid text surface. */
@@ -644,13 +668,13 @@ button.hs-readout:hover {
 }
 
 .hs-dial-hand {
-  stroke: var(--amber);
+  stroke: var(--amber-text);
   stroke-width: 2.5;
   stroke-linecap: round;
 }
 
 .hs-dial-pin {
-  fill: var(--amber);
+  fill: var(--amber-text);
 }
 
 .hs-clock-text {
@@ -694,7 +718,7 @@ button.hs-readout:hover {
   border-radius: var(--radius-pill);
   font-size: var(--size-12);
   font-weight: 600;
-  color: var(--amber);
+  color: var(--amber-text);
   white-space: nowrap;
 }
 
@@ -764,8 +788,17 @@ button.hs-readout:hover {
 }
 
 .hs-speed-btn[aria-pressed='true'] {
+  background: rgba(244, 185, 66, 0.18);
+  color: var(--amber-text);
+  box-shadow: inset 0 0 0 2px var(--amber-text);
+}
+
+/* Solid amber is the primary action's: a pressed speed wears a ring, but a stopped game still
+   shows its Pause solid. */
+.hs-speed-btn[aria-pressed='true'][aria-label='Pause'] {
   background: var(--amber);
   color: var(--on-amber);
+  box-shadow: none;
 }
 
 /* Share and Menu: round, the icon and a short word; a phone keeps the icon (ui.css below). */
@@ -865,7 +898,7 @@ button.hs-readout:hover {
 }
 
 .hs-palette-toggle:hover {
-  color: var(--amber);
+  color: var(--amber-text);
 }
 
 .hs-palette-icon {
@@ -944,8 +977,9 @@ button.hs-readout:hover {
 }
 
 .hs-build-tab[aria-selected='true'] {
-  background: var(--amber);
-  color: var(--on-amber);
+  background: rgba(244, 185, 66, 0.18);
+  color: var(--amber-text);
+  box-shadow: inset 0 0 0 2px var(--amber-text);
 }
 
 .hs-build-tab[aria-selected='true']:focus-visible {
@@ -979,6 +1013,15 @@ button.hs-readout:hover {
 
 /* Folded: the header's hammer and the rail of tabs, nothing else. A tab opens it again. */
 @media (min-width: 721px) {
+/* The collapsed goals card is a small pill: its title says how many are done, and Show. It lives
+   under Share and Menu only (ui.ts placeGoalsPill), so a popover under Views never touches it;
+   a title that does not fit ends in an ellipsis (.hs-panel-title-text). */
+.hs-card.is-collapsed {
+  width: max-content;
+  max-width: var(--pill-max-w, calc(100vw - 2 * var(--edge)));
+  right: var(--pill-right, calc(var(--edge) + var(--safe-right)));
+}
+
 .hs-palette.is-collapsed {
   width: var(--rail-w);
   bottom: auto;
@@ -1036,7 +1079,8 @@ button.hs-readout:hover {
   aspect-ratio: 2 / 1;
   margin-bottom: 4px;
   overflow: hidden;
-  background: var(--press-tint);
+  /* Daytime sky: a room reads as a cutaway against it. */
+  background: linear-gradient(180deg, #9fd3f5 0%, #dcefff 100%);
   border-radius: calc(var(--r) - 4px);
 }
 
@@ -1384,7 +1428,7 @@ button.hs-readout:hover {
   flex: 0 0 auto;
   width: 16px;
   height: 16px;
-  color: var(--amber);
+  color: var(--amber-text);
 }
 
 .hs-panel-title-text {
@@ -1804,7 +1848,7 @@ button.hs-readout:hover {
 }
 
 .hs-log-item.is-warn .hs-log-text {
-  color: var(--amber);
+  color: var(--amber-text);
 }
 
 .hs-log-item.is-alert .hs-log-text {
@@ -2163,6 +2207,12 @@ button.hs-readout:hover {
   color: var(--ink-dim);
 }
 
+/* Sound off: the whole row says it is inactive, not only its slider. */
+.hs-level:has(input:disabled) .hs-set-label,
+.hs-level:has(input:disabled) .hs-level-value {
+  color: var(--ink-dim);
+}
+
 /* The Controls page: a way back, then one row per control with its picture. */
 .hs-set-back {
   --r: var(--radius-pill);
@@ -2199,7 +2249,7 @@ button.hs-readout:hover {
   width: 20px;
   height: 20px;
   margin-top: 1px;
-  color: var(--amber);
+  color: var(--amber-text);
 }
 
 .hs-controls-text {
@@ -2264,7 +2314,7 @@ button.hs-readout:hover {
   background: var(--glass);
   -webkit-backdrop-filter: var(--glass-blur);
   backdrop-filter: var(--glass-blur);
-  border: 1px solid var(--amber);
+  border: 1px solid var(--amber-text);
   border-radius: var(--radius-12);
   font-size: var(--size-12);
   color: var(--ink);
@@ -2392,6 +2442,55 @@ a.hs-btn {
   display: none;
 }
 
+.hs-card .hs-panel-head[hidden],
+.hs-card-pill[hidden] {
+  display: none;
+}
+
+/* The collapsed goals pill: one control, the star, the count and a chevron. The count ends in an
+   ellipsis only when a very long title meets the pill's cap (ui.ts placeGoalsPill). */
+.hs-card-pill {
+  --r: var(--radius-20);
+  display: flex;
+  align-items: center;
+  gap: var(--pad);
+  width: 100%;
+  min-height: calc(var(--touch) + 8px);
+  padding: 0 14px 0 16px;
+  background: transparent;
+  border: 0;
+  border-radius: var(--r);
+  color: var(--ink);
+  font-size: var(--size-16);
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hs-card-pill:hover {
+  background: var(--raise-strong);
+}
+
+.hs-ui .hs-card-pill:focus-visible {
+  outline-offset: calc(-1 * var(--focus-width));
+}
+
+.hs-card-pill-icon {
+  color: var(--amber-text);
+}
+
+.hs-card-pill-text {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.hs-card-pill-chevron {
+  color: var(--ink-dim);
+}
+
 .hs-card-icon {
   display: inline-flex;
 }
@@ -2407,19 +2506,19 @@ a.hs-btn {
 }
 
 .hs-goal.is-done .hs-row-value {
-  color: var(--amber);
+  color: var(--amber-text);
 }
 
 .hs-card-nudge {
   margin: 8px 0 0;
   padding: 6px 8px;
-  border-left: 2px solid var(--amber);
+  border-left: 2px solid var(--amber-text);
   font-size: var(--size-14);
 }
 
 /* The palette tile the guide points at: an amber outline, still, as the chrome never moves. */
 .hs-tool.hs-tool-hint {
-  outline: 2px solid var(--amber);
+  outline: 2px solid var(--amber-text);
   outline-offset: -2px;
 }
 
@@ -2543,8 +2642,15 @@ button.hs-news-toast {
   opacity: 0;
 }
 
+/* News arrives without moving: the chrome moves only when the player acts. An alert still
+   rises, since it asks for a tap. */
 @starting-style {
-  .hs-news-toast,
+  .hs-news-toast {
+    opacity: 0;
+  }
+}
+
+@starting-style {
   .hs-alert-toast {
     opacity: 0;
     transform: translateY(var(--toast-rise));
@@ -2572,7 +2678,7 @@ button.hs-news-toast {
 }
 
 .hs-toast-close:hover {
-  color: var(--amber);
+  color: var(--amber-text);
 }
 
 .hs-toast-note {
@@ -2612,7 +2718,7 @@ button.hs-news-toast {
 }
 
 .hs-views-btn.is-on {
-  box-shadow: var(--shadow-1), inset 0 0 0 2px var(--amber);
+  box-shadow: var(--shadow-1), inset 0 0 0 2px var(--amber-text);
 }
 
 /* The list: a small card of rows, an icon and a name each. Without anchor positioning it sits
@@ -3276,6 +3382,7 @@ button.hs-news-toast {
   --enter-x: 0px;
   --enter-y: 0px;
   --toast-rise: 0px;
+  --watch-fade: 0ms;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -3285,6 +3392,7 @@ button.hs-news-toast {
     --enter-x: 0px;
     --enter-y: 0px;
     --toast-rise: 0px;
+    --watch-fade: 0ms;
   }
 }
 
@@ -3305,8 +3413,10 @@ button.hs-news-toast {
   display: inline-block;
   min-width: 16px;
   margin-right: 6px;
-  padding: 0 3px;
-  border: 1px solid var(--line);
+  padding: 0 4px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--press-tint);
   font-family: var(--font-ui);
   font-variant-numeric: tabular-nums;
   font-weight: 400;
@@ -3323,19 +3433,17 @@ button.hs-news-toast {
   top: 4px;
   right: 6px;
   min-width: 14px;
-  padding: 0 2px;
-  border: 1px solid var(--line);
+  padding: 0 4px;
+  border: 0;
+  border-radius: 4px;
+  /* A plate of its own, never the tile's sky or amber under it: the same on every tile. */
+  background: var(--keycap);
   font-family: var(--font-ui);
   font-variant-numeric: tabular-nums;
   font-size: var(--size-12);
   line-height: 14px;
   text-align: center;
-  color: var(--ink-dim);
-}
-
-.hs-tool[aria-pressed='true'] .hs-tool-key {
-  color: inherit;
-  border-color: currentColor;
+  color: var(--on-keycap);
 }
 
 .hs-palette.is-collapsed .hs-group-key {
@@ -3444,4 +3552,56 @@ button.hs-news-toast {
   font-size: var(--size-28);
   font-weight: 600;
   line-height: 1.15;
+}
+
+/* Watch mode (Settings, off by default; src/ui/watch.ts) ----------------- */
+
+/* After 20 s without input and with nothing open, the chrome steps aside so the tower is the
+   only thing on screen: the top bar but the clock, the dock, the goals card and the map fade
+   out. Any input brings them back at once, with no fade in. Under reduced motion --watch-fade
+   is 0, so they go without a fade. */
+@keyframes hs-watch-hide {
+  from {
+    opacity: 1;
+  }
+}
+
+@keyframes hs-watch-glass-out {
+  from {
+    background-color: var(--glass);
+    box-shadow: var(--shadow-1);
+  }
+}
+
+@keyframes hs-watch-glass-in {
+  from {
+    background-color: transparent;
+    box-shadow: none;
+  }
+}
+
+/* Hidden, they take no clicks: the first input only brings them back (src/ui/watch.ts). The
+   hover card goes with them. */
+.hs-ui.is-watching :is(.hs-status-pill > :not(.hs-status-clock), .hs-top-actions, .hs-view-chip, .hs-palette, .hs-build-fab, .hs-card, .hs-minimap, .hs-hover-card) {
+  opacity: 0;
+  pointer-events: none;
+  animation: hs-watch-hide var(--watch-fade) var(--ease-standard);
+}
+
+/* The pill's glass goes with the rest; the clock keeps a glass of its own, so it still reads
+   over the brightest sky. */
+.hs-ui.is-watching .hs-status-pill {
+  background-color: transparent;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  animation: hs-watch-glass-out var(--watch-fade) var(--ease-standard);
+}
+
+.hs-ui.is-watching .hs-status-clock {
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-1);
+  animation: hs-watch-glass-in var(--watch-fade) var(--ease-standard);
 }

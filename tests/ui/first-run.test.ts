@@ -444,6 +444,7 @@ describe('news toasts and story lines', () => {
       game.notify();
       expect(text().startsWith(`${name}: `)).toBe(true);
       expect(text().toLowerCase()).toContain('three minutes');
+      expect(byClass(root, 'hs-toast-time')).toHaveLength(0); // no clock stamp on news or story lines
       // Never more than two on screen.
       expect(news().filter((n) => !n.classList.contains('is-leaving')).length).toBeLessThanOrEqual(2);
     } finally {
@@ -461,6 +462,8 @@ describe('news toasts and story lines', () => {
     const toast = byClass(root, 'hs-news-toast')[0] as FakeElement;
     expect(toast.tagName).toBe('BUTTON');
     expect(toast.title).toBe('Open the news');
+    // Only the sentence, in the News panel's plain voice: no clock stamp before it.
+    expect(toast.children.map((c) => c.className)).toEqual(['hs-toast-words']);
     click(toast);
     expect(root.descendants().some((n) => n.className === 'hs-panel-title-text' && n.textContent === 'News')).toBe(true);
   });

@@ -40,7 +40,8 @@ export type IconName =
   | 'stress'
   | 'noise'
   | 'vacancy'
-  | 'wait';
+  | 'wait'
+  | 'chevron';
 
 /** A 16 by 16 drawing per icon, 1.5 px lines in the current text color. */
 const LINE = 'fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"';
@@ -75,18 +76,21 @@ const SYMBOLS: Record<IconName, string> = {
   lock: `<rect x="3" y="7" width="10" height="7.25" ${LINE}/><path d="M5.25 7V5a2.75 2.75 0 0 1 5.5 0v2" ${LINE}/>`,
   // Stacked layers: the information views.
   views: `<path d="M8 2L14.5 5.25 8 8.5 1.5 5.25z" ${LINE}/><path d="M1.5 8.25L8 11.5l6.5-3.25M1.5 11.25L8 14.5l6.5-3.25" ${LINE}/>`,
-  // The category tabs: floors and a lobby, a house, a bed, a shop awning, a bin, a wrench.
+  // The category tabs: floors and a lobby, a house, a bed, a shop awning, a service bell on a
+  // counter, a wrench.
   structure: `<path d="M2 14.25h12M3.25 14.25V4.5h9.5v9.75M3.25 7.75h9.5M3.25 11h9.5" ${LINE}/>`,
   home: `<path d="M2 7.5L8 2.5l6 5M3.75 6.25v8h8.5v-8" ${LINE}/><path d="M6.75 14.25V10.5h2.5v3.75" ${LINE}/>`,
   hotel: `<path d="M1.75 4v9.5M1.75 10.5h12.5v3M1.75 10.5V8h12.5v2.5" ${LINE}/><circle cx="5" cy="6" r="1.25" ${LINE}/>`,
   shop: `<path d="M2 6.5l1.25-4h9.5L14 6.5zM2 6.5a2 2 0 0 0 4 0 2 2 0 0 0 4 0 2 2 0 0 0 4 0" ${LINE}/><path d="M3 8.5v5.75h10V8.5M6.5 14.25V10.5h3v3.75" ${LINE}/>`,
-  services: `<path d="M3.5 4.5h9M6.5 4.5V2.5h3v2M4.5 4.5l.75 9.75h5.5l.75-9.75" ${LINE}/>`,
+  services: `<path d="M2 12.75h12" ${LINE}/><path d="M3.5 12.75a4.5 4.5 0 0 1 9 0" ${LINE}/><path d="M8 8.25V6.5M6.75 6.5h2.5" ${LINE}/>`,
   tools: `<path d="M9.75 2.25a3 3 0 0 0-3 4L2.5 10.5a1.5 1.5 0 0 0 2.25 2.25L9 8.5a3 3 0 0 0 4-3l-1.75 1.75-2-.5-.5-2z" ${LINE}/>`,
   // The four views: a frown, sound waves, an open door, an hourglass.
   stress: `<circle cx="8" cy="8" r="6.25" ${LINE}/><path d="M5.5 11.25c1.4-1.5 3.6-1.5 5 0M6 6.5h.25M10 6.5h-.25" ${LINE}/>`,
   noise: `<path d="M2 6v4h2.5L8 13V3L4.5 6z" ${LINE}/><path d="M10.5 5.75a3 3 0 0 1 0 4.5M12.25 4a5.5 5.5 0 0 1 0 8" ${LINE}/>`,
   vacancy: `<path d="M3 14.25h10M4.5 14.25V1.75h7v12.5" ${LINE}/><path d="M9.25 8h.25" ${LINE} stroke-width="2"/>`,
   wait: `<path d="M4 1.75h8M4 14.25h8M5 1.75c0 3.5 6 3.25 6 6.25S5 11 5 14.25M11 14.25c0-1.75-1.5-2.5-3-3" ${LINE}/>`,
+  // A small chevron pointing down: the collapsed goals pill opens downward.
+  chevron: `<path d="M4.5 6.25L8 9.75l3.5-3.5" ${LINE}/>`,
 };
 
 export const ICON_NAMES = Object.keys(SYMBOLS) as IconName[];

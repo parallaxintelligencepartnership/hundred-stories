@@ -86,7 +86,28 @@ export function createSideCard(handlers: SideCardHandlers): SideCard {
   });
   head.append(name, headButton);
   const body = el('div', 'hs-panel-body');
-  node.append(head, body);
+  // The collapsed goals: one control, the count and a chevron. A tap anywhere on it, or Enter or
+  // Space, shows the goals; its name is the count and ", show".
+  const pill = button('', 'hs-card-pill', () => handlers.toggleGoals());
+  const pillText = el('span', 'hs-card-pill-text');
+  pill.append(
+    icon('star', 'hs-icon hs-card-pill-icon') as unknown as HTMLElement,
+    pillText,
+    icon('chevron', 'hs-icon hs-card-pill-chevron') as unknown as HTMLElement,
+  );
+  pill.setAttribute('aria-expanded', 'false');
+  pill.hidden = true;
+  node.append(head, pill, body);
+
+  /** The pill instead of the head, or the head again. */
+  function showPill(on: boolean, title = ''): void {
+    head.hidden = on;
+    pill.hidden = !on;
+    if (!on) return;
+    setText(pillText, title);
+    pill.setAttribute('aria-label', `${title}, show`);
+    if (pill.title !== 'Show the goals') pill.title = 'Show the goals';
+  }
 
   function setHead(kind: 'help' | 'star', title: string, action: string, description: string): void {
     if (titleIcon.dataset['icon'] !== kind) {
@@ -105,6 +126,7 @@ export function createSideCard(handlers: SideCardHandlers): SideCard {
     showGuide(step, copy) {
       mode = 'guide';
       node.classList.remove('is-hidden', 'is-collapsed');
+      showPill(false);
       setHead('help', 'First tower', 'Skip', 'Skip the guide');
       const nextKey = `guide:${step}:${copy.text}`;
       if (nextKey === key) return;
@@ -122,7 +144,11 @@ export function createSideCard(handlers: SideCardHandlers): SideCard {
       mode = 'goals';
       node.classList.remove('is-hidden');
       node.classList.toggle('is-collapsed', collapsed);
-      setHead('star', goals ? goals.title : 'Tower', collapsed ? 'Show' : 'Hide', collapsed ? 'Show the goals' : 'Hide the goals');
+      // Collapsed, the card is a small pill that says how far along the goals are; the stars
+      // readout in the bar already says what the next star is.
+      const title = goals ? (collapsed ? goalsProgress(goals) : goals.title) : 'Tower';
+      setHead('star', title, 'Hide', 'Hide the goals');
+      showPill(collapsed, title);
       const nextKey = `goals:${collapsed ? 'c' : 'o'}:${goals ? goals.items.map(itemKey).join('|') : 'top'}:${nudge ?? ''}`;
       if (nextKey === key) return;
       key = nextKey;
@@ -151,6 +177,12 @@ export function createSideCard(handlers: SideCardHandlers): SideCard {
       node.classList.add('is-hidden');
     },
   };
+}
+
+/** "Goals, 2 of 5": the items done over all of them. */
+function goalsProgress(goals: Goals): string {
+  const done = goals.items.filter((item) => item.done).length;
+  return `Goals, ${done} of ${goals.items.length}`;
 }
 
 function itemKey(item: GoalItem): string {
