@@ -88,7 +88,7 @@ import {
   bakeResolution,
 } from './grid';
 import type { WindowState } from './light';
-import { INK, PALETTE, shade, wallShadow } from './palette';
+import { BLOCK, INK, PALETTE, shade, wallShadow } from './palette';
 
 export {
   CAR_CLEAR_PX,
@@ -507,15 +507,14 @@ function drawWindowBand(g: Graphics, kind: RoomKind, y0: number, w: number, stat
   if (WINDOWS[kind] === 'none') return;
   hline(g, 0, y0 + WIN_TOP, w); // head rail
   hline(g, 0, y0 + WIN_SILL, w); // sill
+  // BB-3: by day the cutaway is open, the rail and the sill with the wall between and no panes,
+  // so the rooms read floor to ceiling; the windows appear at dusk and carry the night.
+  if (state === 'day') return;
   const gy = y0 + WIN_PANE_TOP;
   for (let x = WIN_PANE_X; x + WIN_PANE + LINE_PX <= w; x += TILE_PX) {
     if (state === 'lit') {
       box(g, x, gy, WIN_PANE, WIN_PANE, PALETTE.windowLit);
       box(g, x, gy, WIN_PANE, 2, PALETTE.carLight); // the lamp light pooling at the head
-    } else if (state === 'day') {
-      box(g, x, gy, WIN_PANE, WIN_PANE, PALETTE.windowDay);
-      box(g, x + 2, gy + 2, 3, 1, 0xffffff, 0.55); // a glint in the top corner
-      box(g, x + 2, gy + 3, 1, 2, 0xffffff, 0.55);
     } else {
       box(g, x, gy, WIN_PANE, WIN_PANE, PALETTE.windowUnlit);
       // A dirty hotel room keeps only its lamp: a low warm glow along the bottom of the glass.
@@ -547,6 +546,8 @@ function drawShell(g: Graphics, kind: RoomKind, w: number, h: number, state: Win
       const sy = y0 + BASE;
       box(g, 0, sy, w, SLAB_PX, PALETTE.slab);
       box(g, 0, sy, w, SLAB_EDGE_PX, PALETTE.slabEdge);
+      // D-7: a floor line in the kind's far zoom block colour, so zoom 1 teaches the districts.
+      if (!LOBBY_KINDS.has(kind)) box(g, LINE_PX, sy - 2, w - 2 * LINE_PX, 2, BLOCK[kind]);
     }
   }
 }

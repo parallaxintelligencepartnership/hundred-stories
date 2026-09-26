@@ -1224,10 +1224,11 @@ function drawStairs(ctx: Ctx, w: number, floors: number): void {
   // Landings at the foot and the head.
   box(ctx, 2, y0 - 3, x0, 3, '#c4c9d1', 0.5, 1.5);
   box(ctx, x1, y1 - 3, w - x1 - 2, 3, '#c4c9d1', 0.5, 1.5);
-  // The handrail on posts.
+  // The handrail on its two posts.
   const rail = 26;
-  line(ctx, [[x0 - 6, y0 - rail], [x0, y0 - rail], [x1, y1 - rail], [x1 + 6, y1 - rail]], '#5a6472', 2.5);
-  for (let i = 0; i <= steps; i += 3) {
+  line(ctx, [[x0 - 6, y0 - rail], [x0, y0 - rail], [x1, y1 - rail], [x1 + 6, y1 - rail]], '#8a97a8', 2);
+  // D-12: a post at the foot and one at the head, so a stack of flights recedes.
+  for (const i of [0, steps]) {
     const x = x0 + i * run;
     const y = y0 - i * rise;
     line(ctx, [[x + run / 2, y - rise], [x + run / 2, y - rise - rail + 2]], '#5a6472', 1.5);
@@ -1494,6 +1495,17 @@ export const CONDO_LOOKS: readonly Look[] = [
   { base: 2, wall: P.butter, decor: [at('frameDusk', 92, TY), at('poster', 30, TY - 1), at('cat', 30, BASE - 12 - DECOR.cat.h), onFloor('plant', 84)] },
 ];
 
+/**
+ * D-13: the hotel rooms' looks, four per kind over the one baked layout: the kind's own wall and
+ * three painted ones, no decor. With the mirror (interiorFlip) a floor of hotel rooms reads as
+ * different guests' rooms and costs no texture (the walls are Texture.WHITE tinted).
+ */
+export const HOTEL_LOOKS: Record<'hotelSingle' | 'hotelTwin' | 'hotelSuite', readonly Look[]> = {
+  hotelSingle: [null, P.mist, P.blush, P.sage].map((wall) => ({ base: 0, wall, decor: [] })),
+  hotelTwin: [null, P.butter, P.lilac, P.mist].map((wall) => ({ base: 0, wall, decor: [] })),
+  hotelSuite: [null, P.slate, P.clay, P.sage].map((wall) => ({ base: 0, wall, decor: [] })),
+};
+
 /** The fast food's looks: one per scheme, no decor (the schemes differ in their fixtures). */
 const FAST_FOOD_LOOKS: readonly Look[] = Array.from({ length: FAST_FOOD_VARIANTS }, (_, base) => ({ base, wall: null, decor: [] }));
 
@@ -1529,7 +1541,7 @@ function venueSpec(kind: 'office' | 'shop' | 'restaurant'): InteriorSpec {
 const PER_FLOOR = (): Band => VENUE_BAND;
 /**
  * How many of the two drawn variants of a hotel room are baked: one, a cut for the texture budget
- * (package 8b). Condos bake three layouts at the structural resolution (INTERIOR_2X_MAX_PX), a
+ * (package 8b); the four looks of each hotel kind (HOTEL_LOOKS, D-13) are drawn over it. Condos bake three layouts at the structural resolution (INTERIOR_2X_MAX_PX), a
  * quarter of a hotel's cost each, and draw six looks over them with shared decor, mirrored by
  * the sprite rather than by a texture of their own.
  */
@@ -1562,9 +1574,9 @@ export const INTERIORS: Record<RoomKind, InteriorSpec> = {
   shop: venueSpec('shop'),
   restaurant: venueSpec('restaurant'),
   condo: { variants: CONDO_VARIANTS, bases: 3, looks: CONDO_LOOKS, flips: true, band: PER_FLOOR, draw: drawCondo, pools: true },
-  hotelSingle: { variants: HOTEL_VARIANTS, band: PER_FLOOR, draw: drawHotel('hotelSingle'), pools: true },
-  hotelTwin: { variants: HOTEL_VARIANTS, band: PER_FLOOR, draw: drawHotel('hotelTwin'), pools: true },
-  hotelSuite: { variants: HOTEL_VARIANTS, band: PER_FLOOR, draw: drawHotel('hotelSuite'), pools: true },
+  hotelSingle: { variants: 4, bases: 1, looks: HOTEL_LOOKS.hotelSingle, flips: true, band: PER_FLOOR, draw: drawHotel('hotelSingle'), pools: true },
+  hotelTwin: { variants: 4, bases: 1, looks: HOTEL_LOOKS.hotelTwin, flips: true, band: PER_FLOOR, draw: drawHotel('hotelTwin'), pools: true },
+  hotelSuite: { variants: 4, bases: 1, looks: HOTEL_LOOKS.hotelSuite, flips: true, band: PER_FLOOR, draw: drawHotel('hotelSuite'), pools: true },
   fastFood: {
     variants: FAST_FOOD_VARIANTS,
     looks: FAST_FOOD_LOOKS,

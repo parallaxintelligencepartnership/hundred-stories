@@ -178,6 +178,13 @@ export interface Renderer {
    * moves it without notifying anyone, so the ui reads it on a frame loop while it lasts.
    */
   ghostScreenRect(): { x: number; y: number; w: number; h: number } | null;
+  /**
+   * The selection ring's box as the last frame drew it, in CSS pixels relative to the view
+   * element, or null when no ring was drawn (nothing selected, or a person the frame did not
+   * draw). A new selection answers null until a frame has drawn it. The ui keeps the selection
+   * clear of the card open beside it with this (D-23).
+   */
+  selectionScreenRect(): { x: number; y: number; w: number; h: number } | null;
   setSelection(sel: null | Selection): void;
   onPick(cb: (hit: PickHit) => void): void;
   /** Off for the landing hero: no pointer gesture pans. */
@@ -1028,6 +1035,8 @@ export async function createRenderer(
   // Visual hierarchy by zoom: which layers draw, and how strongly (hierarchy.ts).
   let tier: ZoomTier = 'full';
   let plan: LayerPlan = layerPlan(tier);
+  // applyTier only acts on a change of tier, so the opening tier's connector alpha is set here.
+  connectorLayer.alpha = plan.connectors;
   let veilDirty = true;
   let blocksDirty = true;
   let blocksAge = 0;
@@ -1104,6 +1113,8 @@ export async function createRenderer(
 
   let ghost: Ghost | null = null;
   let selection: Selection | null = null;
+  /** The selection ring as drawOverlay last drew it, world px, or null when it drew none. */
+  let selectionRect: { x: number; y: number; w: number; h: number } | null = null;
   const pickListeners: ((hit: PickHit) => void)[] = [];
 
   const roomSprites = new Map<Id, RoomEntry>();
@@ -1431,12 +1442,13 @@ export async function createRenderer(
       const look = interiorLook(kind, variant);
       const flip = interiorFlip(w.seed, room);
       const band = spec.band(room.height);
-      // A painted feature wall, behind the staff and the fixtures, clear of the wall's shadow face.
+      // A painted feature wall, behind the staff and the fixtures, clear of the wall's shadow face,
+      // and stopping above the shell's district floor line (art.ts drawShell, D-7) so it shows.
       let wall: Container | null = null;
       if (look.wall !== null) {
         wall = new Container();
         const top = WIN_SILL + LINE_PX;
-        const bottom = FLOOR_PX - SLAB_PX;
+        const bottom = FLOOR_PX - SLAB_PX - 2;
         const face = width - LINE_PX - WALL_SHADOW_PX;
         layerSprite(wall, Texture.WHITE, LINE_PX, top, face - LINE_PX, bottom - top).tint = look.wall;
         layerSprite(wall, Texture.WHITE, face, top, WALL_SHADOW_PX, bottom - top).tint = shade(look.wall);
@@ -2049,6 +2061,7 @@ export async function createRenderer(
 
     selectionBox.clear();
     selectionBox.visible = false;
+    selectionRect = null;
     if (!selection) return;
     let box: { x: number; y: number; w: number; h: number } | null = null;
     if (selection.roomId !== undefined) {
@@ -2085,6 +2098,7 @@ export async function createRenderer(
       }
     }
     if (!box) return;
+    selectionRect = box;
     selectionBox.visible = true;
     selectionBox.rect(box.x, box.y, box.w, box.h).stroke({ width: SELECT_PAD_PX, color: 0xf4b942, alignment: 0 });
   }
@@ -2644,8 +2658,16 @@ export async function createRenderer(
       );
       return { x: near.x, y: near.y, w: far.x - near.x, h: far.y - near.y };
     },
+    selectionScreenRect(): { x: number; y: number; w: number; h: number } | null {
+      if (!selectionRect) return null;
+      // The same mapping as ghostScreenRect: the box's two corners, put through the camera.
+      const near = camera.worldToScreen(selectionRect.x, selectionRect.y);
+      const far = camera.worldToScreen(selectionRect.x + selectionRect.w, selectionRect.y + selectionRect.h);
+      return { x: near.x, y: near.y, w: far.x - near.x, h: far.y - near.y };
+    },
     setSelection(sel): void {
       selection = sel;
+      selectionRect = null; // the old ring's box, until a frame draws the new one
     },
     onPick(cb): void {
       pickListeners.push(cb);

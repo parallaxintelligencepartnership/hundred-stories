@@ -464,3 +464,55 @@ describe('one wheel notch moves one zoom stop (BB-1)', () => {
     expect(afterNotches(1, 1, 2, true)).toBe(2);
   });
 });
+
+describe('easing the view sideways (D-23)', () => {
+  it('eases the center to an x over a few frames and lands on it exactly', () => {
+    const cam = createCamera();
+    cam.setViewport(800, 600);
+    cam.centerOn(5, 150);
+    const from = cam.x;
+    cam.easeToX(from + 200);
+    expect(cam.x).toBe(from); // nothing moves until a frame runs
+    cam.update(16);
+    expect(cam.x).toBeGreaterThan(from);
+    expect(cam.x).toBeLessThan(from + 200);
+    for (let i = 0; i < 200; i++) cam.update(16);
+    expect(cam.x).toBe(from + 200);
+  });
+
+  it('moves at once under reduced motion', () => {
+    const cam = createCamera();
+    cam.setViewport(800, 600);
+    cam.setReducedMotion(true);
+    cam.centerOn(5, 150);
+    const from = cam.x;
+    cam.easeToX(from + 200);
+    expect(cam.x).toBe(from + 200);
+  });
+
+  it('lets go of the ease when the player drags, and keeps y where it was', () => {
+    const cam = createCamera();
+    cam.setViewport(800, 600);
+    cam.centerOn(5, 150);
+    const { x, y } = cam;
+    cam.easeToX(x + 300);
+    cam.update(16);
+    cam.dragStart(400, 300, 0);
+    cam.dragEnd();
+    const held = cam.x;
+    for (let i = 0; i < 100; i++) cam.update(16);
+    expect(cam.x).toBe(held);
+    expect(cam.x).toBeLessThan(x + 300);
+    expect(cam.y).toBe(y);
+  });
+
+  it('never eases past the pan range', () => {
+    const cam = createCamera();
+    cam.setViewport(800, 600);
+    cam.setReducedMotion(true);
+    cam.easeToX(1e9);
+    const far = cam.x;
+    cam.panBy(10_000, 0);
+    expect(cam.x).toBe(far);
+  });
+});

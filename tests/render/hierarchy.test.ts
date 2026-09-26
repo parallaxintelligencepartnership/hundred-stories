@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Container, Graphics, Sprite, Texture } from 'pixi.js';
 import type { Art } from '../../src/render/art';
-import { BLOCKS_BELOW_ZOOM, layerPlan, MUTE_AMOUNT, MUTE_BELOW_ZOOM, occupancyLevel, zoomTier } from '../../src/render/hierarchy';
+import { BLOCKS_BELOW_ZOOM, CONNECTOR_ALPHA_FULL, layerPlan, MUTE_AMOUNT, MUTE_BELOW_ZOOM, occupancyLevel, zoomTier } from '../../src/render/hierarchy';
 import { BLOCK } from '../../src/render/palette';
 import { createRenderer, type Renderer } from '../../src/render/renderer';
 import { ROOMS } from '../../src/sim/rules';
@@ -31,7 +31,9 @@ describe('zoom tiers', () => {
   });
 
   it('mutes the window band and the connectors by 20 percent when muted, and not at full zoom', () => {
-    expect(layerPlan('full')).toMatchObject({ rooms: true, blocks: false, windowVeil: 0, connectors: 1, people: 'all' });
+    // D-12: the stairs and escalators hold at 85 percent at full zoom, so the rooms beside them lead.
+    expect(CONNECTOR_ALPHA_FULL).toBe(0.85);
+    expect(layerPlan('full')).toMatchObject({ rooms: true, blocks: false, windowVeil: 0, connectors: CONNECTOR_ALPHA_FULL, people: 'all' });
     expect(layerPlan('muted')).toMatchObject({ rooms: true, blocks: false, windowVeil: 0.2, connectors: 0.8, people: 'all' });
     expect(layerPlan('blocks')).toMatchObject({ rooms: false, blocks: true, people: 'selected', ambient: false });
   });
@@ -148,7 +150,8 @@ describe('the renderer by zoom', () => {
     expect(find(stage, 'rooms').visible).toBe(true);
     expect(find(stage, 'blocks').visible).toBe(false);
     expect(find(stage, 'window veil').visible).toBe(false);
-    expect(find(stage, 'connectors').alpha).toBe(1);
+    // The opening tier's alpha, set before any change of tier (D-12).
+    expect(find(stage, 'connectors').alpha).toBeCloseTo(CONNECTOR_ALPHA_FULL);
   });
 
   it('mutes the window band and the stairs by 20 percent below 0.75', async () => {
@@ -191,6 +194,7 @@ describe('the renderer by zoom', () => {
     expect(find(stage, 'blocks').visible).toBe(false);
     expect(find(stage, 'rooms').visible).toBe(true);
     expect(find(stage, 'people').visible).toBe(true);
+    expect(find(stage, 'connectors').alpha).toBeCloseTo(CONNECTOR_ALPHA_FULL);
   });
 
   it('draws only the selected person at far zoom', async () => {

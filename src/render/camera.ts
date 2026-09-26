@@ -141,6 +141,8 @@ export interface Camera {
   zoomStep(direction: 1 | -1): void;
   /** Ease vertically the shortest distance that puts a whole floor on screen. */
   ensureFloorVisible(floor: number): void;
+  /** Ease the view's center to world x (D-23), the way ensureFloorVisible eases y; instant under reduced motion. */
+  easeToX(x: number): void;
   setKey(code: string, down: boolean): void;
   clearKeys(): void;
   /** Advance inertia, held keys and zoom snapping. dtMs is real time. */
@@ -175,6 +177,7 @@ class TowerCamera implements Camera {
   private keys = new Set<string>();
 
   private easeY: number | null = null;
+  private easeX: number | null = null;
 
   private wheelIdleMs = 0;
   private anchorX = 0;
@@ -237,6 +240,7 @@ class TowerCamera implements Camera {
 
   centerOn(floor: number, x: number): void {
     this.easeY = null;
+    this.easeX = null;
     this.x = (x + 0.5) * TILE_PX;
     this.y = floorTopY(floor) + FLOOR_PX / 2;
     this.vx = 0;
@@ -257,6 +261,7 @@ class TowerCamera implements Camera {
 
   reset(): void {
     this.easeY = null;
+    this.easeX = null;
     this.zoom = DEFAULT_ZOOM;
     this.x = (TOWER_WIDTH / 2) * TILE_PX;
     this.vx = 0;
@@ -279,6 +284,7 @@ class TowerCamera implements Camera {
   dragStart(sx: number, sy: number, timeMs: number, force = false): void {
     if (!this.panEnabled && !force) return;
     this.easeY = null;
+    this.easeX = null;
     this.dragging = true;
     this.lastSx = sx;
     this.lastSy = sy;
@@ -290,6 +296,7 @@ class TowerCamera implements Camera {
   dragMove(sx: number, sy: number, timeMs: number): void {
     if (!this.dragging) return;
     this.easeY = null;
+    this.easeX = null;
     const dx = sx - this.lastSx;
     const dy = sy - this.lastSy;
     this.lastSx = sx;
@@ -344,6 +351,7 @@ class TowerCamera implements Camera {
     if (!this.panEnabled) return;
     if (gesture.dx === 0 && gesture.dy === 0) return;
     this.easeY = null;
+    this.easeX = null;
     this.vx = 0;
     this.vy = 0;
     this.panBy(gesture.dx, gesture.dy);
@@ -377,6 +385,19 @@ class TowerCamera implements Camera {
     this.easeY = target;
   }
 
+  easeToX(x: number): void {
+    if (!Number.isFinite(x)) return;
+    const target = clampX(x);
+    if (this.reducedMotion) {
+      this.easeX = null;
+      this.x = target;
+      this.clampPosition();
+      return;
+    }
+    this.vx = 0;
+    this.easeX = target;
+  }
+
   setKey(code: string, down: boolean): void {
     if (!(code in PAN_KEYS)) return;
     if (down) this.keys.add(code);
@@ -401,6 +422,7 @@ class TowerCamera implements Camera {
     }
     if (kx !== 0 || ky !== 0) {
       this.easeY = null;
+      this.easeX = null;
       const len = Math.hypot(kx, ky) || 1;
       const step = (KEY_PAN_PX_PER_SECOND * dt) / 1000;
       this.vx = 0;
@@ -429,6 +451,21 @@ class TowerCamera implements Camera {
           this.easeY = null;
         } else {
           this.y = next;
+        }
+        this.clampPosition();
+      }
+    }
+
+    if (this.easeX !== null) {
+      if (this.dragging) this.easeX = null;
+      else {
+        const t = 1 - Math.exp(-dt / FOLLOW_EASE_MS);
+        const next = this.x + (this.easeX - this.x) * t;
+        if (Math.abs(this.easeX - next) < 0.5) {
+          this.x = this.easeX;
+          this.easeX = null;
+        } else {
+          this.x = next;
         }
         this.clampPosition();
       }
@@ -480,11 +517,14 @@ class TowerCamera implements Camera {
   }
 
   private clampPosition(): void {
-    const left = -PAN_MARGIN_PX;
-    const right = TOWER_WIDTH * TILE_PX + PAN_MARGIN_PX;
-    this.x = clamp(this.x, left, right);
+    this.x = clampX(this.x);
     this.y = clampY(this.y);
   }
+}
+
+/** The horizontal range the camera center may sit in, the lot plus the margin either side. */
+function clampX(x: number): number {
+  return clamp(x, -PAN_MARGIN_PX, TOWER_WIDTH * TILE_PX + PAN_MARGIN_PX);
 }
 
 /** The vertical range the camera center may sit in, roof to basement plus the margin. */

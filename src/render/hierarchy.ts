@@ -1,6 +1,6 @@
 // Visual hierarchy by zoom (package 2, item 6): occupied rooms lead, repetition recedes.
 //
-// full, zoom 0.75 and up: everything as drawn.
+// full, zoom 0.75 and up: everything as drawn, the stairs and escalators at 85 percent (D-12).
 // muted, zoom below 0.75: the repeating window band and the stair and escalator diagonals are
 //   muted by 20 percent, so the rooms with people in them lead.
 // blocks, zoom below 0.5: every room is a flat block in its category colour with a 1 px outline
@@ -15,6 +15,8 @@ export const MUTE_BELOW_ZOOM = 0.75;
 export const BLOCKS_BELOW_ZOOM = 0.5;
 /** How much the window band and the connectors are muted below MUTE_BELOW_ZOOM. */
 export const MUTE_AMOUNT = 0.2;
+/** D-12: the stairs and escalators at full zoom, a little back, so the rooms beside them lead. */
+export const CONNECTOR_ALPHA_FULL = 0.85;
 
 export type ZoomTier = 'full' | 'muted' | 'blocks';
 
@@ -50,7 +52,7 @@ export function layerPlan(tier: ZoomTier): LayerPlan {
     rooms: true,
     blocks: false,
     windowVeil: muted ? MUTE_AMOUNT : 0,
-    connectors: muted ? 1 - MUTE_AMOUNT : 1,
+    connectors: muted ? 1 - MUTE_AMOUNT : CONNECTOR_ALPHA_FULL,
     people: 'all',
     ambient: true,
     selection: 1,

@@ -9,13 +9,17 @@ import { createArt } from '../../src/render/art';
 import { FLOOR_PX, TILE_PX } from '../../src/render/grid';
 import {
   bakesAtStructuralScale,
+  HOTEL_LOOKS,
   INTERIOR_2X_MAX_PX,
   INTERIORS,
+  interiorFlip,
   interiorOpen,
   interiorVariant,
   LOBBY_RHYTHM,
+  lookOf,
   postX,
 } from '../../src/render/interiors';
+import { PALETTE } from '../../src/render/palette';
 import { venueOf } from '../../src/render/venue';
 import { ROOMS, SCHEDULES, SECURITY, WASTE } from '../../src/sim/rules';
 import type { RoomKind } from '../../src/sim/types';
@@ -195,5 +199,44 @@ describe('variants', () => {
         expect(v, kind).toBeLessThan(n);
       }
     }
+  });
+});
+
+describe('D-13: hotel rows vary by painted wall and facing', () => {
+  const HOTELS = ['hotelSingle', 'hotelTwin', 'hotelSuite'] as const;
+  const P = PALETTE.paint;
+
+  it('gives each hotel kind four looks over one baked layout: its own wall and three painted', () => {
+    expect(HOTEL_LOOKS.hotelSingle.map((l) => l.wall)).toEqual([null, P.mist, P.blush, P.sage]);
+    expect(HOTEL_LOOKS.hotelTwin.map((l) => l.wall)).toEqual([null, P.butter, P.lilac, P.mist]);
+    expect(HOTEL_LOOKS.hotelSuite.map((l) => l.wall)).toEqual([null, P.slate, P.clay, P.sage]);
+    for (const kind of HOTELS) {
+      const spec = INTERIORS[kind];
+      expect(spec, kind).toMatchObject({ variants: 4, bases: 1, flips: true });
+      expect(spec.looks, kind).toBe(HOTEL_LOOKS[kind]);
+      for (const look of HOTEL_LOOKS[kind]) expect(look, kind).toMatchObject({ base: 0, decor: [] });
+    }
+  });
+
+  it('picks a look by id, so neighbors on a floor differ in wall, and mirrors some by hash', () => {
+    for (const kind of HOTELS) {
+      const walls = [10, 11, 12, 13].map((id) => lookOf(kind, interiorVariant(5, { id, kind, x: 0 })).wall);
+      expect(walls, kind).toEqual(HOTEL_LOOKS[kind].map((l) => l.wall).slice(2).concat(HOTEL_LOOKS[kind].map((l) => l.wall).slice(0, 2)));
+      const flips = Array.from({ length: 16 }, (_, id) => interiorFlip(5, { id, kind }));
+      expect(flips.some(Boolean), kind).toBe(true);
+      expect(flips.every(Boolean), kind).toBe(false);
+    }
+  });
+
+  it('bakes one fixture texture per hotel size whatever the look', () => {
+    let canvases = 0;
+    const renderer = { generateTexture: () => new Texture() } as unknown as PixiRenderer;
+    const createCanvas = (width: number, height: number): HTMLCanvasElement => {
+      canvases += 1;
+      return { width, height, getContext: () => new Proxy({}, { get: () => () => ({ addColorStop: () => {} }), set: () => true }) } as unknown as HTMLCanvasElement;
+    };
+    const art = createArt(renderer, { createCanvas, resolution: 1 });
+    for (let v = 0; v < 4; v++) art.interior!('hotelSuite', ROOMS.hotelSuite.width, 1, lookOf('hotelSuite', v).base);
+    expect(canvases).toBe(1);
   });
 });
