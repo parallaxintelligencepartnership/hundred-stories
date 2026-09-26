@@ -14,10 +14,17 @@ import { LIMITS, ROOMS, SHAFTS, STRESS } from '../sim/rules';
 import type { Id, Room, ShaftKind, World } from '../sim/types';
 import { floorBand, floorBaseY, floorTopY } from './camera';
 import { FLOOR_PX, TILE_PX } from './grid';
+import { occupancyLevel } from './hierarchy';
+import { lerpColor } from './light';
+import { BLOCK, BLOCK_FILL_LIFT, BLOCK_OUTLINE } from './palette';
 
-export type OverlayKind = 'stress' | 'noise' | 'vacancy' | 'wait';
+/**
+ * The information views. Districts (design pass BB-2) is the category block chart the far zoom
+ * used to be: categories, not a ramp, so no room takes a step in it.
+ */
+export type OverlayKind = 'stress' | 'noise' | 'vacancy' | 'wait' | 'districts';
 
-export const OVERLAY_KINDS: readonly OverlayKind[] = ['stress', 'noise', 'vacancy', 'wait'];
+export const OVERLAY_KINDS: readonly OverlayKind[] = ['stress', 'noise', 'vacancy', 'wait', 'districts'];
 
 /** Step 0 is fine, step 4 is trouble: ghost green, through amber, to the alert red. */
 export const OVERLAY_RAMP: readonly [number, number, number, number, number] = [
@@ -210,6 +217,7 @@ export function roomStep(world: World, room: Room, kind: OverlayKind, waits?: Re
   if (kind === 'stress') return stressStep(world, room);
   if (kind === 'noise') return noiseStep(world, room);
   if (kind === 'vacancy') return vacancyStep(room);
+  if (kind === 'districts') return null;
   // Stairs and escalators are the way between floors, not a place to wait for a car.
   if (room.kind === 'stairs' || room.kind === 'escalator') return null;
   return roomWaitStep(room, waits ?? floorWaits(world));
@@ -234,7 +242,18 @@ const OVERLAY_TITLES: Record<OverlayKind, string> = {
   noise: 'Noise',
   vacancy: 'Vacancy',
   wait: 'Elevator wait',
+  districts: 'Districts',
 };
+
+/** The Districts legend: one swatch per category, the same colours the blocks are drawn in. */
+const DISTRICTS: readonly LegendEntry[] = [
+  { color: BLOCK.office, label: 'Offices' },
+  { color: BLOCK.condo, label: 'Homes' },
+  { color: BLOCK.hotelSingle, label: 'Hotels' },
+  { color: BLOCK.fastFood, label: 'Food' },
+  { color: BLOCK.shop, label: 'Shops' },
+  { color: BLOCK.medical, label: 'Services' },
+];
 
 export function overlayTitle(kind: OverlayKind): string {
   return OVERLAY_TITLES[kind];
@@ -244,6 +263,8 @@ export function overlayTitle(kind: OverlayKind): string {
 export function overlayLegend(kind: OverlayKind, colorBlind = false): Legend {
   const r = overlayRamp(colorBlind);
   const title = OVERLAY_TITLES[kind];
+  // Categories are not a ramp: the same colours whatever the palette choice.
+  if (kind === 'districts') return { title, entries: DISTRICTS.map((entry) => ({ ...entry })) };
   if (kind === 'vacancy') return { title, entries: [{ color: r[0], label: 'Occupied' }, { color: r[4], label: 'Empty', worst: true }] };
   if (kind === 'noise') {
     return {
@@ -314,6 +335,85 @@ function floorAtBand(band: number): number {
   return band > 0 ? band : band - 1;
 }
 
+// ------------------------------------------------------------------ blocks
+
+/** D-8: at night a block darkens this far toward the night sky, and its occupancy glows instead. */
+export const BLOCK_NIGHT = 0x0d1b3d;
+export const BLOCK_NIGHT_MIX = 0.45;
+export const BLOCK_GLOW = 0xffd678;
+export const BLOCK_GLOW_ALPHA = 0.85;
+
+type BlockTarget = Pick<Graphics, 'rect' | 'fill' | 'stroke'>;
+
+function onView(view: ViewRect | undefined, x: number, y: number, w: number, h: number): boolean {
+  return !view || !(x > view.right || x + w < view.left || y > view.bottom || y + h < view.top);
+}
+
+/**
+ * The category block chart: one flat block per room in its category colour (palette.ts BLOCK)
+ * with a 1 px outline, a lobby run outlined once, its occupancy a lighter fill from the floor up.
+ * At night (D-8, the far zoom's block pass with the FAR_ZOOM_BLOCKS flag) each block darkens
+ * toward the night sky and its occupancy is drawn into `glow` instead, the emissive layer. The
+ * caller clears both. With a view, rooms and runs off it are skipped.
+ */
+export function drawBlocks(
+  g: BlockTarget,
+  rooms: Iterable<Room>,
+  options: { night?: boolean; glow?: Pick<Graphics, 'rect' | 'fill'> | null; view?: ViewRect } = {},
+): void {
+  const night = options.night === true;
+  const view = options.view;
+  // Lobby segments are one tile each: outlined one by one they read as a comb, so a run of
+  // them is outlined once, as the one lobby the player sees.
+  const lobbyRuns = new Map<number, { x: number; end: number }[]>();
+  for (const room of rooms) {
+    if (room.kind === 'stairs' || room.kind === 'escalator') continue;
+    const lobby = room.kind === 'lobby' || room.kind === 'skyLobby';
+    if (lobby) {
+      const key = room.floor + room.height * 1000;
+      const runs = lobbyRuns.get(key) ?? [];
+      runs.push({ x: room.x, end: room.x + room.width });
+      lobbyRuns.set(key, runs);
+    }
+    const x = room.x * TILE_PX;
+    const y = floorTopY(room.floor + room.height - 1);
+    const bw = room.width * TILE_PX;
+    const bh = room.height * FLOOR_PX;
+    if (!onView(view, x, y, bw, bh)) continue;
+    const base = BLOCK[room.kind];
+    const level = occupancyLevel(room);
+    if (night) {
+      g.rect(x, y, bw, bh).fill(lerpColor(base, BLOCK_NIGHT, BLOCK_NIGHT_MIX));
+      if (level > 0 && options.glow) options.glow.rect(x, y + bh * (1 - level), bw, bh * level).fill({ color: BLOCK_GLOW, alpha: BLOCK_GLOW_ALPHA });
+    } else {
+      g.rect(x, y, bw, bh).fill(base);
+      if (level > 0) g.rect(x, y + bh * (1 - level), bw, bh * level).fill(lerpColor(base, 0xffffff, BLOCK_FILL_LIFT));
+    }
+    if (!lobby) g.rect(x, y, bw, bh).stroke({ width: 1, color: BLOCK_OUTLINE, pixelLine: true });
+  }
+  for (const [key, runs] of lobbyRuns) {
+    const height = Math.floor(key / 1000);
+    const floor = key - height * 1000;
+    const y = floorTopY(floor + height - 1);
+    runs.sort((a, b) => a.x - b.x);
+    let start = runs[0]?.x ?? 0;
+    let end = start;
+    const outline = (): void => {
+      const x = start * TILE_PX;
+      const w = (end - start) * TILE_PX;
+      if (onView(view, x, y, w, height * FLOOR_PX)) g.rect(x, y, w, height * FLOOR_PX).stroke({ width: 1, color: BLOCK_OUTLINE, pixelLine: true });
+    };
+    for (const run of runs) {
+      if (run.x > end) {
+        outline();
+        start = run.x;
+      }
+      end = Math.max(end, run.end);
+    }
+    outline();
+  }
+}
+
 // ------------------------------------------------------------------ pass
 
 /** The part of the world the camera shows, in world pixels. */
@@ -333,7 +433,7 @@ export interface OverlayPass {
   draw(world: World, view: ViewRect, ghost: OverlayGhost | null): void;
 }
 
-type TintTarget = Pick<Graphics, 'clear' | 'rect' | 'fill' | 'visible' | 'poly'>;
+type TintTarget = Pick<Graphics, 'clear' | 'rect' | 'fill' | 'visible' | 'poly' | 'stroke'>;
 
 /**
  * The per frame tint pass. Steps are worked out again when the world, its minute, its
@@ -449,7 +549,10 @@ export function createOverlayPass(g: TintTarget): OverlayPass {
       g.clear();
       g.visible = true;
       drawnSomething = true;
-      if (kind !== null) {
+      if (kind === 'districts') {
+        // The block chart at full strength over the tower, the day colours at every hour.
+        drawBlocks(g, world.rooms.values(), { view });
+      } else if (kind !== null) {
         recompute(world, kind);
         drawRooms(world, view);
         if (kind === 'wait') drawShaftStops(world, view);

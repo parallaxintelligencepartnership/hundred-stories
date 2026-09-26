@@ -529,7 +529,8 @@ export const SIGN_DARK_TINT = 0x6e6e6e;
 /** The glow behind a lit sign and the pools of light in a lit venue: the shared glow, tinted. */
 export const SIGN_GLOW_TINT = 0xffe08a;
 export const POOL_TINT = 0xffd678;
-export const POOL_ALPHA = 0.5;
+/** D-4: the pools add over the night tint on the emissive layer, so they draw lighter than they did under it. */
+export const POOL_ALPHA = 0.35;
 /** Pools of light hang every POOL_STEP px along a lit venue's ceiling, each POOL_W by POOL_H. */
 export const POOL_STEP = 48;
 export const POOL_W = 72;

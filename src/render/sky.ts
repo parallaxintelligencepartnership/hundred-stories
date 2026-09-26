@@ -5,9 +5,11 @@
 // dominant. Day holds a flat gradient for most of the day, dawn and dusk are short
 // one hour transitions, night is deep blue and never black.
 //
-// The low horizon (decision 2026-09-22, replacing the single skyline strip; the rule against
-// a tall city backdrop stands): far hills and near two to four storey roofs as two parallax
-// bands on the ground line, and six clouds drifting across the sky.
+// The low horizon (decision 2026-09-22, replacing the single skyline strip): far hills and near
+// two to four storey roofs as two parallax bands on the ground line, and six clouds drifting
+// across the sky. Design pass P3: a distant downtown behind the hills, barely there by day and a
+// field of lights at night (BB-4, which lifts the 2026-09-19 ruling against a tall city
+// backdrop), and stars in the clear night sky (D-6).
 //
 // Nothing here touches world.rng: the horizon uses its own seeded generator so the
 // simulation stays reproducible.
@@ -82,8 +84,132 @@ const BAND_RIGHT = TOWER_WIDTH * TILE_PX + 12000;
  * street and the concrete in front cover whatever is left.
  */
 const BAND_FILL = 6000;
+// D-6: the stars. A fixed field from its own seed, screen space, sliding at a twentieth of the
+// camera and tiled side by side; lit by the night and put out by the clouds, no motion of its own.
+export const STAR_COUNT = 90;
+export const STAR_FIELD_W = 2048;
+export const STAR_FIELD_H = 640;
+const STAR_PARALLAX = 0.05;
+/** The field's bottom sits this far over the clouds' horizon. */
+const STAR_CLEARANCE = 60;
+const STAR_SEED = 0x57a25;
+
+export interface Star {
+  x: number;
+  y: number;
+  r: number;
+  alpha: number;
+}
+
+/** The star field, the same every time: 0.6 to 1.2 px, at 0.4 to 0.9. */
+export function starField(): Star[] {
+  const rng = createRng(STAR_SEED);
+  const stars: Star[] = [];
+  for (let i = 0; i < STAR_COUNT; i++) {
+    const x = rng.int(0, STAR_FIELD_W - 1);
+    const y = rng.int(0, STAR_FIELD_H - 1);
+    stars.push({ x, y, r: 0.6 + rng.int(0, 6) / 10, alpha: 0.4 + rng.int(0, 5) / 10 });
+  }
+  return stars;
+}
+
+/** How bright the stars are: the night, less the clouds (overcast dims them, rain and storm hide them). */
+export function starAlpha(minuteOfDay: number, w: WeatherView['weights']): number {
+  return nightness(minuteOfDay) * Math.max(0, 1 - (0.7 * w.overcast + w.rain + w.storm));
+}
+
+/** Screen x of the field's left copy, in (-STAR_FIELD_W, 0]: the camera at a twentieth, wrapped. */
+export function starsX(camX: number, zoom: number): number {
+  const raw = camX * zoom * STAR_PARALLAX;
+  return -(((raw % STAR_FIELD_W) + STAR_FIELD_W) % STAR_FIELD_W);
+}
+
+/** Screen y of the field's top, from the clouds' horizon line. */
+export function starsTop(cloudHorizonY: number): number {
+  return cloudHorizonY - STAR_CLEARANCE - STAR_FIELD_H;
+}
+
+// BB-4: a distant downtown. Flat topped towers behind the hills at their own parallax, from the
+// sky's own seed: pale and faint by day, dark with a sparse grid of lit windows at night.
+export const DOWNTOWN_PARALLAX = 0.06;
+export const DOWNTOWN_MIN_H = 120;
+export const DOWNTOWN_MAX_H = 360;
+export const DOWNTOWN_WINDOW_PX = 2;
+const DOWNTOWN_SEED = 0xd0e7e;
+const DOWNTOWN_DAY = 0xaebdd0;
+const DOWNTOWN_DAY_ALPHA = 0.35;
+const DOWNTOWN_NIGHT = 0x243457;
+const DOWNTOWN_WINDOWS_ALPHA = 0.6;
+const DOWNTOWN_WINDOW = 0xffd866;
+/** The window grid: a 2 px window every 6 px across and every 10 px down, inset 4 px; about one in nine lit. */
+const DOWNTOWN_PITCH_X = 6;
+const DOWNTOWN_PITCH_Y = 10;
+const DOWNTOWN_INSET = 4;
+const DOWNTOWN_LIT = 0.11;
+/** The towers stand on a low podium, filled down like the other bands so a climb never shows sky under them. */
+const DOWNTOWN_PODIUM = 8;
+
+export interface DowntownTower {
+  x: number;
+  width: number;
+  height: number;
+  /** The lit windows' top left corners, band px (y is negative, up from the base line). */
+  windows: [number, number][];
+  /** How many window cells the tower has, lit or not. */
+  cells: number;
+}
+
+/** The skyline, the same every time, side by side along the whole band. */
+export function downtownTowers(): DowntownTower[] {
+  const rng = createRng(DOWNTOWN_SEED);
+  const towers: DowntownTower[] = [];
+  let x = BAND_LEFT;
+  while (x < BAND_RIGHT) {
+    const width = rng.int(4, 12) * 8;
+    const height = rng.int(DOWNTOWN_MIN_H / 8, DOWNTOWN_MAX_H / 8) * 8;
+    const windows: [number, number][] = [];
+    let cells = 0;
+    for (let wx = x + DOWNTOWN_INSET; wx + DOWNTOWN_WINDOW_PX <= x + width - DOWNTOWN_INSET; wx += DOWNTOWN_PITCH_X) {
+      for (let wy = -height + DOWNTOWN_INSET + 2; wy + DOWNTOWN_WINDOW_PX <= -DOWNTOWN_PODIUM; wy += DOWNTOWN_PITCH_Y) {
+        cells++;
+        if (rng.next() < DOWNTOWN_LIT) windows.push([wx, wy]);
+      }
+    }
+    towers.push({ x, width, height, windows, cells });
+    x += width + rng.int(0, 3) * 8;
+  }
+  return towers;
+}
+
+/** The downtown by nightness: the body's tint and opacity, and the windows' opacity. */
+export function downtownLook(night: number): { tint: number; alpha: number; windows: number } {
+  const n = Math.max(0, Math.min(1, night));
+  return { tint: lerpColor(DOWNTOWN_DAY, DOWNTOWN_NIGHT, n), alpha: DOWNTOWN_DAY_ALPHA + (1 - DOWNTOWN_DAY_ALPHA) * n, windows: DOWNTOWN_WINDOWS_ALPHA * n };
+}
+
+/** The downtown band: the towers in white (tinted by the hour) and their windows. */
+function buildDowntown(): { root: Container; body: Graphics; windows: Graphics } {
+  const root = new Container();
+  root.label = 'downtown';
+  const body = new Graphics();
+  const windows = new Graphics();
+  const towers = downtownTowers();
+  // No shape overlaps another, so the band's opacity reads evenly.
+  for (const t of towers) body.rect(t.x, -t.height, t.width, t.height - DOWNTOWN_PODIUM);
+  body.rect(BAND_LEFT, -DOWNTOWN_PODIUM, BAND_RIGHT - BAND_LEFT, BAND_FILL + DOWNTOWN_PODIUM);
+  body.fill(0xffffff);
+  for (const t of towers) for (const [wx, wy] of t.windows) windows.rect(wx, wy, DOWNTOWN_WINDOW_PX, DOWNTOWN_WINDOW_PX);
+  windows.fill(DOWNTOWN_WINDOW);
+  windows.visible = false;
+  root.addChild(body, windows);
+  return { root, body, windows };
+}
+
 /** Everything on the horizon settles toward the night sky instead of glowing after dark. */
 const HORIZON_NIGHT = 0x5c6f96;
+
+/** No weather handed in: a clear sky. */
+const CLEAR_WEIGHTS: WeatherView['weights'] = { clear: 1, overcast: 0, rain: 0, storm: 0 };
 
 const CONCRETE_COLOR = 0x6b6f78;
 const CONCRETE_LINE = 0x4c5058;
@@ -276,11 +402,23 @@ function buildGround(ground: Container): Graphics {
 
 export function createSky(layers: SkyLayers): Sky {
   const gradient = new Graphics();
-  layers.sky.addChild(gradient);
-  // cityFar holds the clouds (screen space) and the far hills; cityNear the near roofs.
+  // D-6: the stars right after the gradient, the field drawn twice side by side so it tiles. A
+  // third copy shares the same geometry for a view wider than two fields.
+  const field = starField();
+  const stars = new Graphics();
+  stars.label = 'stars';
+  for (let copy = 0; copy < 2; copy++) {
+    for (const s of field) stars.circle(s.x + copy * STAR_FIELD_W, s.y, s.r).fill({ color: 0xffffff, alpha: s.alpha });
+  }
+  stars.visible = false;
+  const starsWide = new Graphics(stars.context);
+  starsWide.visible = false;
+  layers.sky.addChild(gradient, stars, starsWide);
+  // cityFar holds the downtown (BB-4), the clouds (screen space) and the far hills; cityNear the near roofs.
   const cloudLayer = new Container();
   const hills = buildHills();
-  layers.cityFar.addChild(cloudLayer, hills);
+  const downtown = buildDowntown();
+  layers.cityFar.addChild(downtown.root, cloudLayer, hills);
   const clouds = buildClouds(cloudLayer);
   const extraClouds = buildExtraClouds(cloudLayer);
   let extraSeed: number | null = null;
@@ -352,6 +490,11 @@ export function createSky(layers: SkyLayers): Sky {
         const tint = lerpColor(0xffffff, HORIZON_NIGHT, night);
         hills.tint = tint;
         roofs.tint = tint;
+        const look = downtownLook(night);
+        downtown.body.tint = look.tint;
+        downtown.body.alpha = look.alpha;
+        downtown.windows.alpha = look.windows;
+        downtown.windows.visible = look.windows > 0;
         cloudNightTint = lerpColor(0xffffff, HORIZON_NIGHT, night * 0.8);
         lastMinute = rounded;
       }
@@ -365,12 +508,22 @@ export function createSky(layers: SkyLayers): Sky {
         lastCloudTint = cloudTint;
       }
 
+      placeBand(downtown.root, DOWNTOWN_PARALLAX, cam, viewW, viewH);
       placeBand(hills, HILLS_PARALLAX, cam, viewW, viewH);
       placeBand(roofs, ROOFS_PARALLAX, cam, viewW, viewH);
 
       drift += (Math.max(0, dtMs) / 1000) * CLOUD_SPEED;
       if (drift > 1e6) drift -= 1e6;
       const horizon = bandBaseY(viewH / 2 - cam.y * cam.zoom, viewH, CLOUD_PARALLAX);
+      const starLight = starAlpha(minuteOfDay, weather ? weather.view.weights : CLEAR_WEIGHTS);
+      stars.visible = starLight > 0;
+      stars.alpha = starLight;
+      if (stars.visible) {
+        stars.position.set(Math.round(starsX(cam.x, cam.zoom)), Math.round(starsTop(horizon)));
+        starsWide.position.set(stars.x + 2 * STAR_FIELD_W, stars.y);
+        starsWide.alpha = starLight;
+      }
+      starsWide.visible = stars.visible && viewW > stars.x + 2 * STAR_FIELD_W;
       for (const cloud of clouds) {
         cloud.node.position.set(
           Math.round(cloudX(cloud.x0, drift, cam.x, cam.zoom, viewW)),
@@ -397,6 +550,9 @@ export function createSky(layers: SkyLayers): Sky {
     },
     destroy(): void {
       gradient.destroy();
+      starsWide.destroy();
+      stars.destroy();
+      downtown.root.destroy({ children: true });
       fill?.destroy();
       fill = null;
       cloudLayer.destroy({ children: true });

@@ -613,7 +613,8 @@ describe('motion (look round L3)', () => {
 describe('information view tint (setOverlay)', () => {
   /** The tint Graphics: the first child of the overlay layer, under the ghost and the ring. */
   function tintOf(stage: Container): Graphics {
-    const overlayRoot = stage.children[5] as Container;
+    // Design pass D-4: the emissive root sits at 5, between the light layer and the overlay.
+    const overlayRoot = stage.children[6] as Container;
     const overlay = overlayRoot.children[0] as Container;
     return overlay.children[0] as Graphics;
   }
@@ -652,7 +653,7 @@ describe('information view tint (setOverlay)', () => {
     renderer.camera.centerOn(5, 180);
     frame(16);
     const worldRoot = stage.children[3] as Container;
-    const overlayRoot = stage.children[5] as Container;
+    const overlayRoot = stage.children[6] as Container;
     expect(worldRoot.position.y).not.toBe(0);
     expect(overlayRoot.scale.x).toBe(worldRoot.scale.x);
     expect(overlayRoot.position.x).toBe(worldRoot.position.x);
@@ -713,7 +714,8 @@ describe('a replaced world keeps nothing of the old tower', () => {
       renderer.render(a, 1);
       renderer.resetMotion();
       renderer.render(b, 1);
-      expect(spritesWith(stage, 'sign|').map((s) => s.texture.label)).toEqual([`sign|${name}`]);
+      // The plain face and D-4's lit face above the night tint: both on the new brand.
+      expect(spritesWith(stage, 'sign|').map((s) => s.texture.label)).toEqual([`sign|${name}`, `sign|${name}`]);
       checked++;
     }
     expect(checked).toBe(2);

@@ -3,6 +3,7 @@
 // See docs/reviews/2026-09-22-codex-astra-ui-graphics.md section 2 and docs/VISUAL.md.
 
 import type { Room, RoomKind, World } from '../sim/types';
+import { mix } from './venue';
 
 /**
  * What a room's windows show. day: sky in the panes. lit: someone inside at night, warm panes
@@ -53,15 +54,55 @@ export function windowStateOf(room: Room, night: boolean, peopleFloors: Readonly
   return 'vacant';
 }
 
+/** The dusk and dawn windows (D-15), minutes of the day, both ends inclusive: 18:00 to 19:15 and 05:15 to 06:30. */
+const DUSK_WINDOW = [18 * 60, 19 * 60 + 15] as const;
+const DAWN_WINDOW = [5 * 60 + 15, 6 * 60 + 30] as const;
+
+const minuteOf = (minuteOfDay: number): number => ((minuteOfDay % 1440) + 1440) % 1440;
+
+/** Inside the dusk or the dawn window, when the rooms switch on their own minutes (roomNight). */
+export function inLightWindow(minuteOfDay: number): boolean {
+  const m = minuteOf(minuteOfDay);
+  return (m >= DUSK_WINDOW[0] && m <= DUSK_WINDOW[1]) || (m >= DAWN_WINDOW[0] && m <= DAWN_WINDOW[1]);
+}
+
 /**
  * The reconcile gate's light key: one value for all of the day, and one per game hour at
  * night, so window states that do not bump the structure version (a hotel room going dirty,
- * a lobby filling or emptying) are picked up within a game hour.
+ * a lobby filling or emptying) are picked up within a game hour. Inside the dusk and dawn
+ * windows it moves every five game minutes, whatever the global night flag says, so the rooms
+ * light and go out one by one (D-15).
  */
 export function lightBand(night: boolean, minuteOfDay: number): number {
+  const m = minuteOf(minuteOfDay);
+  if (inLightWindow(m)) return 10000 + Math.floor(m / 5);
   if (!night) return -1;
-  return Math.floor((((minuteOfDay % 1440) + 1440) % 1440) / 60);
+  return Math.floor(m / 60);
 }
+
+/**
+ * D-15: whether one room keeps its night windows at this minute. Each room lights on its own
+ * minute from 18:15 to 18:59 and goes out on its own minute from 05:30 to 06:14, both from the
+ * tower's seed and the room's id (venue.ts mix), never from world.rng.
+ */
+export function roomNight(seed: number, roomId: number, minuteOfDay: number): boolean {
+  const h = mix((seed | 0) ^ 0x51ed27, roomId);
+  const on = 1095 + (h % 45);
+  const off = 330 + ((h >>> 8) % 45);
+  const m = minuteOf(minuteOfDay);
+  return m >= on || m < off;
+}
+
+/**
+ * D-4: the night grade a room shell and its illustrated layers take, by window state. A lit
+ * room keeps its colours (its windows glow on the emissive layer); an empty one falls back.
+ */
+export const NIGHT_GRADE: Readonly<Record<WindowState, number>> = {
+  day: 0xffffff,
+  lit: 0xffffff,
+  vacant: 0x9aa5c6,
+  housekeeping: 0xb4bcd6,
+};
 
 interface TintAnchor {
   minute: number;
@@ -73,16 +114,19 @@ const DAWN_TINT = 0xbfd8ff;
 const NOON_TINT = 0xffffff;
 const EVENING_TINT = 0xffd0a0;
 
-/** Hold night through 05:00, dawn at 06:00, noon 07:00 to 17:00, evening 18:00, night from 19:00. */
+/**
+ * D-9: warm with the sky, not before it. Night to 05:30, dawn at 06:00, noon 06:45 to 17:30,
+ * the evening peak at 18:30 (the sky's dusk, sky.ts), night from 19:15.
+ */
 const TINT_ANCHORS: readonly TintAnchor[] = [
   { minute: 0, color: NIGHT_TINT },
-  { minute: 5 * 60, color: NIGHT_TINT },
-  { minute: 6 * 60, color: DAWN_TINT },
-  { minute: 7 * 60, color: NOON_TINT },
-  { minute: 17 * 60, color: NOON_TINT },
-  { minute: 18 * 60, color: EVENING_TINT },
-  { minute: 19 * 60, color: NIGHT_TINT },
-  { minute: 24 * 60, color: NIGHT_TINT },
+  { minute: 330, color: NIGHT_TINT },
+  { minute: 360, color: DAWN_TINT },
+  { minute: 405, color: NOON_TINT },
+  { minute: 1050, color: NOON_TINT },
+  { minute: 1110, color: EVENING_TINT },
+  { minute: 1155, color: NIGHT_TINT },
+  { minute: 1440, color: NIGHT_TINT },
 ];
 
 /** The multiply layer's opacity. */

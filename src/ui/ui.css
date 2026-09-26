@@ -57,6 +57,8 @@
   --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.2), 0 4px 14px rgba(0, 0, 0, 0.22);
   --shadow-2: 0 2px 6px rgba(0, 0, 0, 0.2), 0 12px 32px rgba(0, 0, 0, 0.3);
   --shadow-3: 0 -4px 12px rgba(0, 0, 0, 0.18), 0 -16px 40px rgba(0, 0, 0, 0.3);
+  /* D-10: an inset hairline on the glass controls, so a pill keeps its edge over a night sky. */
+  --glass-edge: rgba(232, 236, 242, 0.10);
 
   --font-ui: 'Bricolage Grotesque', system-ui, -apple-system, 'Segoe UI', sans-serif;
   /* Only the clock and cash use it, always with tabular figures. */
@@ -157,6 +159,7 @@
     --shadow-1: 0 1px 2px rgba(21, 28, 37, 0.12), 0 4px 14px rgba(21, 28, 37, 0.14);
     --shadow-2: 0 2px 6px rgba(21, 28, 37, 0.1), 0 12px 32px rgba(21, 28, 37, 0.18);
     --shadow-3: 0 -4px 12px rgba(21, 28, 37, 0.08), 0 -16px 40px rgba(21, 28, 37, 0.16);
+    --glass-edge: rgba(21, 28, 37, 0.10);
   }
 }
 
@@ -183,6 +186,7 @@
   --shadow-1: 0 1px 2px rgba(21, 28, 37, 0.12), 0 4px 14px rgba(21, 28, 37, 0.14);
   --shadow-2: 0 2px 6px rgba(21, 28, 37, 0.1), 0 12px 32px rgba(21, 28, 37, 0.18);
   --shadow-3: 0 -4px 12px rgba(21, 28, 37, 0.08), 0 -16px 40px rgba(21, 28, 37, 0.16);
+  --glass-edge: rgba(21, 28, 37, 0.10);
 }
 
 /* See-through buttons (package 2 adds the switch): the controls layer turns clearer. Text on
@@ -404,7 +408,7 @@ button.hs-news-toast:active,
   background: var(--glass);
   -webkit-backdrop-filter: var(--glass-blur);
   backdrop-filter: var(--glass-blur);
-  box-shadow: var(--shadow-1);
+  box-shadow: var(--shadow-1), inset 0 0 0 1px var(--glass-edge);
 }
 
 /* The pill: cash, people, stars, the clock and the weather, one row everywhere. */
@@ -2614,7 +2618,7 @@ a.hs-btn {
   -webkit-backdrop-filter: var(--glass-blur);
   backdrop-filter: var(--glass-blur);
   border: 0;
-  box-shadow: var(--shadow-1);
+  box-shadow: var(--shadow-1), inset 0 0 0 1px var(--glass-edge);
   color: var(--ink);
   font-size: var(--size-14);
   line-height: 1.35;

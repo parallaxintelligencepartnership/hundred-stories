@@ -17,6 +17,8 @@ const VIEW_ICONS: Record<OverlayKind, IconName> = {
   noise: 'noise',
   vacancy: 'vacancy',
   wait: 'wait',
+  // BB-2: the category chart the far zoom used to be, beside the floors icon.
+  districts: 'structure',
 };
 
 /** The views in the list, top to bottom. */
@@ -83,7 +85,7 @@ export function createViewControl(
   button.type = 'button';
   button.append(icon('views', 'hs-icon hs-btn-icon') as unknown as HTMLElement, h('span', 'hs-btn-label', 'Views'));
   button.setAttribute('aria-label', 'Views');
-  button.title = 'Views: stress, noise, vacancy and elevator wait';
+  button.title = 'Views: stress, noise, vacancy, elevator wait and districts';
   button.setAttribute('aria-expanded', 'false');
 
   const menu = h('div', 'hs-views-menu');

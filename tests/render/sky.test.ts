@@ -218,7 +218,7 @@ describe('createSky (D-6, BB-4)', () => {
   const H = 900;
   const byLabel = (root: Container, label: string): Container => root.children.find((c) => c.label === label) as Container;
   const circles = (g: Graphics): Circle[] =>
-    g.context.instructions.flatMap((i) => (i.data.path as GraphicsPath).shapePath.shapePrimitives.map((p) => p.shape as Circle));
+    g.context.instructions.flatMap((i) => (i.data as { path: GraphicsPath }).path.shapePath.shapePrimitives.map((p) => p.shape as Circle));
 
   it('adds the stars to the sky right after the gradient, twice side by side, lit on a clear night and gone by day', () => {
     const l = layers();

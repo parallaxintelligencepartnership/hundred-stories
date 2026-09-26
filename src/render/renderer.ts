@@ -96,8 +96,8 @@ import {
   type StressMark,
 } from './figure';
 import { bakesAtStructuralScale, DECOR, INTERIORS, interiorFlip, interiorOpen, interiorVariant, interiorVariants, lookOf as interiorLook } from './interiors';
-import { INTERIOR_TOP, WALL_SHADOW_PX, WIN_SILL, WIN_TOP } from './grid';
-import { layerPlan, occupancyLevel, zoomTier, type LayerPlan, type ZoomTier } from './hierarchy';
+import { INTERIOR_TOP, WALL_SHADOW_PX, WIN_PANE, WIN_PANE_TOP, WIN_PANE_X, WIN_SILL, WIN_TOP } from './grid';
+import { layerPlan, zoomTier, type LayerPlan, type ZoomTier } from './hierarchy';
 import {
   carFinishes,
   carIndicator,
@@ -111,12 +111,12 @@ import {
   signBoard,
   type SignState,
 } from './illustrated';
-import { BLOCK, BLOCK_FILL_LIFT, BLOCK_OUTLINE, PALETTE, shade } from './palette';
+import { PALETTE, shade } from './palette';
 import { isVenueKind, venueOf, type Venue } from './venue';
 import { createBuildFx } from './buildfx';
 import { Motion, TELEPORT_TILES } from './interpolate';
-import { floorsWithPeople, LIGHT_ALPHA, lerpColor, lightBand, lightTintAt, windowStateOf, windowStatesFor, type WindowState } from './light';
-import { createOverlayPass, type OverlayKind, type ViewRect } from './overlays';
+import { floorsWithPeople, inLightWindow, LIGHT_ALPHA, lightBand, lightTintAt, NIGHT_GRADE, roomNight, windowStateOf, windowStatesFor, type WindowState } from './light';
+import { createOverlayPass, drawBlocks, type OverlayKind, type ViewRect } from './overlays';
 import { createSky, isNight, nightness, skyBackground, type Sky } from './sky';
 import { easeView, publishWeatherView, settledView, weatherLightTint, weatherNow, weatherSkyColor, type Rect as WeatherRect } from './weather';
 import { basementSpanOf, createWeatherFx, floorRectsOf } from './weatherfx';
@@ -280,6 +280,28 @@ const FRAME_GRACE_MS = 2000; // after this the opening framing never reasserts i
 const CABLE_PX = LINE_PX; // the hoist cable, one art line wide
 const CABLE_COLOR = 0x3b3f47;
 const NO_FLOORS: ReadonlySet<number> = new Set<number>();
+/** A room on fire is tinted this, day or night. */
+const FIRE_TINT = 0xff8a72;
+
+// D-4: what gives light at night, drawn on the emissive layer over the light layer's multiply.
+/** A lit pane and its pale header (VISUAL.md windows), and the housekeeping lamp at 55 percent. */
+const LIT_PANE = PALETTE.windowLit;
+const LIT_HEADER = PALETTE.carLight;
+const LAMP_ALPHA = 0.55;
+/** The soft band of warm light behind a lit floor's panes. */
+const HALO_ALPHA = 0.12;
+/** A lit sign's added glow. */
+const SIGN_GLOW_ALPHA = 0.8;
+
+// BB-2: the far zoom facade.
+/** The facade's wall, one band per built floor. */
+export const FACADE_WALL = 0xdfe6ee;
+/** A shaft on the facade: a darker vertical strip, the near view's shaft cavity (VISUAL.md shafts). */
+export const FACADE_SHAFT = 0x3b3f47;
+/** One facade pane per two tiles, as wide as two tiles' panes and the mullions between them. */
+export const FACADE_PANE_W = 2 * WIN_PANE + 2 * LINE_PX;
+/** The facade's slab line, one art line of ink at the top of each floor's slab. */
+const FACADE_SLAB = 0x222222;
 
 /**
  * Every room's shell is plain (package 8b): its furniture, signs, shutters and lighting are
@@ -437,10 +459,14 @@ interface VenueEntry {
   wall: Container | null;
   sign: Sprite | null;
   signGlow: Sprite | null;
+  /** D-4: the same sign face again on the emissive layer, shown while the sign is lit. */
+  signLit: Sprite | null;
   closed: Sprite | null;
   pool: Container | null;
   staff: Sprite | null;
   state: string;
+  /** D-4: the tint the room's shell takes (the night grade, or fire), for the layers made later. */
+  grade: number;
   /** The room's top left, world px, for the layers made later (the shutter, the staff). */
   x: number;
   y: number;
@@ -923,7 +949,11 @@ export async function createRenderer(
   // placement colours are never graded by the hour.
   const overlayRoot = new Container();
   overlayRoot.addChild(layers.overlay);
-  app.stage.addChild(layers.sky, layers.cityFar, layers.cityNear, worldRoot, layers.light, overlayRoot);
+  // D-4: what gives light at night sits over the light layer's multiply, under the same camera:
+  // lit panes over their halo, the pools, the signs, the car indicators and the stress marks.
+  const emissiveRoot = new Container();
+  emissiveRoot.label = 'emissive';
+  app.stage.addChild(layers.sky, layers.cityFar, layers.cityNear, worldRoot, layers.light, emissiveRoot, overlayRoot);
 
   // The light layer: one screen sized multiply quad tinted by the minute of day. It grades the
   // sky, the horizon and the tower together; the DOM chrome is outside the canvas.
@@ -936,9 +966,10 @@ export async function createRenderer(
   // Cars draw over their cables: one layer of hoist lines, then the car sprites.
   const cableLayer = new Container();
   const carSpriteLayer = new Container();
-  // Each car's floor indicator, drawn over the housing baked into the car.
+  // Each car's floor indicator, drawn over the housing baked into the car (on the emissive layer).
   const indicatorLayer = new Container();
-  layers.cars.addChild(cableLayer, carSpriteLayer, indicatorLayer);
+  indicatorLayer.label = 'indicators';
+  layers.cars.addChild(cableLayer, carSpriteLayer);
 
   const slabLayer = new Container();
   const roomLayer = new Container();
@@ -963,9 +994,14 @@ export async function createRenderer(
   const venueLayer = new Container();
   const venueClosedLayer = new Container();
   const venuePoolLayer = new Container();
-  // Far zoom: every room as one category block.
+  venuePoolLayer.label = 'pools';
+  // Far zoom with FAR_ZOOM_BLOCKS: every room as one category block (the Districts chart).
   const blockLayer = new Graphics();
   blockLayer.visible = false;
+  // Far zoom (BB-2): each built floor as a facade band; its night panes go on the emissive layer.
+  const facade = new Graphics();
+  facade.label = 'facade';
+  facade.visible = false;
   // Labels name the layers the zoom hierarchy switches, for the tests and the pixi devtools.
   roomLayer.label = 'rooms';
   connectorLayer.label = 'connectors';
@@ -980,11 +1016,11 @@ export async function createRenderer(
     venueStaffLayer,
     venueLayer,
     venueClosedLayer,
-    venuePoolLayer,
     slabLayer,
     shaftLayer,
     connectorLayer,
     blockLayer,
+    facade,
   );
 
   const simSpriteLayer = new Container();
@@ -999,7 +1035,29 @@ export async function createRenderer(
   soloLayer.addChild(soloSprite);
   simSpriteLayer.label = 'people';
   soloLayer.label = 'selected person';
-  layers.sims.addChild(simSpriteLayer, propLayer, markLayer, soloLayer);
+  markLayer.label = 'marks';
+  layers.sims.addChild(simSpriteLayer, propLayer, soloLayer);
+
+  // The emissive layer's contents, back to front. The far zoom's night: the block glow (D-8, with
+  // FAR_ZOOM_BLOCKS) or the facade's panes (BB-2). The near view's night: a soft halo behind each
+  // lit floor, the lit panes, the pools, the sign glows and the lit sign faces, then the car
+  // indicators and the stress marks. Signs and marks stand in front of the windows, as before.
+  const blockGlow = new Graphics();
+  blockGlow.label = 'block glow';
+  blockGlow.visible = false;
+  const facadeLit = new Graphics();
+  facadeLit.label = 'facade lit';
+  facadeLit.visible = false;
+  const litHalo = new Graphics();
+  litHalo.label = 'lit halo';
+  litHalo.blendMode = 'add';
+  const litPanes = new Graphics();
+  litPanes.label = 'lit panes';
+  const signGlowLayer = new Container();
+  signGlowLayer.label = 'sign glows';
+  const signLitLayer = new Container();
+  signLitLayer.label = 'lit signs';
+  emissiveRoot.addChild(blockGlow, facadeLit, litHalo, litPanes, venuePoolLayer, signGlowLayer, signLitLayer, indicatorLayer, markLayer);
 
   // The load fade: the chrome's steel over the whole stage until the first frame is drawn, then
   // lifted over LOAD_FADE_MS of wall clock time (onFrame). fadeIn: false shows none of it.
@@ -1040,6 +1098,7 @@ export async function createRenderer(
   let veilDirty = true;
   let blocksDirty = true;
   let blocksAge = 0;
+  let facadeDirty = true;
   let venueClock = -1;
   let sweepAge = 0;
 
@@ -1315,14 +1374,16 @@ export async function createRenderer(
     rebuildFloorStrips(w);
   }
 
-  function reconcileRooms(w: World, night: boolean, animateNew: boolean): void {
+  function reconcileRooms(w: World, night: boolean, minuteOfDay: number, animateNew: boolean): void {
     seenRooms.clear();
-    const peopleFloors = night ? floorsWithPeople(w) : NO_FLOORS;
+    // D-15: each room keeps its own night (roomNight), so across the dusk and dawn windows the
+    // lobbies need the people too, not only once the tower's night has fallen.
+    const peopleFloors = night || inLightWindow(minuteOfDay) ? floorsWithPeople(w) : NO_FLOORS;
     // Every room's look, neighbors considered: one pass per reconcile, from ids and positions.
     const looks = art.interior ? interiorVariants(w.seed, w.rooms.values()) : null;
     for (const room of w.rooms.values()) {
       seenRooms.add(room.id);
-      const state = windowStateOf(room, night, peopleFloors);
+      const state = windowStateOf(room, roomNight(w.seed, room.id, minuteOfDay), peopleFloors);
       const variant = roomVariant(room);
       const topFloor = room.floor + room.height - 1;
       const px = room.x * TILE_PX;
@@ -1368,11 +1429,15 @@ export async function createRenderer(
       }
       entry.node.position.set(px, py);
       entry.node.setSize(pw, ph);
-      entry.node.tint = room.onFire ? 0xff8a72 : 0xffffff;
+      // D-4: the night grade by window state (day and lit keep their colours), or the fire.
+      const grade = room.onFire ? FIRE_TINT : NIGHT_GRADE[state];
+      entry.node.tint = grade;
       // A room the player just placed settles, puffs dust and flashes; one loaded with the
       // world, or drawn on the first pass, simply appears. Nothing under reduced motion.
       if (placed && animateNew && !reducedMotion) buildFx.start([entry.node, slab.node], px, py, pw, ph);
       if (art.interior && !INTERIORS[room.kind].overlay) syncVenue(w, room, px, py, looks?.get(room.id) ?? interiorVariant(w.seed, room));
+      const venue = venueSprites.get(room.id);
+      if (venue) gradeVenue(venue, grade);
     }
 
     for (const [id, entry] of roomSprites) {
@@ -1389,12 +1454,98 @@ export async function createRenderer(
     }
     veilDirty = true;
     blocksDirty = true;
+    facadeDirty = true;
     updateVenues(w, night);
     for (const [id, entry] of slabSprites) {
       if (seenRooms.has(id)) continue;
       entry.node.destroy();
       slabSprites.delete(id);
     }
+    drawLitWindows(w);
+  }
+
+  /**
+   * Where no pane is drawn on a floor: a shaft, or a stair or escalator over the rooms. Per
+   * floor, tile spans [x, end). For the lit panes (D-4) and the facade (BB-2).
+   */
+  function paneObstacles(w: World): Map<number, [number, number][]> {
+    const out = new Map<number, [number, number][]>();
+    const add = (floor: number, x: number, end: number): void => {
+      const spans = out.get(floor);
+      if (spans) spans.push([x, end]);
+      else out.set(floor, [[x, end]]);
+    };
+    for (const shaft of w.shafts.values()) {
+      for (let f = shaft.floorMin; f <= shaft.floorMax; f++) if (f !== 0) add(f, shaft.x, shaft.x + shaft.width);
+    }
+    for (const room of w.rooms.values()) {
+      if (!drawsOverRooms(room.kind)) continue;
+      for (const f of spanFloors(room.floor, room.height)) add(f, room.x, room.x + room.width);
+    }
+    return out;
+  }
+
+  function blockedAt(spans: readonly [number, number][] | undefined, tile: number): boolean {
+    if (!spans) return false;
+    for (const [x, end] of spans) if (tile >= x && tile < end) return true;
+    return false;
+  }
+
+  /**
+   * D-4: the lit windows over the multiply. A lit room's panes, one per tile with a pale header,
+   * over a soft halo along each lit floor; a housekeeping room's lamp. Panes under a shaft or a
+   * flight are skipped, and a pane is cut where the room's sign board stands in front of it, so
+   * what stood before the windows still does. Rebuilt with every full reconcile; empty by day.
+   */
+  function drawLitWindows(w: World): void {
+    litPanes.clear();
+    litHalo.clear();
+    let obstacles: Map<number, [number, number][]> | null = null;
+    for (const room of w.rooms.values()) {
+      const entry = roomSprites.get(room.id);
+      if (!entry || (entry.state !== 'lit' && entry.state !== 'housekeeping') || !hasWindowBand(room.kind)) continue;
+      obstacles ??= paneObstacles(w);
+      const lit = entry.state === 'lit';
+      const px = room.x * TILE_PX;
+      const width = room.width * TILE_PX;
+      const venue = venueSprites.get(room.id);
+      const board = venue?.sign ? signBoard(room.kind as 'shop' | 'restaurant', width) : null;
+      for (const f of spanFloors(room.floor, room.height)) {
+        const y = floorTopY(f);
+        const spans = obstacles.get(f);
+        if (lit) litHalo.rect(px, y + WIN_TOP, width, WIN_SILL + LINE_PX - WIN_TOP).fill({ color: LIT_PANE, alpha: HALO_ALPHA });
+        for (let x = WIN_PANE_X, n = 0; x + WIN_PANE + LINE_PX <= width; x += TILE_PX, n++) {
+          if (blockedAt(spans, room.x + n)) continue;
+          for (const [from, to] of clearOf(x, x + WIN_PANE, board)) {
+            if (lit) {
+              litPanes.rect(px + from, y + WIN_PANE_TOP, to - from, WIN_PANE).fill(LIT_PANE);
+              litPanes.rect(px + from, y + WIN_PANE_TOP, to - from, LINE_PX).fill(LIT_HEADER);
+            } else {
+              litPanes.rect(px + from, y + WIN_PANE_TOP + WIN_PANE - 4, to - from, 4).fill({ color: LIT_PANE, alpha: LAMP_ALPHA });
+            }
+          }
+        }
+      }
+    }
+  }
+
+  /** The parts of [from, to) a board does not cover, room px. */
+  function clearOf(from: number, to: number, board: { x: number; w: number } | null): [number, number][] {
+    if (!board || to <= board.x || from >= board.x + board.w) return [[from, to]];
+    const out: [number, number][] = [];
+    if (from < board.x) out.push([from, board.x]);
+    if (to > board.x + board.w) out.push([board.x + board.w, to]);
+    return out;
+  }
+
+  /** D-4: a room's illustrated layers take its shell's tint: the night grade, or the fire. */
+  function gradeVenue(v: VenueEntry, grade: number): void {
+    v.grade = grade;
+    v.fixtures.tint = grade;
+    if (v.decor) v.decor.tint = grade;
+    if (v.wall) v.wall.tint = grade;
+    if (v.staff) v.staff.tint = grade;
+    if (v.closed) v.closed.tint = grade;
   }
 
   // ---------------------------------------------------------------- venues
@@ -1410,7 +1561,7 @@ export async function createRenderer(
   }
 
   function dropVenue(id: Id, entry: VenueEntry): void {
-    for (const node of [entry.fixtures, entry.decor, entry.wall, entry.sign, entry.signGlow, entry.closed, entry.pool, entry.staff]) node?.destroy({ children: true });
+    for (const node of [entry.fixtures, entry.decor, entry.wall, entry.sign, entry.signGlow, entry.signLit, entry.closed, entry.pool, entry.staff]) node?.destroy({ children: true });
     venueSprites.delete(id);
   }
 
@@ -1470,15 +1621,23 @@ export async function createRenderer(
       }
       let sign: Sprite | null = null;
       let signGlow: Sprite | null = null;
+      let signLit: Sprite | null = null;
       if (venue && kind !== 'office' && art.sign) {
         const k = kind as 'shop' | 'restaurant';
         const board = signBoard(k, width);
         if (art.glow) {
-          signGlow = layerSprite(venueLayer, art.glow(), 0, 0, board.w + 24, board.h + 20);
+          // D-4: the glow adds over the night tint, and a second face on the same texture lights
+          // the sign above it; the plain face stays in the world for the day and the dark.
+          signGlow = layerSprite(signGlowLayer, art.glow(), 0, 0, board.w + 24, board.h + 20);
           signGlow.tint = SIGN_GLOW_TINT;
+          signGlow.blendMode = 'add';
+          signGlow.alpha = SIGN_GLOW_ALPHA;
           signGlow.visible = false;
         }
-        sign = layerSprite(venueLayer, art.sign(k, room.width, venue.name, venue.accent), 0, 0, board.w, board.h);
+        const face = art.sign(k, room.width, venue.name, venue.accent);
+        sign = layerSprite(venueLayer, face, 0, 0, board.w, board.h);
+        signLit = layerSprite(signLitLayer, face, 0, 0, board.w, board.h);
+        signLit.visible = false;
       }
       let pool: Container | null = null;
       if (art.glow && spec.pools && room.height === 1) {
@@ -1488,12 +1647,13 @@ export async function createRenderer(
           const glow = layerSprite(pool, art.glow(), x - POOL_W / 2, INTERIOR_TOP - 2, POOL_W, POOL_H);
           glow.tint = POOL_TINT;
           glow.alpha = POOL_ALPHA;
+          glow.blendMode = 'add';
         }
         pool.visible = false;
         venuePoolLayer.addChild(pool);
       }
       // The closed overlay and the post are made the first time they show (updateVenues).
-      entry = { kind, width: room.width, floors: room.height, variant, flip, venue, fixtures, decor, wall, sign, signGlow, closed: null, pool, staff: null, state: '', x: px, y: py };
+      entry = { kind, width: room.width, floors: room.height, variant, flip, venue, fixtures, decor, wall, sign, signGlow, signLit, closed: null, pool, staff: null, state: '', grade: 0xffffff, x: px, y: py };
       venueSprites.set(room.id, entry);
     }
     if (!entry) return;
@@ -1510,6 +1670,7 @@ export async function createRenderer(
     if (entry.sign || entry.signGlow) {
       const board = signBoard(kind as 'shop' | 'restaurant', width);
       entry.sign?.position.set(px + board.x, py + board.y);
+      entry.signLit?.position.set(px + board.x, py + board.y);
       entry.signGlow?.position.set(px + board.x - 12, py + board.y - 10);
     }
     if (entry.staff && spec.post) entry.staff.position.set(px + spec.post.x(width), py + room.height * FLOOR_PX - SLAB_TOP_PX);
@@ -1534,6 +1695,7 @@ export async function createRenderer(
       if (!open && !v.closed && spec.closed && art.shut) {
         const r = spec.closed.rect(width, v.floors);
         v.closed = layerSprite(venueClosedLayer, art.shut(v.kind, v.width, v.floors), v.x + r.x, v.y + r.y, r.w, r.h);
+        v.closed.tint = v.grade;
       }
       const post = spec.post;
       const manned = !!post && open && (post.when === 'open' || occupied);
@@ -1544,6 +1706,7 @@ export async function createRenderer(
         v.staff.anchor.set(0.5, 1);
         v.staff.setSize(SIM_WIDTH_PX, SIM_HEIGHT_PX);
         v.staff.position.set(v.x + post.x(width), v.y + v.floors * FLOOR_PX - SLAB_TOP_PX);
+        v.staff.tint = v.grade;
         venueStaffLayer.addChild(v.staff);
       }
       if (v.closed) v.closed.visible = !open;
@@ -1552,6 +1715,7 @@ export async function createRenderer(
       const sign: SignState = !open ? 'dark' : night ? 'lit' : 'day';
       if (v.sign) v.sign.tint = sign === 'dark' ? SIGN_DARK_TINT : 0xffffff;
       if (v.signGlow) v.signGlow.visible = sign === 'lit';
+      if (v.signLit) v.signLit.visible = sign === 'lit';
     }
   }
 
@@ -1570,6 +1734,11 @@ export async function createRenderer(
     venueLayer.visible = rooms;
     venueClosedLayer.visible = rooms;
     venuePoolLayer.visible = rooms;
+    // The near view's lit windows and signs go with the rooms.
+    litPanes.visible = rooms;
+    litHalo.visible = rooms;
+    signGlowLayer.visible = rooms;
+    signLitLayer.visible = rooms;
     ambientLayer.visible = plan.ambient;
     connectorLayer.visible = plan.connectors > 0;
     connectorLayer.alpha = plan.connectors;
@@ -1577,6 +1746,12 @@ export async function createRenderer(
     windowVeil.alpha = plan.windowVeil;
     blockLayer.visible = plan.blocks;
     if (plan.blocks) blocksDirty = true;
+    else blockGlow.visible = false;
+    // BB-2: the facade covers the shafts, which it draws as strips of its own.
+    facade.visible = plan.facade;
+    facadeLit.visible = plan.facade;
+    shaftLayer.visible = !plan.facade;
+    if (plan.facade) facadeDirty = true;
   }
 
   /** The wall coloured veil over every window band, muting the repetition at broad zoom. */
@@ -1593,48 +1768,67 @@ export async function createRenderer(
     }
   }
 
-  /** Far zoom: one flat block per room, its occupancy a lighter fill from the floor up. */
+  /**
+   * Far zoom with FAR_ZOOM_BLOCKS: the category blocks (overlays.ts drawBlocks). At night (D-8)
+   * the blocks darken toward the night sky and their occupancy glows on the emissive layer.
+   */
   function rebuildBlocks(w: World): void {
     blocksDirty = false;
     blocksAge = 0;
+    const night = isNight(clockOf(w.time.minute).minuteOfDay);
     blockLayer.clear();
-    // Lobby segments are one tile each: outlined one by one they read as a comb, so a run of
-    // them is outlined once, as the one lobby the player sees.
-    const lobbyRuns = new Map<number, { x: number; end: number }[]>();
+    blockGlow.clear();
+    drawBlocks(blockLayer, w.rooms.values(), { night, glow: blockGlow });
+    blockGlow.visible = plan.blocks && night;
+  }
+
+  /**
+   * BB-2: the far zoom as a facade. Each built floor is a band of wall across its extent with a
+   * 2 px slab line, one pane per two tiles (on the tile grid, so a floor keeps one rhythm) where a
+   * room with windows stands, none under a shaft or a flight, and each shaft a darker strip. By
+   * day the panes are glass; once a room's night has come (roomNight, D-15) its pane is lit or
+   * dark by the room's window state, on the emissive layer over the night tint.
+   */
+  function rebuildFacade(w: World): void {
+    facadeDirty = false;
+    facade.clear();
+    facadeLit.clear();
+    const extents = builtFloorExtents(w);
+    const obstacles = paneObstacles(w);
+    const cells = new Map<number, Map<number, Room>>();
     for (const room of w.rooms.values()) {
-      if (drawsOverRooms(room.kind)) continue;
-      if (room.kind === 'lobby' || room.kind === 'skyLobby') {
-        const runs = lobbyRuns.get(room.floor + room.height * 1000) ?? [];
-        runs.push({ x: room.x, end: room.x + room.width });
-        lobbyRuns.set(room.floor + room.height * 1000, runs);
+      if (drawsOverRooms(room.kind) || !hasWindowBand(room.kind)) continue;
+      for (const f of spanFloors(room.floor, room.height)) {
+        let row = cells.get(f);
+        if (!row) cells.set(f, (row = new Map()));
+        for (let t = room.x; t < room.x + room.width; t++) row.set(t, room);
       }
-      const x = room.x * TILE_PX;
-      const y = floorTopY(room.floor + room.height - 1);
-      const bw = room.width * TILE_PX;
-      const bh = room.height * FLOOR_PX;
-      const base = BLOCK[room.kind];
-      blockLayer.rect(x, y, bw, bh).fill(base);
-      const level = occupancyLevel(room);
-      if (level > 0) blockLayer.rect(x, y + bh * (1 - level), bw, bh * level).fill(lerpColor(base, 0xffffff, BLOCK_FILL_LIFT));
-      if (room.kind !== 'lobby' && room.kind !== 'skyLobby') blockLayer.rect(x, y, bw, bh).stroke({ width: 1, color: BLOCK_OUTLINE, pixelLine: true });
     }
-    for (const [key, runs] of lobbyRuns) {
-      const height = Math.floor(key / 1000);
-      const floor = key - height * 1000;
-      runs.sort((a, b) => a.x - b.x);
-      let start = runs[0]?.x ?? 0;
-      let end = start;
-      const outline = (): void => {
-        blockLayer.rect(start * TILE_PX, floorTopY(floor + height - 1), (end - start) * TILE_PX, height * FLOOR_PX).stroke({ width: 1, color: BLOCK_OUTLINE, pixelLine: true });
-      };
-      for (const run of runs) {
-        if (run.x > end) {
-          outline();
-          start = run.x;
+    for (const [floor, extent] of extents) {
+      const top = floorTopY(floor);
+      const x = extent.min * TILE_PX;
+      const width = (extent.max - extent.min) * TILE_PX;
+      if (width <= 0) continue;
+      facade.rect(x, top, width, FLOOR_PX).fill(FACADE_WALL);
+      const row = cells.get(floor);
+      const spans = obstacles.get(floor);
+      if (row) {
+        for (let t = extent.min + (((extent.min % 2) + 2) % 2); t < extent.max; t += 2) {
+          const room = row.get(t);
+          if (!room || blockedAt(spans, t)) continue;
+          const state = roomSprites.get(room.id)?.state ?? 'day';
+          // The pane's second tile: cut back to one tile's pane at a shaft, a flight or the floor's end.
+          const paneW = blockedAt(spans, t + 1) || t + 1 >= extent.max ? WIN_PANE : FACADE_PANE_W;
+          const px = t * TILE_PX + WIN_PANE_X;
+          const py = top + WIN_PANE_TOP;
+          if (state === 'day') facade.rect(px, py, paneW, WIN_PANE).fill(PALETTE.windowDay);
+          else facadeLit.rect(px, py, paneW, WIN_PANE).fill(state === 'lit' ? PALETTE.windowLit : PALETTE.windowUnlit);
         }
-        end = Math.max(end, run.end);
       }
-      outline();
+      facade.rect(x, top + FLOOR_PX - SLAB_PX, width, LINE_PX).fill(FACADE_SLAB);
+    }
+    for (const shaft of w.shafts.values()) {
+      facade.rect(shaft.x * TILE_PX, floorTopY(shaft.floorMax), shaft.width * TILE_PX, shaftFloorSpan(shaft) * FLOOR_PX).fill(FACADE_SHAFT);
     }
   }
 
@@ -1736,7 +1930,7 @@ export async function createRenderer(
     reconciledVersion = w.structureVersion;
     lastLitState = band;
     syncFloorStrips(w);
-    reconcileRooms(w, night, animateNew);
+    reconcileRooms(w, night, minuteOfDay, animateNew);
     ambient.sync(w, reducedMotion);
     reconcileShafts(w);
     reconcileFires(w);
@@ -2417,6 +2611,8 @@ export async function createRenderer(
     // in world pixels, so it takes the same camera transform.
     overlayRoot.scale.set(camera.zoom);
     overlayRoot.position.copyFrom(worldRoot.position);
+    emissiveRoot.scale.set(camera.zoom);
+    emissiveRoot.position.copyFrom(worldRoot.position);
 
     const clock = clockOf(lastWorld.time.minute);
     // One weather snapshot a frame, eased in real time: the fade runs under reduced motion too.
@@ -2455,6 +2651,8 @@ export async function createRenderer(
     if (plan.blocks) {
       blocksAge += dt;
       if (blocksDirty || blocksAge >= BLOCKS_REFRESH_MS) rebuildBlocks(lastWorld);
+    } else if (plan.facade) {
+      if (facadeDirty) rebuildFacade(lastWorld);
     } else if (plan.windowVeil > 0 && veilDirty) rebuildVeil(lastWorld);
     curb.update({
       world: lastWorld,
@@ -2562,6 +2760,7 @@ export async function createRenderer(
     venueClock = -1;
     veilDirty = true;
     blocksDirty = true;
+    facadeDirty = true;
     weatherView = settledView(weatherNow(w.seed, w.time.minute));
     publishWeatherView(w.seed, weatherView);
     weatherFx.reset();
