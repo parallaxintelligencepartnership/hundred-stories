@@ -40,3 +40,27 @@ export function drawLedText(g: Graphics, text: string, x: number, y: number, cel
     cx += 4 * cell;
   }
 }
+
+/** The floor a car at height `y` shows: the nearest floor, B and the depth below ground. */
+export function carFloorLabel(y: number): string {
+  const floor = Math.round(y);
+  return floor < 0 ? `B${-floor}` : `${Math.max(1, floor)}`;
+}
+
+/**
+ * The car's indicator face inside its housing (`boxW` px wide): the direction arrow, then the
+ * whole floor label at 1 px a cell, centred together. Every label a shaft can reach, 1 to 100
+ * and B1 to B10, is at most three glyphs: 11 px, 15 with the arrow, inside the 22 px housing.
+ */
+export function drawCarIndicator(g: Graphics, label: string, dir: number, boxW: number, color: number): void {
+  const textW = ledTextWidth(label, 1);
+  const arrowW = dir === 0 ? 0 : 4;
+  let cx = Math.round((boxW - textW - arrowW) / 2);
+  const cy = 1.5;
+  if (dir !== 0) {
+    const up = dir > 0;
+    g.poly(up ? [cx, cy + 3.5, cx + 1.5, cy + 0.5, cx + 3, cy + 3.5] : [cx, cy + 1.5, cx + 3, cy + 1.5, cx + 1.5, cy + 4.5]).fill(color);
+    cx += arrowW;
+  }
+  drawLedText(g, label, cx, cy, 1, color);
+}

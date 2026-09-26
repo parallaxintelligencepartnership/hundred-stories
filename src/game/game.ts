@@ -396,6 +396,23 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     edits++;
   }
 
+  /**
+   * The one way a player command reaches the world: refused once Today's tower is over, recorded
+   * in the build log, and, when accepted, marked unsaved. api.apply and the lobby drag both come
+   * through here; the drag skips only api.apply's refusal line, since it repaints tiles it has
+   * already placed and each repaint is refused.
+   */
+  function commit(cmd: Command): CommandResult {
+    if (dailyOver()) return { ok: false, reason: DAILY_OVER_REASON };
+    const res = applyAndRecord(world, cmd);
+    if (res.ok) {
+      markDirty();
+      // A paused clock crosses no autosave boundary, so a build while paused saves on its own.
+      if (speed === 0) saveWhenIdle();
+    }
+    return res;
+  }
+
   // While the tab is visible the frame loop drives the sim, so ticks land on frame boundaries and
   // the interpolation alpha is exact. Chrome pauses rAF in hidden tabs, so there the timer takes
   // over. Exactly one of the two advances at any moment.
@@ -845,7 +862,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     const touch = ev.pointerType === 'touch';
     if (tool.kind === 'room' && tool.room === 'lobby') {
       drag = { floor, x, kind: 'lobby', touch };
-      applyAndRecord(world, { kind: 'build', room: 'lobby', floor: 1, x });
+      commit({ kind: 'build', room: 'lobby', floor: 1, x });
       notify();
     } else if (tool.kind === 'shaft') {
       // An elevator in hand on a shaft that is already there means stretch that one, whichever
@@ -874,7 +891,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
       // paint segments while dragging on the lobby floor
       const from = Math.min(drag.x, x);
       const to = Math.max(drag.x, x);
-      for (let sx = from; sx <= to; sx++) applyAndRecord(world, { kind: 'build', room: 'lobby', floor: 1, x: sx });
+      for (let sx = from; sx <= to; sx++) commit({ kind: 'build', room: 'lobby', floor: 1, x: sx });
       drag.x = x;
       notify();
     }
@@ -910,7 +927,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     if (drag.kind === 'lobby') {
       const from = Math.min(drag.x, x);
       const to = Math.max(drag.x, x);
-      for (let sx = from; sx <= to; sx++) applyAndRecord(world, { kind: 'build', room: 'lobby', floor: 1, x: sx });
+      for (let sx = from; sx <= to; sx++) commit({ kind: 'build', room: 'lobby', floor: 1, x: sx });
       notify();
     }
     if (drag.kind === 'shaftExtend') {
@@ -950,13 +967,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
       return world;
     },
     apply(cmd: Command): CommandResult {
-      if (dailyOver()) return { ok: false, reason: DAILY_OVER_REASON };
-      const res = applyAndRecord(world, cmd);
-      if (res.ok) {
-        markDirty();
-        // A paused clock crosses no autosave boundary, so a build while paused saves on its own.
-        if (speed === 0) saveWhenIdle();
-      }
+      const res = commit(cmd);
       if (!res.ok) logEvent(world, res.reason, 'warn');
       else followBuild(cmd);
       if (res.ok && eventListeners.size > 0 && isBuildCommand(cmd.kind)) emit({ kind: 'build', command: cmd.kind });

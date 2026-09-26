@@ -114,7 +114,7 @@ import {
 import { PALETTE, shade } from './palette';
 import { isVenueKind, venueOf, type Venue } from './venue';
 import { createBuildFx, priceLabel, type RevealBand } from './buildfx';
-import { drawLedText } from './led';
+import { carFloorLabel, drawCarIndicator } from './led';
 import { Motion, TELEPORT_TILES } from './interpolate';
 import { floorsWithPeople, inLightWindow, LIGHT_ALPHA, lightBand, lightTintAt, NIGHT_GRADE, roomNight, windowStateOf, windowStatesFor, type WindowState } from './light';
 import { createOverlayPass, drawBlocks, type OverlayKind, type ViewRect } from './overlays';
@@ -1894,27 +1894,15 @@ export async function createRenderer(
 
   /** The car's floor and direction, lit in the housing baked above its doors. */
   function drawIndicator(entry: CarEntry, car: Car, x: number, y: number): void {
-    const floor = Math.round(car.y);
-    const label = floor < 0 ? `B${-floor}` : `${Math.max(1, floor)}`;
+    const label = carFloorLabel(car.y);
     const key = `${label}|${car.dir}`;
     const size = TEXTURE_SIZE.car(entry.kind);
     const box = carIndicator(size.width, 4);
     entry.indicator.position.set(x - size.width / 2 + box.x, y - size.height + box.y);
     if (key === entry.indicatorKey) return;
     entry.indicatorKey = key;
-    const g = entry.indicator;
-    g.clear();
-    const text = label.slice(-2);
-    const textW = text.length * 4 - 1;
-    const arrowW = car.dir === 0 ? 0 : 4;
-    let cx = Math.round((box.w - textW - arrowW) / 2);
-    const cy = 1.5;
-    if (car.dir !== 0) {
-      const up = car.dir > 0;
-      g.poly(up ? [cx, cy + 3.5, cx + 1.5, cy + 0.5, cx + 3, cy + 3.5] : [cx, cy + 1.5, cx + 3, cy + 1.5, cx + 1.5, cy + 4.5]).fill(LED);
-      cx += arrowW;
-    }
-    drawLedText(g, text, cx, cy, 1, LED);
+    entry.indicator.clear();
+    drawCarIndicator(entry.indicator, label, car.dir, box.w, LED);
   }
 
   /**

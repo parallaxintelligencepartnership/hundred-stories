@@ -190,6 +190,16 @@ describe('watch mode', () => {
     expect(getFlag(PREF_KEYS.watchMode)).toBe(true);
   });
 
+  it('the Settings switch turns Watch mode off again: a second click stores false and reads unchecked', () => {
+    const ctx = { apply: () => ({ ok: true }), notice() {}, close() {}, reducedMotion: false, setReducedMotion() {} } as unknown as PanelContext;
+    const panel = createSettingsPanel({ world: { seed: 1, log: [], logTotal: 0 } } as never, ctx) as unknown as FakeElement;
+    const control = panel.descendants().find((n) => n.id === 'hs-watch-mode') as FakeElement;
+    click(control);
+    expect([getFlag(PREF_KEYS.watchMode), control.getAttribute('aria-checked')]).toEqual([true, 'true']);
+    click(control);
+    expect([getFlag(PREF_KEYS.watchMode), control.getAttribute('aria-checked')]).toEqual([false, 'false']);
+  });
+
   it('never hides the chrome while it is off', () => {
     const { shell } = mount();
     vi.advanceTimersByTime(5 * WATCH_IDLE_MS);
@@ -308,6 +318,34 @@ describe('watch mode', () => {
     const later = spied({ type: 'click' });
     dom.fireWindow('click', later);
     expect(later.stopped).toBe(false);
+  });
+
+  it('a restore press that makes no click (a drag) does not take the next tap\'s click, nor a key\'s', () => {
+    setFlag(PREF_KEYS.watchMode, true);
+    const { shell } = mount();
+    vi.advanceTimersByTime(WATCH_IDLE_MS);
+    dom.fireWindow('pointerdown', spied({ type: 'pointerdown', pointerId: 7, pointerType: 'touch', clientX: 900, clientY: 40 }));
+    dom.fireWindow('pointerup', spied({ type: 'pointerup', pointerId: 7, pointerType: 'touch' }));
+    expect(watching(shell)).toBe(false);
+    // No click came (the press moved); 100 ms on, well inside the grace, the player taps.
+    vi.advanceTimersByTime(100);
+    const down = spied({ type: 'pointerdown', pointerId: 9, pointerType: 'touch' });
+    dom.fireWindow('pointerdown', down);
+    dom.fireWindow('pointerup', spied({ type: 'pointerup', pointerId: 9, pointerType: 'touch' }));
+    const clicked = spied({ type: 'click' });
+    dom.fireWindow('click', clicked);
+    expect([down.stopped, clicked.stopped]).toEqual([false, false]);
+
+    // The same after a key: hidden again, a drag restores, then Enter on a button clicks it.
+    vi.advanceTimersByTime(WATCH_IDLE_MS);
+    expect(watching(shell)).toBe(true);
+    dom.fireWindow('pointerdown', spied({ type: 'pointerdown', pointerId: 11, pointerType: 'mouse' }));
+    dom.fireWindow('pointerup', spied({ type: 'pointerup', pointerId: 11, pointerType: 'mouse' }));
+    vi.advanceTimersByTime(100);
+    dom.fireWindow('keydown', spied({ type: 'keydown', key: 'Enter', code: 'Enter' }));
+    const keyClick = spied({ type: 'click' });
+    dom.fireWindow('click', keyClick);
+    expect(keyClick.stopped).toBe(false);
   });
 
   it('while hidden, the first pad press only brings the chrome back', () => {
