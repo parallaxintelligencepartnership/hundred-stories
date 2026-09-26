@@ -196,11 +196,31 @@ export function createBuildDock(options: BuildDockOptions): BuildDock {
   function setSheet(next: BuildSheet): void {
     if (next === sheet) return;
     const hadFocus = contains(palette, activeElement());
+    const wasOpen = sheet === 'row' || sheet === 'full';
+    const top = wasOpen && typeof palette.getBoundingClientRect === 'function' ? palette.getBoundingClientRect().top : null;
     sheet = next;
     paint();
+    if (top !== null && (next === 'row' || next === 'full')) slideFrom(top);
     // Closing with focus inside hands it to the Build button, not to the page.
     if (next === 'closed' && hadFocus) (fab as { focus?: () => void }).focus?.();
     options.changed();
+  }
+
+  // Row and full differ in height, which snaps. Start the sheet where its top edge was and let
+  // the transform carry it to its new edge, so the swap is one smooth slide.
+  function slideFrom(oldTop: number): void {
+    const delta = oldTop - palette.getBoundingClientRect().top;
+    if (!delta) return;
+    palette.classList.add('is-flipping');
+    palette.style.setProperty('--sheet-flip', `${Math.round(delta)}px`);
+    // Read a layout value so the start position is committed before the slide back to zero.
+    void palette.offsetHeight;
+    palette.style.setProperty('--sheet-flip', '0px');
+    const done = (): void => {
+      palette.classList.remove('is-flipping');
+      palette.removeEventListener('transitionend', done);
+    };
+    palette.addEventListener('transitionend', done);
   }
 
   function focusTab(): void {

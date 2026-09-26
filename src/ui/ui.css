@@ -234,6 +234,9 @@ body {
   /* Fixed so the chrome works whether or not the mount point is a positioned box. */
   position: fixed;
   inset: 0;
+  /* No browser pinch from any control: it zooms the page, carries the fixed chrome (the Build
+     button, the sheet) out of the visual viewport, and leaves no way back. The tower zooms itself. */
+  touch-action: pan-x pan-y;
   font-family: var(--font-ui);
   font-size: var(--size-14);
   line-height: 1.4;
@@ -3300,12 +3303,9 @@ button.hs-news-toast {
     padding: 0 var(--safe-right) var(--safe-bottom) var(--safe-left);
     border-radius: var(--radius-20) var(--radius-20) 0 0;
     box-shadow: var(--shadow-3);
-    transform: translateY(max(-24px, var(--sheet-drag, 0px)));
+    transform: translateY(calc(max(-24px, var(--sheet-drag, 0px)) + var(--sheet-flip, 0px)));
     height: auto;
-    interpolate-size: allow-keywords;
-    transition:
-      transform var(--motion-med) var(--ease-spring),
-      height var(--motion-med) var(--ease-standard);
+    transition: transform var(--motion-med) var(--ease-spring);
     overscroll-behavior: contain;
   }
 
@@ -3317,6 +3317,12 @@ button.hs-news-toast {
 
   .hs-palette.is-sheet-closed {
     display: none;
+  }
+
+  /* Row and full swap height at once; build.ts then slides the sheet from where its top edge was,
+     a transform only, so nothing is laid out while it moves and it stops exactly on its edge. */
+  .hs-palette.is-flipping {
+    transition: transform var(--motion-med) var(--ease-standard);
   }
 
   .hs-palette-toggle,
