@@ -1,7 +1,7 @@
 // Toasts: the small notes that float above the bottom edge instead of a ticker strip.
 //
 // Routine news is a small glass toast that fades on its own after about four seconds, with at
-// most two on screen; a third pushes the oldest off. An alert stays until it is tapped. Each
+// most one on screen; a new one replaces it. An alert stays until it is tapped. Each
 // kind has its own live region, made once and kept in the page so a screen reader is already
 // listening when a toast lands: news is polite, alerts are assertive. The event log keeps the
 // full history, so a toast that went by too fast is never lost.
@@ -13,7 +13,7 @@ export const NEWS_TOAST_MS = 4000;
 /** The fade out, matched to --motion-fade in ui.css. The node leaves the page after it. */
 export const TOAST_FADE_MS = 200;
 /** News toasts on screen at once. */
-export const NEWS_TOAST_MAX = 2;
+export const NEWS_TOAST_MAX = 1;
 
 export interface ToastOptions {
   /** What a tap does. News without one is plain text; an alert always closes on a tap as well. */

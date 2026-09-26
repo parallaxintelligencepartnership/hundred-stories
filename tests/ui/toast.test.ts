@@ -57,16 +57,14 @@ describe('news', () => {
     expect(node.parentNode).toBe(null);
   });
 
-  it('shows at most two: a third pushes the oldest off at once', () => {
-    expect(NEWS_TOAST_MAX).toBe(2);
+  it('shows one at a time: a new one replaces the old at once', () => {
+    expect(NEWS_TOAST_MAX).toBe(1);
     const first = toasts.show('one') as unknown as FakeElement;
     vi.advanceTimersByTime(1000);
     toasts.show('two');
-    toasts.show('three');
     expect(first.parentNode).toBe(null);
-    expect(news().children.map(words)).toEqual(['two', 'three']);
-    expect(toasts.visibleNews().map((n) => words(n as unknown as FakeElement))).toEqual(['two', 'three']);
-    // The pushed one's timer is gone with it; the others keep their own four seconds.
+    expect(news().children.map(words)).toEqual(['two']);
+    expect(toasts.visibleNews().map((n) => words(n as unknown as FakeElement))).toEqual(['two']);
     vi.advanceTimersByTime(NEWS_TOAST_MS + TOAST_FADE_MS);
     expect(news().children).toHaveLength(0);
   });

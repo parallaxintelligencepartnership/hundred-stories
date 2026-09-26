@@ -245,6 +245,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
   let newsShowsAlert = false;
   let storyShownAt = Number.NEGATIVE_INFINITY;
   let giveUps = 0;
+  let warns = 0;
   let giveUpShownAt = Number.NEGATIVE_INFINITY;
   /** The last refusal shown as a notice, so its log line does not show a second time. */
   let lastNoticeText = '';
@@ -1344,23 +1345,33 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     const first = newsLogSeen < 0;
     const fresh = first ? 0 : Math.min(world.logTotal - newsLogSeen, log.length);
     newsLogSeen = world.logTotal;
-    for (const line of log.slice(log.length - fresh)) if (line.text.startsWith(GIVE_UP_PREFIX)) giveUps += 1;
+    for (const line of log.slice(log.length - fresh)) {
+      if (line.level !== 'warn') continue;
+      warns += 1;
+      if (line.text.startsWith(GIVE_UP_PREFIX)) giveUps += 1;
+    }
     const beat = newFollowedBeat(world);
     if (logMoved && newest) {
       newsShowsAlert = newest.level === 'alert';
       // The first look is the tower as loaded: its old lines are history, not news.
       if (first || newsShowsAlert) return;
-      // A busy rush has many people give up at once: one folded toast now and then, not one each.
-      if (newest.text.startsWith(GIVE_UP_PREFIX)) {
+      // A full tower logs warnings in bursts (give-ups, move-outs, people with no way out): one
+      // folded toast now and then, not one each. The News panel keeps every line.
+      if (newest.level === 'warn' && !acting) {
         const at = performance.now();
         if (at - giveUpShownAt < GIVE_UP_TOAST_GAP_MS) return;
         giveUpShownAt = at;
-        const count = giveUps;
+        const count = warns;
+        const onlyGiveUps = giveUps === count;
+        warns = 0;
         giveUps = 0;
-        toastLayer.show(count > 1 ? `${count} people gave up waiting for an elevator.` : newest.text, {
-          onTap: openLog,
-          tapLabel: 'Open the news',
-        });
+        const text =
+          count <= 1
+            ? newest.text
+            : onlyGiveUps
+              ? `${count} people gave up waiting for an elevator.`
+              : `${count} problems in the tower. Tap for the news.`;
+        toastLayer.show(text, { onTap: openLog, tapLabel: 'Open the news' });
         return;
       }
       // A refusal of the player's own command is said as a notice where they acted.
