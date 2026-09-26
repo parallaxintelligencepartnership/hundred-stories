@@ -57,6 +57,21 @@ describe('the store tower fixture', () => {
     expect(mod.OG_FIXTURE).toBe(join(__dirname, '..', '..', 'store', 'fixtures', 'demo-tower.json'));
   });
 
+  it('seeds the fixture afresh before every capture, so the clock holds 13:00', async () => {
+    type Step = (...args: unknown[]) => Promise<unknown>;
+    const { shootScene } = (await import(pathToFileURL(join(__dirname, '..', '..', 'scripts', 'make-store-shots.mjs')).href)) as {
+      shootScene(browser: unknown, base: string, spec: unknown, scene: string, steps: Record<string, Step>): Promise<unknown>;
+    };
+    const calls: string[] = [];
+    const step = (name: string): Step => async () => {
+      calls.push(name);
+      return name === 'capture' ? 'png' : undefined;
+    };
+    const steps = { seed: step('seed'), openGame: step('openGame'), toScene: step('toScene'), capture: step('capture') };
+    for (const scene of ['tower', 'wide']) expect(await shootScene({}, 'http://x', { id: 's' }, scene, steps)).toBe('png');
+    expect(calls).toEqual(['seed', 'openGame', 'toScene', 'capture', 'seed', 'openGame', 'toScene', 'capture']);
+  });
+
   it('rewrites the tracked og.png only when asked, with --og or ONLY=og', async () => {
     const { shootsOg } = (await import(pathToFileURL(join(__dirname, '..', '..', 'scripts', 'make-store-shots.mjs')).href)) as {
       shootsOg(args: Set<string>, only: Set<string> | null): boolean;

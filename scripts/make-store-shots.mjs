@@ -427,6 +427,19 @@ async function capture(browser, spec) {
   return png;
 }
 
+/**
+ * One store capture. Each scene starts from the fixture, seeded afresh, and the opening view: the
+ * clock holds the fixture's 13:00 instead of running on across the whole run (past midnight,
+ * where the day's population change resets), and one scene's zoom never carries into the next.
+ * `steps` is for the tests, which record the order.
+ */
+export async function shootScene(browser, base, spec, scene, steps = { seed, openGame, toScene, capture }) {
+  await steps.seed(browser, base);
+  await steps.openGame(browser, base, spec);
+  await steps.toScene(browser, spec, scene);
+  return steps.capture(browser, spec);
+}
+
 /** The GRAPHICS source, read straight off disk (repo public/), as a data URL. Never loaded
  * through the preview origin: dist-app strips og.png, robots.txt, sitemap.xml and every
  * wordmark file (vite.config.ts APP_UNUSED_PUBLIC_FILES), so fetching them from `base` hits
@@ -551,14 +564,7 @@ async function main() {
     for (const spec of SCREENSHOTS) {
       if (only && !only.has(spec.id)) continue;
       for (const [i, scene] of SCENES.entries()) {
-        // Each scene starts from the fixture, seeded afresh, and the opening view: the clock
-        // holds the fixture's 13:00 instead of running on across the whole run (past midnight,
-        // where the day's population change resets), and one scene's zoom never carries into
-        // the next.
-        await seed(browser, base);
-        await openGame(browser, base, spec);
-        await toScene(browser, spec, scene);
-        const png = await capture(browser, spec);
+        const png = await shootScene(browser, base, spec, scene);
         const clock = await browser.evaluate(`(() => { const d = document.querySelector('.hs-clock-digits'); const a = document.querySelector('.hs-clock-ampm'); return (d ? d.textContent : '?') + ' ' + (a ? a.textContent : ''); })()`).catch(() => '?');
         console.log(`${spec.id} ${scene}: clock ${clock}`);
         const file = join(OUT_DIR, spec.store, `${spec.id}-${i + 1}-${scene}.png`);

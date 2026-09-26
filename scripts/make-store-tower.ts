@@ -33,7 +33,7 @@ const SERVICES = OFFICE_TOP + 2;
 const SHOPS = [OFFICE_TOP + 3, OFFICE_TOP + 4];
 const DINING = OFFICE_TOP + 5;
 const SHAFT_XS = [140, 186, 232];
-const CARS = 4;
+const CARS = 8; // every shaft full (24 cars), so nobody in the shots gives up waiting
 const SAVE_MINUTE_OF_DAY = 13 * 60;
 
 function builder(world: World) {
