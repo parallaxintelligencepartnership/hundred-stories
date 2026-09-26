@@ -8,9 +8,90 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PAD_BUTTONS, type PadLike } from '../../src/ui/gamepad';
 import { createSettingsPanel, type PanelContext } from '../../src/ui/panels';
 import { getFlag, PREF_KEYS, setFlag } from '../../src/ui/prefs';
+import { ROOMS } from '../../src/sim/rules';
+import type { RoomKind } from '../../src/sim/types';
+import { addRoom, allocId, createWorld } from '../../src/sim/world';
 import { createUi } from '../../src/ui/ui';
 import { WATCH_CLASS, WATCH_FADE_MS, WATCH_IDLE_MS } from '../../src/ui/watch';
 import { FakeDom, type FakeElement } from './fake-dom';
+
+// ------------------------------------------------------------ the stylesheet, read as a browser would
+// The fake DOM lays nothing out and computes no style, so these few helpers apply ui.css's own
+// rules to the fake tree: what the watch rule hides, and what --watch-fade resolves to.
+
+const sheet = readFileSync(new URL('../../src/ui/ui.css', import.meta.url), 'utf8')
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .replace(/@import[^;]*;/g, '');
+
+/** The rules outside any at-rule (@media, @supports and @keyframes blocks are skipped whole). */
+function topLevelRules(): { selectors: string[]; body: string }[] {
+  const out: { selectors: string[]; body: string }[] = [];
+  let i = 0;
+  while (i < sheet.length) {
+    const open = sheet.indexOf('{', i);
+    if (open < 0) break;
+    const head = sheet.slice(i, open).trim();
+    if (head.startsWith('@')) {
+      let depth = 1;
+      let j = open + 1;
+      for (; j < sheet.length && depth > 0; j += 1) {
+        if (sheet[j] === '{') depth += 1;
+        else if (sheet[j] === '}') depth -= 1;
+      }
+      i = j;
+      continue;
+    }
+    const close = sheet.indexOf('}', open);
+    out.push({ selectors: head.split(',').map((x) => x.trim()), body: sheet.slice(open + 1, close) });
+    i = close + 1;
+  }
+  return out;
+}
+
+const classesOf = (node: FakeElement): string[] => node.className.split(/\s+/).filter(Boolean);
+
+/** A compound of classes only (".hs-ui.is-reduced") that the node carries every class of. */
+function matchesCompound(selector: string, node: FakeElement): boolean {
+  if (!/^(\.[\w-]+)+$/.test(selector)) return false;
+  const own = classesOf(node);
+  return selector.split('.').filter(Boolean).every((c) => own.includes(c));
+}
+
+/** What a custom property resolves to on this node: its own matching rules win over :root's. */
+function resolvedVar(node: FakeElement, name: string): string | null {
+  let own: string | null = null;
+  let root: string | null = null;
+  const decl = new RegExp(`${name}:\\s*([^;]+);`);
+  for (const rule of topLevelRules()) {
+    const value = decl.exec(rule.body)?.[1]?.trim() ?? null;
+    if (value === null) continue;
+    if (rule.selectors.includes(':root')) root = value;
+    if (rule.selectors.some((sel) => matchesCompound(sel, node))) own = value;
+  }
+  return own ?? root;
+}
+
+/** The watch rule: `.hs-ui.is-watching :is(...)` and its declarations. */
+function watchRule(): { parts: string[]; body: string } {
+  const rule = topLevelRules().find((r) => r.selectors.join(',').startsWith(`.hs-ui.${WATCH_CLASS} :is(`));
+  if (!rule) throw new Error('no watch rule');
+  const all = rule.selectors.join(', ');
+  const list = all.slice(all.indexOf(':is(') + 4, all.lastIndexOf(')'));
+  return { parts: list.split(',').map((x) => x.trim()), body: rule.body };
+}
+
+/** Does the watch rule apply to this node now: an ancestor is the watching shell, and a part matches? */
+function hiddenByWatch(node: FakeElement): boolean {
+  let up = node.parentNode;
+  let shellWatching = false;
+  for (; up; up = up.parentNode) if (matchesCompound(`.hs-ui.${WATCH_CLASS}`, up)) shellWatching = true;
+  if (!shellWatching) return false;
+  return watchRule().parts.some((part) => {
+    if (matchesCompound(part, node)) return true;
+    const child = /^(\.[\w-]+) > :not\((\.[\w-]+)\)$/.exec(part);
+    return !!child && !!node.parentNode && matchesCompound(child[1] as string, node.parentNode) && !matchesCompound(child[2] as string, node);
+  });
+}
 
 let dom: FakeDom;
 let uninstall: () => void;
@@ -270,6 +351,135 @@ describe('watch mode', () => {
     for (const type of ['pointermove', 'pointerdown', 'pointerup', 'pointercancel', 'click', 'wheel']) {
       expect(dom.windowListeners.get(type) ?? []).toHaveLength(0);
     }
+  });
+});
+
+describe('watch mode keeps the chrome up while anything is open', () => {
+  const byClass = (root: FakeElement, name: string): FakeElement => {
+    const found = root.descendants().find((n) => classesOf(n).includes(name));
+    if (!found) throw new Error(`no .${name}`);
+    return found;
+  };
+  const phone = (): void => {
+    (globalThis as unknown as { window: { innerWidth?: number } }).window.innerWidth = 390;
+  };
+
+  it('the Views list', () => {
+    setFlag(PREF_KEYS.watchMode, true);
+    const { shell } = mount();
+    const views = byClass(shell, 'hs-views-btn');
+    click(views); // no window input: as far as watch mode knows, the list is simply open
+    expect(byClass(shell, 'hs-views-menu').hidden).toBe(false);
+    vi.advanceTimersByTime(3 * WATCH_IDLE_MS);
+    expect(watching(shell)).toBe(false);
+    click(views);
+    vi.advanceTimersByTime(2 * WATCH_IDLE_MS);
+    expect(watching(shell)).toBe(true); // closed, the chrome steps aside again
+  });
+
+  it('the build sheet in row view', () => {
+    phone();
+    setFlag(PREF_KEYS.watchMode, true);
+    const { shell } = mount();
+    click(byClass(shell, 'hs-build-fab'));
+    expect(classesOf(byClass(shell, 'hs-palette'))).toContain('is-sheet-row');
+    vi.advanceTimersByTime(3 * WATCH_IDLE_MS);
+    expect(watching(shell)).toBe(false);
+    click(byClass(shell, 'hs-build-fab')); // closed
+    vi.advanceTimersByTime(2 * WATCH_IDLE_MS);
+    expect(watching(shell)).toBe(true);
+  });
+
+  it('the build sheet in full view', () => {
+    phone();
+    setFlag(PREF_KEYS.watchMode, true);
+    const { shell } = mount();
+    click(byClass(shell, 'hs-build-fab'));
+    click(byClass(shell, 'hs-build-handle'));
+    expect(classesOf(byClass(shell, 'hs-palette'))).toContain('is-sheet-full');
+    vi.advanceTimersByTime(3 * WATCH_IDLE_MS);
+    expect(watching(shell)).toBe(false);
+    click(byClass(shell, 'hs-build-fab')); // closed
+    vi.advanceTimersByTime(2 * WATCH_IDLE_MS);
+    expect(watching(shell)).toBe(true);
+  });
+
+  it('the guide, and its end starts the 20 s over', () => {
+    const store = (globalThis as unknown as { window: { localStorage: { setItem(k: string, v: string): void } } }).window.localStorage;
+    store.setItem('hs.guide.done', 'false'); // an empty tower with the guide still to do
+    setFlag(PREF_KEYS.watchMode, true);
+    const { shell } = mount();
+    const card = byClass(shell, 'hs-card');
+    expect(classesOf(card)).not.toContain('is-hidden');
+    expect(card.textContent).toContain('First tower');
+    vi.advanceTimersByTime(3 * WATCH_IDLE_MS);
+    expect(watching(shell)).toBe(false);
+    const skip = card.descendants().find((n) => n.tagName === 'BUTTON' && n.textContent === 'Skip') as FakeElement;
+    click(skip); // the guide ends by itself as far as watch mode knows: no window input
+    vi.advanceTimersByTime(WATCH_IDLE_MS - 1);
+    expect(watching(shell)).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(watching(shell)).toBe(true);
+  });
+});
+
+describe('watch mode on the page, with ui.css applied', () => {
+  it('hides the chrome but the clock, and the hover card with it; any input brings them back', () => {
+    // A real world with an office under the pointer, so the hover card is up when watching starts.
+    const world = createWorld(3);
+    const kind: RoomKind = 'office';
+    const office = {
+      id: allocId(world), kind, floor: 4, x: 100, width: ROOMS[kind].width, height: ROOMS[kind].height, eval: 0.72, tenants: [],
+      occupancy: 0, builtAtMinute: 0, vacant: false, dirty: false, infested: false, lowEvalSinceMinute: null, onFire: false, rent: 100,
+    };
+    addRoom(world, office as never);
+    const game = mkGame() as unknown as Record<string, unknown>;
+    game['world'] = world;
+    game['getHover'] = () => ({ floor: 4, x: 104 });
+    setFlag(PREF_KEYS.watchMode, true);
+    const root = dom.createElement('div');
+    createUi(root as never, game as never, {} as never);
+    const shell = root.children[0] as FakeElement;
+    const find = (name: string): FakeElement => shell.descendants().find((n) => classesOf(n).includes(name)) as FakeElement;
+    dom.fireWindow('pointermove', { type: 'pointermove', pointerType: 'mouse', clientX: 300, clientY: 300, target: { tagName: 'CANVAS' } });
+    const hover = find('hs-hover-card');
+    expect(classesOf(hover)).not.toContain('is-hidden'); // the office's card is up
+    const clock = find('hs-status-clock');
+    const parts = ['hs-status-cash', 'hs-top-actions', 'hs-palette', 'hs-card', 'hs-hover-card'].map(find);
+    expect([hiddenByWatch(hover), hiddenByWatch(clock)]).toEqual([false, false]);
+
+    vi.advanceTimersByTime(WATCH_IDLE_MS);
+    expect(parts.map(hiddenByWatch)).toEqual([true, true, true, true, true]);
+    expect(hiddenByWatch(clock)).toBe(false);
+    expect(watchRule().body).toContain('opacity: 0;');
+    expect(watchRule().body).toContain('pointer-events: none;');
+    // The fade they go with, on this shell: the full 400 ms without reduced motion.
+    expect(resolvedVar(shell, '--watch-fade')).toBe(`${WATCH_FADE_MS}ms`);
+
+    dom.fireWindow('pointermove', { type: 'pointermove', pointerType: 'mouse', clientX: 302, clientY: 300, target: { tagName: 'CANVAS' } });
+    expect(parts.map(hiddenByWatch)).toEqual([false, false, false, false, false]);
+  });
+
+  it('under reduced motion hides at once: only the watch class goes on, nothing inline, and the fade is 0 ms', () => {
+    const store = (globalThis as unknown as { window: { localStorage: { setItem(k: string, v: string): void } } }).window.localStorage;
+    store.setItem(PREF_KEYS.reducedMotion, 'true');
+    setFlag(PREF_KEYS.watchMode, true);
+    const { shell } = mount();
+    expect(classesOf(shell)).toContain('is-reduced');
+    const before = classesOf(shell);
+    vi.advanceTimersByTime(WATCH_IDLE_MS);
+    // One step, one class: no fading state in between and none added after.
+    expect(classesOf(shell).sort()).toEqual([...before, WATCH_CLASS].sort());
+    vi.advanceTimersByTime(WATCH_FADE_MS);
+    expect(classesOf(shell).sort()).toEqual([...before, WATCH_CLASS].sort());
+    // Nothing in the ui writes a transition or an animation inline: the stylesheet decides.
+    for (const node of [shell, ...shell.descendants()]) {
+      for (const key of Object.keys(node.style)) expect(key).not.toMatch(/transition|animation/i);
+    }
+    const palette = shell.descendants().find((n) => classesOf(n).includes('hs-palette')) as FakeElement;
+    expect(hiddenByWatch(palette)).toBe(true);
+    expect(watchRule().body).toContain('var(--watch-fade)');
+    expect(resolvedVar(shell, '--watch-fade')).toBe('0ms');
   });
 });
 

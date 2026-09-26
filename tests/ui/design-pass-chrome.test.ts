@@ -18,6 +18,59 @@ function ruleOf(source: string, selector: string): string {
   return source.slice(at, source.indexOf('}', at));
 }
 
+/**
+ * The style ui.css gives a fake node, as a browser would compute it for the rules that matter
+ * here: plain rules whose selector is a compound of classes the node carries, at the top level
+ * or inside one of the `media` queries named, the more specific winning, then the later. A
+ * `var(--x, fallback)` resolves against the node's inline custom properties.
+ */
+function styleOf(node: FakeElement, media: string[] = []): Record<string, string> {
+  const text = css.replace(/\/\*[\s\S]*?\*\//g, '').replace(/@import[^;]*;/g, '');
+  const rules: { media: string | null; selectors: string[]; body: string }[] = [];
+  const walk = (src: string, within: string | null): void => {
+    let i = 0;
+    while (i < src.length) {
+      const open = src.indexOf('{', i);
+      if (open < 0) break;
+      const head = src.slice(i, open).trim();
+      let depth = 1;
+      let j = open + 1;
+      for (; j < src.length && depth > 0; j += 1) {
+        if (src[j] === '{') depth += 1;
+        else if (src[j] === '}') depth -= 1;
+      }
+      const inner = src.slice(open + 1, j - 1);
+      if (head.startsWith('@media')) walk(inner, head.slice('@media'.length).trim());
+      else if (!head.startsWith('@')) rules.push({ media: within, selectors: head.split(',').map((x) => x.trim()), body: inner });
+      i = j;
+    }
+  };
+  walk(text, null);
+  const own = node.className.split(/\s+/).filter(Boolean);
+  const won = new Map<string, { value: string; weight: number; order: number }>();
+  rules.forEach((rule, order) => {
+    if (rule.media !== null && !media.includes(rule.media)) return;
+    const weights = rule.selectors
+      .filter((sel) => /^(\.[\w-]+)+$/.test(sel) && sel.split('.').filter(Boolean).every((c) => own.includes(c)))
+      .map((sel) => sel.split('.').filter(Boolean).length);
+    if (weights.length === 0) return;
+    const weight = Math.max(...weights);
+    for (const decl of rule.body.split(';')) {
+      const at = decl.indexOf(':');
+      if (at < 0) continue;
+      const prop = decl.slice(0, at).trim();
+      const was = won.get(prop);
+      if (!was || weight > was.weight || (weight === was.weight && order > was.order)) won.set(prop, { value: decl.slice(at + 1).trim(), weight, order });
+    }
+  });
+  const out: Record<string, string> = {};
+  for (const [prop, { value }] of won) {
+    const ref = /^var\((--[\w-]+)(?:,\s*(.*))?\)$/.exec(value);
+    out[prop] = ref ? (node.style[ref[1] as string] ?? ref[2] ?? '') : value;
+  }
+  return out;
+}
+
 /** Every block of a light theme: the system one and the explicit one. */
 function lightBlocks(source: string): string[] {
   return [ruleOf(source, ":root:not([data-theme='dark'])"), ruleOf(source, ":root[data-theme='light']")];
@@ -140,6 +193,56 @@ describe('D-22: the collapsed goals card is a small pill', () => {
     const text = ruleOf(css, '.hs-card-pill-text');
     expect(text).toContain('text-overflow: ellipsis;');
     expect(text).toContain('min-width: 0;');
+  });
+
+  it('cuts a title too long for the cap with an ellipsis: the cap on the collapsed card, the ellipsis on its words', () => {
+    const store = (globalThis as unknown as { window: { localStorage: { setItem(k: string, v: string): void } } }).window.localStorage;
+    store.setItem('hs.intro.seen', 'true');
+    store.setItem('hs.guide.done', 'true');
+    store.setItem('hs.goals.collapsed', 'true');
+    const game = {
+      world: {
+        seed: 1, cash: 1e6, population: 0, stars: 1, time: { minute: 0 }, log: [], logTotal: 0, rooms: new Map(), shafts: new Map(),
+        sims: new Map(), events: [], stats: { lastQuarter: null, vipRating: 'none', weddingsHeld: 0 },
+        story: { followed: [], threads: {}, recent: [], seq: 0 },
+      },
+      subscribe: () => () => {}, getHover: () => null, getSpeed: () => 1, getTool: () => ({ kind: 'none' }), setTool() {},
+      getPlacement: () => null, getPlacementRect: () => null, getSelection: () => null, setChrome() {}, setReducedMotion() {}, getSlot: () => 'mine',
+    } as never;
+    const root = dom.createElement('div');
+    createUi(root as never, game, {} as never);
+    const named = (label: string): FakeElement =>
+      root.descendants().find((n) => n.tagName === 'BUTTON' && n.getAttribute('aria-label') === label) as FakeElement;
+    const rect = (left: number, width: number) => () => ({ left, width, right: left + width, top: 12, bottom: 64, height: 52 });
+    // A narrow cap: Share and Menu span 60 px, less than "Goals, 0 of 3" needs at 16 px.
+    Object.assign(named('Share'), { getBoundingClientRect: rect(930, 28) });
+    Object.assign(named('Menu'), { getBoundingClientRect: rect(962, 28) });
+    dom.fireWindow('resize');
+    const byClass = (name: string): FakeElement =>
+      root.descendants().find((n) => n.className.split(' ').includes(name)) as FakeElement;
+    const card = byClass('hs-card');
+    const pill = byClass('hs-card-pill');
+    const words = byClass('hs-card-pill-text');
+    expect(card.className.split(' ')).toContain('is-collapsed');
+    expect(pill.hidden).toBe(false);
+    // The cap applies to the collapsed card at the desk width, right-aligned under Menu.
+    const cardStyle = styleOf(card, ['(min-width: 721px)']);
+    expect(cardStyle['max-width']).toBe('60px');
+    expect(cardStyle['width']).toBe('max-content');
+    expect(cardStyle['right']).toBe(`${1000 - 990}px`);
+    // The words may shrink inside the one-row pill, and end in an ellipsis when they do.
+    expect(styleOf(pill)['display']).toBe('flex');
+    const wordStyle = styleOf(words);
+    expect([wordStyle['min-width'], wordStyle['overflow'], wordStyle['white-space'], wordStyle['text-overflow']]).toEqual([
+      '0',
+      'hidden',
+      'nowrap',
+      'ellipsis',
+    ]);
+    expect(wordStyle['flex']).toBe('0 1 auto');
+    // Cut on screen only: the words and the control's name keep the whole title.
+    expect(words.textContent).toMatch(/^Goals, \d+ of \d+$/);
+    expect(pill.getAttribute('aria-label')).toBe(`${words.textContent}, show`);
   });
 
   it('shrinks the collapsed card to its content above 720 px', () => {
