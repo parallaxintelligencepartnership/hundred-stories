@@ -52,3 +52,22 @@ Checkpoints found and closed: P4 the site amber hunk left out of the commit (IMP
 - Cloudflare Email Routing for hello@hundredstories.xyz forwarding to hello@parallaxintelligence.ai: the agent launch was blocked by the auto-mode classifier (it needed the wrangler OAuth token from ~/Library). Options given: dashboard (two minutes), Matt runs the curl steps himself with `!`, or a permission rule then relaunch. The Requests link change (GitHub issues to the address) folds into P8 once he confirms the address.
 - Ideas Matt raised: richer share links need a small Worker to serve a per-link og:image (free tier covers it); more daily twists need new sim knobs (only starting cash exists today). Both are their own decisions and packages.
 - Analytics: Cloudflare zone analytics and the store consoles are the no-beacon answers; the Web Analytics beacon stays declined.
+
+## Completed 2026-09-26
+
+The run finished in the morning session under the same authorization. Every package is on main with its checkpoint closed in `.itworks/REVIEWS.md`; the state trims are in; the full suite ran once at 89670d1 (165 files, 2033 passed, 1 skipped, tsc clean).
+
+| Commit | What |
+| --- | --- |
+| 9280b9c, d49b41a, ab9de42 | P3 night: D-4, D-6, D-8, D-9, D-10, D-15, BB-2, BB-4; two reviews, one fix wave; downtown as a faint haze at dusk and a field of warm lights at night, the far facade night graded, burning rooms unlit at any zoom |
+| e5f5a67, 26b802e | P5 phone: D-29 to D-33; the bottom-left corner stacks when it does not fit (under 390 px, or Larger text), the sheet close in its own cell, star tap opens goals, minimap idle count from the pointer lift |
+| 972e4a0, 368aa65, 7e0372b | P8 site system: D-38 to D-41; specimens drawn by the game's code, lazily after the hero's first frame; the hero's settled signal always resolves; two-tone focus rings |
+| d49b41a | P6 game feel: D-14, D-16, D-17, D-18; sheet script: night-clear shot, place spot from the fixture, site shots wait for the hero |
+| 89670d1, 98ac29f | P9 records: D-44 (store tower, og only with --og), D-45, D-46, D-47; MAP.md 58 lines, DECISIONS.md lines shortened, lint clean |
+| 87a98a2 | docs/BRIEF-AGENTS.md: the review and capture discipline, permanent |
+
+Not done: D-43, the VISUAL.md chrome, motion and type rewrite. The permission classifier refused the agent's write to that file and Matt's own permission is needed; the draft text and the list of chrome elements matched to the two verify shots are in the P9 agent's report. D-14's three placement frames could not be timed in this Chrome; D-14 stands on its tests, and by the 2026-09-26 rule no further capture mechanism is tried.
+
+Texture budget: the demo tower measures 6,553,472 bytes (1.678 of the 2026-09-23 baseline, against a 1.6 cap that was already exceeded at 1.619 before this pass). No line in the pass bakes a texture; the extra 229,376 bytes over the 8dae179 measurement is one car door frame key that normal play always bakes and that the measuring window now catches. `--textures` lists every key since d49b41a. The overshoot predates the pass and is Matt's call.
+
+Process: the run showed the review loop had grown to six or seven rounds per package. Matt's 2026-09-26 ruling ("cut the junk processes", "fix it permanently") is in `~/.claude/CLAUDE.md`, the reviewer and senior-implementer agent definitions, and `docs/BRIEF-AGENTS.md`: one review per package at its commit, advisories batched into one close, senior implementers decide within the finding, the capture script's fixed list is the only screenshot source.
