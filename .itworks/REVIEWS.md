@@ -521,3 +521,14 @@ Scope: checkpoint, diff fe7f65a..93609f1 (P2: src/render art, hierarchy, interio
 - [x] ADVISORY | testing | nothing pins the three-frame selection retry: SELECTION_CLEAR_FRAMES set to 2 leaves all 98 green (src/ui/ui.ts:161) | Evidence: the lens mutation run | Evidence to close: a case where the ring drawn on frame 3 still eases the view, red at 2 | Closed 2026-09-25: 9290dac adds the ring-on-frame-3 case; red at 2 in a scratch worktree
 
 Seven touched files, 98 passed. Failure paths each named to a test. Four mutations (day panes back, paint bottom back, init alpha removed, cardLeft one edge) each went red; green after checkout, tree clean. Live evidence: P2-after-person and P2-after phone shots (no day panes, district floor lines, ring clear of the card).
+
+## Checkpoint 2026-09-25 - design pass P7 front door, diff 388d128..f464377 - lenses: testing
+
+Scope: checkpoint, diff 388d128..f464377 (P7: the five HTML pages, src/site hero.ts and site.css, src/render/smoke.ts, scripts/make-icons.mjs and make-store-shots.mjs, public/og.png and icons, native icons; tests/site landing, hero, icons; tests/store og; tests/render smoke-support), lens testing, run in a clean worktree at f464377. Not covered: code outside the diff, application logic, the full suite (once at closeout), the live walker bound and final hero layout (the P7-after-2 shots predate the last hero edit; P8 retakes the home page). Last audit: 2026-09-25 @7b4e60f.
+
+### Findings
+
+- [ ] IMPORTANT | testing | the icon script's "write only when run as a script" guard has no test: with it removed the run stayed green while the import rewrote public/icons and the mipmaps, so the "ships as the script draws" tests would pass against icons regenerated during the run (scripts/make-icons.mjs:381) | Evidence: lens mutation, 91 passed with the guard replaced by if (true) | Evidence to close: a test that imports the module and proves nothing was written, red with the guard removed
+- [ ] ADVISORY | testing | the no-WebGL fallback that drops has-canvas so the panel keeps its width has no test (src/site/hero.ts:110) | Evidence: deleting the line stayed green | Evidence to close: a jsdom case where createRenderer rejects and has-canvas is absent, red with the line deleted
+
+Seven scoped files: 91 passed, 1 skipped (the STORE_SHOTS_E2E run). Failure paths named to tests. Four mutations plus one extra each went red; green after checkout, tree clean. Live evidence: og.png and icon-48.png match the commit byte for byte; P7-after-2 site shots for the composition.
