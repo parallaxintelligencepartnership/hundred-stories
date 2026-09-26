@@ -1,7 +1,7 @@
 // The app icon (scripts/make-icons.mjs, design pass D-37): a lit cutaway tower, five floors of
 // three cells over a lobby with two doors, in an outlined amber frame on navy. The drawing is
 // counted by its colour regions, so a change in rounding never breaks it but a lost pane does.
-import { readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -158,5 +158,30 @@ describe('the app icon is a lit cutaway tower', () => {
       const onDisk = readFileSync(join(ROOT, 'public', 'icons', `icon-${size}.png`));
       expect(onDisk.equals(encodePNG(size)), `icon-${size}.png`).toBe(true);
     }
+  });
+});
+
+describe('importing scripts/make-icons.mjs', () => {
+  /** Every file the script writes lives under these: the web icons and both native sets. */
+  const OUTPUT_DIRS = [
+    join(ROOT, 'public', 'icons'),
+    join(ROOT, 'android', 'app', 'src', 'main', 'res'),
+    join(ROOT, 'ios', 'App', 'App', 'Assets.xcassets'),
+  ];
+  const outputs = (): string[] =>
+    OUTPUT_DIRS.filter((dir) => existsSync(dir)).flatMap((dir) =>
+      (readdirSync(dir, { recursive: true }) as string[]).map((name) => join(dir, name)).filter((path) => statSync(path).isFile()),
+    );
+
+  it('writes nothing: only running it as a script (npm run icons) writes the icons', async () => {
+    const files = outputs();
+    expect(files.some((path) => path.endsWith(join('public', 'icons', 'icon-192.png')))).toBe(true);
+    const before = new Map(files.map((path) => [path, statSync(path, { bigint: true }).mtimeNs]));
+    // A fresh evaluation of the module, not the copy the cases above already imported.
+    const url = `${pathToFileURL(join(ROOT, 'scripts', 'make-icons.mjs')).href}?fresh=${Date.now()}`;
+    const fresh = (await import(/* @vite-ignore */ url)) as IconsModule;
+    expect(typeof fresh.makeSkylinePixels).toBe('function');
+    const touched = files.filter((path) => statSync(path, { bigint: true }).mtimeNs !== before.get(path));
+    expect(touched).toEqual([]);
   });
 });

@@ -2,7 +2,12 @@
 // no load fade, a clock held between 10:00 and 20:00, and the tower beside the copy on a desk.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+// Node has no WebGL, so the renderer refuses here exactly as it does on a machine without it.
+vi.mock('../../src/render/renderer', () => ({
+  createRenderer: vi.fn(() => Promise.reject(new Error('no WebGL context'))),
+}));
 
 import heroSource from '../../src/site/hero.ts?raw';
 import {
@@ -190,5 +195,43 @@ describe('the hero tower (buildHeroWorld)', () => {
 
   it('is the world the hero draws', () => {
     expect(heroSource).toContain('const world = buildHeroWorld();');
+  });
+});
+
+describe('the hero without WebGL', () => {
+  it('drops has-canvas when the renderer refuses, so the panel keeps its width and the still image returns', async () => {
+    // No jsdom in this repo: the three elements start() reads, as stubs (as tests/site/challenge.test.ts does).
+    const classes = new Set<string>();
+    const added: string[] = [];
+    const hero = {
+      classList: {
+        add: (name: string) => {
+          added.push(name);
+          classes.add(name);
+        },
+        remove: (name: string) => classes.delete(name),
+        contains: (name: string) => classes.has(name),
+      },
+      querySelector: () => null,
+    };
+    const elements: Record<string, unknown> = { hero, 'hero-view': {}, 'hero-shot': { style: { display: '' } } };
+    const g = globalThis as Record<string, unknown>;
+    g.document = { getElementById: (id: string) => elements[id] ?? null, visibilityState: 'visible' };
+    g.window = { matchMedia: () => ({ matches: false }) };
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      // A fresh evaluation, so the module level start() runs now that there is a document.
+      vi.resetModules();
+      await import('../../src/site/hero');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      // The class went on while the renderer booted, and came off when it refused.
+      expect(added).toEqual(['has-canvas']);
+      expect(hero.classList.contains('has-canvas')).toBe(false);
+      expect(warn).toHaveBeenCalledWith('hero: no tower today', expect.any(Error));
+    } finally {
+      delete g.document;
+      delete g.window;
+      warn.mockRestore();
+    }
   });
 });
