@@ -1,13 +1,22 @@
 // The information views: each view's five step ramp from a stub world, the served floors an
 // elevator ghost bands, and the tint pass that redraws every frame while on and costs nothing off.
 import { describe, expect, it } from 'vitest';
+import { floorTopY } from '../../src/render/camera';
+import { lerpColor } from '../../src/render/light';
 import {
+  BLOCK_GLOW,
+  BLOCK_GLOW_ALPHA,
+  BLOCK_NIGHT,
+  BLOCK_NIGHT_MIX,
   createOverlayPass,
+  drawBlocks,
   floorWaits,
   hallQueues,
   noiseStep,
+  OVERLAY_KINDS,
   OVERLAY_RAMP,
   overlayLegend,
+  overlayTitle,
   roomStep,
   servedFloors,
   stressStep,
@@ -15,6 +24,7 @@ import {
   waitStepOf,
   type ViewRect,
 } from '../../src/render/overlays';
+import { BLOCK, BLOCK_FILL_LIFT, BLOCK_OUTLINE } from '../../src/render/palette';
 import { ROOMS, STRESS } from '../../src/sim/rules';
 import type { Room, RoomKind, Shaft, Sim, World } from '../../src/sim/types';
 import { addRoom, addShaft, addSim, allocId, createWorld } from '../../src/sim/world';
@@ -284,5 +294,128 @@ describe('tint pass', () => {
     expect(calls.rects).toHaveLength(5);
     pass.draw(world, WIDE, { widthTiles: 9, heightFloors: 1, floor: 2, x: 10, ok: true }); // a room ghost: no band
     expect(g.visible).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------- BB-2 and D-8: the block pass
+
+interface BlockRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  color: number;
+  alpha?: number;
+}
+
+/** A Graphics stand-in that records each rectangle with the fill or the stroke it was given. */
+function blockRecorder() {
+  const calls = { fills: [] as BlockRect[], strokes: [] as BlockRect[] };
+  let last = { x: 0, y: 0, w: 0, h: 0 };
+  const g = {
+    visible: false,
+    clear() {
+      return g;
+    },
+    rect(x: number, y: number, w: number, h: number) {
+      last = { x, y, w, h };
+      return g;
+    },
+    fill(style: number | { color: number; alpha?: number }) {
+      const s = typeof style === 'number' ? { color: style, alpha: 1 } : { color: style.color, alpha: style.alpha ?? 1 };
+      calls.fills.push({ ...last, ...s });
+      return g;
+    },
+    stroke(style: { color: number }) {
+      calls.strokes.push({ ...last, color: style.color });
+      return g;
+    },
+    poly() {
+      return g;
+    },
+  };
+  return { g, calls };
+}
+
+describe('BB-2: the Districts view', () => {
+  it('lists Districts after the four views, with a legend of the categories', () => {
+    expect(OVERLAY_KINDS).toEqual(['stress', 'noise', 'vacancy', 'wait', 'districts']);
+    expect(overlayTitle('districts')).toBe('Districts');
+    expect(overlayLegend('districts')).toEqual({
+      title: 'Districts',
+      entries: [
+        { color: BLOCK.office, label: 'Offices' },
+        { color: BLOCK.condo, label: 'Homes' },
+        { color: BLOCK.hotelSingle, label: 'Hotels' },
+        { color: BLOCK.fastFood, label: 'Food' },
+        { color: BLOCK.shop, label: 'Shops' },
+        { color: BLOCK.medical, label: 'Services' },
+      ],
+    });
+    // Categories, not a ramp: the same colours with the color-blind views on.
+    expect(overlayLegend('districts', true)).toEqual(overlayLegend('districts'));
+  });
+
+  it('draws the block chart through the overlay pass: a block per room in its colour, occupancy lighter from the floor up, a lobby run outlined once', () => {
+    const world = createWorld(1);
+    makeRoom(world, 'office', 3, 100, { occupancy: ROOMS.office.capacity / 2 });
+    makeRoom(world, 'condo', 4, 100);
+    for (let x = 90; x < 96; x += 1) makeRoom(world, 'lobby', 1, x);
+    makeRoom(world, 'stairs', 2, 120); // a connector is not a block
+    const { g, calls } = blockRecorder();
+    const pass = createOverlayPass(g as never);
+    pass.set('districts');
+    pass.draw(world, WIDE, null);
+    expect(g.visible).toBe(true);
+    const office = { x: 100 * 16, y: floorTopY(3), w: 9 * 16, h: 72 };
+    expect(calls.fills.slice(0, 2)).toEqual([
+      { ...office, color: BLOCK.office, alpha: 1 },
+      { ...office, y: office.y + 36, h: 36, color: lerpColor(BLOCK.office, 0xffffff, BLOCK_FILL_LIFT), alpha: 1 },
+    ]);
+    expect(calls.fills.filter((f) => f.color === BLOCK.lobby)).toHaveLength(6);
+    expect(calls.fills.some((f) => f.color === BLOCK.stairs)).toBe(false);
+    expect(calls.strokes).toEqual([
+      { ...office, color: BLOCK_OUTLINE },
+      { x: 100 * 16, y: floorTopY(4), w: 16 * 16, h: 72, color: BLOCK_OUTLINE },
+      { x: 90 * 16, y: floorTopY(1), w: 6 * 16, h: 72, color: BLOCK_OUTLINE },
+    ]);
+    // Off screen, nothing is drawn.
+    calls.fills.length = 0;
+    calls.strokes.length = 0;
+    pass.draw(world, { left: -100, right: 500, top: -1e6, bottom: 1e6 }, null);
+    expect([calls.fills, calls.strokes]).toEqual([[], []]);
+    // Off again: cleared and hidden.
+    pass.set(null);
+    pass.draw(world, WIDE, null);
+    expect(g.visible).toBe(false);
+  });
+
+  it('gives no room a ramp step in the districts view', () => {
+    const world = createWorld(1);
+    expect(roomStep(world, makeRoom(world, 'office', 2, 0), 'districts')).toBe(null);
+  });
+});
+
+describe('D-8: the block pass at night', () => {
+  it('darkens each block toward the night sky and draws its occupancy as a warm glow from the floor up', () => {
+    expect([BLOCK_NIGHT, BLOCK_NIGHT_MIX, BLOCK_GLOW, BLOCK_GLOW_ALPHA]).toEqual([0x0d1b3d, 0.45, 0xffd678, 0.85]);
+    const world = createWorld(1);
+    makeRoom(world, 'office', 3, 100, { occupancy: ROOMS.office.capacity / 2 });
+    makeRoom(world, 'condo', 4, 100); // empty: dark navy, no glow
+    const blocks = blockRecorder();
+    const glow = blockRecorder();
+    drawBlocks(blocks.g as never, world.rooms.values(), { night: true, glow: glow.g as never });
+    expect(blocks.calls.fills.map((f) => f.color)).toEqual([lerpColor(BLOCK.office, 0x0d1b3d, 0.45), lerpColor(BLOCK.condo, 0x0d1b3d, 0.45)]);
+    expect(glow.calls.fills).toEqual([{ x: 100 * 16, y: floorTopY(3) + 36, w: 9 * 16, h: 36, color: 0xffd678, alpha: 0.85 }]);
+  });
+
+  it('draws the blocks as before by day and leaves the glow untouched', () => {
+    const world = createWorld(1);
+    makeRoom(world, 'office', 3, 100, { occupancy: ROOMS.office.capacity });
+    const blocks = blockRecorder();
+    const glow = blockRecorder();
+    drawBlocks(blocks.g as never, world.rooms.values(), { night: false, glow: glow.g as never });
+    expect(blocks.calls.fills.map((f) => f.color)).toEqual([BLOCK.office, lerpColor(BLOCK.office, 0xffffff, BLOCK_FILL_LIFT)]);
+    expect(glow.calls.fills).toEqual([]);
   });
 });

@@ -4,6 +4,7 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { OVERLAY_RAMP, OVERLAY_RAMP_COLOR_BLIND } from '../../src/render/overlays';
+import { BLOCK } from '../../src/render/palette';
 import { createViewControl, VIEW_OPTIONS, type ViewChoice } from '../../src/ui/overlays';
 import { createUi } from '../../src/ui/ui';
 import { FakeDom, type FakeElement } from './fake-dom';
@@ -44,11 +45,11 @@ function parts(control: ReturnType<typeof createViewControl>) {
 }
 
 describe('views popover', () => {
-  it('lists the four views, an icon and a name each, none on, the chip hidden', () => {
+  it('lists the five views, an icon and a name each, none on, the chip hidden', () => {
     const control = createViewControl(() => {}, { popover: false });
     const { button, menu, chip } = parts(control);
-    expect(itemsOf(menu).map((b) => b.textContent)).toEqual(['Stress', 'Noise', 'Vacancy', 'Elevator wait']);
-    expect(VIEW_OPTIONS.map((o) => o.kind)).toEqual(['stress', 'noise', 'vacancy', 'wait']);
+    expect(itemsOf(menu).map((b) => b.textContent)).toEqual(['Stress', 'Noise', 'Vacancy', 'Elevator wait', 'Districts']);
+    expect(VIEW_OPTIONS.map((o) => o.kind)).toEqual(['stress', 'noise', 'vacancy', 'wait', 'districts']);
     for (const item of itemsOf(menu)) expect(item.children[0]?.getAttribute('aria-hidden')).toBe('true'); // the icon
     expect(button.getAttribute('aria-label')).toBe('Views');
     expect(button.getAttribute('aria-controls')).toBe(menu.id);
@@ -138,6 +139,33 @@ describe('views popover', () => {
     expect(swatches().map((s) => has(s, 'is-striped'))).toEqual([false, false, false, false, true]);
     // The stripes are drawn in css, so meaning never rests on color alone.
     expect(css).toMatch(/\.hs-legend-swatch\.is-striped \{\s*background-image: repeating-linear-gradient/);
+  });
+
+  it('BB-2: offers the category chart as Districts, the floors icon beside it, the categories in the chip', () => {
+    const changes: ViewChoice[] = [];
+    const control = createViewControl((kind) => changes.push(kind), { popover: false });
+    const { button, menu, chip, legend } = parts(control);
+    expect(button.title).toBe('Views: stress, noise, vacancy, elevator wait and districts');
+    const row = itemsOf(menu).find((b) => b.dataset['view'] === 'districts')!;
+    expect(row.textContent).toBe('Districts');
+    expect(row.children[0]?.children[0]?.getAttribute('href')).toBe('#hs-icon-structure');
+    click(row);
+    expect(changes).toEqual(['districts']);
+    expect(pressed(menu)).toEqual(['Districts']);
+    expect(chip.descendants().find((n) => has(n, 'hs-view-chip-title'))?.textContent).toBe('Districts');
+    expect(legend.textContent).toBe('OfficesHomesHotelsFoodShopsServices');
+    const swatches = legend.descendants().filter((n) => has(n, 'hs-legend-swatch'));
+    const hex = (c: number): string => `#${c.toString(16).padStart(6, '0')}`;
+    expect(swatches.map((s) => s.style['backgroundColor'])).toEqual(
+      [BLOCK.office, BLOCK.condo, BLOCK.hotelSingle, BLOCK.fastFood, BLOCK.shop, BLOCK.medical].map(hex),
+    );
+    // Categories are not a ramp: nothing striped with the color-blind views on.
+    control.setColorBlind(true);
+    expect(legend.descendants().filter((n) => has(n, 'is-striped'))).toHaveLength(0);
+    const x = chip.descendants().find((n) => has(n, 'hs-view-chip-close'))!;
+    expect(x.getAttribute('aria-label')).toBe('Turn off the districts view');
+    click(x);
+    expect(changes).toEqual(['districts', null]);
   });
 
   it('places the list against the button with anchor positioning where supported, and under the bar where not', () => {
