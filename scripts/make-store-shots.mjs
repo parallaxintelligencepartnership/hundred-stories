@@ -12,6 +12,12 @@
 // public/wordmark-dark.png on a canvas in the same browser. Output: store/shots/ (gitignored),
 // plus store/shots/manifest.json with every file and its size.
 //
+// It also writes the link preview, public/og.png (OG below, design pass D-36): the game itself at
+// 1200 by 630 on a clear afternoon, the chrome hidden, with the wordmark and the tagline on a navy
+// panel at the left. It runs before the graphics, which are cut from it. ONLY=og makes just that
+// file (plus ONLY=og,steam-header-capsule,... for the graphics after it). scripts/make-og.mjs, the
+// wordmark card drawn in Node, stays as the offline fallback for a machine with no Chrome.
+//
 // The size table below is the one store/ios.md, store/android.md and store/steam.md list;
 // tests/store/shots.test.ts checks that the two agree. No npm packages: Node, Chrome, zlib.
 
@@ -22,6 +28,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { deflateSync, inflateSync, crc32 } from 'node:zlib';
+import { weatherAt } from '../src/game/weather.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 export const CHROME_PATH = process.env.CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
@@ -67,6 +74,65 @@ export const NOT_MADE = [
   { id: 'steam-library-hero', store: 'steam', width: 3840, height: 1240, reason: 'needs wide key art with no logo; public/og.png carries the wordmark and is 1200 by 630' },
   { id: 'steam-page-background', store: 'steam', width: 1438, height: 810, reason: 'optional; Steam builds a default from the screenshots' },
 ];
+
+/**
+ * The link preview (D-36), public/og.png: the game at 1200 by 630 css px, device pixel ratio 1, on
+ * the fixture's first clear day (weather at OG.weatherMinute into the day) at 13:00, paused, the
+ * chrome (.hs-ui) hidden. The capture is drawn from x `crop` on (its left `crop` px cropped), under
+ * a navy panel from 0 to `panel.right` whose right `panel.fade` px fade to transparent, with the
+ * wordmark and the tagline on the panel.
+ */
+export const OG = {
+  id: 'og',
+  out: 'public/og.png',
+  width: 1200,
+  height: 630,
+  css: { w: 1200, h: 630, dpr: 1 },
+  mobile: false,
+  minuteOfDay: 13 * 60,
+  weatherMinute: 780,
+  crop: 360,
+  panel: { color: '#0b1020', right: 420, fade: 60 },
+  wordmark: { source: 'public/wordmark-dark.png', x: 30, y: 190, width: 360 },
+  tagline: { text: 'Build a tower. Run it well.', font: '600 30px "Bricolage Grotesque"', color: '#e8ecf2', x: 30, y: 330 },
+};
+
+/**
+ * The first day, from `fromDay` on, whose weather at OG.weatherMinute into it is clear. Weather is
+ * a pure function of the seed and the minute (src/game/weather.ts), so this reads no state.
+ */
+export function firstClearDay(seed, fromDay = 0) {
+  for (let day = fromDay; day < fromDay + 3650; day++) {
+    if (weatherAt(seed, day * 1440 + OG.weatherMinute).kind === 'clear') return day;
+  }
+  throw new Error(`no clear day in ten years for seed ${seed}`);
+}
+
+/** Moves a minute stamp by delta; null and absent stay as they are. */
+function shiftStamp(holder, key, delta) {
+  if (holder && typeof holder[key] === 'number') holder[key] += delta;
+}
+
+/**
+ * The fixture's save moved to OG.minuteOfDay on its first clear day. The search starts at the
+ * save's own day, so the clock only ever moves forward. Every per-person stamp in the same clock
+ * moves by the same delta (as make-design-sheet.mjs fixtureAtMinute does), so a wait keeps its age.
+ * A copy for the capture only: the committed fixture is never written.
+ */
+export function ogFixture(saveText) {
+  const save = JSON.parse(saveText);
+  const day = firstClearDay(save.seed, Math.floor(save.minute / 1440));
+  const delta = day * 1440 + OG.minuteOfDay - save.minute;
+  save.minute += delta;
+  for (const sim of save.sims ?? []) {
+    shiftStamp(sim, 'waitStart', delta);
+    shiftStamp(sim, 'stayUntil', delta);
+    shiftStamp(sim, 'storyTripStart', delta);
+    shiftStamp(sim.guard, 'pauseUntil', delta);
+    shiftStamp(sim.collector, 'until', delta);
+  }
+  return JSON.stringify(save);
+}
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -259,11 +325,10 @@ const PREFS = {
   'hs.tips': JSON.stringify(['longWait', 'tenantLeft', 'firstRent', 'firstEvent', 'nightSpeed', 'firstPanel']),
 };
 
-async function seed(browser, base) {
+async function seed(browser, base, saveText = readFileSync(FIXTURE, 'utf8')) {
   const { send, evaluate } = browser;
   await send('Page.navigate', { url: `${base}/?new&cb=${Date.now()}` });
   await sleep(1500);
-  const saveText = readFileSync(FIXTURE, 'utf8');
   await evaluate(`(() => { const p = ${JSON.stringify(PREFS)}; for (const k in p) localStorage.setItem(k, p[k]); return true; })()`);
   await evaluate(`new Promise((res, rej) => { const q = indexedDB.open('hundred-stories', 1);
     q.onupgradeneeded = () => q.result.createObjectStore('saves');
@@ -390,6 +455,47 @@ async function drawGraphic(browser, g) {
   return png;
 }
 
+/**
+ * public/og.png: the game on the fixture's first clear afternoon, paused, the chrome hidden, then
+ * the panel, the wordmark and the tagline composed over it on a canvas in the same page, where the
+ * bundled Bricolage Grotesque (src/fonts.css) is already declared.
+ */
+async function shootOg(browser, base) {
+  await seed(browser, base, ogFixture(readFileSync(FIXTURE, 'utf8')));
+  await openGame(browser, base, OG);
+  await browser.evaluate(`(() => { for (const el of document.querySelectorAll('.hs-ui')) el.style.visibility = 'hidden'; return true; })()`);
+  await sleep(600);
+  const shot = await capture(browser, OG);
+  const wordmarkUrl = graphicSourceDataUrl({ id: 'og wordmark', source: OG.wordmark.source });
+  const dataUrl = await browser.evaluate(`(async () => {
+    const og = ${JSON.stringify(OG)};
+    const load = (src) => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('og: an image did not load')); i.src = src; });
+    const shot = await load(${JSON.stringify(`data:image/png;base64,${shot.toString('base64')}`)});
+    const mark = await load(${JSON.stringify(wordmarkUrl)});
+    await document.fonts.load(og.tagline.font);
+    if (!document.fonts.check(og.tagline.font)) throw new Error('og: Bricolage Grotesque did not load');
+    const c = document.createElement('canvas'); c.width = og.width; c.height = og.height;
+    const x = c.getContext('2d');
+    x.imageSmoothingEnabled = true; x.imageSmoothingQuality = 'high';
+    x.drawImage(shot, og.crop, 0, og.width - og.crop, og.height, og.crop, 0, og.width - og.crop, og.height);
+    const solid = og.panel.right - og.panel.fade;
+    x.fillStyle = og.panel.color; x.fillRect(0, 0, solid, og.height);
+    const fade = x.createLinearGradient(solid, 0, og.panel.right, 0);
+    fade.addColorStop(0, og.panel.color); fade.addColorStop(1, og.panel.color + '00');
+    x.fillStyle = fade; x.fillRect(solid, 0, og.panel.fade, og.height);
+    const h = Math.round((og.wordmark.width * mark.naturalHeight) / mark.naturalWidth);
+    x.drawImage(mark, og.wordmark.x, og.wordmark.y, og.wordmark.width, h);
+    x.font = og.tagline.font; x.fillStyle = og.tagline.color; x.textBaseline = 'top';
+    x.fillText(og.tagline.text, og.tagline.x, og.tagline.y);
+    return c.toDataURL('image/png');
+  })()`);
+  const png = dropAlpha(Buffer.from(dataUrl.split(',')[1], 'base64'));
+  const info = pngInfo(png);
+  if (info.width !== OG.width || info.height !== OG.height) throw new Error(`og: drew ${info.width} by ${info.height}`);
+  writeFileSync(join(ROOT, OG.out), png);
+  console.log('wrote', OG.out, `(${png.length} bytes)`);
+}
+
 // ------------------------------------------------------------------ main
 
 async function main() {
@@ -426,8 +532,10 @@ async function main() {
       browser = await launchChrome('swiftshader');
     }
     manifest.angle = browser.angle;
-    await seed(browser, base);
     const only = process.env.ONLY ? new Set(process.env.ONLY.split(',')) : null;
+    // The link preview first: the Steam and Play graphics below are cut from it.
+    if (!only || only.has(OG.id)) await shootOg(browser, base);
+    await seed(browser, base);
     for (const spec of SCREENSHOTS) {
       if (only && !only.has(spec.id)) continue;
       await openGame(browser, base, spec);

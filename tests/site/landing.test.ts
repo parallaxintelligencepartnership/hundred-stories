@@ -52,6 +52,12 @@ describe('landing page', () => {
     expect(landing).toContain('id="hero-view"');
   });
 
+  it('describes the still hero image as it is: the game beside its name (og.png, D-36)', () => {
+    const shot = flat(landing).match(/<img id="hero-shot"[^>]*>/)![0];
+    expect(shot).toContain('alt="An illustrated tower in daylight beside the Hundred Stories name"');
+    expect(landing).not.toContain('A tower of cream office cells against a dark sky');
+  });
+
   it('carries a hidden challenge line for a friend arriving from a shared link', () => {
     expect(landing).toContain('<p id="challenge" class="challenge" hidden></p>');
   });
@@ -252,6 +258,24 @@ describe('theme', () => {
   it('leaves the 404 page without a toggle, since it has no nav', () => {
     expect(notfound).not.toContain('theme-toggle');
     expect(notfound).not.toContain('theme-init');
+  });
+});
+
+describe('favicon', () => {
+  const pages: Array<[string, string]> = [
+    ['landing', landing],
+    ['guide', guide],
+    ['privacy', privacy],
+    ['404', notfound],
+    ['game shell', play],
+  ];
+  const FAVICON = '<link rel="icon" type="image/png" sizes="48x48" href="/icons/icon-48.png" />';
+  const ICON_192 = '<link rel="icon" href="/icons/icon-192.png" />';
+
+  it.each(pages)('links the drawn 48 px favicon on the %s page, ahead of the 192 px icon it keeps', (_name, html) => {
+    expect(html.split(FAVICON)).toHaveLength(2);
+    expect(html).toContain(ICON_192);
+    expect(html.indexOf(FAVICON)).toBeLessThan(html.indexOf(ICON_192));
   });
 });
 

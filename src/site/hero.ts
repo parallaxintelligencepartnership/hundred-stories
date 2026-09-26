@@ -1,4 +1,4 @@
-// The landing hero: the game's own renderer drawing the demo tower behind the
+// The landing hero: the game's own renderer drawing the hero tower (buildHeroWorld) beside the
 // copy. Same art, same sky, same elevators as /play/.
 //
 // It is decoration and it behaves like decoration. No pointer handling, no
@@ -6,18 +6,69 @@
 // there, or anything at all throws, the still image in the markup stays and
 // this file goes quiet.
 
+import { TILE_PX } from '../render/grid';
 import { createRenderer, type Renderer } from '../render/renderer';
-import { animateDemo, buildDemoWorld } from '../render/smoke';
+import { animateDemo, buildHeroWorld } from '../render/smoke';
 import './challenge';
 import './platforms';
 import './stores';
 
-/** One demo day every forty seconds: slower than the smoke page, it is background. */
-const MINUTES_PER_MS = 1440 / 40_000;
 const SECONDS_PER_FLOOR = 6;
 const START_FLOOR = 3;
-const CENTER_TILE = 130;
+export const CENTER_TILE = 130;
 const MAX_FRAME_MS = 100;
+
+/** The hero's clock (D-35): 10:00 to 20:00 and back, one way every HERO_LEG_MS, so it is day most of the loop. */
+export const HERO_MINUTE_FROM = 600;
+export const HERO_MINUTE_SPAN = 600;
+export const HERO_LEG_MS = 45_000;
+/** At this viewport width and wider the copy sits beside the tower, not over it (site.css). */
+export const HERO_SIDE_BY_SIDE = '(min-width: 720px)';
+/** A tower wider than the space beside the panel starts this many css px right of the panel. */
+export const HERO_PANEL_GAP = 24;
+
+/** The 0 to 1 to 0 triangle: rises over [0, 1], falls over [1, 2], and repeats. */
+export function tri(x: number): number {
+  const phase = ((x % 2) + 2) % 2;
+  return phase < 1 ? phase : 2 - phase;
+}
+
+/** The hero's minute of the day at this much elapsed wall clock time. */
+export function heroMinute(elapsedMs: number): number {
+  return HERO_MINUTE_FROM + tri(elapsedMs / HERO_LEG_MS) * HERO_MINUTE_SPAN;
+}
+
+type Span = { left: number; right: number };
+
+/** The tower's horizontal span in tiles, rooms and shafts, right edge exclusive. */
+export function towerSpanOf(world: ReturnType<typeof buildHeroWorld>): Span {
+  let left = Infinity;
+  let right = -Infinity;
+  for (const part of [...world.rooms.values(), ...world.shafts.values()]) {
+    left = Math.min(left, part.x);
+    right = Math.max(right, part.x + part.width);
+  }
+  return { left, right };
+}
+
+/**
+ * The tile the camera centers on (camera.ts centerOn: that tile's middle at the view's middle,
+ * zoom 1, and the view fills the hero). Stacked (a phone), or with no panel, it is CENTER_TILE.
+ * Side by side, the tower goes in the middle of the space right of the panel as the spec has it
+ * (the space is dx css px right of the hero's center, so the camera looks dx / TILE_PX tiles left
+ * of CENTER_TILE), but only when that leaves its left edge at least HERO_PANEL_GAP px clear of the
+ * panel. Otherwise its left edge sits HERO_PANEL_GAP px right of the panel and its right side
+ * crops at the viewport edge.
+ */
+export function heroCenterTile(hero: Span, panel: Span | null, sideBySide: boolean, tower: Span): number {
+  if (!sideBySide || !panel) return CENTER_TILE;
+  const heroMid = (hero.left + hero.right) / 2;
+  const leftEdgeAt = (tile: number): number => heroMid + (tower.left - (tile + 0.5)) * TILE_PX;
+  const spaceMid = (panel.right + hero.right) / 2;
+  const centered = CENTER_TILE - (spaceMid - heroMid) / TILE_PX;
+  if (leftEdgeAt(centered) - panel.right >= HERO_PANEL_GAP) return centered;
+  return tower.left + (heroMid - (panel.right + HERO_PANEL_GAP)) / TILE_PX - 0.5;
+}
 
 function driftFloor(elapsedMs: number, topFloor: number): number {
   const climb = Math.max(1, topFloor - START_FLOOR);
@@ -29,7 +80,7 @@ function driftFloor(elapsedMs: number, topFloor: number): number {
   return START_FLOOR + eased * climb;
 }
 
-function topFloorOf(world: ReturnType<typeof buildDemoWorld>): number {
+function topFloorOf(world: ReturnType<typeof buildHeroWorld>): number {
   let top = START_FLOOR;
   for (const room of world.rooms.values()) top = Math.max(top, room.floor + room.height - 1);
   return top;
@@ -42,8 +93,10 @@ async function start(): Promise<void> {
   if (!hero || !view) return;
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 
-  const world = buildDemoWorld();
+  const world = buildHeroWorld();
+  world.time.minute = heroMinute(0);
   const top = topFloorOf(world);
+  const tower = towerSpanOf(world);
 
   // The canvas host only takes its size once this class is on, and the renderer
   // measures the host as it initializes, so the class goes on first.
@@ -51,7 +104,8 @@ async function start(): Promise<void> {
 
   let renderer: Renderer;
   try {
-    renderer = await createRenderer(view, world, { crowd: 'all' });
+    // No load fade: the hero's own daytime sky (site.css) is under the canvas already (D-34).
+    renderer = await createRenderer(view, world, { crowd: 'all', fadeIn: false });
   } catch (e) {
     hero.classList.remove('has-canvas');
     console.warn('hero: no tower today', e);
@@ -60,7 +114,18 @@ async function start(): Promise<void> {
 
   if (shot) shot.style.display = 'none';
   renderer.setPanEnabled(false);
-  renderer.camera.centerOn(START_FLOOR, CENTER_TILE);
+
+  const panel = hero.querySelector('.hero-panel');
+  const sideBySide = window.matchMedia(HERO_SIDE_BY_SIDE);
+  let centerTile = CENTER_TILE;
+  const measure = (): void => {
+    const box = hero.getBoundingClientRect();
+    const panelBox = panel ? panel.getBoundingClientRect() : null;
+    centerTile = heroCenterTile(box, panelBox, sideBySide.matches, tower);
+  };
+  measure();
+  window.addEventListener('resize', measure);
+  renderer.camera.centerOn(START_FLOOR, centerTile);
 
   let elapsed = 0;
   let last = performance.now();
@@ -74,11 +139,13 @@ async function start(): Promise<void> {
     last = now;
     elapsed += dt;
 
-    animateDemo(world, dt, { minutesPerMs: MINUTES_PER_MS, fire: false });
+    // The clock is set, not run: the loop holds the tower in daylight with the evening as the payoff.
+    world.time.minute = heroMinute(elapsed);
+    animateDemo(world, dt, { minutesPerMs: 0, fire: false });
     // The camera is ours every frame: this also undoes any key panning the
     // renderer's own window listeners picked up from someone reading the page.
     renderer.camera.clearKeys();
-    renderer.camera.centerOn(driftFloor(elapsed, top), CENTER_TILE);
+    renderer.camera.centerOn(driftFloor(elapsed, top), centerTile);
     renderer.render(world, 1);
 
     frameHandle = requestAnimationFrame(frame);
@@ -118,6 +185,7 @@ async function start(): Promise<void> {
     () => {
       destroyed = true;
       sync();
+      window.removeEventListener('resize', measure);
       renderer.destroy();
     },
     { once: true },
@@ -126,10 +194,13 @@ async function start(): Promise<void> {
   sync();
 }
 
-start().catch((e: unknown) => {
-  // Nothing here is load bearing: put the still image back and say nothing louder.
-  document.getElementById('hero')?.classList.remove('has-canvas');
-  const shot = document.getElementById('hero-shot');
-  if (shot) shot.style.display = '';
-  console.warn('hero: disabled', e);
-});
+// Guarded so the helpers above import cleanly into tests, which run with no `document`.
+if (typeof document !== 'undefined') {
+  start().catch((e: unknown) => {
+    // Nothing here is load bearing: put the still image back and say nothing louder.
+    document.getElementById('hero')?.classList.remove('has-canvas');
+    const shot = document.getElementById('hero-shot');
+    if (shot) shot.style.display = '';
+    console.warn('hero: disabled', e);
+  });
+}

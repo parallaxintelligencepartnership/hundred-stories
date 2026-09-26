@@ -283,7 +283,8 @@ p {
   display: block;
   width: 100%;
   height: 320px;
-  background: #070b1a;
+  /* The game's day sky (src/render/sky.ts DAY_TOP to DAY_BOTTOM) until the first frame lands. */
+  background: linear-gradient(180deg, #9fd3f5 0%, #dcefff 100%);
   border-bottom: 1px solid #222222;
   /* The demo tower is decoration: it never takes a pointer or the scroll wheel. */
   pointer-events: none;
@@ -298,6 +299,12 @@ p {
 #hero-shot {
   width: 100%;
   border-bottom: 1px solid #222222;
+}
+
+/* Once the renderer is booting the still image steps out, so it never shares the hero's flex
+   row with the copy. If the renderer fails, hero.ts drops has-canvas and the image is back. */
+.hero.has-canvas #hero-shot {
+  display: none;
 }
 
 /* The copy sits in a lobby cell: white marble, outlined, on its own slab. */

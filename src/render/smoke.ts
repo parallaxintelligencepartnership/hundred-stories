@@ -123,6 +123,48 @@ export function buildDemoWorld(): World {
   return world;
 }
 
+/**
+ * The landing hero's tower (design pass D-35): a lobby, shops and fast food over it, a
+ * restaurant, two office floors, a hotel floor and two condo floors, one shaft with two cars, and
+ * a crowd of every everyday kind. buildDemoWorld stays as it is for ?smoke.
+ */
+export function buildHeroWorld(): World {
+  const world = createWorld(20260918);
+  world.time.minute = 10 * 60;
+  world.cash = 2_000_000;
+
+  for (let x = 110; x <= 149; x++) makeRoom(world, 'lobby', 1, x, 0);
+
+  // Nothing overlaps the shaft (x 146 to 149): the fast food ends at x 145, and the second
+  // floor 2 shop gave it the room.
+  makeRoom(world, 'shop', 2, 110, 8);
+  makeRoom(world, 'fastFood', 2, 146 - ROOMS.fastFood.width, 12);
+  makeRoom(world, 'restaurant', 3, 110, 12);
+  makeRoom(world, 'shop', 3, 134, 8);
+  for (const floor of [4, 5]) {
+    for (const x of [110, 119, 128, 137]) makeRoom(world, 'office', floor, x, 6);
+  }
+  makeRoom(world, 'hotelSuite', 6, 110, 2);
+  makeRoom(world, 'hotelTwin', 6, 120, 2);
+  makeRoom(world, 'hotelTwin', 6, 126, 2);
+  for (const x of [132, 136, 140]) makeRoom(world, 'hotelSingle', 6, x, 1);
+  for (const floor of [7, 8]) {
+    for (const x of [110, 126]) makeRoom(world, 'condo', floor, x, 3);
+  }
+
+  makeShaft(world, 'standard', 146, 1, 8, 2);
+
+  const kinds: SimKind[] = ['worker', 'resident', 'guest', 'shopper', 'staff', 'guard', 'visitor'];
+  for (let i = 0; i < 24; i++) {
+    const floor = 1 + (i % 8);
+    const x = 112 + ((i * 5) % 32);
+    const stress = (i % 5) * 0.22;
+    makeSim(world, kinds[i % kinds.length] as SimKind, floor, x, stress);
+  }
+
+  return world;
+}
+
 export interface DemoAnimationOptions {
   /** Game minutes per real millisecond. 0.12 is one demo day every twelve seconds. */
   minutesPerMs?: number;
@@ -130,8 +172,36 @@ export interface DemoAnimationOptions {
   fire?: boolean;
 }
 
+/**
+ * The span a demo walker paces on one floor, in tiles: that floor's own extent, its rooms (on
+ * floor 1 the whole lobby run) and the shaft tiles where a shaft reaches it. A walker is drawn one
+ * tile wide centered on pos.x, and can step up to 0.6 tiles past a bound in one 100 ms frame
+ * before it turns, so the left bound is 1.5 tiles in from the extent (the figure's left edge stays
+ * at least 0.4 tiles inside) and the right bound two tiles in from the rightmost tile (its right
+ * edge stays at least 0.9 tiles inside). The ?smoke lobby paces 101.5 to 176; the hero's floors
+ * 111.5 to 147. A floor with nothing on it keeps 101 to 176.
+ */
+export function walkRange(world: World, floor: number): { min: number; max: number } {
+  let left = Infinity;
+  let right = -Infinity;
+  const take = (x: number, width: number): void => {
+    left = Math.min(left, x);
+    right = Math.max(right, x + width - 1);
+  };
+  for (const room of world.rooms.values()) {
+    if (floor >= room.floor && floor < room.floor + room.height) take(room.x, room.width);
+  }
+  for (const shaft of world.shafts.values()) {
+    if (floor >= shaft.floorMin && floor <= shaft.floorMax) take(shaft.x, shaft.width);
+  }
+  if (left > right) return { min: 101, max: 176 };
+  return { min: left + 1.5, max: right - 2 };
+}
+
 interface DemoState {
   elapsed: number;
+  /** walkRange per floor, filled as walkers on each floor are first seen. */
+  ranges: Map<number, { min: number; max: number }>;
   dirs: Map<number, number>;
   shaft: Shaft | undefined;
   burning: Room | undefined;
@@ -154,6 +224,7 @@ export function animateDemo(world: World, dt: number, options: DemoAnimationOpti
   if (!state) {
     state = {
       elapsed: 0,
+      ranges: new Map(),
       dirs: new Map<number, number>(),
       shaft: [...world.shafts.values()][0],
       burning: [...world.rooms.values()].find((r) => r.kind === 'office' && r.floor === 3),
@@ -168,8 +239,13 @@ export function animateDemo(world: World, dt: number, options: DemoAnimationOpti
   for (const sim of world.sims.values()) {
     const dir = state.dirs.get(sim.id) ?? 1;
     sim.pos.x += dir * dt * 0.006;
-    if (sim.pos.x > 176) state.dirs.set(sim.id, -1);
-    if (sim.pos.x < 101) state.dirs.set(sim.id, 1);
+    let range = state.ranges.get(sim.pos.floor);
+    if (!range) {
+      range = walkRange(world, sim.pos.floor);
+      state.ranges.set(sim.pos.floor, range);
+    }
+    if (sim.pos.x > range.max) state.dirs.set(sim.id, -1);
+    if (sim.pos.x < range.min) state.dirs.set(sim.id, 1);
     sim.stress = (sim.stress + dt * 0.00002) % 1;
   }
 
