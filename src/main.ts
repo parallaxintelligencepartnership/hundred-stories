@@ -4,6 +4,7 @@ import { createGame } from './game/game';
 import { createSteam } from './steam/steam';
 import { parseWeatherQuery, setForcedWeather } from './render/weather';
 import { MAX_START } from './share/share';
+import { createNotifier, pageNotifyEnv, watchForUpdate, type Notifier } from './ui/notify';
 
 export interface BootDeps {
   createRenderer: typeof createRenderer;
@@ -17,6 +18,10 @@ export interface BootDeps {
   native?: () => boolean;
   /** Steam achievements; inert outside the Tauri desktop shell. Called once the game runs. */
   createSteam?: (game: ReturnType<typeof createGame>) => unknown;
+  /** The web's opt in notifications (src/ui/notify.ts). Never called inside a shell. */
+  createNotifier?: () => Notifier | null;
+  /** Call onReady once a new version has installed over this one. Never called inside a shell. */
+  watchUpdates?: (onReady: () => void) => void;
 }
 
 // The globals the shells inject before the page loads, read directly so the web bundle imports
@@ -93,6 +98,10 @@ const defaultDeps: BootDeps = {
   search: () => location.search,
   native: () => inShell(),
   createSteam,
+  createNotifier: () => createNotifier(pageNotifyEnv()),
+  watchUpdates: (onReady) => {
+    watchForUpdate(navigator.serviceWorker, onReady);
+  },
 };
 
 export async function boot(app: HTMLElement, deps: BootDeps = defaultDeps): Promise<void> {
@@ -138,9 +147,13 @@ export async function boot(app: HTMLElement, deps: BootDeps = defaultDeps): Prom
   game.attach(renderer, view);
   // The ui subscribes its own update() to the game and drops it on destroy, so boot adds
   // no second subscription: one notify is one HUD refresh.
-  deps.createUi(uiRoot, game, renderer);
+  // The shells have no service worker and their own notices: none of the web's notifications.
+  const web = !deps.native?.();
+  const notifier = web ? (deps.createNotifier?.() ?? null) : null;
+  const ui = deps.createUi(uiRoot, game, renderer, { notifier });
   game.start();
   deps.createSteam?.(game);
+  if (web) deps.watchUpdates?.(() => ui?.updateReady?.());
 }
 
 if (!import.meta.env.TEST) {

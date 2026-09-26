@@ -170,4 +170,33 @@ describe('boot', () => {
     expect(seen).toEqual([game]);
     expect(order).toEqual(['start', 'steam']);
   });
+
+  it('on the web hands the ui a notifier and tells it when a new version is ready; a shell gets neither', async () => {
+    for (const native of [false, true]) {
+      const seen: { notifier: unknown; ready: number; watched: number } = { notifier: undefined, ready: 0, watched: 0 };
+      const notifier = { id: 'notifier' };
+      await boot(
+        fakeApp(),
+        baseDeps({
+          native: () => native,
+          createGame: (() => ({
+            world: { log: [], time: { minute: 0 } },
+            load: async () => ({ ok: false, reason: 'none' }),
+            attach: () => {},
+            start: () => {},
+          })) as never,
+          createNotifier: () => notifier as never,
+          watchUpdates: (onReady) => {
+            seen.watched += 1;
+            onReady();
+          },
+          createUi: ((_root: HTMLElement, _g: unknown, _r: unknown, options: { notifier: unknown }) => {
+            seen.notifier = options.notifier;
+            return { update: () => {}, destroy: () => {}, updateReady: () => (seen.ready += 1) };
+          }) as never,
+        }),
+      );
+      expect(seen).toEqual(native ? { notifier: null, ready: 0, watched: 0 } : { notifier, ready: 1, watched: 1 });
+    }
+  });
 });

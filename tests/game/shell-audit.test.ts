@@ -390,6 +390,14 @@ describe('D S8: saves while paused and when the page is hidden or closed', () =>
     game.stop();
   });
 
+  it('flush, before a reload into a new version, has all 11 rooms on disk once it resolves, with no log line', async () => {
+    const { game, ls } = await pausedWithTenUnsaved();
+    const lines = game.world.log.length;
+    await game.flush!();
+    expect(roomsOnDisk(ls)).toBe(11);
+    expect(game.world.log.length).toBe(lines);
+  });
+
   it('a build while paused schedules an idle save, and pausing saves a tower that moved', async () => {
     const ls = fakeLocalStorage();
     vi.stubGlobal('localStorage', ls.store);

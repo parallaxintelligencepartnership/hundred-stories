@@ -4,6 +4,7 @@
 import { hapticsEnabled, setHapticsEnabled } from './haptics';
 import type { Sound } from '../audio/audio';
 import type { GameApi } from '../game/api';
+import { NOTIFY_KINDS, NOTIFY_LABEL, NOTIFY_NOTE, NOTIFY_TIP, type Notifier } from './notify';
 import {
   exportImageWithDialog,
   exportSaveWithDialog,
@@ -104,6 +105,8 @@ export interface PanelContext {
    * the part of the ui that shows it (larger text, the color-blind views) to follow at once.
    */
   setDisplay?: (name: DisplaySwitch, on: boolean) => void;
+  /** The web's notifications (src/ui/notify.ts); none in the native shells, so no section there. */
+  notifications?: Pick<Notifier, 'isOn' | 'turnOn' | 'turnOff'>;
 }
 
 const NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];
@@ -1506,15 +1509,13 @@ export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElem
       applyGlassClear(on);
       ctx.setDisplay?.('glassClear', on);
     }).row,
-    // Watch mode: after 20 s idle the chrome steps aside, all but the clock (src/ui/watch.ts,
-    // which hears the write). Off by default.
-    switchRow('hs-watch-mode', 'Watch mode', getFlag(PREF_KEYS.watchMode) === true, (on) => {
-      setFlag(PREF_KEYS.watchMode, on);
-    }).row,
+    // Watch mode is the round Watch button under Views on the game view (src/ui/watch.ts).
     // Vibration (haptics), last: on by default (src/ui/haptics.ts).
     switchRow('hs-haptics', 'Vibration', hapticsEnabled(), (on) => setHapticsEnabled(on)).row,
   );
   main.append(display.node);
+
+  if (ctx.notifications) main.append(notificationsSection(ctx.notifications));
 
   // Help: the intro again, the guide page, and the Controls page.
   const help = settingsGroup('Help');
@@ -1562,6 +1563,39 @@ export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElem
 }
 
 /** Sound on or off, and its three levels. Off by default; nothing plays until it is on. */
+/**
+ * Notifications: three switches, each off by default. Turning one on asks the browser, from this
+ * click and never before; when it says no, or cannot show them at all, the switch goes back off
+ * and a short line under it says why.
+ */
+function notificationsSection(notifications: NonNullable<PanelContext['notifications']>): HTMLDivElement {
+  const group = settingsGroup('Notifications', NOTIFY_NOTE);
+  for (const kind of NOTIFY_KINDS) {
+    const why = el('p', 'hs-note hs-set-why');
+    why.id = `hs-notify-${kind}-why`;
+    why.setAttribute('aria-live', 'polite');
+    why.hidden = true;
+    const toggle = switchRow(`hs-notify-${kind}`, NOTIFY_LABEL[kind], notifications.isOn(kind), (on) => {
+      why.hidden = true;
+      why.textContent = '';
+      if (!on) {
+        notifications.turnOff(kind);
+        return;
+      }
+      void notifications.turnOn(kind).then((reason) => {
+        if (reason === null) return;
+        toggle.set(false);
+        why.textContent = reason;
+        why.hidden = false;
+      });
+    });
+    toggle.row.title = NOTIFY_TIP[kind];
+    toggle.control.setAttribute('aria-describedby', why.id);
+    group.list.append(toggle.row, why);
+  }
+  return group.node;
+}
+
 function soundSection(sound: Sound): HTMLDivElement {
   const group = settingsGroup('Sound');
   const levels: HTMLInputElement[] = [];

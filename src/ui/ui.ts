@@ -67,11 +67,21 @@ import { pageRoot, watchDisplayPrefs } from './display';
 import { createPageHaptics, hapticsEnabled } from './haptics';
 import { createGamepadInput, pageGamepadDeps, type GamepadInput, type PadDirection } from './gamepad';
 import { focusablesIn, SHEET_CARD_MIN_WIDTH } from './sheet';
-import { createWatchMode } from './watch';
+import { createWatchMode, createWatchToggle } from './watch';
+import { UPDATE_TEXT, type Notifier } from './notify';
 
 export interface Ui {
   destroy(): void;
   update(): void;
+  /** A new version has installed: say so once, with a way to reload into it. */
+  updateReady(): void;
+}
+
+export interface UiOptions {
+  /** The web's notifications (main.ts makes none in the native shells or in tests). */
+  notifier?: Notifier | null;
+  /** Load the page again. The page's own reload unless a test hands in another. */
+  reload?: () => void;
 }
 
 type PanelKind = 'none' | 'finances' | 'log' | 'settings' | 'share' | 'intro' | 'stories' | 'recap' | 'chronicle' | 'daily';
@@ -185,7 +195,11 @@ export function selectionClearX(
   return over > 0 ? camera.x + over / camera.zoom : null;
 }
 
-export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): Ui {
+export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, options: UiOptions = {}): Ui {
+  const notifier = options.notifier ?? null;
+  const reload = options.reload ?? (() => location.reload());
+  /** The new version toast is said once per page. */
+  let updateToldAt: HTMLElement | null = null;
   let reducedMotion = readReducedMotion();
   // Sound is off by default and builds nothing until the player turns it on and touches the page.
   const sound = createSound(game);
@@ -316,6 +330,10 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
 
   pill.append(status.cash, status.population, status.stars, status.clock, hoverReadout);
   top.append(view.chip);
+  // Watch mode's round button, under Views (placeWatchButton; on a phone, where Views lives in
+  // Settings, under the pill on the right). It steps aside with the rest of the chrome.
+  const watchToggle = createWatchToggle();
+  top.append(watchToggle.button);
 
   // Speed: one segmented pill of icons. The keys stay: space pauses, comma and period step.
   const speedBar = el('div', 'hs-speed');
@@ -626,6 +644,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
       // The switch is already stored; Larger text and the color-blind views follow at once.
       if (name === 'largeText' || name === 'colorBlind') display.refresh();
     },
+    ...(notifier ? { notifications: notifier } : {}),
     select(sel) {
       // A name in a list is a way into that person: the list's panel steps aside for theirs.
       if (panelKind !== 'none') panelKind = 'none';
@@ -647,7 +666,10 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     viewSize = null; // the chrome moved, so the view may have too
     game.setChrome(band.top, band.bottom);
     refreshPlacement();
-  }, placeGoalsPill);
+  }, (shellRect) => {
+    placeGoalsPill(shellRect);
+    placeWatchButton();
+  });
   // Larger text and color-blind friendly views, now and whenever Settings changes them.
   const display = watchDisplayPrefs({
     root: pageRoot(),
@@ -1179,6 +1201,18 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     card.node.style.setProperty('--pill-right', `${Math.round(view.right - to.right)}px`);
   }
 
+  /**
+   * The Watch button sits centered under Views: its middle, from the top bar's left edge. Where
+   * Views is not laid out (a phone keeps it in Settings) ui.css puts it on the right instead.
+   */
+  function placeWatchButton(): void {
+    const views = view.button.getBoundingClientRect();
+    const bar = top.getBoundingClientRect();
+    const placed = views.width > 0;
+    watchToggle.button.classList.toggle('is-placed', placed);
+    if (placed) watchToggle.button.style.setProperty('--watch-x', `${Math.round(views.left + views.width / 2 - bar.left)}px`);
+  }
+
   /** The view, a media query or a font changed under the chip and the bar: measure them again. */
   function onPlacementResize(): void {
     cardEdge = null;
@@ -1428,7 +1462,11 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     const fresh = Math.min(total - lastLogTotal, log.length);
     for (let i = log.length - fresh; i < log.length; i += 1) {
       const entry = log[i];
-      if (entry && entry.level === 'alert') alerts.onAlert(entry);
+      if (entry && entry.level === 'alert') {
+        alerts.onAlert(entry);
+        // Hidden, the system says it too (when the player turned Alerts on); visible, the card is the notice.
+        notifier?.alert(entry.text);
+      }
       if (entry && !demoCap.offered && isDemoCapEntry(entry)) demoCap.offer();
     }
     lastLogTotal = total;
@@ -1733,12 +1771,39 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer): 
     }
   }
 
+  // A tap on a notification brought the game forward; an alert's also opens the news.
+  notifier?.onTap((kind) => {
+    if (destroyed || kind !== 'alerts') return;
+    setPanel('log');
+    update();
+  });
+
+  /**
+   * A new version has installed. The toast stays until tapped, and a tap saves what moved and
+   * then reloads: the pagehide save is fire and forget, so it is not trusted to finish first.
+   */
+  function updateReady(): void {
+    if (destroyed || updateToldAt) return;
+    updateToldAt = toastLayer.alert(UPDATE_TEXT, {
+      className: 'is-update',
+      action: 'Reload',
+      tapLabel: 'Reload to get the new version',
+      onTap: () => {
+        const flushed = game.flush?.() ?? Promise.resolve();
+        void flushed.catch(() => {}).finally(() => reload());
+      },
+    });
+    notifier?.updateReady();
+  }
+
   return {
     update,
+    updateReady,
     destroy() {
       destroyed = true;
       if (selectionRaf) cancelAnimationFrame(selectionRaf);
       watch.destroy();
+      watchToggle.destroy();
       display.stop();
       unsubscribeHaptics?.();
       pad?.destroy();

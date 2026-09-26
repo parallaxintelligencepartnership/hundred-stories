@@ -1,8 +1,8 @@
 // Watch mode (design pass 2026-09-25, BB-5): after 20 s with no pointer, key or pad input and
 // nothing open, the chrome steps aside (the top bar but the clock, the dock, the goals card and
-// the map fade out over 400 ms); any input brings it back at once. Off by default, a switch in
-// Settings named "Watch mode", remembered with the other prefs. Under reduced motion there is
-// no fade.
+// the map fade out over 400 ms); any input brings it back at once. Off by default, a round
+// Watch button under Views on the game view (no longer a Settings switch), remembered with the
+// other prefs. Under reduced motion there is no fade.
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PAD_BUTTONS, type PadLike } from '../../src/ui/gamepad';
@@ -12,7 +12,7 @@ import { ROOMS } from '../../src/sim/rules';
 import type { RoomKind } from '../../src/sim/types';
 import { addRoom, allocId, createWorld } from '../../src/sim/world';
 import { createUi } from '../../src/ui/ui';
-import { WATCH_CLASS, WATCH_FADE_MS, WATCH_IDLE_MS } from '../../src/ui/watch';
+import { WATCH_CLASS, WATCH_FADE_MS, WATCH_IDLE_MS, WATCH_TIP } from '../../src/ui/watch';
 import { FakeDom, type FakeElement } from './fake-dom';
 
 // ------------------------------------------------------------ the stylesheet, read as a browser would
@@ -143,6 +143,8 @@ function mount(calls: string[] = []): { root: FakeElement; shell: FakeElement; u
 }
 
 const watching = (shell: FakeElement): boolean => shell.classList.contains(WATCH_CLASS);
+const watchButton = (root: FakeElement): FakeElement =>
+  root.descendants().find((n) => n.tagName === 'BUTTON' && n.getAttribute('aria-label') === 'Watch')!;
 const menuButton = (root: FakeElement): FakeElement =>
   root.descendants().find((n) => n.tagName === 'BUTTON' && n.getAttribute('aria-label') === 'Menu')!;
 const click = (node: FakeElement): void => (node.listeners.get('click') ?? []).forEach((f) => f({}));
@@ -176,28 +178,38 @@ function pad(held: (keyof typeof PAD_BUTTONS)[] = []): PadLike {
 }
 
 describe('watch mode', () => {
-  it('is off by default: the Settings switch reads "Watch mode", unchecked, and nothing is stored', () => {
+  it('is off by default: the Watch button under Views reads not pressed, and nothing is stored', () => {
     expect(getFlag(PREF_KEYS.watchMode)).toBe(null);
-    const ctx = { apply: () => ({ ok: true }), notice() {}, close() {}, reducedMotion: false, setReducedMotion() {} } as unknown as PanelContext;
-    const panel = createSettingsPanel({ world: { seed: 1, log: [], logTotal: 0 } } as never, ctx) as unknown as FakeElement;
-    const control = panel.descendants().find((n) => n.id === 'hs-watch-mode') as FakeElement;
-    expect(control.getAttribute('role')).toBe('switch');
-    expect(control.getAttribute('aria-checked')).toBe('false');
-    const label = panel.descendants().find((n) => n.tagName === 'LABEL' && n.textContent === 'Watch mode') as unknown as { htmlFor: string };
-    expect(label.htmlFor).toBe('hs-watch-mode');
-    click(control);
+    const { root } = mount();
+    const button = watchButton(root);
+    expect(classesOf(button)).toEqual(expect.arrayContaining(['hs-icon-btn', 'hs-round', 'hs-watch-btn']));
+    expect(button.getAttribute('aria-pressed')).toBe('false');
+    expect(button.title).toBe(WATCH_TIP);
+    expect(WATCH_TIP).toContain('20 seconds');
+    // In the top bar, beside the Views button's row rather than inside it.
+    const top = root.descendants().find((n) => n.className === 'hs-top') as FakeElement;
+    expect(top.children).toContain(button);
+    click(button);
     expect(PREF_KEYS.watchMode).toBe('hs.watchMode');
-    expect(getFlag(PREF_KEYS.watchMode)).toBe(true);
+    expect([getFlag(PREF_KEYS.watchMode), button.getAttribute('aria-pressed')]).toEqual([true, 'true']);
   });
 
-  it('the Settings switch turns Watch mode off again: a second click stores false and reads unchecked', () => {
+  it('the Watch button turns Watch mode off again, and follows the pref however it changes', () => {
+    const { root, shell } = mount();
+    const button = watchButton(root);
+    click(button);
+    vi.advanceTimersByTime(WATCH_IDLE_MS);
+    expect(watching(shell)).toBe(true);
+    click(button);
+    expect([getFlag(PREF_KEYS.watchMode), button.getAttribute('aria-pressed'), watching(shell)]).toEqual([false, 'false', false]);
+    setFlag(PREF_KEYS.watchMode, true);
+    expect(button.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('Settings no longer has a Watch mode switch', () => {
     const ctx = { apply: () => ({ ok: true }), notice() {}, close() {}, reducedMotion: false, setReducedMotion() {} } as unknown as PanelContext;
     const panel = createSettingsPanel({ world: { seed: 1, log: [], logTotal: 0 } } as never, ctx) as unknown as FakeElement;
-    const control = panel.descendants().find((n) => n.id === 'hs-watch-mode') as FakeElement;
-    click(control);
-    expect([getFlag(PREF_KEYS.watchMode), control.getAttribute('aria-checked')]).toEqual([true, 'true']);
-    click(control);
-    expect([getFlag(PREF_KEYS.watchMode), control.getAttribute('aria-checked')]).toEqual([false, 'false']);
+    expect(panel.descendants().some((n) => n.id === 'hs-watch-mode' || n.textContent === 'Watch mode')).toBe(false);
   });
 
   it('never hides the chrome while it is off', () => {
@@ -483,11 +495,11 @@ describe('watch mode on the page, with ui.css applied', () => {
     const hover = find('hs-hover-card');
     expect(classesOf(hover)).not.toContain('is-hidden'); // the office's card is up
     const clock = find('hs-status-clock');
-    const parts = ['hs-status-cash', 'hs-top-actions', 'hs-palette', 'hs-card', 'hs-hover-card'].map(find);
+    const parts = ['hs-status-cash', 'hs-top-actions', 'hs-watch-btn', 'hs-palette', 'hs-card', 'hs-hover-card'].map(find);
     expect([hiddenByWatch(hover), hiddenByWatch(clock)]).toEqual([false, false]);
 
     vi.advanceTimersByTime(WATCH_IDLE_MS);
-    expect(parts.map(hiddenByWatch)).toEqual([true, true, true, true, true]);
+    expect(parts.map(hiddenByWatch)).toEqual([true, true, true, true, true, true]);
     expect(hiddenByWatch(clock)).toBe(false);
     expect(watchRule().body).toContain('opacity: 0;');
     expect(watchRule().body).toContain('pointer-events: none;');
@@ -495,7 +507,7 @@ describe('watch mode on the page, with ui.css applied', () => {
     expect(resolvedVar(shell, '--watch-fade')).toBe(`${WATCH_FADE_MS}ms`);
 
     dom.fireWindow('pointermove', { type: 'pointermove', pointerType: 'mouse', clientX: 302, clientY: 300, target: { tagName: 'CANVAS' } });
-    expect(parts.map(hiddenByWatch)).toEqual([false, false, false, false, false]);
+    expect(parts.map(hiddenByWatch)).toEqual([false, false, false, false, false, false]);
   });
 
   it('under reduced motion hides at once: only the watch class goes on, nothing inline, and the fade is 0 ms', () => {
@@ -531,7 +543,7 @@ describe('watch mode styles', () => {
   it('fades the top bar but the clock, the dock, the goals card and the map over 400 ms', () => {
     expect(block(':root {')).toContain(`--watch-fade: ${WATCH_FADE_MS}ms;`);
     const hide = block(`.hs-ui.${WATCH_CLASS} :is(`);
-    for (const part of ['.hs-status-pill > :not(.hs-status-clock)', '.hs-top-actions', '.hs-view-chip', '.hs-palette', '.hs-build-fab', '.hs-card', '.hs-minimap', '.hs-hover-card']) {
+    for (const part of ['.hs-status-pill > :not(.hs-status-clock)', '.hs-top-actions', '.hs-watch-btn', '.hs-view-chip', '.hs-palette', '.hs-build-fab', '.hs-card', '.hs-minimap', '.hs-hover-card']) {
       expect(hide).toContain(part);
     }
     expect(hide).toContain('opacity: 0;');

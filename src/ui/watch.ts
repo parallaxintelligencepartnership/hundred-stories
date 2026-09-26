@@ -4,12 +4,14 @@
 // map and the hover card out over --watch-fade, and they take no clicks. Any input takes the
 // class off at once, and that first input only brings the chrome back: the key, the tap (its
 // press, release and click) or the pad press is not passed on to anything under it. Off by
-// default: a Settings switch, remembered in prefs.ts. Reduced motion is ui.css's business.
+// default: the round Watch button under Views (createWatchToggle below), remembered in prefs.ts.
+// Reduced motion is ui.css's business.
 //
 // The chrome rule "controls never move or hide" still holds while it is off, which is today's
 // behavior, and while anything is open (a panel, a card, a menu), since then the player is busy.
 
-import { PREF_KEYS, getFlag, onPrefChange } from './prefs';
+import { icon } from './icons';
+import { PREF_KEYS, getFlag, onPrefChange, setFlag } from './prefs';
 
 /** Real milliseconds without input before the chrome steps aside. */
 export const WATCH_IDLE_MS = 20_000;
@@ -28,6 +30,40 @@ const GESTURE_EVENTS = ['pointerup', 'pointercancel', 'click'] as const;
 /** Is Watch mode on? Off by default, and when the store will not answer. */
 export function readWatchMode(): boolean {
   return getFlag(PREF_KEYS.watchMode) === true;
+}
+
+/** The Watch button's tooltip: what turning it on does. */
+export const WATCH_TIP = 'Watch mode: after 20 seconds with no input, the buttons step aside so you can watch the tower. Any touch or key brings them back.';
+
+export interface WatchToggle {
+  /** The round Watch button, for under Views. aria-pressed says whether Watch mode is on. */
+  button: HTMLButtonElement;
+  destroy(): void;
+}
+
+/**
+ * The Watch button on the game view. A tap writes the same pref the Settings switch used to,
+ * so createWatchMode hears it as before; the button follows the pref however it changes.
+ */
+export function createWatchToggle(): WatchToggle {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'hs-icon-btn hs-round hs-watch-btn';
+  const label = document.createElement('span');
+  label.className = 'hs-btn-label';
+  label.textContent = 'Watch';
+  button.append(icon('watch', 'hs-icon hs-btn-icon') as unknown as HTMLElement, label);
+  button.setAttribute('aria-label', 'Watch');
+  button.title = WATCH_TIP;
+  const paint = (): void => {
+    button.setAttribute('aria-pressed', readWatchMode() ? 'true' : 'false');
+  };
+  paint();
+  button.addEventListener('click', () => setFlag(PREF_KEYS.watchMode, !readWatchMode()));
+  const stop = onPrefChange((key) => {
+    if (key === PREF_KEYS.watchMode) paint();
+  });
+  return { button, destroy: stop };
 }
 
 export interface WatchModeOptions {

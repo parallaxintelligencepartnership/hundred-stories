@@ -41,7 +41,9 @@ export type IconName =
   | 'noise'
   | 'vacancy'
   | 'wait'
-  | 'chevron';
+  | 'chevron'
+  // Watch mode: an open eye.
+  | 'watch';
 
 /** A 16 by 16 drawing per icon, 1.5 px lines in the current text color. */
 const LINE = 'fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"';
@@ -91,6 +93,8 @@ const SYMBOLS: Record<IconName, string> = {
   wait: `<path d="M4 1.75h8M4 14.25h8M5 1.75c0 3.5 6 3.25 6 6.25S5 11 5 14.25M11 14.25c0-1.75-1.5-2.5-3-3" ${LINE}/>`,
   // A small chevron pointing down: the collapsed goals pill opens downward.
   chevron: `<path d="M4.5 6.25L8 9.75l3.5-3.5" ${LINE}/>`,
+  // An open eye: Watch mode, under Views.
+  watch: `<path d="M1.5 8c1.6-3 3.8-4.5 6.5-4.5S12.9 5 14.5 8c-1.6 3-3.8 4.5-6.5 4.5S3.1 11 1.5 8z" ${LINE}/><circle cx="8" cy="8" r="2" ${LINE}/>`,
 };
 
 export const ICON_NAMES = Object.keys(SYMBOLS) as IconName[];

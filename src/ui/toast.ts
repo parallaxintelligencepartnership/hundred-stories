@@ -24,6 +24,8 @@ export interface ToastOptions {
   time?: string;
   /** Extra classes, e.g. is-story. */
   className?: string;
+  /** An alert only: the word its tap does (e.g. Reload), shown where the close x would be. */
+  action?: string;
 }
 
 export interface Toasts {
@@ -137,7 +139,8 @@ export function createToasts(): Toasts {
     node.type = 'button';
     if (options.className) for (const c of options.className.split(/\s+/).filter(Boolean)) node.classList.add(c);
     body(node, text, options);
-    node.append(icon('close', 'hs-icon hs-alert-toast-x') as unknown as HTMLElement);
+    if (options.action) node.append(el('span', 'hs-toast-action', options.action));
+    else node.append(icon('close', 'hs-icon hs-alert-toast-x') as unknown as HTMLElement);
     const label = options.tapLabel ?? 'Tap to close';
     node.title = label;
     node.addEventListener('click', () => {

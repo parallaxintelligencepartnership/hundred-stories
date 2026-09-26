@@ -227,6 +227,24 @@ describe('views in the shell', () => {
     expect(has(shell, 'has-view')).toBe(false);
   });
 
+  it('puts the round Watch button centered under Views, out of the bar\'s flow, and on the right on a phone', () => {
+    const root = dom.createElement('div');
+    createUi(root as never, fakeGame(), {} as never);
+    const top = root.descendants().find((n) => n.className === 'hs-top')!;
+    const watch = top.children.find((n) => has(n, 'hs-watch-btn'))!;
+    expect(has(watch, 'hs-round')).toBe(true);
+    // Measured once at mount: the fake Views button is 120 px wide from the bar's left edge.
+    expect(has(watch, 'is-placed')).toBe(true);
+    expect(watch.style['--watch-x']).toBe('60px');
+    expect(css).toMatch(/\.hs-watch-btn \{\s*position: absolute;\s*top: calc\(100% \+ var\(--gap-float\)\);/);
+    expect(css).toMatch(/\.hs-watch-btn\.is-placed \{\s*right: auto;\s*left: var\(--watch-x\);\s*translate: -50% 0;/);
+    const phone = css.slice(css.indexOf('@media (max-width: 720px) {\n  /* The top bar on a phone'));
+    expect(phone).toMatch(/\.hs-watch-btn,\s*\.hs-watch-btn\.is-placed \{\s*left: auto;\s*right: 0;/);
+    // The open side card on a wide screen starts under it.
+    const wide = css.slice(css.indexOf('@media (min-width: 721px) {\n/* The collapsed goals card'));
+    expect(wide.slice(0, wide.indexOf('@media', 1))).toMatch(/\.hs-card:not\(\.is-collapsed\) \{\s*top: calc\([^;]*var\(--touch\) \+ 8px\);/);
+  });
+
   it('closes the list on Escape before the key does anything else', () => {
     const root = dom.createElement('div');
     const tools: unknown[] = [];

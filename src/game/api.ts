@@ -107,6 +107,11 @@ export interface GameApi {
   confirmPending(): CommandResult;
   cancelPending(): void;
   save(): Promise<CommandResult>;
+  /**
+   * Save what moved since the last save, quietly (no log line), and resolve once it is written:
+   * before the page reloads itself. Nothing to save resolves at once.
+   */
+  flush?(): Promise<void>;
   load(): Promise<CommandResult>;
   exportSave(): string;
   /**

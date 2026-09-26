@@ -1039,6 +1039,13 @@ button.hs-readout:hover {
   right: var(--pill-right, calc(var(--edge) + var(--safe-right)));
 }
 
+/* Open, the side card starts under the Watch button, which sits under Views in its corner;
+   folded, the goals pill sits under Share and Menu beside it. */
+.hs-card:not(.is-collapsed) {
+  top: calc(var(--top-actual, calc(var(--top-h) + var(--safe-top))) + 2 * var(--gap-float) + var(--touch) + 8px);
+  max-height: calc(100% - var(--top-actual, var(--top-h)) - 2 * var(--gap-float) - var(--touch) - 8px - 2 * var(--edge) - var(--safe-bottom));
+}
+
 .hs-palette.is-collapsed {
   width: var(--rail-w);
   bottom: auto;
@@ -2035,8 +2042,15 @@ button.hs-readout:hover {
   text-decoration: none;
 }
 
-.hs-set-row + .hs-set-row {
+.hs-set-row + .hs-set-row,
+.hs-set-why + .hs-set-row {
   border-top: 1px solid var(--hairline);
+}
+
+/* Why a Notifications switch stayed off: one short line under it, inside the list. */
+.hs-set-why {
+  margin: 0;
+  padding: 0 14px 10px;
 }
 
 .hs-set-action {
@@ -2599,6 +2613,18 @@ a.hs-btn {
   flex: 1 1 auto;
 }
 
+/* The new version notice (ui.ts updateReady): news, not trouble, so no red edge; its tap
+   reloads, and the word says so where an alert's x would be. */
+.hs-alert-toast.is-update {
+  box-shadow: var(--shadow-2), inset 3px 0 0 var(--amber-text);
+}
+
+.hs-toast-action {
+  flex: none;
+  font-weight: 600;
+  color: var(--amber-text);
+}
+
 /* The news: small glass toasts centred above the bottom edge, at most two (toast.ts). */
 .hs-news {
   position: absolute;
@@ -2735,6 +2761,25 @@ button.hs-news-toast {
 }
 
 .hs-views-btn.is-on {
+  box-shadow: var(--shadow-1), inset 0 0 0 2px var(--amber-text);
+}
+
+/* Watch: round like Views and centered under it (ui.ts placeWatchButton), out of the bar's flow
+   so it never moves the bar or the tower. Until the first measure it waits on the right. Amber
+   edge while Watch mode is on, like Views with a view on. */
+.hs-watch-btn {
+  position: absolute;
+  top: calc(100% + var(--gap-float));
+  right: 0;
+}
+
+.hs-watch-btn.is-placed {
+  right: auto;
+  left: var(--watch-x);
+  translate: -50% 0;
+}
+
+.hs-watch-btn[aria-pressed='true'] {
   box-shadow: var(--shadow-1), inset 0 0 0 2px var(--amber-text);
 }
 
@@ -3028,6 +3073,15 @@ button.hs-news-toast {
   .hs-views-btn,
   .hs-round[aria-label='Share'] {
     display: none;
+  }
+
+  /* No Views here, so Watch sits under the pill on the right, in the column the map and the
+     alerts already leave free (the map moves under it, below). */
+  .hs-watch-btn,
+  .hs-watch-btn.is-placed {
+    left: auto;
+    right: 0;
+    translate: none;
   }
 
   /* Where one row would reach Build (under 390 px, or with Larger text at any phone width) the
@@ -3512,10 +3566,14 @@ button.hs-news-toast {
     --chip-h: calc(var(--touch) + 30px + var(--gap-float));
   }
 
-  /* The palette owns the bottom of a phone screen, so the hint sits under the top strip. */
+  /* The palette owns the bottom of a phone screen, so the hint sits under the top strip, on
+     the left: the right column under the pill is Watch's and the map's. */
   .hs-hint {
     top: calc(var(--top-actual, calc(var(--top-h) * 2 + var(--safe-top))) + var(--gap-float) + var(--chip-h, 0px));
     bottom: auto;
+    left: calc(var(--edge) + var(--safe-left));
+    transform: none;
+    max-width: calc(100% - 64px - 3 * var(--edge) - var(--safe-left) - var(--safe-right));
   }
 
   /* The sheet and a panel share the bottom of a phone screen, so only one shows at a time. */
@@ -3678,13 +3736,15 @@ button.hs-news-toast {
      under the status bar and clear of the controls hint while it shows. It shows only while
      the camera moves (minimap.ts). */
   .hs-minimap {
-    top: calc(var(--top-actual, calc(var(--top-h) * 2 + var(--safe-top))) + var(--gap-float));
+    top: calc(var(--top-actual, calc(var(--top-h) * 2 + var(--safe-top))) + 2 * var(--gap-float) + var(--touch) + 8px);
     bottom: auto;
     width: 64px;
   }
 
+  /* The hint leaves the right column to Watch and the map (.hs-hint above), so the map stays
+     where it is while the hint shows. */
   .hs-hint:not(.is-hidden) ~ .hs-minimap {
-    top: calc(var(--top-actual, calc(var(--top-h) * 2 + var(--safe-top))) + var(--pad) + 40px);
+    top: calc(var(--top-actual, calc(var(--top-h) * 2 + var(--safe-top))) + 2 * var(--gap-float) + var(--touch) + 8px);
   }
 
   /* A panel is the whole phone screen's business while it is open. */
@@ -3768,7 +3828,7 @@ button.hs-news-toast {
 
 /* Hidden, they take no clicks: the first input only brings them back (src/ui/watch.ts). The
    hover card goes with them. */
-.hs-ui.is-watching :is(.hs-status-pill > :not(.hs-status-clock), .hs-top-actions, .hs-view-chip, .hs-palette, .hs-build-fab, .hs-card, .hs-minimap, .hs-hover-card) {
+.hs-ui.is-watching :is(.hs-status-pill > :not(.hs-status-clock), .hs-top-actions, .hs-watch-btn, .hs-view-chip, .hs-palette, .hs-build-fab, .hs-card, .hs-minimap, .hs-hover-card) {
   opacity: 0;
   pointer-events: none;
   animation: hs-watch-hide var(--watch-fade) var(--ease-standard);

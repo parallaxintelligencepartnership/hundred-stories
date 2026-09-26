@@ -1091,6 +1091,12 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     cancelPending() {
       clearPending();
     },
+    async flush() {
+      // saveNow's write, awaited: the page is about to reload into a new version.
+      if (!dirty || holds > 0) return;
+      cancelScheduledSave();
+      await saveWorld('background');
+    },
     save() {
       // The player pressed Save, so this one logs; in a held My tower it is also the player
       // choosing the new tower over the save that would not open.

@@ -15,7 +15,8 @@ const APP_MODE = 'app';
 // landing site's Cloudflare headers, crawler files, social preview image and wordmark
 // exports. theme.js is not on this list — it is left for closeBundle to decide, since the
 // game page (play/index.html) references it.
-const APP_UNUSED_PUBLIC_FILES = ['_headers', 'robots.txt', 'sitemap.xml', 'og.png'];
+// notify-sw.js is the web service worker's notification tap handler; the shells have no worker.
+const APP_UNUSED_PUBLIC_FILES = ['_headers', 'robots.txt', 'sitemap.xml', 'og.png', 'notify-sw.js'];
 
 // The Capacitor and Tauri plugin code only ever loads inside a shell, through the dynamic imports
 // in src/game/storage.ts and src/steam/steam.ts. Each package gets a stable chunk named
@@ -116,6 +117,8 @@ export default defineConfig(({ mode }) => {
               ],
             },
             workbox: {
+              // A tap on one of the game's notifications focuses the game (src/ui/notify.ts).
+              importScripts: ['notify-sw.js'],
               navigateFallback: '/play/index.html',
               globPatterns: ['**/*.{js,css,html,png,svg,woff2}'],
               // App-only chunks (nativeChunk above): the web never loads them. The rest of this
