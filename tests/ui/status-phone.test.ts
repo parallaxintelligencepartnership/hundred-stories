@@ -261,7 +261,7 @@ describe('top bar at phone width', () => {
     expect(rule(phoneBlock(), '.hs-top-actions').position).toBe('fixed');
     expect(has(chip, 'hs-view-chip')).toBe(true);
     expect(rule(wide(), '.hs-view-chip').position).toBe('absolute');
-    expect(top.children).toHaveLength(3);
+    expect(top.children).toHaveLength(4); // pill, actions, chip, and the Watch button
     expect(css).not.toMatch(/hs-top-views/);
 
     // The day line is hidden on a phone and lives in the tooltip instead.
