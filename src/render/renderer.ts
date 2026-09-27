@@ -832,6 +832,12 @@ export type RendererOptions = { crowd?: 'sample' | 'all'; fadeIn?: boolean };
 export const OPENING_WHOLE_TOWER = true;
 export const OPENING_ZOOM = 0.5;
 
+/**
+ * The share picture's longest side, in device pixels at most: inside every phone's texture limit,
+ * and above the 1200 px the share image is scaled to (share.ts).
+ */
+export const SNAPSHOT_MAX_PX = 2048;
+
 /** The built tower's floor span: its top floor (D-1) and its lowest floor, 1 with no basement. */
 export function towerSpan(world: World): { top: number; bottom: number; built: boolean } {
   let top = 1;
@@ -2952,7 +2958,15 @@ export async function createRenderer(
       }
     },
     snapshot(): HTMLCanvasElement {
-      return app.renderer.extract.canvas({ target: app.stage }) as HTMLCanvasElement;
+      // The view on screen, never the whole stage: the stage's bounds run the sky and street far
+      // past the screen (30744 x 7386 px on a phone), which a phone cannot allocate.
+      const { width, height } = app.screen;
+      const resolution = Math.min(app.renderer.resolution, SNAPSHOT_MAX_PX / Math.max(1, width, height));
+      return app.renderer.extract.canvas({
+        target: app.stage,
+        frame: new Rectangle(0, 0, width, height),
+        resolution,
+      }) as HTMLCanvasElement;
     },
     destroy(): void {
       app.canvas.removeEventListener('pointerdown', onPointerDown);
