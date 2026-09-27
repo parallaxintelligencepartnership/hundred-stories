@@ -5,7 +5,20 @@
 set -eu
 
 NEW="${1:?usage: sh scripts/ship.sh <new version> [tag]}"
-TAG="${2:-ship-$(date +%Y-%m-%d)}"
+TAG="${2:-}"
+if [ -z "$TAG" ]; then
+  # Today's tag, with a letter suffix when today already shipped (ship-2026-09-26-b and so on).
+  BASE="ship-$(date +%Y-%m-%d)"
+  TAG="$BASE"
+  for s in b c d e f g h; do
+    git rev-parse -q --verify "refs/tags/$TAG" >/dev/null || break
+    TAG="$BASE-$s"
+  done
+fi
+if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+  echo "tag $TAG already exists" >&2
+  exit 1
+fi
 OLD=$(node -p "require('./package.json').version")
 
 if [ "$OLD" = "$NEW" ]; then
