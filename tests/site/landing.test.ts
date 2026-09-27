@@ -233,6 +233,10 @@ describe('privacy page', () => {
     expect(privacy).toContain('Last updated 2026-09-26.');
   });
 
+  it('mentions Cloudflare Web Analytics', () => {
+    expect(flat(privacy)).toContain('Cloudflare Web Analytics');
+  });
+
   it('covers purchases and links right after network requests', () => {
     const tags = [...privacy.matchAll(/<p class="floor-tag">([^<]*)<\/p>/g)].map((m) => m[1]);
     expect(tags).toEqual(Array.from({ length: tags.length }, (_, i) => `B${i + 1}`));

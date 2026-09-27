@@ -82,6 +82,12 @@ describe('bundled fonts: sources', () => {
       expect(policy).toMatch(/style-src 'self' 'unsafe-inline';/);
     }
   });
+
+  it('the site CSP allows the Cloudflare Web Analytics beacon', () => {
+    const headers = readFileSync(join(repo, 'public/_headers'), 'utf8');
+    expect(headers).toContain("script-src 'self' https://static.cloudflareinsights.com");
+    expect(headers).toContain("connect-src 'self' https://cloudflareinsights.com");
+  });
 });
 
 describe('bundled fonts: builds', () => {
