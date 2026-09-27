@@ -1,6 +1,6 @@
 {
   "name": "hundred-stories",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "A downtown skyscraper simulation: run and operate a tower, one hundred stories tall.",
   "private": true,
   "type": "module",
