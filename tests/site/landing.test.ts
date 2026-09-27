@@ -325,15 +325,10 @@ describe('sponsor slot', () => {
     return landing.slice(start, landing.indexOf('</section>', start));
   };
 
-  it('sits in the B2 section after the cards, holding the house card', () => {
+  it('has no sponsor aside in the B2 section', () => {
     const html = features();
-    expect(html).toContain('<aside class="sponsor"');
-    expect(html.indexOf('<div class="cards">')).toBeLessThan(html.indexOf('<aside class="sponsor"'));
-    const aside = html.slice(html.indexOf('<aside class="sponsor"'), html.indexOf('</aside>'));
-    expect(flat(aside)).toContain('The full game is coming to the App Store and Google Play, with no ads and no tracking.');
-    // The house card is ours, so it carries no Sponsor label.
-    expect(aside).not.toContain('Sponsor');
-    expect(aside).not.toMatch(/\$\d|20\d\d/);
+    expect(html).not.toContain('class="sponsor"');
+    expect(html).not.toContain('<aside');
   });
 
   it('carries no sponsor wording or swap-in comment', () => {

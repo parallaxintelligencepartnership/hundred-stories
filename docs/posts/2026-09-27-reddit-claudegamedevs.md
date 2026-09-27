@@ -1,6 +1,6 @@
 Title: Hundred Stories: a free tower sim you play in your browser (made with Claude Code)
 
-TL;DR: I made a free skyscraper sim that runs in your browser. No sign-up, no ads. https://hundredstories.xyz
+TL;DR: I made a free skyscraper sim that runs in your browser. The whole game, no sign-up, no ads. https://hundredstories.xyz
 
 You start with an empty lot and a little money. You drag out a lobby, run an elevator up through it, and start adding offices, condos, shops and hotel rooms.
 

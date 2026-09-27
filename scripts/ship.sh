@@ -24,6 +24,9 @@ sed -i '' "s/\"version\": \"$OLD_RE\"/\"version\": \"$NEW\"/" package.json src-t
 sed -i '' "s/^version = \"$OLD_RE\"/version = \"$NEW\"/" src-tauri/Cargo.toml src-tauri/Cargo.lock
 sed -i '' "s/MARKETING_VERSION = $OLD_RE;/MARKETING_VERSION = $NEW;/" ios/App/App.xcodeproj/project.pbxproj
 sed -i '' "s/versionName \"$OLD_RE\"/versionName \"$NEW\"/" android/app/build.gradle
+# Android versionCode is the dotted version as one number (0.6.1 -> 601), see tests/site/versions.test.ts.
+CODE=$(printf '%s' "$NEW" | awk -F. '{ print $1 * 10000 + $2 * 100 + $3 }')
+sed -i '' "s/versionCode [0-9]*/versionCode $CODE/" android/app/build.gradle
 npm install --package-lock-only --ignore-scripts >/dev/null
 
 if grep -q "\"version\": \"$OLD_RE\"" package.json package-lock.json; then
