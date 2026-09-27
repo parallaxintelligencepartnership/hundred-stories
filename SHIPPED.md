@@ -9,7 +9,7 @@ Requirements: Node 26 (pinned in `.nvmrc`). No environment variables.
 ```bash
 npm ci
 npm run dev       # landing on http://localhost:5173/, game on http://localhost:5173/play/
-npm test          # vitest run: 1705 tests in 144 files (1700 pass, 5 skipped: the opt-in store screenshot run needs Chrome)
+npm test          # vitest run: 2129 tests in 174 files (2126 pass, 1 skipped plus store screenshot skips as before: the opt-in store screenshot run needs Chrome)
 npm run typecheck # tsc --noEmit
 npm run audio:samples && node scripts/analyze-audio-samples.mjs docs/reviews/audio-samples-2026-09-23/*.wav  # the score gate, every line PASS or SKIP
 npm run build     # tsc --noEmit then vite build, output in dist/ (landing, how-to-play, play, privacy, 404)
@@ -40,7 +40,7 @@ Save format: 0.5.1 writes format 5 unchanged (the design pass changed no `src/si
 
 - Cloudflare: `npx wrangler rollback` returns the live site to the previous uploaded version; `npx wrangler versions list` shows the versions with their ids.
 - pi3: `deploy.sh` snapshots the live tree to `html.prev` before every sync; the swap is in `deploy/README.md` under Rollback.
-- Return target for this ship: `git checkout ship-2026-09-26-d`. Previous good state: `ship-2026-09-26-c` (0.5.3 without the beacon), or `npx wrangler rollback` to it.
+- Return target for this ship: `git checkout ship-2026-09-26-e`. Previous good state: `ship-2026-09-26-d` (0.5.3 with the beacon), or `npx wrangler rollback` to it.
 
 ## Known limitations and accepted risks
 No finding was accepted; the accepted risks list is empty, and at the 0.5.0 ship no finding of any severity is open in `.itworks/REVIEWS.md`.
@@ -84,6 +84,7 @@ Second: a browser whose IndexedDB never opens. Since 0.5.0 a failed read no long
 - Project state: `.itworks/` holds PROJECT.md, MAP.md, DECISIONS.md, REVIEWS.md and PROFILE.md; REVIEWS.md is the finding record this document is built from.
 
 ## Ship history
+- 2026-09-26: 0.5.4, tag ship-2026-09-26-e, Cloudflare version 5e92aaf6-43ad-49c5-821d-704bdad9c5c0; Menu > Today's tower no longer leaves the daily sheet stuck open on a phone (the tower switch orphaned the mounted sheet); the audio context suspends when the page hides and resumes when it shows, so a background tab on iOS no longer holds the phone's audio session; the phone alert band has bleed room so cards' shadows and rounded corners are no longer clipped square, and the glass news toast is isolated for Safari. Sweep skipped at Matt's call (same-day small re-ship). Not yet tried on a physical iPhone.
 - 2026-09-26: 0.5.3 re-ship, tag ship-2026-09-26-d, Cloudflare version 9af55468-a357-420d-b87e-71f85999fd78; the site pages carry the Cloudflare Web Analytics snippet (token set in vite.config.ts, site build only; the app build has none), and the Web Analytics site is switched to manual snippet mode in the dashboard. Beacon confirmed on hundredstories.xyz and www.
 - 2026-09-26: 0.5.3, tag ship-2026-09-26-c, Cloudflare version 65b4996a-4888-4981-bb0c-810101339bc7; routine info lines (hotel check-outs, housekeeping, rentals) go to News only and never toast, VIP arrivals and weddings still do; Watch hides the chrome 600 ms after the toggle, the phone build row no longer blocks it, the placing bar and news toasts are covered; the panel head no longer shrinks under its Close button, toasts wrap and keep clear of the X; the site CSP lets the Cloudflare Web Analytics beacon through and the privacy page says visits are counted (the zone setting itself is still off, so no counting yet). Sweep skipped at Matt's call, same as 0.5.2.
 - 2026-09-19: first ship (closeout; deploy pending domain)
