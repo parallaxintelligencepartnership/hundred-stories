@@ -13,7 +13,7 @@ const APP_MODE = 'app';
 
 // Cloudflare Web Analytics site token, from Web Analytics > Manage site > JS Snippet. It is a
 // public site id printed in every page, not a secret. Empty means no beacon.
-export const CF_BEACON_TOKEN = '';
+export const CF_BEACON_TOKEN = 'da9e796e547149989dea193754d58994';
 
 // Files copied verbatim from public/ into dist-app that the app shells never load: the
 // landing site's Cloudflare headers, crawler files, social preview image and wordmark
