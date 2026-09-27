@@ -477,6 +477,26 @@ describe('watch mode keeps the chrome up while anything is open', () => {
     expect(classesOf(byClass(shell, 'hs-palette'))).not.toContain('is-sheet-row');
   });
 
+  it('a placement in progress: a room or an elevator in hand keeps the placing bar up', () => {
+    phone();
+    setFlag(PREF_KEYS.watchMode, true);
+    const root = dom.createElement('div');
+    const game = mkGame() as unknown as Record<string, unknown>;
+    let tool: { kind: string; room?: string } = { kind: 'room', room: 'office' };
+    game['getTool'] = () => tool;
+    game['getPlacement'] = () => ({ pending: true, ok: true, floor: 2, x: 100, widthTiles: 9, heightFloors: 1 });
+    createUi(root as never, game as never, {} as never);
+    const shell = root.children[0] as FakeElement;
+    vi.advanceTimersByTime(3 * WATCH_IDLE_MS);
+    expect(watching(shell)).toBe(false);
+    // Put down, the chrome steps aside again after the idle.
+    tool = { kind: 'none' };
+    game['getPlacement'] = () => null;
+    keydown();
+    vi.advanceTimersByTime(WATCH_IDLE_MS);
+    expect(watching(shell)).toBe(true);
+  });
+
   it('the build sheet in full view', () => {
     phone();
     setFlag(PREF_KEYS.watchMode, true);

@@ -1466,8 +1466,11 @@ export async function createRenderer(
         entry.variant = variant;
         entry.state = state;
       }
-      entry.node.position.set(px, py);
-      entry.node.setSize(pw, ph);
+      // An illustrated flight (stairs, escalator) is baked into its band only (interiors.ts
+      // FLIGHT), so it goes at the band's top at the band's height, never stretched over the room.
+      const flight = art.interior && INTERIORS[room.kind].overlay ? INTERIORS[room.kind].band(room.height) : null;
+      entry.node.position.set(px, flight ? py + flight.top : py);
+      entry.node.setSize(pw, flight ? flight.height : ph);
       // D-4: the night grade by window state (day and lit keep their colours), or the fire.
       const grade = room.onFire ? FIRE_TINT : NIGHT_GRADE[state];
       entry.node.tint = grade;

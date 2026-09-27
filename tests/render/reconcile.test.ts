@@ -13,7 +13,7 @@ import { ROOMS } from '../../src/sim/rules';
 import type { Car, Room, RoomKind, Sim, World } from '../../src/sim/types';
 import { addRoom, addShaft, addSim, allocId, createWorld, markStructureChanged, setOccupancy, setOnFire } from '../../src/sim/world';
 import { floorTopY } from '../../src/render/camera';
-import { interiorVariants } from '../../src/render/interiors';
+import { INTERIORS, interiorVariants } from '../../src/render/interiors';
 import { venueOf } from '../../src/render/venue';
 import { REVEAL_COLOUR } from '../../src/render/buildfx';
 import { LINE_PX, WIN_SILL, WIN_TOP } from '../../src/render/grid';
@@ -886,5 +886,32 @@ describe('a replaced world keeps nothing of the old tower', () => {
     renderer.render(b, 1);
     expect(roomSprite(stage)).toBe(sprite); // no rebuild on a same-world render
     expect(sprite.y).toBe(floorTopY(3));
+  });
+});
+
+describe('the illustrated stairs and escalator sit on the floors they join', () => {
+  // The flight is baked into a band that starts FLIGHT_TOP below the room's top (interiors.ts
+  // FLIGHT), so its sprite goes at the band's top at the band's height. Placed at the room's top
+  // and stretched to the room's full height, the flight rose 1.29 times too steep and its head
+  // landing sat about 22 px above the upper floor, poking into the floor over it.
+  it('places the flight at its band, not stretched over the whole room', async () => {
+    artHolder.art = { ...stubArt, interior: (kind, w, h, v) => tex(`interior|${kind}|${w}|${h}|${v}`) } satisfies Art;
+    const world = createWorld(1);
+    world.time.minute = NOON;
+    const stairs = makeRoom(world, 'stairs', 3, 100);
+    const escalator = makeRoom(world, 'escalator', 6, 140);
+    const { renderer, stage } = await mount(world);
+    renderer.render(world, 1);
+    for (const room of [stairs, escalator]) {
+      const [flight] = spritesWith(stage, `interior|${room.kind}|`);
+      expect(flight).toBeDefined();
+      const band = INTERIORS[room.kind].band(room.height);
+      const roomTop = floorTopY(room.floor + room.height - 1);
+      expect(flight!.x).toBe(room.x * 16);
+      expect(flight!.y).toBe(roomTop + band.top);
+      expect(flight!.height).toBe(band.height);
+      // The band ends on the room's bottom edge, so the foot lands on the lower floor's slab.
+      expect(flight!.y + flight!.height).toBe(floorTopY(room.floor) + 72);
+    }
   });
 });
