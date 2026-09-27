@@ -6,7 +6,7 @@ You start with an empty lot and a little money. You drag out a lobby, run an ele
 
 Then people move in, and every one of them has a name and a story. Tap anyone to see what's on their mind.
 
-The elevators are where it gets real. A full car goes right past the people waiting. They get stressed, and if it goes on too long they give up and move out.
+The elevators are where it gets real. A full car goes right past the people waiting. They get stressed, and if it goes on too long they give up. Tenants who give up start moving out.
 
 Noise matters too. Put a fast food place under someone's condo and they'll let you know.
 
