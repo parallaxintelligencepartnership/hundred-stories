@@ -22,7 +22,7 @@ It works on desktop and phone, saves in your browser and plays offline.
 
 I built it solo with Claude Code over the last nine days. All the pixel art is drawn in code.
 
-Play it and tell me what breaks, especially on phones. Got an idea? The Requests link on the site goes straight to GitHub issues.
+Play it and tell me what breaks, especially on phones. Got an idea or hit a bug? There's a Send feedback button in the game menu that comes straight to me, no account needed.
 
 Matt
 

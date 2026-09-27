@@ -113,6 +113,8 @@ The code is laid out in seven parts:
 - `src/steam` reports star achievements from the desktop app; it does nothing in a browser.
 - `src/site` is the landing site: one stylesheet for `index.html` and `how-to-play/index.html`, plus the hero that draws the demo tower with the game's own renderer.
 
+The site deploys to Cloudflare as a Worker with static assets (`npm run deploy`, config in `wrangler.jsonc`). Every page and file is served as a static asset; the only Worker code is `src/worker/index.ts`, which answers `POST /api/feedback` from the in-game feedback card, rate limits it per IP and keeps each message in a KV namespace until it is read and emailed on. `npm run typecheck` checks the Worker against its own `tsconfig.worker.json`, and it is never part of the Vite bundles.
+
 See `docs/DESIGN.md` for the architecture contract and `docs/VISUAL.md` for the visual direction.
 
 The simulation is deterministic: the same seed plus the same list of commands always produces the same world hash. You can set the starting seed with a `?seed=` query parameter on the game URL, for example `/play/?seed=42`.

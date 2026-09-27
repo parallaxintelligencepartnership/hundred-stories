@@ -121,7 +121,7 @@ on the App Store or Everyone 10+ under IARC) is check at submission.
 
 What the app does with data, from the code in this repo:
 
-- No accounts, no sign in, no server of ours.
+- No accounts, no sign in. The one server of ours is the feedback route on hundredstories.xyz.
 - No analytics, no crash reporting, no advertising, no tracking, no third party SDKs in the app.
 - The save is written on the device: the app data directory on iOS and Android (Capacitor
   Filesystem, one file), the app data directory on desktop (Tauri), IndexedDB in a browser.
@@ -129,19 +129,25 @@ What the app does with data, from the code in this repo:
   file dialog. It is the player's own file and never reaches us.
 - Steam (desktop, only in the build with the steam feature): achievements are reported to the
   Steam client on the player's machine. Steam's own data practice is Valve's.
-- Network: the app makes no network requests. Its two typefaces (Bricolage Grotesque and Share
-  Tech Mono, SIL Open Font License) are bundled in the app, and it plays fully offline.
+- Network: the app makes one network request, and only when the player presses Send on the
+  feedback card (Menu, Help, Send feedback). It posts, over HTTPS to hundredstories.xyz, the
+  text they typed, an email address if they chose to give one, the game version, the platform
+  ("ios", "android", "macos") and the screen size. Nothing else, and nothing before Send. Its two
+  typefaces (Bricolage Grotesque and Share Tech Mono, SIL Open Font License) are bundled in the
+  app, and it plays fully offline.
 
 Form answers that follow:
 
-- App Store privacy label: Data Not Collected.
+- App Store privacy label: Data Collected, Other User Content (the feedback text) and, optional,
+  Email Address; both not linked to the user's identity and not used for tracking; purpose App
+  Functionality (answering the feedback).
 - App Tracking Transparency: not needed, the app does not track.
-- Google Play data safety: no data collected, no data shared; data is not encrypted in transit
-  because none is sent (the app makes no network requests); no account, so no deletion
-  request path is needed. Check at submission.
+- Google Play data safety: collected, Other user-generated content and, optional, Email address;
+  not shared; encrypted in transit (HTTPS); collection is optional (only on Send); the player
+  can ask for deletion by email to requests@hundredstories.xyz. Check at submission.
 - Steam: no privacy form in the store page; the privacy policy URL below covers it.
 
-A privacy policy URL is required by Apple and Google even for an app that collects nothing.
+A privacy policy URL is required by Apple and Google; the feedback card makes it more than a formality.
 
 privacyUrl: https://hundredstories.xyz/privacy/
 

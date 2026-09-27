@@ -68,8 +68,11 @@ import { vipView, vipViewKey, type VipView } from './vip';
 import { chevron, controlsDevice, currentDeviceEnv, fillControlsPage } from './controls';
 import { getFlag, PREF_KEYS, setFlag } from './prefs';
 
-/** A panel element may expose a cheap refresh that rewrites live numbers without rebuilding. */
-export type PanelElement = HTMLDivElement & { refresh?: () => void; sheet?: Sheet };
+/**
+ * A panel element may expose a cheap refresh that rewrites live numbers without rebuilding, and
+ * the control that takes focus once it is up (the feedback card's text box).
+ */
+export type PanelElement = HTMLDivElement & { refresh?: () => void; sheet?: Sheet; initialFocus?: HTMLElement };
 
 export interface PanelContext {
   /** Applies a command, reports the reason when it is refused, and marks the panels dirty. */
@@ -98,6 +101,8 @@ export interface PanelContext {
   openViews?: () => void;
   /** Open the share panel, from the settings panel on a phone, where the top bar has no Share. */
   openShare?: () => void;
+  /** Open the Send feedback card (src/ui/feedback.ts), from Help in the settings panel. */
+  openFeedback?: () => void;
   /** Put another person or room in the query panel, closing whichever panel asked. */
   select?: (sel: Selection) => void;
   /**
@@ -1517,7 +1522,7 @@ export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElem
 
   if (ctx.notifications) main.append(notificationsSection(ctx.notifications));
 
-  // Help: the intro again, the guide page, and the Controls page.
+  // Help: the intro again, the guide page, the Controls page, and Send feedback.
   const help = settingsGroup('Help');
   const openIntro = ctx.openIntro;
   if (openIntro) help.list.append(actionRow('Intro', () => openIntro(), 'Show the three intro screens again'));
@@ -1531,6 +1536,8 @@ export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElem
   controlsRow.append(chevron() as unknown as HTMLElement);
   controlsRow.title = 'The controls for what you are playing with';
   help.list.append(controlsRow);
+  const openFeedback = ctx.openFeedback;
+  if (openFeedback) help.list.append(actionRow('Send feedback', () => openFeedback(), 'Tell us what broke or what you would like'));
   main.append(help.node);
 
   // The Controls page: its own page inside the sheet, with a way back. Built now for the device

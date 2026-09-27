@@ -54,11 +54,12 @@ question stops coming back (a one line Info.plist change, not made here).
 | Screenshots | see below | store/shots/ios/ |
 | App previews (video) | optional | none |
 
-App privacy (the nutrition label): Data Not Collected, from listing.md "Privacy answers". The app
-makes no network requests.
+App privacy (the nutrition label): Other User Content and, optional, Email Address, collected, not
+linked to identity, not used for tracking, from listing.md "Privacy answers". The app's one network
+request is the feedback card's Send.
 
 App review information: no sign in is needed, so no demo account. Notes for the reviewer, as a
-suggestion: "Hundred Stories is a single player tower simulation. No account, no network features.
+suggestion: "Hundred Stories is a single player tower simulation. No account; the only network use is the optional Send feedback card.
 Drag along the ground floor to build a lobby, then add an elevator and rooms. The save is local."
 Contact name, phone and email are the account holder's (Matt's).
 

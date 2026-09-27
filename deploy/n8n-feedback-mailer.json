@@ -1,0 +1,239 @@
+{
+  "name": "Hundred Stories feedback mailer",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "name": "Every hour",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.cloudflare.com/client/v4/accounts/c50b1304a5eb5e5a006ba60483d58aeb/storage/kv/namespaces/242d9b50825d4d16988a03b052fedb3a/keys",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "limit",
+              "value": "100"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "List feedback keys",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Cloudflare n8n-feedback-kv"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "result",
+        "options": {}
+      },
+      "name": "One item per key",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.cloudflare.com/client/v4/accounts/c50b1304a5eb5e5a006ba60483d58aeb/storage/kv/namespaces/242d9b50825d4d16988a03b052fedb3a/values/{{ encodeURIComponent($json.name) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "name": "Read the message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Cloudflare n8n-feedback-kv"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "requests@hundredstories.xyz",
+        "toEmail": "requests@hundredstories.xyz",
+        "subject": "=Hundred Stories feedback ({{ $json.platform || 'unknown' }}, {{ $json.version || '?' }})",
+        "emailFormat": "text",
+        "text": "={{ $json.text }}\n\n---\nReply to: {{ $json.replyTo || 'not given' }}\nVersion: {{ $json.version || '?' }}\nPlatform: {{ $json.platform || '?' }}\nScreen: {{ $json.screen || '?' }}\nSent: {{ $json.at || '?' }}\nKey: {{ $('One item per key').item.json.name }}",
+        "options": {
+          "replyTo": "={{ $json.replyTo || '' }}"
+        }
+      },
+      "name": "Email Matt",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        880,
+        0
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "email-sent-no-error",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notExists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "name": "Email sent",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1100,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "=https://api.cloudflare.com/client/v4/accounts/c50b1304a5eb5e5a006ba60483d58aeb/storage/kv/namespaces/242d9b50825d4d16988a03b052fedb3a/values/{{ encodeURIComponent($('One item per key').item.json.name) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "name": "Delete the key",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "Cloudflare n8n-feedback-kv"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every hour": {
+      "main": [
+        [
+          {
+            "node": "List feedback keys",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List feedback keys": {
+      "main": [
+        [
+          {
+            "node": "One item per key",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "One item per key": {
+      "main": [
+        [
+          {
+            "node": "Read the message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read the message": {
+      "main": [
+        [
+          {
+            "node": "Email Matt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Matt": {
+      "main": [
+        [
+          {
+            "node": "Email sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email sent": {
+      "main": [
+        [
+          {
+            "node": "Delete the key",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

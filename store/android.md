@@ -54,7 +54,7 @@ check.
 | Content rating | the IARC questionnaire, answered from listing.md "Age rating answers"; the email for the certificate is the account's |
 | Target audience | Matt's call. The game is not made for children; choosing an under 13 age group puts it under the Families policy (check at submission). A suggestion: 13 and over |
 | News app | no |
-| Data safety | no data collected, no data shared (listing.md "Privacy answers", the font note as check at submission) |
+| Data safety | Other user-generated content and, optional, Email address, collected, not shared, deletion on request by email (listing.md "Privacy answers"; the feedback card's Send is the only network request) |
 | Government app | no |
 | Financial features | none |
 | Health | none |

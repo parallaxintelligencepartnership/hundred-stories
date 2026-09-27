@@ -2007,6 +2007,46 @@ button.hs-readout:hover {
   resize: none;
 }
 
+/* Send feedback (src/ui/feedback.ts) ------------------------------------ */
+
+/* 16 px text: a smaller field makes iOS zoom the page when it takes focus. */
+.hs-feedback-text,
+.hs-feedback-email {
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--radius-12);
+  background: var(--raise);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--size-16);
+  line-height: 1.4;
+}
+
+.hs-feedback-text {
+  resize: vertical;
+  min-height: 96px;
+}
+
+.hs-feedback-email {
+  min-height: var(--touch);
+}
+
+.hs-feedback-count {
+  align-self: flex-end;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The honeypot: off screen, never seen by a player. */
+.hs-feedback-trap {
+  position: absolute;
+  left: -10000px;
+  top: auto;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
 /* Settings, like a phone's settings app ------------------------------- */
 
 .hs-settings .hs-section {

@@ -237,12 +237,30 @@ describe('privacy page', () => {
     expect(privacy).toContain('<link rel="canonical" href="https://hundredstories.xyz/privacy/" />');
   });
 
-  it('states that the game makes no network requests, and the last-updated date', () => {
-    expect(flat(privacy)).toContain(
-      'The game makes no network requests of its own.',
-    );
+  it('states that the game makes one network request, feedback, and the last-updated date', () => {
+    const text = flat(privacy);
+    expect(text).toContain('The game makes one network request of its own, and only when you ask it to:');
+    const start = privacy.indexOf('<h2 id="fonts">Network requests</h2>');
+    const list = privacy.slice(privacy.indexOf('<ul>', start), privacy.indexOf('</ul>', start));
+    const items = [...list.matchAll(/<li>([\s\S]*?)<\/li>/g)].map((m) => flat(m[1] as string).trim());
+    expect(items).toEqual([
+      '/api/feedback: sent only when you press Send on the feedback card. It carries the text you typed, the email you typed if any, the game version, the platform and the screen size.',
+    ]);
     expect(privacy).not.toMatch(/googleapis|gstatic|google\.com|googletagmanager|google-analytics/i);
-    expect(privacy).toContain('Last updated 2026-09-26.');
+    expect(privacy).toContain('Last updated 2026-09-27.');
+  });
+
+  it('says what feedback sends, where it is kept, and that nothing else goes with it', () => {
+    const heads = [...privacy.matchAll(/<h2 id="[^"]+">([^<]*)<\/h2>/g)].map((m) => m[1]);
+    expect(heads.indexOf('Feedback you send')).toBe(heads.indexOf('Network requests') - 1);
+    const start = privacy.indexOf('<h2 id="feedback">');
+    const text = flat(privacy.slice(start, privacy.indexOf('</section>', start)));
+    expect(text).toContain('only ever sends something when you press Send on the feedback card');
+    expect(text).toContain('the text you typed, the email you typed if any, the game version, the platform');
+    expect(text).toContain('the platform, meaning the browser or app and the operating system (for example "web-safari" or "ios"), and your screen size');
+    expect(text).toContain('stored at Cloudflare until it is emailed to requests@hundredstories.xyz, then it is deleted');
+    expect(text).toContain('No account, no IP address and no tracking is attached to it.');
+    expect(text).toContain('it is used only to reply to you');
   });
 
   it('mentions Cloudflare Web Analytics', () => {
@@ -296,7 +314,7 @@ describe('terms page', () => {
   it('names who runs it, the license, and who handles purchases', () => {
     const text = flat(terms);
     expect(text).toContain('Parallax Intelligence Partnership');
-    expect(terms).toContain('href="https://github.com/parallaxintelligencepartnership/hundred-stories/issues/new"');
+    expect(terms).toContain('href="mailto:requests@hundredstories.xyz?subject=Hundred%20Stories%20request"');
     expect(terms).toContain('href="mailto:requests@hundredstories.xyz"');
     expect(terms.split('href="https://polyformproject.org/licenses/strict/1.0.0"').length).toBeGreaterThan(2);
     expect(text).toContain('through Apple or Google');
@@ -350,7 +368,7 @@ describe('sponsor slot', () => {
   it('says in the web panel that the game tracks nothing', () => {
     const web = landing.slice(landing.indexOf('id="platform-panel-web"'), landing.indexOf('id="platform-panel-ios"'));
     expect(flat(web)).toContain(
-      '<dd> None: the game tracks nothing, and nothing leaves your device. </dd>',
+      '<dd> None: the game tracks nothing, and nothing leaves your device unless you send us feedback. </dd>',
     );
   });
 });
@@ -432,7 +450,7 @@ describe('nav', () => {
   it.each(pages)('gives the %s page a Requests link instead of Source in the nav', (_name, html) => {
     const nav = html.slice(html.indexOf('<nav class="site-nav"'), html.indexOf('</nav>'));
     expect(nav).toContain(
-      '<a href="https://github.com/parallaxintelligencepartnership/hundred-stories/issues/new">Requests</a>',
+      '<a href="mailto:requests@hundredstories.xyz?subject=Hundred%20Stories%20request">Requests</a>',
     );
     expect(nav).not.toMatch(/<a[^>]*>Source<\/a>/);
   });

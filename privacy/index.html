@@ -44,7 +44,7 @@
         <nav class="site-nav" aria-label="Main">
           <a href="/how-to-play/">How to play</a>
           <a class="nav-play" href="/play/">Play</a>
-          <a href="https://github.com/parallaxintelligencepartnership/hundred-stories/issues/new">Requests</a>
+          <a href="mailto:requests@hundredstories.xyz?subject=Hundred%20Stories%20request">Requests</a>
           <button type="button" class="theme-toggle" id="theme-toggle">Theme</button>
         </nav>
       </div>
@@ -69,8 +69,8 @@
             <p class="floor-tag">B1</p>
             <h2 id="accounts">No accounts, nothing tracked</h2>
             <p>
-              There are no accounts and no sign-in. The game does not collect, send, or track
-              anything about you or your tower. The site counts visits with Cloudflare Web
+              There are no accounts and no sign-in. The game does not collect or track anything
+              about you or your tower, and it sends nothing unless you send us feedback. The site counts visits with Cloudflare Web
               Analytics, so we can see how many people visit and how many open the game. It sets
               no cookies, does not identify you, and does not follow you across other sites.
               There are no ads.
@@ -92,17 +92,42 @@
           </div>
         </section>
 
-        <section class="floor guide" aria-labelledby="fonts">
+        <section class="floor guide" aria-labelledby="feedback">
           <div class="wrap">
             <p class="floor-tag">B3</p>
+            <h2 id="feedback">Feedback you send</h2>
+            <p>
+              The game only ever sends something when you press Send on the feedback card in the
+              game menu. What it sends is the text you typed, the email you typed if any, the game
+              version, the platform, meaning the browser or app and the operating system (for
+              example "web-safari" or "ios"), and your screen size.
+            </p>
+            <p>
+              It is stored at Cloudflare until it is emailed to requests@hundredstories.xyz, then
+              it is deleted. No account, no IP address and no tracking is attached to it. If you
+              type an email, it is used only to reply to you.
+            </p>
+          </div>
+        </section>
+
+        <section class="floor guide" aria-labelledby="fonts">
+          <div class="wrap">
+            <p class="floor-tag">B4</p>
             <h2 id="fonts">Network requests</h2>
-            <p>The game makes no network requests of its own.</p>
+            <p>The game makes one network request of its own, and only when you ask it to:</p>
+            <ul>
+              <li>
+                /api/feedback: sent only when you press Send on the feedback card. It carries the
+                text you typed, the email you typed if any, the game version, the platform and the
+                screen size.
+              </li>
+            </ul>
           </div>
         </section>
 
         <section class="floor guide" aria-labelledby="purchases">
           <div class="wrap">
-            <p class="floor-tag">B4</p>
+            <p class="floor-tag">B5</p>
             <h2 id="purchases">Purchases and links</h2>
             <p>
               The game is free in your browser. If you buy the store app, the purchase is handled
@@ -118,7 +143,7 @@
 
         <section class="floor guide" aria-labelledby="hosting">
           <div class="wrap">
-            <p class="floor-tag">B5</p>
+            <p class="floor-tag">B6</p>
             <h2 id="hosting">Hosting</h2>
             <p>
               This site is served by a hosting provider, which may log requests the way any web
@@ -129,7 +154,7 @@
 
         <section class="floor guide" aria-labelledby="where-this-applies">
           <div class="wrap">
-            <p class="floor-tag">B6</p>
+            <p class="floor-tag">B7</p>
             <h2 id="where-this-applies">Where this applies</h2>
             <p>
               This page covers hundredstories.xyz and the store apps.
@@ -139,14 +164,14 @@
 
         <section class="floor guide" aria-labelledby="contact">
           <div class="wrap">
-            <p class="floor-tag">B7</p>
+            <p class="floor-tag">B8</p>
             <h2 id="contact">Contact</h2>
             <p>
               Questions go to the
-              <a href="https://github.com/parallaxintelligencepartnership/hundred-stories/issues/new">Requests</a>
+              <a href="mailto:requests@hundredstories.xyz?subject=Hundred%20Stories%20request">Requests</a>
               link.
             </p>
-            <p>Last updated 2026-09-26.</p>
+            <p>Last updated 2026-09-27.</p>
           </div>
         </section>
       </div>

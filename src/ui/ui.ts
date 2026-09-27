@@ -14,6 +14,7 @@ import { unlocksText } from '../sim/chronicle';
 import { createAlertStack, type GameOverAction } from './alerts';
 import { importSaveWithDialog, savePlatform } from '../game/storage';
 import { createDemoCapCard, isDemoCapEntry } from './demo';
+import { createFeedbackPanel } from './feedback';
 import { formatFloorShort, formatMoney } from './format';
 import {
   GUIDE_DONE,
@@ -84,7 +85,7 @@ export interface UiOptions {
   reload?: () => void;
 }
 
-type PanelKind = 'none' | 'finances' | 'log' | 'settings' | 'share' | 'intro' | 'stories' | 'recap' | 'chronicle' | 'daily';
+type PanelKind = 'none' | 'finances' | 'log' | 'settings' | 'share' | 'intro' | 'stories' | 'recap' | 'chronicle' | 'daily' | 'feedback';
 
 /** Real milliseconds the star card stays up unless closed first. */
 export const STAR_CARD_LINGER_MS = 20_000;
@@ -643,6 +644,9 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     openShare() {
       setPanel('share');
     },
+    openFeedback() {
+      setPanel('feedback');
+    },
     setDisplay(name) {
       // The switch is already stored; Larger text and the color-blind views follow at once.
       if (name === 'largeText' || name === 'colorBlind') display.refresh();
@@ -805,7 +809,9 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
 
   /**
    * Today's tower puts up its own card: the twist when a daily starts, the choice when an older
-   * one is waiting, the result when it ends. Each once; the intro is never pushed aside.
+   * one is waiting, the result when it ends. Each once; the intro is never pushed aside. Nor is
+   * the feedback card, which may hold half-typed words: that open is skipped, not queued, and
+   * the player finds the card in the menu (Today's tower).
    */
   function watchDaily(): void {
     const key = dailyKey();
@@ -817,6 +823,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     }
     if (panelKind === 'intro') return;
     dailyShownKey = key;
+    if (panelKind === 'feedback') return;
     shareWords = null;
     panelKind = 'daily';
   }
@@ -1329,12 +1336,17 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
                   ? createRecapPanel(game, ctx)
                   : panelKind === 'chronicle'
                     ? createChroniclePanel(game, ctx)
-                    : createQueryPanel(game, selection ?? {}, ctx);
+                    : panelKind === 'feedback'
+                      ? createFeedbackPanel(ctx)
+                      : createQueryPanel(game, selection ?? {}, ctx);
 
     mountedPanel = panel;
     // The sheet slides in on its own (ui.css, @starting-style), a plain fade under reduced motion.
     if (panel.sheet) panel.sheet.mount(panelSlot, carried ?? {});
     else panelSlot.append(panel);
+    // A card with its own first control (the feedback card's text box) takes focus there; Menu
+    // stays the place focus goes back to when it closes.
+    panel.initialFocus?.focus?.();
     if (key.startsWith('query:')) keepSelectionClearSoon();
   }
 

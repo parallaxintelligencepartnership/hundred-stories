@@ -81,7 +81,9 @@ The screenshot script, scripts/make-store-shots.mjs:
   could build. store/fixtures/demo-tower.json, every room kind, stays for the art captures.
 
 Fonts: the two typefaces are bundled (public/fonts/, SIL Open Font License texts alongside). The
-game makes no network requests, which is what the privacy forms on all three stores state.
+game makes one network request, the feedback card's Send (the text, an optional email, the version,
+platform and screen size); the privacy forms on all three stores state that (listing.md "Privacy
+answers").
 
 ## 3. App Store
 
