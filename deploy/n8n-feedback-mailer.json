@@ -90,7 +90,7 @@
     },
     {
       "parameters": {
-        "fromEmail": "requests@hundredstories.xyz",
+        "fromEmail": "matthew@parallaxintelligence.ai",
         "toEmail": "requests@hundredstories.xyz",
         "subject": "=Hundred Stories feedback ({{ $json.platform || 'unknown' }}, {{ $json.version || '?' }})",
         "emailFormat": "text",
@@ -106,7 +106,12 @@
         880,
         0
       ],
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "smtp": {
+          "name": "MATTHEW @ AI"
+        }
+      }
     },
     {
       "parameters": {
@@ -235,5 +240,8 @@
   },
   "settings": {
     "executionOrder": "v1"
+  },
+  "meta": {
+    "note": "Imported into n8n on 2026-09-27 as workflow Hundred Stories feedback mailer. Header credential: Cloudflare n8n-feedback-kv (token in the Mac keychain as cloudflare-n8n-feedback-kv, Workers KV Storage:Edit). Mail: the MATTHEW @ AI SMTP credential (Spacemail), from matthew@parallaxintelligence.ai to requests@hundredstories.xyz, Reply-To the player when given."
   }
 }
