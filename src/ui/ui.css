@@ -2621,21 +2621,41 @@ a.hs-btn {
   gap: var(--pad);
 }
 
-/* A card that holds text: the solid surface, a soft shadow, and an alert colour edge drawn as
-   a shadow, not a border. */
+/* A card that holds text: the solid surface, a soft shadow, and an alert colour edge. The edge
+   is a bar inside the rounded corner (::before), not an inset shadow: a shadow edge follows the
+   16 px curve and thins to a hairline at the top and bottom, and on a short phone card that
+   crescent is the whole left side and smears into the drop shadow as a grey bleed. */
 .hs-toast {
+  --toast-edge: var(--alert);
   position: relative;
   padding: 12px 14px;
   overflow-wrap: anywhere;
   background: var(--surface);
   border-radius: var(--radius-16);
-  box-shadow: var(--shadow-2), inset 3px 0 0 var(--alert);
+  box-shadow: var(--shadow-2);
   pointer-events: auto;
+}
+
+/* The bar starts 8 px down, where the corner's curve is only 2 px in, so all of it sits on the
+   card; the words start 7 px past it. */
+.hs-toast::before,
+.hs-alert-toast::before {
+  content: '';
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 4px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--toast-edge);
+  pointer-events: none;
 }
 
 /* An alert toast (toast.ts): stays until tapped. */
 .hs-alert-toast {
   --r: var(--radius-16);
+  --toast-edge: var(--alert);
+  position: relative;
   display: flex;
   align-items: flex-start;
   gap: 10px;
@@ -2644,7 +2664,7 @@ a.hs-btn {
   padding: 12px 14px;
   background: var(--surface);
   border: 0;
-  box-shadow: var(--shadow-2), inset 3px 0 0 var(--alert);
+  box-shadow: var(--shadow-2);
   color: var(--ink);
   font-size: var(--size-14);
   text-align: left;
@@ -2669,7 +2689,7 @@ a.hs-btn {
 /* The new version notice (ui.ts updateReady): news, not trouble, so no red edge; its tap
    reloads, and the word says so where an alert's x would be. */
 .hs-alert-toast.is-update {
-  box-shadow: var(--shadow-2), inset 3px 0 0 var(--amber-text);
+  --toast-edge: var(--amber-text);
 }
 
 .hs-toast-action {
@@ -2808,7 +2828,7 @@ button.hs-news-toast {
 }
 
 .hs-toast.is-notice {
-  box-shadow: var(--shadow-2), inset 3px 0 0 var(--ink-dim);
+  --toast-edge: var(--ink-dim);
 }
 
 /* Views: the information layers ----------------------------------------- */
@@ -3913,8 +3933,9 @@ button.hs-news-toast {
     right: calc(64px + 2 * var(--edge) + var(--safe-right) + var(--touch) + 8px + var(--gap-float) - var(--toast-bleed));
   }
 
+  /* Tight on a phone, except on the left: the words clear the colour edge by 7 px. */
   .hs-toast {
-    padding: 6px;
+    padding: 6px 6px 6px 14px;
   }
 
   .hs-toast-text {

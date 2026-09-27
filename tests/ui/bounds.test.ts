@@ -51,6 +51,11 @@ function box(value: string, scale: number): [number, number, number, number] {
   return [t, r!, b!, l!];
 }
 
+/** The colour edge bar every text toast draws in its ::before. */
+function edgeBar(): string {
+  return blockOf('.hs-toast::before,\n.hs-alert-toast::before {');
+}
+
 describe('the sheet head holds its Close button', () => {
   const head = ruleOf('.hs-panel-head');
   const close = ruleOf('.hs-panel-close');
@@ -98,6 +103,43 @@ describe('toasts keep their contents inside the card', () => {
     const phone = blockOf('@media (max-width: 720px) {\n  /* A phone');
     const phonePad = box(decl(phone.slice(phone.indexOf('.hs-toast {')), 'padding'), 1)[1];
     for (const pad of [desktopPad, phonePad]) expect(pad + reserve).toBeGreaterThanOrEqual(reach + 4);
+  });
+
+  it('draws the colour edge as a bar inside the rounded corner, never a shadow hugging the curve', () => {
+    // An inset shadow edge follows the 16 px corner and thins to a hairline at the top and
+    // bottom; on a short phone card that crescent is the whole left side and smears into the
+    // drop shadow as a grey bleed.
+    for (const sel of ['.hs-toast', '.hs-alert-toast', '.hs-alert-toast.is-update', '.hs-toast.is-notice']) {
+      expect(decl(ruleOf(sel), 'box-shadow'), sel).not.toMatch(/inset/);
+    }
+    const radius = 16;
+    const bar = edgeBar();
+    for (const card of ['.hs-toast', '.hs-alert-toast']) expect(decl(ruleOf(card), 'position'), card).toBe('relative');
+    expect(decl(bar, 'position')).toBe('absolute');
+    expect(decl(bar, 'background')).toBe('var(--toast-edge)');
+    const left = px(decl(bar, 'left'), 1);
+    const top = px(decl(bar, 'top'), 1);
+    expect(px(decl(bar, 'bottom'), 1)).toBe(top);
+    // Where the bar starts, the rounded edge is already left of it: no part pokes outside.
+    const curve = radius - Math.sqrt(radius ** 2 - (radius - top) ** 2);
+    expect(left).toBeGreaterThan(curve + 1);
+    expect(decl(ruleOf('.hs-toast'), '--toast-edge')).toBe('var(--alert)');
+    expect(decl(ruleOf('.hs-alert-toast'), '--toast-edge')).toBe('var(--alert)');
+    expect(decl(ruleOf('.hs-alert-toast.is-update'), '--toast-edge')).toBe('var(--amber-text)');
+    expect(decl(ruleOf('.hs-toast.is-notice'), '--toast-edge')).toBe('var(--ink-dim)');
+  });
+
+  it('keeps the words clear of the colour edge, desktop and phone', () => {
+    const phone = blockOf('@media (max-width: 720px) {\n  /* A phone');
+    const phoneToast = phone.slice(phone.indexOf('.hs-toast {'));
+    const pads: [string, string][] = [
+      ['.hs-toast', decl(ruleOf('.hs-toast'), 'padding')],
+      ['.hs-alert-toast', decl(ruleOf('.hs-alert-toast'), 'padding')],
+      ['phone .hs-toast', decl(phoneToast.slice(0, phoneToast.indexOf('}')), 'padding')],
+    ];
+    const bar = edgeBar();
+    const barRight = px(decl(bar, 'left'), 1) + px(decl(bar, 'width'), 1);
+    for (const [name, pad] of pads) expect(box(pad, 1)[3] - barRight, name).toBeGreaterThanOrEqual(6);
   });
 
   it('gives the alert toast its x or action a column of its own', () => {
