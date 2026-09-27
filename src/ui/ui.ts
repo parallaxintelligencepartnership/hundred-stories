@@ -68,6 +68,7 @@ import { pageRoot, watchDisplayPrefs } from './display';
 import { createPageHaptics, hapticsEnabled } from './haptics';
 import { createGamepadInput, pageGamepadDeps, type GamepadInput, type PadDirection } from './gamepad';
 import { focusablesIn, SHEET_CARD_MIN_WIDTH } from './sheet';
+import { createQuietLabels } from './quiet-labels';
 import { WATCH_CLASS, createWatchMode, createWatchToggle } from './watch';
 import { createSoundToggle } from './sound-toggle';
 import { UPDATE_TEXT, type Notifier } from './notify';
@@ -592,6 +593,44 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   // keeps out from under the card open on the right.
   const hoverCard = createHoverCard(shell, game, () => chromeBand, openCardLeft);
   shell.append(hoverCard.node);
+
+  // Smart hiding: after 2 s idle the Watch and Sound words fold to the icon (ui.css), and any
+  // input brings them back. Watch's width changes over --label-fade, so Sound, which ends one gap
+  // left of it, is measured again on every frame until the fold ends (or 500 ms, whichever first).
+  // Made before Watch mode so it hears the input that only brings Watch's chrome back, too.
+  let labelRaf = 0;
+  let labelUntil = 0;
+  const onLabelFrame = (): void => {
+    labelRaf = 0;
+    if (destroyed) return;
+    placeWatchButton();
+    if (Date.now() < labelUntil) labelRaf = requestAnimationFrame(onLabelFrame);
+  };
+  const stopLabelFrames = (): void => {
+    labelUntil = 0;
+    if (labelRaf) cancelAnimationFrame(labelRaf);
+    labelRaf = 0;
+  };
+  const onLabelTransitionEnd = (event: Event): void => {
+    const { target, propertyName } = event as TransitionEvent;
+    if (propertyName !== 'max-width' && !propertyName?.startsWith('padding')) return;
+    if (target && watchToggle.button.contains(target as Node)) {
+      stopLabelFrames();
+      placeWatchButton();
+    }
+  };
+  watchToggle.button.addEventListener('transitionend', onLabelTransitionEnd);
+  const quietLabels = createQuietLabels({
+    shell,
+    onChange: () => {
+      if (typeof requestAnimationFrame !== 'function') {
+        placeWatchButton();
+        return;
+      }
+      labelUntil = Date.now() + 500;
+      if (!labelRaf) labelRaf = requestAnimationFrame(onLabelFrame);
+    },
+  });
 
   // Watch mode (the Watch button, off by default): turned on, the chrome steps aside at once,
   // all but the clock; any input brings it back, and 5 s idle with nothing open hides it again.
@@ -1851,6 +1890,9 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
       destroyed = true;
       if (selectionRaf) cancelAnimationFrame(selectionRaf);
       watch.destroy();
+      quietLabels.destroy();
+      stopLabelFrames();
+      watchToggle.button.removeEventListener('transitionend', onLabelTransitionEnd);
       watchToggle.destroy();
       soundToggle.destroy();
       stopSoundPref();

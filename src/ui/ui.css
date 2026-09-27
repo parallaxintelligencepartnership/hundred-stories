@@ -85,6 +85,8 @@
   --toast-rise: 8px;
   /* Watch mode (Settings): the chrome's one fade out, after 5 s without input. */
   --watch-fade: 400ms;
+  /* The Watch and Sound words folding to the icon after 2 s idle, and back (quiet-labels.ts). */
+  --label-fade: 220ms;
 
   /* Touch and focus. */
   --touch: calc(44px * var(--ui-scale));
@@ -2860,6 +2862,44 @@ button.hs-news-toast {
   translate: -100% 0;
 }
 
+/* Smart hiding (quiet-labels.ts): after 2 s with no pointer move, press or key the shell takes
+   is-quiet-labels and Watch and Sound fold their words away, leaving the icon centered in its
+   circle (the -6px takes back the button's gap; .hs-round's min-width keeps the circle). Any
+   input brings the words back; hover or keyboard focus keeps a button's word out regardless.
+   ui.ts moves Sound with Watch's width on every frame of the fold. A phone hides the words
+   already (below), so none of this shows there. */
+.hs-watch-btn .hs-btn-label,
+.hs-sound-btn .hs-btn-label {
+  display: inline-block;
+  max-width: 6em;
+  overflow: hidden;
+  white-space: nowrap;
+  transition:
+    max-width var(--label-fade) var(--ease-standard),
+    opacity var(--label-fade) var(--ease-standard),
+    margin-left var(--label-fade) var(--ease-standard);
+}
+
+/* .hs-icon-btn's press transition, with the padding's fold added. */
+.hs-watch-btn,
+.hs-sound-btn {
+  transition:
+    transform var(--motion-fast) var(--ease-spring),
+    border-radius var(--motion-fast) var(--ease-spring),
+    background-color var(--motion-fade) var(--ease-standard),
+    padding var(--label-fade) var(--ease-standard);
+}
+
+.hs-ui.is-quiet-labels :is(.hs-watch-btn, .hs-sound-btn):not(:hover):not(:focus-visible) {
+  padding: 0;
+}
+
+.hs-ui.is-quiet-labels :is(.hs-watch-btn, .hs-sound-btn):not(:hover):not(:focus-visible) .hs-btn-label {
+  max-width: 0;
+  opacity: 0;
+  margin-left: -6px;
+}
+
 /* The list: a small card of rows, an icon and a name each. Without anchor positioning it sits
    under the top bar on the right, which is where the button is. */
 .hs-views-menu {
@@ -3714,6 +3754,7 @@ button.hs-news-toast {
   --enter-y: 0px;
   --toast-rise: 0px;
   --watch-fade: 0ms;
+  --label-fade: 0ms;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -3724,6 +3765,7 @@ button.hs-news-toast {
     --enter-y: 0px;
     --toast-rise: 0px;
     --watch-fade: 0ms;
+    --label-fade: 0ms;
   }
 }
 

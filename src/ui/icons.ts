@@ -42,7 +42,7 @@ export type IconName =
   | 'vacancy'
   | 'wait'
   | 'chevron'
-  // Watch mode: an open eye.
+  // Watch mode: an open eye with iris, pupil and lashes.
   | 'watch'
   // The Sound button beside Watch: a speaker with its waves, and the speaker crossed out.
   | 'sound'
@@ -97,7 +97,7 @@ const SYMBOLS: Record<IconName, string> = {
   // A small chevron pointing down: the collapsed goals pill opens downward.
   chevron: `<path d="M4.5 6.25L8 9.75l3.5-3.5" ${LINE}/>`,
   // An open eye: Watch mode, under Views.
-  watch: `<path d="M1.5 8c1.6-3 3.8-4.5 6.5-4.5S12.9 5 14.5 8c-1.6 3-3.8 4.5-6.5 4.5S3.1 11 1.5 8z" ${LINE}/><circle cx="8" cy="8" r="2" ${LINE}/>`,
+  watch: `<path d="M1.5 8c1.6-3 3.8-4.5 6.5-4.5S12.9 5 14.5 8c-1.6 3-3.8 4.5-6.5 4.5S3.1 11 1.5 8z" ${LINE}/><circle cx="8" cy="8" r="2.6" ${LINE}/><circle cx="8" cy="8" r="1.1" fill="currentColor"/><path d="M4.2 4.6l-.7-1.1M11.8 4.6l.7-1.1" ${LINE}/>`,
   sound: `<path d="M2 6v4h2.5L8 13V3L4.5 6z" ${LINE}/><path d="M10.5 5.75a3 3 0 0 1 0 4.5M12.25 4a5.5 5.5 0 0 1 0 8" ${LINE}/>`,
   mute: `<path d="M2 6v4h2.5L8 13V3L4.5 6z" ${LINE}/><path d="M10.5 6l4 4M14.5 6l-4 4" ${LINE}/>`,
 };

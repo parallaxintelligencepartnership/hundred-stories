@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SOUND_KEY, createSound } from '../../src/audio/audio';
 import { PREF_KEYS } from '../../src/ui/prefs';
+import { LABEL_IDLE_MS } from '../../src/ui/quiet-labels';
 import { SOUND_TIP, createSoundToggle, setSoundOn } from '../../src/ui/sound-toggle';
 import { createUi } from '../../src/ui/ui';
 import { WATCH_CLASS } from '../../src/ui/watch';
@@ -78,6 +79,34 @@ describe('the Sound button', () => {
     // Measured beside Watch: its left edge, from the bar's, goes into --sound-x.
     expect(classesOf(sound)).toContain('is-placed');
     expect(sound.style['--sound-x']).toMatch(/^-?\d+px$/);
+  });
+
+  it('follows Watch on every frame while the words fold away and come back, until the fold ends', () => {
+    const { root } = mount();
+    const sound = byLabel(root, 'Sound');
+    const watch = byLabel(root, 'Watch');
+    // Watch stays centered under Views, so its left edge moves in as its word folds away.
+    let watchLeft = 100;
+    watch.getBoundingClientRect = () => ({ width: 52, height: 52, top: 0, left: watchLeft, right: watchLeft + 52, bottom: 52 });
+    vi.advanceTimersByTime(LABEL_IDLE_MS);
+    watchLeft = 110;
+    dom.runFrame();
+    expect(sound.style['--sound-x']).toBe('110px');
+    watchLeft = 130;
+    dom.runFrame();
+    expect(sound.style['--sound-x']).toBe('130px');
+    // The fold's own transition ends: the last measure, and no more frames.
+    const label = watch.descendants().find((n) => classesOf(n).includes('hs-btn-label'))!;
+    watchLeft = 134;
+    (watch.listeners.get('transitionend') ?? []).forEach((f) => f({ target: label, propertyName: 'max-width' }));
+    expect(sound.style['--sound-x']).toBe('134px');
+    watchLeft = 150;
+    dom.runFrame();
+    expect(sound.style['--sound-x']).toBe('134px');
+    // A pointer move brings the words back, and Sound follows again.
+    dom.fireWindow('pointermove', { type: 'pointermove', target: dom.body });
+    dom.runFrame();
+    expect(sound.style['--sound-x']).toBe('150px');
   });
 
   it('turns the same stored setting as the Settings switch, one tap each way', () => {
@@ -234,8 +263,10 @@ describe('Sound button styles', () => {
     // On a wide screen Watch shows its word, so Sound waits hidden for the measure; a phone's fallback is right.
     expect(css).toMatch(/\.hs-sound-btn:not\(\.is-placed\) \{\s*visibility: hidden;/);
     expect(phone).toMatch(/\.hs-sound-btn:not\(\.is-placed\) \{\s*visibility: visible;/);
-    // Its size is .hs-round's, the Watch button's own: no rule of its own sets one.
-    expect(css).not.toMatch(/\.hs-sound-btn[^{]*\{[^}]*(min-height|min-width|padding)/);
+    // Its size is .hs-round's, the Watch button's own: no rule of its own sets one. The quiet
+    // fold (quiet-labels.ts) takes Watch's and Sound's padding to 0 alike while the words are away.
+    const resting = css.replace(/\.hs-ui\.is-quiet-labels[^{]*\{[^}]*\}/g, '');
+    expect(resting).not.toMatch(/\.hs-sound-btn[^{]*\{[^}]*(min-height|min-width|padding):/);
   });
 });
 

@@ -14,6 +14,7 @@ import { getFlag, PREF_KEYS, setFlag } from '../../src/ui/prefs';
 import { ROOMS } from '../../src/sim/rules';
 import type { RoomKind } from '../../src/sim/types';
 import { addRoom, allocId, createWorld, log } from '../../src/sim/world';
+import { LABELS_QUIET_CLASS } from '../../src/ui/quiet-labels';
 import { createUi } from '../../src/ui/ui';
 import { WATCH_CLASS, WATCH_ENABLE_GRACE_MS, WATCH_FADE_MS, WATCH_IDLE_MS, WATCH_TIP } from '../../src/ui/watch';
 import { FakeDom, type FakeElement } from './fake-dom';
@@ -553,11 +554,13 @@ describe('watch mode on the page, with ui.css applied', () => {
     const { shell } = mount();
     expect(classesOf(shell)).toContain('is-reduced');
     const before = classesOf(shell);
+    // The Watch and Sound words fold away on their own clock (quiet-labels.ts), not Watch mode's.
+    const ownClasses = (): string[] => classesOf(shell).filter((c) => c !== LABELS_QUIET_CLASS).sort();
     vi.advanceTimersByTime(WATCH_IDLE_MS);
     // One step, one class: no fading state in between and none added after.
-    expect(classesOf(shell).sort()).toEqual([...before, WATCH_CLASS].sort());
+    expect(ownClasses()).toEqual([...before, WATCH_CLASS].sort());
     vi.advanceTimersByTime(WATCH_FADE_MS);
-    expect(classesOf(shell).sort()).toEqual([...before, WATCH_CLASS].sort());
+    expect(ownClasses()).toEqual([...before, WATCH_CLASS].sort());
     // Nothing in the ui writes a transition or an animation inline: the stylesheet decides.
     for (const node of [shell, ...shell.descendants()]) {
       for (const key of Object.keys(node.style)) expect(key).not.toMatch(/transition|animation/i);
