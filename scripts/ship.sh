@@ -29,8 +29,11 @@ CODE=$(printf '%s' "$NEW" | awk -F. '{ print $1 * 10000 + $2 * 100 + $3 }')
 sed -i '' "s/versionCode [0-9]*/versionCode $CODE/" android/app/build.gradle
 npm install --package-lock-only --ignore-scripts >/dev/null
 
-if grep -q "\"version\": \"$OLD_RE\"" package.json package-lock.json; then
-  echo "the old version is still in package.json or the lockfile" >&2
+# Check the project's own version fields only: a dependency in the lockfile can share the old number.
+PKG=$(node -p "require('./package.json').version")
+LOCK=$(node -p "const l = require('./package-lock.json'); [l.version, l.packages[''].version].join(' ')")
+if [ "$PKG" != "$NEW" ] || [ "$LOCK" != "$NEW $NEW" ]; then
+  echo "the bump did not land: package.json is $PKG, the lockfile says $LOCK" >&2
   exit 1
 fi
 
