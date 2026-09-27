@@ -3,6 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+import { createRenderer } from '../../src/render/renderer';
 
 // Node has no WebGL, so the renderer refuses here exactly as it does on a machine without it.
 vi.mock('../../src/render/renderer', () => ({
@@ -14,6 +15,8 @@ import {
   CENTER_TILE,
   HERO_PANEL_GAP,
   HERO_SIDE_BY_SIDE,
+  LOAD_WAIT_NOTE_MS,
+  afterPageLoad,
   heroCenterTile,
   heroMinute,
   towerSpanOf,
@@ -24,6 +27,23 @@ import { animateDemo, buildHeroWorld, walkRange } from '../../src/render/smoke';
 // Read off disk: vitest hands a .css?raw import over empty.
 const css = readFileSync(join(__dirname, '..', '..', 'src', 'site', 'site.css'), 'utf8');
 const flat = (text: string): string => text.replace(/\s+/g, ' ');
+
+/** A WebP's pixel size, read off its RIFF header by hand (lossy VP8, lossless VP8L, extended VP8X). */
+function webpSize(b: Uint8Array): { width: number; height: number } {
+  const tag = (at: number): string => String.fromCharCode(...b.subarray(at, at + 4));
+  expect(tag(0)).toBe('RIFF');
+  expect(tag(8)).toBe('WEBP');
+  const chunk = tag(12);
+  const le16 = (at: number): number => b[at]! | (b[at + 1]! << 8);
+  const le24 = (at: number): number => le16(at) | (b[at + 2]! << 16);
+  if (chunk === 'VP8X') return { width: le24(24) + 1, height: le24(27) + 1 };
+  if (chunk === 'VP8 ') return { width: le16(26) & 0x3fff, height: le16(28) & 0x3fff };
+  if (chunk === 'VP8L') {
+    const bits = b[21]! | (b[22]! << 8) | (b[23]! << 16) | (b[24]! << 24);
+    return { width: (bits & 0x3fff) + 1, height: ((bits >>> 14) & 0x3fff) + 1 };
+  }
+  throw new Error(`not a WebP image chunk: ${chunk}`);
+}
 
 describe('the hero opens on a daytime sky', () => {
   it('hides the still image as soon as the canvas is booting, so it never squeezes the copy', () => {
@@ -216,14 +236,14 @@ describe('the hero without WebGL', () => {
     };
     const elements: Record<string, unknown> = { hero, 'hero-view': {}, 'hero-shot': { style: { display: '' } } };
     const g = globalThis as Record<string, unknown>;
-    g.document = { getElementById: (id: string) => elements[id] ?? null, visibilityState: 'visible' };
+    g.document = { getElementById: (id: string) => elements[id] ?? null, visibilityState: 'visible', readyState: 'complete' };
     g.window = { matchMedia: () => ({ matches: false }) };
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     try {
       // A fresh evaluation, so the module level start() runs now that there is a document.
       vi.resetModules();
       await import('../../src/site/hero');
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      await vi.waitFor(() => expect(warn).toHaveBeenCalled());
       // The class went on while the renderer booted, and came off when it refused.
       expect(added).toEqual(['has-canvas']);
       expect(hero.classList.contains('has-canvas')).toBe(false);
@@ -232,6 +252,108 @@ describe('the hero without WebGL', () => {
       delete g.document;
       delete g.window;
       warn.mockRestore();
+    }
+  });
+});
+
+describe('the hero leaves the network to the still image', () => {
+  it('imports the renderer only inside start(), so Vite never modulepreloads its chunks in the head', () => {
+    expect(heroSource).not.toMatch(/^import (?!type )[^;]*from '\.\.\/render\/(renderer|smoke)';/m);
+    expect(heroSource).toContain("import('../render/renderer')");
+    expect(heroSource).toContain("import('../render/smoke')");
+  });
+
+  it("waits for the page's load event before it boots the renderer or hides the still image", async () => {
+    const added: string[] = [];
+    const hero = { classList: { add: (n: string) => added.push(n), remove: () => undefined, contains: () => false }, querySelector: () => null };
+    const elements: Record<string, unknown> = { hero, 'hero-view': {}, 'hero-shot': { style: { display: '' } } };
+    const loads: (() => void)[] = [];
+    const g = globalThis as Record<string, unknown>;
+    g.document = { getElementById: (id: string) => elements[id] ?? null, visibilityState: 'visible', readyState: 'interactive' };
+    g.window = {
+      matchMedia: () => ({ matches: false }),
+      addEventListener: (type: string, l: () => void) => void (type === 'load' && loads.push(l)),
+    };
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.mocked(createRenderer).mockClear();
+    try {
+      vi.resetModules();
+      await import('../../src/site/hero');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(createRenderer).not.toHaveBeenCalled();
+      expect(added).toEqual([]);
+      expect(loads).toHaveLength(1);
+      loads[0]!();
+      await vi.waitFor(() => expect(warn).toHaveBeenCalledWith('hero: no tower today', expect.any(Error)));
+      expect(added).toEqual(['has-canvas']);
+    } finally {
+      delete g.document;
+      delete g.window;
+      warn.mockRestore();
+    }
+  });
+});
+
+describe('the still image and the canvas share one box (no layout shift when has-canvas flips)', () => {
+  const flatCss = flat(css);
+  const wide = flatCss.slice(flatCss.indexOf('@media (min-width: 720px)'));
+  const ruleIn = (text: string, selector: string): string => {
+    const at = text.indexOf(`${selector} {`);
+    expect(at, selector).toBeGreaterThanOrEqual(0);
+    return text.slice(at, text.indexOf('}', at) + 1);
+  };
+
+  it('on a phone the still image is the canvas host\'s 320 px block, cropped to fit', () => {
+    const shot = ruleIn(flatCss, '#hero-shot');
+    expect(shot).toContain('display: block;');
+    expect(shot).toContain('height: 320px;');
+    expect(shot).toContain('object-fit: cover;');
+    expect(ruleIn(flatCss, '.hero.has-canvas #hero-view')).toContain('height: 320px;');
+  });
+
+  it('on a wider screen the hero keeps its desk layout in both states, the image under the copy like the canvas', () => {
+    const hero = ruleIn(wide, '.hero');
+    for (const decl of ['min-height: 480px;', 'display: flex;', 'align-items: flex-end;', 'padding-bottom: 40px;']) expect(hero).toContain(decl);
+    expect(ruleIn(wide, '.hero .wrap')).toContain('width: 100%;');
+    const shot = ruleIn(wide, '#hero-shot');
+    for (const decl of ['position: absolute;', 'inset: 0;', 'height: 100%;']) expect(shot).toContain(decl);
+    expect(wide).not.toContain('.hero.has-canvas {');
+    expect(wide).not.toContain('.hero:not(.has-canvas)');
+  });
+
+  it('crops toward the tower and the ground, so a crop only trims sky', () => {
+    expect(ruleIn(flatCss, '#hero-shot')).toContain('object-position: right bottom;');
+  });
+
+  it('ships a WebP still whose pixel size is the size the markup reserves', () => {
+    const webp = readFileSync(join(__dirname, '..', '..', 'public', 'hero-still.webp'));
+    const size = webpSize(webp);
+    const shot = flat(readFileSync(join(__dirname, '..', '..', 'index.html'), 'utf8')).match(/<img id="hero-shot"[^>]*>/)![0];
+    expect(size).toEqual({ width: Number(shot.match(/width="(\d+)"/)![1]), height: Number(shot.match(/height="(\d+)"/)![1]) });
+    expect(size).toEqual({ width: 1600, height: 479 });
+  });
+});
+
+describe('a load event that never comes', () => {
+  it('leaves one console note, and none when the page loads in time', () => {
+    vi.useFakeTimers();
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
+    try {
+      const loads: (() => void)[] = [];
+      const win = { addEventListener: (_t: string, l: () => void) => void loads.push(l) } as unknown as Window;
+      void afterPageLoad({ readyState: 'interactive' }, win);
+      vi.advanceTimersByTime(LOAD_WAIT_NOTE_MS * 3);
+      expect(info).toHaveBeenCalledTimes(1);
+      expect(info.mock.calls[0]![0]).toContain('no load event');
+
+      info.mockClear();
+      void afterPageLoad({ readyState: 'interactive' }, win);
+      loads[1]!();
+      vi.advanceTimersByTime(LOAD_WAIT_NOTE_MS * 3);
+      expect(info).not.toHaveBeenCalled();
+    } finally {
+      info.mockRestore();
+      vi.useRealTimers();
     }
   });
 });

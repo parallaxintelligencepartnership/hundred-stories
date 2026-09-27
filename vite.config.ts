@@ -20,7 +20,7 @@ export const CF_BEACON_TOKEN = 'da9e796e547149989dea193754d58994';
 // exports. theme.js is not on this list — it is left for closeBundle to decide, since the
 // game page (play/index.html) references it.
 // notify-sw.js is the web service worker's notification tap handler; the shells have no worker.
-const APP_UNUSED_PUBLIC_FILES = ['_headers', 'robots.txt', 'sitemap.xml', 'og.png', 'notify-sw.js'];
+const APP_UNUSED_PUBLIC_FILES = ['_headers', 'robots.txt', 'sitemap.xml', 'og.png', 'hero-still.webp', 'notify-sw.js'];
 
 // The Capacitor and Tauri plugin code only ever loads inside a shell, through the dynamic imports
 // in src/game/storage.ts and src/steam/steam.ts. Each package gets a stable chunk named

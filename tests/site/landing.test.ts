@@ -49,14 +49,26 @@ describe('landing page', () => {
     expect(guide).not.toContain('pixel art');
   });
 
+  it('serves the still hero image as a preloaded, high priority WebP, with its size reserved', () => {
+    const shot = flat(landing).match(/<img id="hero-shot"[^>]*>/)![0];
+    expect(shot).toContain('src="/hero-still.webp"');
+    expect(shot).toContain('fetchpriority="high"');
+    expect(shot).toContain('decoding="async"');
+    expect(shot).toContain('width="1600"');
+    expect(shot).toContain('height="479"');
+    const head = landing.slice(0, landing.indexOf('</head>'));
+    expect(head).toContain('<link rel="preload" as="image" href="/hero-still.webp" fetchpriority="high" />');
+  });
+
   it('keeps the still hero image as the fallback', () => {
     expect(landing).toContain('id="hero-shot"');
     expect(landing).toContain('id="hero-view"');
   });
 
-  it('describes the still hero image as it is: the game beside its name (og.png, D-36)', () => {
+  it('describes the still hero image as it is: a frame of the demo tower as the game draws it', () => {
     const shot = flat(landing).match(/<img id="hero-shot"[^>]*>/)![0];
-    expect(shot).toContain('alt="An illustrated tower in daylight beside the Hundred Stories name"');
+    expect(shot).toContain('alt="The demo tower in daylight, cut open to show its rooms, people and elevator, as the game draws it"');
+    expect(shot).not.toContain('Hundred Stories name');
     expect(landing).not.toContain('A tower of cream office cells against a dark sky');
   });
 

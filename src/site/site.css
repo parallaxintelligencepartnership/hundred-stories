@@ -299,8 +299,15 @@ p {
   height: 100%;
 }
 
+/* The still image takes exactly the canvas's box (320 px here, the whole hero on wider screens),
+   so hero.ts adding or dropping has-canvas moves nothing below the hero (no layout shift). */
 #hero-shot {
+  display: block;
   width: 100%;
+  height: 320px;
+  object-fit: cover;
+  /* The still is a frame of the desktop canvas, tower at the right on the ground: a crop trims sky. */
+  object-position: right bottom;
   border-bottom: 1px solid #222222;
 }
 
@@ -882,19 +889,22 @@ p {
     border-bottom: 0;
   }
 
-  .hero:not(.has-canvas) #hero-shot {
-    max-height: 480px;
-    object-fit: cover;
+  /* The still image sits under the copy exactly as the canvas does, so both states share one box. */
+  #hero-shot {
+    position: absolute;
+    inset: 0;
+    height: 100%;
+    border-bottom: 0;
   }
 
-  .hero.has-canvas {
+  .hero {
     min-height: 480px;
     display: flex;
     align-items: flex-end;
     padding-bottom: 40px;
   }
 
-  .hero.has-canvas .wrap {
+  .hero .wrap {
     width: 100%;
   }
 

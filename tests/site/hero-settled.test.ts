@@ -71,6 +71,7 @@ function install(reducedMotion: boolean): void {
     querySelectorAll: () => [office],
     createElement: () => ({ src: '', alt: '', width: 0, height: 0, className: '' }),
     visibilityState: 'visible',
+    readyState: 'complete',
     office,
   };
   g.window = {
@@ -86,7 +87,9 @@ async function startHero(reducedMotion: boolean): Promise<void> {
   install(reducedMotion);
   vi.resetModules();
   await import('../../src/site/hero');
-  for (let i = 0; i < 20; i++) await Promise.resolve();
+  // start() fetches the renderer with a dynamic import, so give it real ticks, not only microtasks.
+  if (reducedMotion) await vi.waitFor(() => expect(attrs.get(HERO_SETTLED_ATTR)).toBe('none'));
+  else await vi.waitFor(() => expect(frames.length).toBeGreaterThan(0));
 }
 
 async function specimensDraw(): Promise<string | undefined> {

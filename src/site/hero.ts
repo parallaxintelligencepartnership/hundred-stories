@@ -7,8 +7,8 @@
 // this file goes quiet.
 
 import { TILE_PX } from '../render/grid';
-import { createRenderer, type Renderer } from '../render/renderer';
-import { animateDemo, buildHeroWorld } from '../render/smoke';
+import type { Renderer } from '../render/renderer';
+import type { World } from '../sim/types';
 import { markHeroSettled } from './hero-ready';
 import './challenge';
 import './platforms';
@@ -18,6 +18,8 @@ const SECONDS_PER_FLOOR = 6;
 const START_FLOOR = 3;
 export const CENTER_TILE = 130;
 const MAX_FRAME_MS = 100;
+/** How long start() waits on the load event before it notes the wait in the console. */
+export const LOAD_WAIT_NOTE_MS = 15_000;
 
 /** The hero's clock (D-35): 10:00 to 20:00 and back, one way every HERO_LEG_MS, so it is day most of the loop. */
 export const HERO_MINUTE_FROM = 600;
@@ -42,7 +44,7 @@ export function heroMinute(elapsedMs: number): number {
 type Span = { left: number; right: number };
 
 /** The tower's horizontal span in tiles, rooms and shafts, right edge exclusive. */
-export function towerSpanOf(world: ReturnType<typeof buildHeroWorld>): Span {
+export function towerSpanOf(world: World): Span {
   let left = Infinity;
   let right = -Infinity;
   for (const part of [...world.rooms.values(), ...world.shafts.values()]) {
@@ -81,10 +83,31 @@ function driftFloor(elapsedMs: number, topFloor: number): number {
   return START_FLOOR + eased * climb;
 }
 
-function topFloorOf(world: ReturnType<typeof buildHeroWorld>): number {
+function topFloorOf(world: World): number {
   let top = START_FLOOR;
   for (const room of world.rooms.values()) top = Math.max(top, room.floor + room.height - 1);
   return top;
+}
+
+/**
+ * Resolves once the page's load event has fired. The renderer (PixiJS, most of the landing page's
+ * bytes) is fetched only after it, so the still image and the copy have the network to themselves
+ * on a first visit and are what Largest Contentful Paint measures.
+ */
+export function afterPageLoad(doc: { readyState: string }, win: Pick<Window, 'addEventListener'>): Promise<void> {
+  if (doc.readyState === 'complete') return Promise.resolve();
+  return new Promise((resolve) => {
+    // A load event that never comes (a request that hangs) leaves the still up for good; say so once.
+    const hung = setTimeout(() => console.info(`hero: no load event after ${LOAD_WAIT_NOTE_MS / 1000} s, the still image stays`), LOAD_WAIT_NOTE_MS);
+    win.addEventListener(
+      'load',
+      () => {
+        clearTimeout(hung);
+        resolve();
+      },
+      { once: true },
+    );
+  });
 }
 
 async function start(): Promise<void> {
@@ -93,6 +116,13 @@ async function start(): Promise<void> {
   const shot = document.getElementById('hero-shot');
   if (!hero || !view) return markHeroSettled(document, 'none');
   if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return markHeroSettled(document, 'none');
+
+  await afterPageLoad(document, window);
+  // Dynamic, so Vite does not modulepreload the renderer's chunks in the page head.
+  const [{ createRenderer }, { animateDemo, buildHeroWorld }] = await Promise.all([
+    import('../render/renderer'),
+    import('../render/smoke'),
+  ]);
 
   const world = buildHeroWorld();
   world.time.minute = heroMinute(0);

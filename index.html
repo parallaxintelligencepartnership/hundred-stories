@@ -33,6 +33,7 @@
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <script src="/theme.js"></script>
     <link rel="stylesheet" href="/src/site/site.css" />
+    <link rel="preload" as="image" href="/hero-still.webp" fetchpriority="high" />
     <script type="application/ld+json">
       {"@context":"https://schema.org","@graph":[{"@type":"Organization","@id":"https://parallaxintelligence.ai/#organization","name":"Parallax Intelligence Partnership","url":"https://parallaxintelligence.ai","sameAs":["https://parallaxintelligence.digital","https://parallaxintelligence.online","https://prlx.one","https://postmortem.report","https://github.com/parallaxintelligencepartnership","https://itworks.build","https://stillpub.com"]},{"@type":"VideoGame","@id":"https://hundredstories.xyz/#game","name":"Hundred Stories","url":"https://hundredstories.xyz/","description":"Hundred Stories is a tower-building simulation for the browser. Place offices, condos, shops and elevators, keep your tenants happy, and climb from one star to TOWER. Plays offline, saves in your browser, nothing uploaded.","applicationCategory":"Game","operatingSystem":"Any (web browser)","gamePlatform":"Web browser","author":{"@id":"https://parallaxintelligence.ai/#organization"},"publisher":{"@id":"https://parallaxintelligence.ai/#organization"},"license":"https://polyformproject.org/licenses/strict/1.0.0"}]}
     </script>
@@ -55,10 +56,12 @@
         <div id="hero-view" aria-hidden="true"></div>
         <img
           id="hero-shot"
-          src="/og.png"
-          alt="An illustrated tower in daylight beside the Hundred Stories name"
-          width="1200"
-          height="630"
+          src="/hero-still.webp"
+          alt="The demo tower in daylight, cut open to show its rooms, people and elevator, as the game draws it"
+          width="1600"
+          height="479"
+          fetchpriority="high"
+          decoding="async"
         />
         <div class="wrap">
           <div class="hero-panel">
