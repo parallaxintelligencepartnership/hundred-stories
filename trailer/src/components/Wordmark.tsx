@@ -1,8 +1,10 @@
 import React from 'react';
+import { Img } from 'remotion';
+import wordmarkUrl from '../../../public/wordmark-line-dark.svg';
 import { amber, ink, inkDim, mint } from '../style/palette';
 import { display } from '../style/fonts';
 
-// The name set in the game's display face, ink on an amber bloom that echoes the first lit window.
+// The game's single-row night wordmark on the existing amber bloom.
 export const Wordmark: React.FC<{
   opacity: number;
   scale: number;
@@ -21,21 +23,17 @@ export const Wordmark: React.FC<{
         filter: 'blur(20px)',
       }}
     />
-    <div
+    <Img
+      src={wordmarkUrl}
+      alt="Hundred Stories"
       style={{
-        fontFamily: display,
-        fontWeight: 700,
-        fontSize: size,
-        letterSpacing: size * 0.04,
-        color: ink,
+        width: size * 9,
+        height: 'auto',
         opacity,
         transform: `scale(${scale})`,
-        textShadow: `0 0 ${size * 0.25}px ${amber}66, 0 4px 0 #00000055`,
-        whiteSpace: 'nowrap',
+        filter: `drop-shadow(0 0 ${size * 0.25}px ${amber}66) drop-shadow(0 4px 0 #00000055)`,
       }}
-    >
-      HUNDRED STORIES
-    </div>
+    />
   </div>
 );
 
