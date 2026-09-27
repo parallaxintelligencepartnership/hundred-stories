@@ -1,10 +1,10 @@
-// Watch mode (design pass 2026-09-25, BB-5): after 20 s with no pointer, key or pad input and
+// Watch mode (design pass 2026-09-25, BB-5): after 5 s with no pointer, key or pad input and
 // nothing open, the chrome steps aside (the top bar but the clock, the dock, the goals card and
 // the map fade out over 400 ms); any input brings it back at once. Off by default, a round
 // Watch button under Views on the game view (no longer a Settings switch), remembered with the
 // other prefs. Under reduced motion there is no fade.
 // 2026-09-26 (Matt: the toggle "doesn't seem to do much"): turning it on steps the chrome aside
-// after a 600 ms grace, not 20 s; the build sheet's row is not busy and closes as the chrome
+// after a 600 ms grace, not 5 s; the build sheet's row is not busy and closes as the chrome
 // goes; the placing chip and bar go too; no news toasts while watching, alerts still show.
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -188,7 +188,7 @@ describe('watch mode', () => {
     expect(classesOf(button)).toEqual(expect.arrayContaining(['hs-icon-btn', 'hs-round', 'hs-watch-btn']));
     expect(button.getAttribute('aria-pressed')).toBe('false');
     expect(button.title).toBe(WATCH_TIP);
-    expect(WATCH_TIP).toContain('20 seconds');
+    expect(WATCH_TIP).toContain('5 seconds');
     // In the top bar, beside the Views button's row rather than inside it.
     const top = root.descendants().find((n) => n.className === 'hs-top') as FakeElement;
     expect(top.children).toContain(button);
@@ -221,8 +221,8 @@ describe('watch mode', () => {
     expect(watching(shell)).toBe(false);
   });
 
-  it('hides the chrome after 20 s without input when on, with a 400 ms fade', () => {
-    expect([WATCH_IDLE_MS, WATCH_FADE_MS]).toEqual([20_000, 400]);
+  it('hides the chrome after 5 s without input when on, with a 400 ms fade', () => {
+    expect([WATCH_IDLE_MS, WATCH_FADE_MS]).toEqual([5_000, 400]);
     setFlag(PREF_KEYS.watchMode, true);
     const { shell } = mount();
     vi.advanceTimersByTime(WATCH_IDLE_MS - 1);
@@ -244,7 +244,7 @@ describe('watch mode', () => {
     vi.advanceTimersByTime(WATCH_IDLE_MS - 1000);
     dom.fireWindow('pointerdown', { clientX: 10, clientY: 10, pointerType: 'touch', target: dom.body });
     vi.advanceTimersByTime(WATCH_IDLE_MS - 1);
-    expect(watching(shell)).toBe(false); // the tap restarted the 20 s
+    expect(watching(shell)).toBe(false); // the tap restarted the 5 s
     vi.advanceTimersByTime(1);
     expect(watching(shell)).toBe(true);
 
@@ -291,7 +291,7 @@ describe('watch mode', () => {
     expect(watching(shell)).toBe(false);
     vi.advanceTimersByTime(1);
     expect(watching(shell)).toBe(true);
-    // Later input brings the chrome back, and it steps aside again 20 s after the last input.
+    // Later input brings the chrome back, and it steps aside again 5 s after the last input.
     dom.fireWindow('pointermove', { type: 'pointermove', clientX: 20, clientY: 20, pointerType: 'mouse', target: dom.body });
     expect(watching(shell)).toBe(false);
     vi.advanceTimersByTime(WATCH_IDLE_MS - 1);
@@ -403,7 +403,7 @@ describe('watch mode', () => {
     expect(shell.descendants().some((n) => n.getAttribute('role') === 'dialog')).toBe(true);
   });
 
-  it('fades again after a panel opened and closed on its own, 20 s from the close', () => {
+  it('fades again after a panel opened and closed on its own, 5 s from the close', () => {
     setFlag(PREF_KEYS.watchMode, true);
     const { root, shell } = mount();
     vi.advanceTimersByTime(WATCH_IDLE_MS);
@@ -490,7 +490,7 @@ describe('watch mode keeps the chrome up while anything is open', () => {
     expect(watching(shell)).toBe(true);
   });
 
-  it('the guide, and its end starts the 20 s over', () => {
+  it('the guide, and its end starts the 5 s over', () => {
     const store = (globalThis as unknown as { window: { localStorage: { setItem(k: string, v: string): void } } }).window.localStorage;
     store.setItem('hs.guide.done', 'false'); // an empty tower with the guide still to do
     setFlag(PREF_KEYS.watchMode, true);

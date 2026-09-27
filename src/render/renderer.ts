@@ -300,8 +300,13 @@ const SIGN_GLOW_ALPHA = 0.8;
 // BB-2: the far zoom facade.
 /** The facade's wall, one band per built floor. */
 export const FACADE_WALL = 0xdfe6ee;
-/** A shaft on the facade: a darker vertical strip, the near view's shaft cavity (VISUAL.md shafts). */
-export const FACADE_SHAFT = 0x3b3f47;
+/**
+ * A shaft on the facade: a faint strip a step darker than the wall, so the column reads without
+ * blocking the view behind it. The cars keep drawing over it at full strength.
+ */
+export const FACADE_SHAFT = 0xc4ccd6;
+/** The shaft layer's alpha under the Districts view: a faint column between the category blocks. */
+export const DISTRICTS_SHAFT_ALPHA = 0.3;
 /** One facade pane per two tiles, as wide as two tiles' panes and the mullions between them. */
 export const FACADE_PANE_W = 2 * WIN_PANE + 2 * LINE_PX;
 /** The facade's slab line, one art line of ink at the top of each floor's slab. */
@@ -976,6 +981,7 @@ export async function createRenderer(
   const indicatorLayer = new Container();
   indicatorLayer.label = 'indicators';
   layers.cars.addChild(cableLayer, carSpriteLayer);
+  layers.cars.label = 'cars';
 
   const slabLayer = new Container();
   const roomLayer = new Container();
@@ -983,6 +989,7 @@ export async function createRenderer(
   const lobbyEdges = new Graphics();
   lobbyEdges.label = 'lobby edges';
   const shaftLayer = new Container();
+  shaftLayer.label = 'shafts';
   // Stairs and escalators are rooms, but they overlay the rooms they cross, so they
   // are drawn last of all, with no backing fill (art.ts OVERLAY_KINDS).
   const connectorLayer = new Container();
@@ -2862,6 +2869,9 @@ export async function createRenderer(
     })(),
     setOverlay(kind): void {
       overlayPass.set(kind);
+      // The Districts view steps the shafts back to a faint column; the cars stay at full strength.
+      // Alpha only: the far tier's facade owns shaftLayer.visible (applyTier), so the two never fight.
+      shaftLayer.alpha = kind === 'districts' ? DISTRICTS_SHAFT_ALPHA : 1;
     },
     setOverlayColorBlind(on): void {
       overlayPass.setColorBlind(on);

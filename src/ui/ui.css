@@ -83,7 +83,7 @@
   --enter-x: 16px;
   --enter-y: 100%;
   --toast-rise: 8px;
-  /* Watch mode (Settings): the chrome's one fade out, after 20 s without input. */
+  /* Watch mode (Settings): the chrome's one fade out, after 5 s without input. */
   --watch-fade: 400ms;
 
   /* Touch and focus. */
@@ -3822,7 +3822,7 @@ button.hs-news-toast {
 
 /* Watch mode (Settings, off by default; src/ui/watch.ts) ----------------- */
 
-/* After 20 s without input and with nothing open, the chrome steps aside so the tower is the
+/* After 5 s without input and with nothing open, the chrome steps aside so the tower is the
    only thing on screen: the top bar but the clock, the dock, the goals card and the map fade
    out. Any input brings them back at once, with no fade in. Under reduced motion --watch-fade
    is 0, so they go without a fade. */

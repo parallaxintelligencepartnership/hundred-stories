@@ -17,7 +17,7 @@ import { icon } from './icons';
 import { PREF_KEYS, getFlag, onPrefChange, setFlag } from './prefs';
 
 /** Real milliseconds without input before the chrome steps aside. */
-export const WATCH_IDLE_MS = 20_000;
+export const WATCH_IDLE_MS = 5_000;
 /**
  * Turned on, the chrome steps aside this long after: the rest of the Watch button's tap (a
  * mouse leaving it, a late touch event) lands inside it and is not taken as the player's input.
@@ -41,7 +41,7 @@ export function readWatchMode(): boolean {
 }
 
 /** The Watch button's tooltip: what turning it on does. */
-export const WATCH_TIP = 'Watch mode: the buttons step aside so you can watch the tower. Any touch or key brings them back, and after 20 seconds with no input they step aside again.';
+export const WATCH_TIP = 'Watch mode: the buttons step aside so you can watch the tower. Any touch or key brings them back, and after 5 seconds with no input they step aside again.';
 
 export interface WatchToggle {
   /** The round Watch button, for under Views. aria-pressed says whether Watch mode is on. */
@@ -155,7 +155,7 @@ export function createWatchMode(options: WatchModeOptions): WatchMode {
       return;
     }
     if (options.busy()) {
-      // Never over something open: the 20 s start again from now.
+      // Never over something open: the 5 s start again from now.
       lastInput = Date.now();
       arm(WATCH_IDLE_MS);
       return;
@@ -230,7 +230,7 @@ export function createWatchMode(options: WatchModeOptions): WatchMode {
     enabled = next;
     disarm();
     if (enabled) {
-      // Turned on: the chrome steps aside once the grace is out, as if already idle 20 s.
+      // Turned on: the chrome steps aside once the grace is out, as if already idle 5 s.
       const now = Date.now();
       graceUntil = now + WATCH_ENABLE_GRACE_MS;
       lastInput = now + WATCH_ENABLE_GRACE_MS - WATCH_IDLE_MS;
@@ -256,7 +256,7 @@ export function createWatchMode(options: WatchModeOptions): WatchMode {
         return;
       }
       if (wasBusy) {
-        // Closed by itself: the 20 s start from this moment.
+        // Closed by itself: the 5 s start from this moment.
         wasBusy = false;
         graceUntil = 0;
         lastInput = Date.now();

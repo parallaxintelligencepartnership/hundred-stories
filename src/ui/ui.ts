@@ -586,7 +586,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   shell.append(hoverCard.node);
 
   // Watch mode (the Watch button, off by default): turned on, the chrome steps aside at once,
-  // all but the clock; any input brings it back, and 20 s idle with nothing open hides it again.
+  // all but the clock; any input brings it back, and 5 s idle with nothing open hides it again.
   // The phone's build sheet at its row is not "open": it closes as the chrome steps aside.
   const watch = createWatchMode({
     shell,

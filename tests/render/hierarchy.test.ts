@@ -10,7 +10,7 @@ import { FLOOR_PX, SLAB_PX, TILE_PX, WIN_PANE, WIN_PANE_TOP } from '../../src/re
 import { BLOCKS_BELOW_ZOOM, CONNECTOR_ALPHA_FULL, FAR_ZOOM_BLOCKS, layerPlan, MUTE_AMOUNT, MUTE_BELOW_ZOOM, occupancyLevel, zoomTier } from '../../src/render/hierarchy';
 import { floorTopY } from '../../src/render/camera';
 import { BLOCK, PALETTE } from '../../src/render/palette';
-import { createRenderer, FACADE_PANE_W, FACADE_SHAFT, FACADE_WALL, type Renderer } from '../../src/render/renderer';
+import { createRenderer, DISTRICTS_SHAFT_ALPHA, FACADE_PANE_W, FACADE_SHAFT, FACADE_WALL, type Renderer } from '../../src/render/renderer';
 import { ROOMS } from '../../src/sim/rules';
 import type { Room, RoomKind, World } from '../../src/sim/types';
 import { addRoom, addShaft, allocId, createWorld, setOnFire } from '../../src/sim/world';
@@ -216,6 +216,47 @@ describe('the renderer by zoom', () => {
     expect(find(stage, 'connectors').alpha).toBeCloseTo(CONNECTOR_ALPHA_FULL);
   });
 
+  it('keeps the elevator cars visible at full strength at the far tier', async () => {
+    const { stage, renderer } = await mountAt(0.4);
+    expect(renderer.camera.zoom).toBeLessThan(BLOCKS_BELOW_ZOOM);
+    const cars = find(stage, 'cars');
+    expect(cars.visible).toBe(true);
+    expect(cars.alpha).toBe(1);
+    expect(cars.parent!.visible).toBe(true);
+    // The facade draws the shafts itself, so the shaft sprites are hidden.
+    expect(find(stage, 'shafts').visible).toBe(false);
+  });
+
+  it('dims the shaft layer in the Districts view and restores it for any other view, at every tier', async () => {
+    const { stage, renderer, world, frame } = await mountAt(1);
+    const shafts = find(stage, 'shafts');
+    const cars = find(stage, 'cars');
+    expect(shafts.alpha).toBe(1);
+    renderer.setOverlay('districts');
+    expect(shafts.visible).toBe(true);
+    expect(shafts.alpha).toBeCloseTo(DISTRICTS_SHAFT_ALPHA);
+    expect([cars.visible, cars.alpha]).toEqual([true, 1]);
+    renderer.setOverlay('stress');
+    expect(shafts.alpha).toBe(1);
+    renderer.setOverlay('districts');
+    renderer.setOverlay(null);
+    expect(shafts.alpha).toBe(1);
+
+    // Far tier under Districts: the facade hides the shaft sprites, the dim is kept for the way back in.
+    renderer.setOverlay('districts');
+    renderer.camera.zoomAt(0.4 / renderer.camera.zoom, 400, 300);
+    frame();
+    renderer.render(world, 1);
+    expect([shafts.visible, shafts.alpha]).toEqual([false, DISTRICTS_SHAFT_ALPHA]);
+    expect([cars.visible, cars.alpha]).toEqual([true, 1]);
+    renderer.camera.zoomAt(1 / renderer.camera.zoom, 400, 300);
+    frame();
+    renderer.render(world, 1);
+    expect([shafts.visible, shafts.alpha]).toEqual([true, DISTRICTS_SHAFT_ALPHA]);
+    renderer.setOverlay('vacancy');
+    expect([shafts.visible, shafts.alpha]).toEqual([true, 1]);
+  });
+
   it('draws only the selected person at far zoom', async () => {
     const { stage, renderer, world } = await mountAt(0.4);
     const sim = {
@@ -307,6 +348,8 @@ describe('BB-2: the far zoom facade', () => {
     // Darker than the wall, lighter than the ink.
     const lum = (c: number): number => ((c >> 16) & 255) + ((c >> 8) & 255) + (c & 255);
     expect(lum(FACADE_SHAFT)).toBeLessThan(lum(FACADE_WALL));
+    // Only a step darker: a faint column, never a solid dark bar over the view behind it.
+    expect(lum(FACADE_SHAFT)).toBeGreaterThan(0.8 * lum(FACADE_WALL));
     expect(fills(find(stage, 'facade lit') as Graphics)).toEqual([]);
   });
 
