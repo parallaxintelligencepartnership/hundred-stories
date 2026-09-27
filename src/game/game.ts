@@ -384,6 +384,9 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
 
   /** The daily reached its end: stop the clock and keep the result. The ui shows the card. */
   function endDaily(): void {
+    // Nothing more can be built: the tool goes down and a parked outline with it, so no Build
+    // is left on screen that every tap refuses.
+    if (tool.kind !== 'none' || pending) api.setTool({ kind: 'none' });
     speed = 0;
     loop.accumulator = 0;
     cancelScheduledSave();
@@ -1323,6 +1326,15 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
         pointers.delete(ev.pointerId);
         abandonPress();
       });
+      // A gesture cut off by the window losing focus leaves fingers whose release never comes,
+      // and a stale one makes every later tap a "second finger": nothing parks or moves while
+      // the camera, which forgets its fingers on blur too (renderer.ts onBlur), goes on panning.
+      if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+        window.addEventListener('blur', () => {
+          pointers.clear();
+          abandonPress();
+        });
+      }
       el.addEventListener('pointerleave', () => {
         hover = null;
         press = null;

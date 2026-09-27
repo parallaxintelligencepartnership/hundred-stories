@@ -635,9 +635,15 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   // Watch mode (the Watch button, off by default): turned on, the chrome steps aside at once,
   // all but the clock; any input brings it back, and 5 s idle with nothing open hides it again.
   // The phone's build sheet at its row is not "open": it closes as the chrome steps aside.
+  // A room or an elevator in hand is a placement in progress: its placing bar (Cancel, Build,
+  // the nudges) stays up, or the game looks stuck mid-placement.
+  const placing = (): boolean => {
+    const kind = game.getTool().kind;
+    return kind === 'room' || kind === 'shaft';
+  };
   const watch = createWatchMode({
     shell,
-    busy: () => mountedPanel !== null || view.isOpen() || build.sheet() === 'full' || guideActive(),
+    busy: () => mountedPanel !== null || view.isOpen() || build.sheet() === 'full' || guideActive() || placing(),
     onWatch: () => {
       if (build.sheet() === 'row') build.close();
     },
