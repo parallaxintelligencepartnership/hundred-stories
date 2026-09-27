@@ -399,7 +399,7 @@ describe('the alert stack', () => {
     const phone = css.slice(css.lastIndexOf('@media (max-width: 720px) {'));
     const rule = /\n {2}\.hs-toasts \{([^}]*)\}/.exec(phone)?.[1] ?? '';
     expect(rule).toContain('bottom: auto;');
-    expect(rule).toContain('max-height: 25vh;');
+    expect(rule).toContain('max-height: calc(25vh + 2 * var(--toast-bleed));');
     expect(rule).toContain('overflow-y: auto;');
   });
 });

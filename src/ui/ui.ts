@@ -794,15 +794,21 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     timers.add(timer);
   }
 
+  /** The daily card in hand and the date it is for ('' when there is no card). */
+  function dailyKey(): string {
+    const card = dailyCard(game);
+    if (card === null) return '';
+    const daily = game.getDaily?.() ?? null;
+    const choice = game.getDailyChoice?.() ?? null;
+    return `${card}:${choice ? choice.savedDate : daily?.date ?? ''}`;
+  }
+
   /**
    * Today's tower puts up its own card: the twist when a daily starts, the choice when an older
    * one is waiting, the result when it ends. Each once; the intro is never pushed aside.
    */
   function watchDaily(): void {
-    const card = dailyCard(game);
-    const daily = game.getDaily?.() ?? null;
-    const choice = game.getDailyChoice?.() ?? null;
-    const key = card === null ? '' : `${card}:${choice ? choice.savedDate : daily?.date ?? ''}`;
+    const key = dailyKey();
     if (key === dailyShownKey) return;
     if (key === '') {
       dailyShownKey = '';
@@ -828,12 +834,17 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     }
   }
 
-  /** Move to another tower, then show it from the top with nothing open. */
+  /**
+   * Move to another tower, then show it from the top: whatever was open closes, and the daily
+   * card is decided afresh for the tower just arrived in (shown when there is one, nothing in My
+   * tower or a friend's). The open may already have notified and mounted that card; mountedKey
+   * is left truthful, so it is kept as it is and closes normally later.
+   */
   async function switchTower(open: () => Promise<void>): Promise<void> {
     await open();
     syncAddress();
     panelKind = 'none';
-    mountedKey = '';
+    dailyShownKey = '';
     update();
   }
 
@@ -1254,7 +1265,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     const selection = game.getSelection();
     const key =
       panelKind !== 'none'
-        ? `panel:${panelKind}${panelKind === 'daily' ? `:${dailyCard(game) ?? ''}` : ''}`
+        ? `panel:${panelKind}${panelKind === 'daily' ? `:${dailyKey()}` : ''}`
         : selection
           ? `query:${selection.roomId ?? ''}:${selection.simId ?? ''}:${selection.shaftId ?? ''}:${
               selectionExists(selection) ? '1' : '0'

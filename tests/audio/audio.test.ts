@@ -110,12 +110,16 @@ class StubContext {
   }
   deferResume = false;
   pendingResumes: Array<() => void> = [];
+  resumes = 0;
+  suspends = 0;
   resume(): Promise<void> {
+    this.resumes += 1;
     if (this.deferResume) return new Promise<void>((done) => this.pendingResumes.push(() => { this.state = 'running'; done(); }));
     this.state = 'running';
     return Promise.resolve();
   }
   suspend(): Promise<void> {
+    this.suspends += 1;
     this.state = 'suspended';
     return Promise.resolve();
   }
@@ -731,5 +735,68 @@ describe('audit 2026-09-25: incidents, tower switches and the sound toggle', () 
     await new Promise(done => setTimeout(done, 0));
     expect(ctx.state).toBe('suspended');
     sound.destroy();
+  });
+});
+
+describe('a hidden page', () => {
+  // iOS holds a page's audio session, and every other app's audio, while its context runs.
+  function rig(gesture = true) {
+    const game = fakeGame(); const target = fakeTarget(); const page = fakeTarget(); const ctx = new StubContext();
+    let hidden = false;
+    const sound = createSound(game, { target, page, hidden: () => hidden, store: memoryStore(),
+      createContext: () => asCtx(ctx), setInterval: () => 1, clearInterval: () => {} });
+    if (gesture) { target.fire('pointerdown'); sound.setEnabled(true); }
+    const settle = () => new Promise(done => setTimeout(done, 0));
+    const hide = () => { hidden = true; page.fire('visibilitychange'); };
+    const show = () => { hidden = false; page.fire('visibilitychange'); };
+    return { ctx, sound, page, hide, show, settle };
+  }
+
+  it('suspends the running context when hidden and resumes it when shown', async () => {
+    const { ctx, sound, hide, show, settle } = rig();
+    await settle();
+    expect(ctx.state).toBe('running');
+    const resumes = ctx.resumes;
+    hide();
+    expect(ctx.suspends).toBe(1);
+    expect(ctx.state).toBe('suspended');
+    show();
+    expect(ctx.resumes).toBe(resumes + 1);
+    await settle();
+    expect(ctx.state).toBe('running');
+    sound.destroy();
+  });
+
+  it('does not resume on show when sound was turned off while hidden', async () => {
+    const { ctx, sound, hide, show, settle } = rig();
+    await settle();
+    hide();
+    sound.setEnabled(false);
+    const resumes = ctx.resumes;
+    show();
+    await settle();
+    expect(ctx.resumes).toBe(resumes);
+    expect(ctx.state).toBe('suspended');
+    sound.destroy();
+  });
+
+  it('pagehide suspends and pageshow resumes the same way', async () => {
+    const { ctx, sound, page, settle } = rig();
+    await settle();
+    page.fire('pagehide');
+    expect(ctx.state).toBe('suspended');
+    page.fire('pageshow');
+    await settle();
+    expect(ctx.state).toBe('running');
+    sound.destroy();
+  });
+
+  it('leaves a page with no gesture or no context alone', () => {
+    const { ctx, sound, page, hide, show } = rig(false);
+    expect(() => { hide(); show(); page.fire('pagehide'); page.fire('pageshow'); }).not.toThrow();
+    expect(sound.hasContext).toBe(false);
+    expect(ctx.suspends + ctx.resumes).toBe(0);
+    sound.destroy();
+    expect(page.count()).toBe(0);
   });
 });

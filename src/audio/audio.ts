@@ -463,6 +463,13 @@ export interface SoundDeps {
   /** Timer for the crickets' random gate. */
   setInterval?: (fn: () => void, ms: number) => number;
   clearInterval?: (id: number) => void;
+  /**
+   * Where page visibility is heard. Default: document for visibilitychange and window for
+   * pagehide and pageshow; when given, all three are heard here.
+   */
+  page?: { addEventListener(type: string, fn: () => void): void; removeEventListener(type: string, fn: () => void): void };
+  /** Whether the page is hidden now. Default: document.hidden, false without a document. */
+  hidden?: () => boolean;
 }
 
 export interface Sound {
@@ -530,8 +537,18 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
   const every = deps.setInterval ?? ((fn: () => void, ms: number) => setInterval(fn, ms) as unknown as number);
   const stopEvery = deps.clearInterval ?? ((id: number) => clearInterval(id));
   const makeContext = deps.createContext ?? browserContext;
+  type PageTarget = NonNullable<SoundDeps['page']>;
+  // A global counts only if it can take listeners (test harnesses install bare fakes).
+  const listenable = (g: unknown): PageTarget | null =>
+    g && typeof (g as PageTarget).addEventListener === 'function' && typeof (g as PageTarget).removeEventListener === 'function' ? g as PageTarget : null;
+  const page: PageTarget | null = deps.page ?? (typeof document !== 'undefined' ? listenable(document) : null);
+  const pageWindow: PageTarget | null = deps.page ?? (typeof window !== 'undefined' ? listenable(window) : null);
+  const isHidden = deps.hidden ?? (() => typeof document !== 'undefined' && document.hidden === true);
 
   let gestured = false;
+  // The context was suspended because the page went hidden (not because sound was turned off).
+  // iOS keeps a page's audio session, and so every other app's audio, held while it runs.
+  let dozing = false;
   let ctx: AudioContextLike | null = null;
   let master: GainNode | null = null;
   let musicBus: GainNode | null = null;
@@ -617,6 +634,31 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
   target?.addEventListener('pointerdown', onGesture, true);
   target?.addEventListener('keydown', onGesture, true);
 
+  /** Resumes a suspended context; suspends it again if sound went off or the page hid meanwhile. */
+  function resumeGuarded(resuming: AudioContextLike): void {
+    void resuming.resume().then(() => { if (!settings.on || dozing) void resuming.suspend().catch(() => {}); }).catch(() => {});
+  }
+
+  const onPageHidden = (): void => {
+    if (!ctx || ctx.state === 'closed') return;
+    if (ctx.state === 'running') void ctx.suspend().catch(() => {});
+    // Also marked while a resume is still in flight, so it suspends again once it lands.
+    dozing = true;
+  };
+  const onPageShown = (): void => {
+    if (!dozing) return;
+    dozing = false;
+    if (!settings.on || !gestured || !ctx || ctx.state !== 'suspended') return;
+    // Only the context wakes: smoothing, chapter and mute automation stay as they were. The mood
+    // eases from now, not from the moment the page hid.
+    lastMoodMs = now();
+    resumeGuarded(ctx);
+  };
+  const onVisibility = (): void => { if (isHidden()) onPageHidden(); else onPageShown(); };
+  page?.addEventListener('visibilitychange', onVisibility);
+  pageWindow?.addEventListener('pagehide', onPageHidden);
+  pageWindow?.addEventListener('pageshow', onPageShown);
+
   function wake(): void {
     if (!gestured || !settings.on) return;
     if (!ctx) {
@@ -665,10 +707,15 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
       tapeDepth = ctx.createGain(); tapeDepth.gain.value = TAPE_WOBBLE_CENTS;
     }
     if (ctx.state === 'suspended') {
-      const resuming = ctx;
-      // Sound may be turned off again before the resume settles; sleep saw a suspended context
-      // then, so suspend it here once the resume lands.
-      void resuming.resume().then(() => { if (!settings.on) void resuming.suspend().catch(() => {}); }).catch(() => {});
+      if (isHidden()) {
+        dozing = true; // turned on while hidden: the context waits for the page to show
+      } else {
+        // Sound may be turned off again (or the page hidden) before the resume settles; sleep saw
+        // a suspended context then, so resumeGuarded suspends it once the resume lands. A resume
+        // here ends any doze, so a later pageshow does not resume a second time.
+        dozing = false;
+        resumeGuarded(ctx);
+      }
     }
     if (unsubEvents) return; // Already awake: gestures must not reset smoothing or mute automation.
     // Nothing was heard while asleep: take the tower, its stars and its incidents as they are now.
@@ -700,6 +747,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
   }
 
   function sleep(): void {
+    dozing = false;
     unsubEvents?.();
     unsubEvents = null;
     unsubClock?.();
@@ -1230,6 +1278,9 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
     destroy() {
       target?.removeEventListener('pointerdown', onGesture, true);
       target?.removeEventListener('keydown', onGesture, true);
+      page?.removeEventListener('visibilitychange', onVisibility);
+      pageWindow?.removeEventListener('pagehide', onPageHidden);
+      pageWindow?.removeEventListener('pageshow', onPageShown);
       sleep();
     },
   };

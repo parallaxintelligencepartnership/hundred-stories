@@ -2656,6 +2656,8 @@ a.hs-btn {
   align-items: baseline;
   gap: 8px;
   max-width: 100%;
+  /* Safari draws a transformed glass box with square corners unless it is its own layer. */
+  isolation: isolate;
   min-height: var(--touch);
   align-items: center;
   padding: 8px 16px;
@@ -3767,16 +3769,20 @@ button.hs-news-toast {
   }
 
   /* On a phone the alerts sit under the status bar and never take more than the top quarter of
-     the view; they scroll inside that band, left of the map's corner. */
+     the view; they scroll inside that band, left of the map's corner. The band clips, so its
+     edges sit --toast-bleed outside the cards with the same room as padding inside: a card's
+     shadow and rounded corners are never cut square by the band. */
   .hs-toasts {
-    top: calc(var(--top-actual, calc(var(--top-h) * 2 + var(--safe-top))) + var(--gap-float) + var(--chip-h, 0px));
+    --toast-bleed: 24px;
+    top: calc(var(--top-actual, calc(var(--top-h) * 2 + var(--safe-top))) + var(--gap-float) + var(--chip-h, 0px) - var(--toast-bleed));
     bottom: auto;
-    left: calc(var(--pad) + var(--safe-left));
+    left: calc(var(--pad) + var(--safe-left) - var(--toast-bleed));
     /* The map's corner stays free whether it shows or not: the map comes and goes with every
        pan, and the alerts keep one right edge instead of jumping sideways with it. */
-    right: calc(64px + 2 * var(--edge) + var(--safe-right));
+    right: calc(64px + 2 * var(--edge) + var(--safe-right) - var(--toast-bleed));
     width: auto;
-    max-height: 25vh;
+    max-height: calc(25vh + 2 * var(--toast-bleed));
+    padding: var(--toast-bleed);
     overflow-y: auto;
     overscroll-behavior: contain;
     gap: 4px;
@@ -3784,7 +3790,7 @@ button.hs-news-toast {
 
   /* The same edge with the map up: this outranks the wide screen's step left of a 96 px map. */
   .hs-minimap:not(.is-hidden) ~ .hs-toasts {
-    right: calc(64px + 2 * var(--edge) + var(--safe-right));
+    right: calc(64px + 2 * var(--edge) + var(--safe-right) - var(--toast-bleed));
   }
 
   .hs-toast {
