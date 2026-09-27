@@ -11,6 +11,10 @@ import { join } from 'node:path';
 // /theme.js, /icons/...) and the shell serves dist-app at its origin root, so nothing is rewritten.
 const APP_MODE = 'app';
 
+// Cloudflare Web Analytics site token, from Web Analytics > Manage site > JS Snippet. It is a
+// public site id printed in every page, not a secret. Empty means no beacon.
+export const CF_BEACON_TOKEN = '';
+
 // Files copied verbatim from public/ into dist-app that the app shells never load: the
 // landing site's Cloudflare headers, crawler files, social preview image and wordmark
 // exports. theme.js is not on this list — it is left for closeBundle to decide, since the
@@ -42,6 +46,20 @@ const CHUNK_GROUPS = [
   { name: 'preload-helper', test: /vite[\\/]preload-helper/, priority: 2 },
   { name: (id: string) => nativeChunk(id) ?? null, test: NATIVE_PACKAGE, priority: 1 },
 ];
+
+// The Worker that serves this site never sees Cloudflare's automatic Web Analytics injection, so
+// the beacon has to be added by hand. Cloudflare's snippet is a single <script> tag with the
+// site's public token; when there is no token, this is a no-op.
+export function cfBeacon(token: string): Plugin {
+  return {
+    name: 'cf-beacon',
+    transformIndexHtml(html) {
+      if (!token) return html;
+      const tag = `<script defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token": "${token}"}'></script>`;
+      return html.replace('</head>', `${tag}</head>`);
+    },
+  };
+}
 
 function gameAtRoot(): Plugin {
   let outDir = 'dist-app';
@@ -90,6 +108,7 @@ export default defineConfig(({ mode }) => {
     plugins: app
       ? [gameAtRoot()]
       : [
+          cfBeacon(CF_BEACON_TOKEN),
           VitePWA({
             registerType: 'autoUpdate',
             // The installable app is the game, not the landing site.
