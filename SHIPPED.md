@@ -40,7 +40,7 @@ Save format: 0.5.1 writes format 5 unchanged (the design pass changed no `src/si
 
 - Cloudflare: `npx wrangler rollback` returns the live site to the previous uploaded version; `npx wrangler versions list` shows the versions with their ids.
 - pi3: `deploy.sh` snapshots the live tree to `html.prev` before every sync; the swap is in `deploy/README.md` under Rollback.
-- Return target for this ship: `git checkout ship-2026-09-26-c`. Previous good state: `ship-2026-09-26-b` (0.5.2), or `npx wrangler rollback` to it.
+- Return target for this ship: `git checkout ship-2026-09-26-d`. Previous good state: `ship-2026-09-26-c` (0.5.3 without the beacon), or `npx wrangler rollback` to it.
 
 ## Known limitations and accepted risks
 No finding was accepted; the accepted risks list is empty, and at the 0.5.0 ship no finding of any severity is open in `.itworks/REVIEWS.md`.
@@ -84,6 +84,7 @@ Second: a browser whose IndexedDB never opens. Since 0.5.0 a failed read no long
 - Project state: `.itworks/` holds PROJECT.md, MAP.md, DECISIONS.md, REVIEWS.md and PROFILE.md; REVIEWS.md is the finding record this document is built from.
 
 ## Ship history
+- 2026-09-26: 0.5.3 re-ship, tag ship-2026-09-26-d, Cloudflare version 9af55468-a357-420d-b87e-71f85999fd78; the site pages carry the Cloudflare Web Analytics snippet (token set in vite.config.ts, site build only; the app build has none), and the Web Analytics site is switched to manual snippet mode in the dashboard. Beacon confirmed on hundredstories.xyz and www.
 - 2026-09-26: 0.5.3, tag ship-2026-09-26-c, Cloudflare version 65b4996a-4888-4981-bb0c-810101339bc7; routine info lines (hotel check-outs, housekeeping, rentals) go to News only and never toast, VIP arrivals and weddings still do; Watch hides the chrome 600 ms after the toggle, the phone build row no longer blocks it, the placing bar and news toasts are covered; the panel head no longer shrinks under its Close button, toasts wrap and keep clear of the X; the site CSP lets the Cloudflare Web Analytics beacon through and the privacy page says visits are counted (the zone setting itself is still off, so no counting yet). Sweep skipped at Matt's call, same as 0.5.2.
 - 2026-09-19: first ship (closeout; deploy pending domain)
 - 2026-09-19: post-ship checkpoint, people rescaled and interiors redrawn
