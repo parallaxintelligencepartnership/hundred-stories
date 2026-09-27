@@ -3,6 +3,9 @@
 // the map fade out over 400 ms); any input brings it back at once. Off by default, a round
 // Watch button under Views on the game view (no longer a Settings switch), remembered with the
 // other prefs. Under reduced motion there is no fade.
+// 2026-09-26 (Matt: the toggle "doesn't seem to do much"): turning it on steps the chrome aside
+// after a 600 ms grace, not 20 s; the build sheet's row is not busy and closes as the chrome
+// goes; the placing chip and bar go too; no news toasts while watching, alerts still show.
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PAD_BUTTONS, type PadLike } from '../../src/ui/gamepad';
@@ -10,9 +13,9 @@ import { createSettingsPanel, type PanelContext } from '../../src/ui/panels';
 import { getFlag, PREF_KEYS, setFlag } from '../../src/ui/prefs';
 import { ROOMS } from '../../src/sim/rules';
 import type { RoomKind } from '../../src/sim/types';
-import { addRoom, allocId, createWorld } from '../../src/sim/world';
+import { addRoom, allocId, createWorld, log } from '../../src/sim/world';
 import { createUi } from '../../src/ui/ui';
-import { WATCH_CLASS, WATCH_FADE_MS, WATCH_IDLE_MS, WATCH_TIP } from '../../src/ui/watch';
+import { WATCH_CLASS, WATCH_ENABLE_GRACE_MS, WATCH_FADE_MS, WATCH_IDLE_MS, WATCH_TIP } from '../../src/ui/watch';
 import { FakeDom, type FakeElement } from './fake-dom';
 
 // ------------------------------------------------------------ the stylesheet, read as a browser would
@@ -275,10 +278,32 @@ describe('watch mode', () => {
     expect(watching(shell)).toBe(true);
   });
 
-  it('follows the switch live: on starts the idle clock, off brings everything back at once', () => {
+  it('turned on, hides at once after a 600 ms grace that the toggle tap\'s own pointer events do not cancel', () => {
+    expect(WATCH_ENABLE_GRACE_MS).toBe(600);
+    const { root, shell } = mount();
+    click(watchButton(root));
+    // The mouse leaves the button and the touch finishes, inside the grace.
+    vi.advanceTimersByTime(100);
+    dom.fireWindow('pointermove', { type: 'pointermove', clientX: 12, clientY: 12, pointerType: 'mouse', target: dom.body });
+    const up = spied({ type: 'pointerup', pointerId: 3, pointerType: 'touch' });
+    dom.fireWindow('pointerup', up);
+    vi.advanceTimersByTime(WATCH_ENABLE_GRACE_MS - 101);
+    expect(watching(shell)).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(watching(shell)).toBe(true);
+    // Later input brings the chrome back, and it steps aside again 20 s after the last input.
+    dom.fireWindow('pointermove', { type: 'pointermove', clientX: 20, clientY: 20, pointerType: 'mouse', target: dom.body });
+    expect(watching(shell)).toBe(false);
+    vi.advanceTimersByTime(WATCH_IDLE_MS - 1);
+    expect(watching(shell)).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(watching(shell)).toBe(true);
+  });
+
+  it('follows the switch live: on hides after the grace, off brings everything back at once', () => {
     const { shell } = mount();
     setFlag(PREF_KEYS.watchMode, true);
-    vi.advanceTimersByTime(WATCH_IDLE_MS);
+    vi.advanceTimersByTime(WATCH_ENABLE_GRACE_MS);
     expect(watching(shell)).toBe(true);
     setFlag(PREF_KEYS.watchMode, false);
     expect(watching(shell)).toBe(false);
@@ -427,17 +452,28 @@ describe('watch mode keeps the chrome up while anything is open', () => {
     expect(watching(shell)).toBe(true); // closed, the chrome steps aside again
   });
 
-  it('the build sheet in row view', () => {
+  it('but not the build sheet in row view: it is not busy, and it closes as the chrome steps aside', () => {
     phone();
     setFlag(PREF_KEYS.watchMode, true);
     const { shell } = mount();
     click(byClass(shell, 'hs-build-fab'));
     expect(classesOf(byClass(shell, 'hs-palette'))).toContain('is-sheet-row');
-    vi.advanceTimersByTime(3 * WATCH_IDLE_MS);
-    expect(watching(shell)).toBe(false);
-    click(byClass(shell, 'hs-build-fab')); // closed
-    vi.advanceTimersByTime(2 * WATCH_IDLE_MS);
+    vi.advanceTimersByTime(WATCH_IDLE_MS);
     expect(watching(shell)).toBe(true);
+    expect(classesOf(byClass(shell, 'hs-palette'))).not.toContain('is-sheet-row');
+    expect(classesOf(shell)).not.toContain('is-building'); // the sheet is shut, not just faded
+    expect(watching(shell)).toBe(true); // and its closing did not wake the chrome
+  });
+
+  it('turning Watch on over the row sheet closes it after the grace', () => {
+    phone();
+    const { root, shell } = mount();
+    click(byClass(shell, 'hs-build-fab'));
+    expect(classesOf(byClass(shell, 'hs-palette'))).toContain('is-sheet-row');
+    click(watchButton(root));
+    vi.advanceTimersByTime(WATCH_ENABLE_GRACE_MS);
+    expect(watching(shell)).toBe(true);
+    expect(classesOf(byClass(shell, 'hs-palette'))).not.toContain('is-sheet-row');
   });
 
   it('the build sheet in full view', () => {
@@ -531,6 +567,46 @@ describe('watch mode on the page, with ui.css applied', () => {
     expect(watchRule().body).toContain('var(--watch-fade)');
     expect(resolvedVar(shell, '--watch-fade')).toBe('0ms');
   });
+
+  it('hides the placing chip and bar; raises no news toast; an alert still shows and does not wake the chrome', () => {
+    const world = createWorld(3);
+    const subscribers = new Set<() => void>();
+    const game = mkGame() as unknown as Record<string, unknown>;
+    game['world'] = world;
+    game['subscribe'] = (cb: () => void) => {
+      subscribers.add(cb);
+      return () => subscribers.delete(cb);
+    };
+    const notify = (): void => subscribers.forEach((cb) => cb());
+    const root = dom.createElement('div');
+    createUi(root as never, game as never, {} as never);
+    const shell = root.children[0] as FakeElement;
+    const find = (name: string): FakeElement => shell.descendants().find((n) => classesOf(n).includes(name)) as FakeElement;
+    const newsToasts = (): FakeElement[] => shell.descendants().filter((n) => classesOf(n).includes('hs-news-toast'));
+
+    setFlag(PREF_KEYS.watchMode, true);
+    vi.advanceTimersByTime(WATCH_ENABLE_GRACE_MS);
+    expect(watching(shell)).toBe(true);
+    expect([hiddenByWatch(find('hs-place-bar')), hiddenByWatch(find('hs-place-chip'))]).toEqual([true, true]);
+
+    // Even a notable line waits in the News panel while watching.
+    log(world, 'The VIP checked into the suite on floor 9.', 'info', { notable: true });
+    notify();
+    expect(newsToasts()).toHaveLength(0);
+    expect(world.log.at(-1)?.text).toBe('The VIP checked into the suite on floor 9.');
+
+    log(world, 'Fire broke out in the office on floor 2.', 'alert');
+    notify();
+    const alerts = find('hs-alerts');
+    expect(alerts.textContent).toContain('Fire');
+    expect([hiddenByWatch(alerts), hiddenByWatch(find('hs-toasts')), watching(shell)]).toEqual([false, false, true]);
+
+    // Watching off: the next notable line toasts again.
+    setFlag(PREF_KEYS.watchMode, false);
+    log(world, 'The wedding is over and the guests have left.', 'info', { notable: true });
+    notify();
+    expect(newsToasts().map((n) => n.textContent)).toEqual(['The wedding is over and the guests have left.']);
+  });
 });
 
 describe('watch mode styles', () => {
@@ -543,9 +619,11 @@ describe('watch mode styles', () => {
   it('fades the top bar but the clock, the dock, the goals card and the map over 400 ms', () => {
     expect(block(':root {')).toContain(`--watch-fade: ${WATCH_FADE_MS}ms;`);
     const hide = block(`.hs-ui.${WATCH_CLASS} :is(`);
-    for (const part of ['.hs-status-pill > :not(.hs-status-clock)', '.hs-top-actions', '.hs-watch-btn', '.hs-view-chip', '.hs-palette', '.hs-build-fab', '.hs-card', '.hs-minimap', '.hs-hover-card']) {
+    for (const part of ['.hs-status-pill > :not(.hs-status-clock)', '.hs-top-actions', '.hs-watch-btn', '.hs-view-chip', '.hs-palette', '.hs-build-fab', '.hs-card', '.hs-minimap', '.hs-hover-card', '.hs-place-bar', '.hs-place-chip']) {
       expect(hide).toContain(part);
     }
+    // The toasts' region (alert cards and alert toasts) is never in it.
+    expect(hide).not.toMatch(/\.hs-(toasts|alerts|alert-toast|toast)\b/);
     expect(hide).toContain('opacity: 0;');
     // Hidden controls take no clicks.
     expect(hide).toContain('pointer-events: none;');

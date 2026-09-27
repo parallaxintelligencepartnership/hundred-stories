@@ -473,6 +473,7 @@ export function tickVip(world: World, event: VipEventState): void {
     log(world, `The VIP, ${name}, walked into the lobby and is heading up to the ${describe(suite)}.`, 'info', {
       roomId: suite.id,
       simId: sim.id,
+      notable: true,
     });
     return;
   }
@@ -501,7 +502,7 @@ export function tickVip(world: World, event: VipEventState): void {
     event.checkInEval = suite.eval;
     event.leavesAt = minute + EVENTS.vip.stayMinutes;
     sim.stayUntil = event.leavesAt;
-    log(world, `The VIP checked into the ${describe(suite)}.`, 'info', { roomId: suite.id, simId: sim.id });
+    log(world, `The VIP checked into the ${describe(suite)}.`, 'info', { roomId: suite.id, simId: sim.id, notable: true });
     towerBeat(world, 'vip.arrival', { simId: sim.id, roomId: suite.id });
     return;
   }
@@ -835,14 +836,14 @@ export function startWedding(world: World): void {
   const cathedral = roomsOfKind(world, 'cathedral')[0];
   if (!cathedral) return;
   world.events.push({ kind: 'wedding', startedAt: world.time.minute });
-  log(world, `A wedding has started in the cathedral on floor ${cathedral.floor}.`, 'info', { roomId: cathedral.id });
+  log(world, `A wedding has started in the cathedral on floor ${cathedral.floor}.`, 'info', { roomId: cathedral.id, notable: true });
 }
 
 export function tickWedding(world: World, event: Extract<ActiveEvent, { kind: 'wedding' }>): void {
   if (world.time.minute - event.startedAt < EVENTS.wedding.durationMinutes) return;
   world.stats.weddingsHeld += 1;
   endEvent(world, event);
-  log(world, 'The wedding is over and the guests have left.', 'info');
+  log(world, 'The wedding is over and the guests have left.', 'info', { notable: true });
 }
 
 // ---------------------------------------------------------------- scheduler

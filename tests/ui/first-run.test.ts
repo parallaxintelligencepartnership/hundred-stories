@@ -389,8 +389,10 @@ describe('news toasts and story lines', () => {
       const { root } = mount(game);
       const news = (): FakeElement[] => byClass(root, 'hs-news-toast');
       const text = (): string => news().at(-1)?.descendants().find((n) => n.className === 'hs-toast-words')?.textContent ?? '';
+      // Only a notable info line (a VIP, a wedding) toasts; routine info goes to News only.
       const log = (line: string, level: 'info' | 'alert'): void => {
-        (world.log as unknown as { minute: number; text: string; level: string }[]).push({ minute: 500, text: line, level });
+        const entry = { minute: 500, text: line, level, ...(level === 'info' ? { notable: true } : {}) };
+        (world.log as unknown as { minute: number; text: string; level: string }[]).push(entry);
         world.logTotal += 1;
       };
       followSim(world.story, 501);
@@ -400,14 +402,14 @@ describe('news toasts and story lines', () => {
       const region = byClass(root, 'hs-news')[0] as FakeElement;
       expect([region.getAttribute('role'), region.getAttribute('aria-live')]).toEqual(['status', 'polite']);
 
-      log('Built a lobby on floor 1.', 'info');
+      log('A wedding has started in the cathedral on floor 1.', 'info');
       game.notify();
-      expect(text()).toBe('Built a lobby on floor 1.');
+      expect(text()).toBe('A wedding has started in the cathedral on floor 1.');
       expect(news()[0]?.parentNode).toBe(region);
 
       recordBeat(world.story, { code: 'wait.long', minute: 510, simId: 502, value: 8 }); // not followed
       game.notify();
-      expect(text()).toBe('Built a lobby on floor 1.');
+      expect(text()).toBe('A wedding has started in the cathedral on floor 1.');
 
       recordBeat(world.story, { code: 'wait.long', minute: 511, simId: 501, value: 8 });
       game.notify();
@@ -436,9 +438,9 @@ describe('news toasts and story lines', () => {
       game.notify();
       expect(news()).toHaveLength(before); // and the alert is not covered by a story
 
-      log('Built an office on floor 2.', 'info');
+      log('The wedding is over and the guests have left.', 'info');
       game.notify();
-      expect(text()).toBe('Built an office on floor 2.');
+      expect(text()).toBe('The wedding is over and the guests have left.');
       now += 30_000;
       recordBeat(world.story, { code: 'trip.arrived', minute: 550, simId: 501, value: 3 });
       game.notify();
@@ -456,7 +458,7 @@ describe('news toasts and story lines', () => {
     const game = stubGame();
     addRoom(game, { kind: 'lobby', floor: 1, x: 180, width: 20 });
     const { root } = mount(game);
-    (game.world.log as unknown as { minute: number; text: string; level: string }[]).push({ minute: 500, text: 'Built a lobby on floor 1.', level: 'info' });
+    (game.world.log as unknown as { minute: number; text: string; level: string; notable?: boolean }[]).push({ minute: 500, text: 'A wedding has started in the cathedral on floor 1.', level: 'info', notable: true });
     (game.world as unknown as { logTotal: number }).logTotal += 1;
     game.notify();
     const toast = byClass(root, 'hs-news-toast')[0] as FakeElement;

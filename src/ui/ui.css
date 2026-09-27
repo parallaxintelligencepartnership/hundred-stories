@@ -1422,12 +1422,16 @@ button.hs-readout:hover {
   }
 }
 
+/* The head band: Close (a touch target tall) with 8 px above and below it and the hairline
+   under it. In the sheet, a column flex box of fixed or capped height, it never shrinks: a
+   long body used to squeeze it to 44 px, under its own padded Close. */
 .hs-panel-head {
   display: flex;
+  flex: none;
   align-items: center;
   justify-content: space-between;
   gap: var(--pad);
-  min-height: var(--touch);
+  min-height: calc(var(--touch) + 2 * 8px + 1px);
   padding: 8px 12px 8px 16px;
   border-bottom: 1px solid var(--hairline);
 }
@@ -2580,6 +2584,7 @@ a.hs-btn {
 .hs-toast {
   position: relative;
   padding: 12px 14px;
+  overflow-wrap: anywhere;
   background: var(--surface);
   border-radius: var(--radius-16);
   box-shadow: var(--shadow-2), inset 3px 0 0 var(--alert);
@@ -2601,6 +2606,7 @@ a.hs-btn {
   color: var(--ink);
   font-size: var(--size-14);
   text-align: left;
+  overflow-wrap: anywhere;
   cursor: pointer;
   pointer-events: auto;
   opacity: 1;
@@ -2611,6 +2617,11 @@ a.hs-btn {
 
 .hs-alert-toast .hs-toast-words {
   flex: 1 1 auto;
+}
+
+/* The words take what is left of the row and wrap in it, never pushing the x or the time out. */
+.hs-toast-words {
+  min-width: 0;
 }
 
 /* The new version notice (ui.ts updateReady): news, not trouble, so no red edge; its tap
@@ -2657,6 +2668,7 @@ a.hs-btn {
   font-size: var(--size-14);
   line-height: 1.35;
   text-align: left;
+  overflow-wrap: anywhere;
   pointer-events: auto;
   opacity: 1;
   transform: translateY(0);
@@ -2700,15 +2712,17 @@ button.hs-news-toast {
   }
 }
 
-/* Every alert closes: the control sits in the top right corner, clear of the text. */
+/* Every alert closes: the control sits in the top right corner, inside the rounded edge and
+   clear of the text (6 + 28 px, and 4 px to spare at the phone's 6 px padding). */
 .hs-toast-body {
-  padding-right: 28px;
+  min-width: 0;
+  padding-right: 32px;
 }
 
 .hs-toast-close {
   position: absolute;
-  top: 2px;
-  right: 2px;
+  top: 6px;
+  right: 6px;
   width: 28px;
   height: 28px;
   padding: 0;
@@ -3827,8 +3841,9 @@ button.hs-news-toast {
 }
 
 /* Hidden, they take no clicks: the first input only brings them back (src/ui/watch.ts). The
-   hover card goes with them. */
-.hs-ui.is-watching :is(.hs-status-pill > :not(.hs-status-clock), .hs-top-actions, .hs-watch-btn, .hs-view-chip, .hs-palette, .hs-build-fab, .hs-card, .hs-minimap, .hs-hover-card) {
+   hover card and the placing chip and bar go with them. News toasts are not raised while
+   watching (refreshNews); the alert cards and alert toasts in .hs-toasts stay. */
+.hs-ui.is-watching :is(.hs-status-pill > :not(.hs-status-clock), .hs-top-actions, .hs-watch-btn, .hs-view-chip, .hs-palette, .hs-build-fab, .hs-card, .hs-minimap, .hs-hover-card, .hs-place-bar, .hs-place-chip) {
   opacity: 0;
   pointer-events: none;
   animation: hs-watch-hide var(--watch-fade) var(--ease-standard);

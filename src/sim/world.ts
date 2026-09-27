@@ -57,7 +57,7 @@ export function allocId(world: World): Id {
   return world.nextId++;
 }
 
-export function log(world: World, text: string, level: LogEntry['level'] = 'info', extra: { roomId?: Id; simId?: Id } = {}): void {
+export function log(world: World, text: string, level: LogEntry['level'] = 'info', extra: { roomId?: Id; simId?: Id; notable?: boolean } = {}): void {
   world.logTotal += 1;
   world.log.push({ minute: world.time.minute, text, level, ...extra });
   if (world.log.length > 2000) world.log.splice(0, world.log.length - 2000);

@@ -67,7 +67,7 @@ import { pageRoot, watchDisplayPrefs } from './display';
 import { createPageHaptics, hapticsEnabled } from './haptics';
 import { createGamepadInput, pageGamepadDeps, type GamepadInput, type PadDirection } from './gamepad';
 import { focusablesIn, SHEET_CARD_MIN_WIDTH } from './sheet';
-import { createWatchMode, createWatchToggle } from './watch';
+import { WATCH_CLASS, createWatchMode, createWatchToggle } from './watch';
 import { UPDATE_TEXT, type Notifier } from './notify';
 
 export interface Ui {
@@ -585,12 +585,15 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   const hoverCard = createHoverCard(shell, game, () => chromeBand, openCardLeft);
   shell.append(hoverCard.node);
 
-  // Watch mode (Settings, off by default): after 20 s idle with nothing open, the chrome steps
-  // aside, all but the clock. Any input brings it back.
+  // Watch mode (the Watch button, off by default): turned on, the chrome steps aside at once,
+  // all but the clock; any input brings it back, and 20 s idle with nothing open hides it again.
+  // The phone's build sheet at its row is not "open": it closes as the chrome steps aside.
   const watch = createWatchMode({
     shell,
-    busy: () =>
-      mountedPanel !== null || view.isOpen() || build.sheet() === 'row' || build.sheet() === 'full' || guideActive(),
+    busy: () => mountedPanel !== null || view.isOpen() || build.sheet() === 'full' || guideActive(),
+    onWatch: () => {
+      if (build.sheet() === 'row') build.close();
+    },
   });
 
   const ctx: PanelContext = {
@@ -1389,6 +1392,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
       newsShowsAlert = newest.level === 'alert';
       // The first look is the tower as loaded: its old lines are history, not news.
       if (first || newsShowsAlert) return;
+      // Watching: the News panel keeps the line; no toast rises over the tower (alerts still do).
+      if (shell.classList.contains(WATCH_CLASS)) return;
       // A full tower logs warnings in bursts (give-ups, move-outs, people with no way out): one
       // folded toast now and then, not one each. The News panel keeps every line.
       if (newest.level === 'warn' && !acting) {
@@ -1415,11 +1420,19 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
         lastNoticeText = '';
         return;
       }
+      // Routine info (built, rented, checked out, cleaned) goes to the News panel only; a notable
+      // one (a VIP, a wedding) still toasts, even when a routine line landed after it.
+      const shown =
+        newest.level === 'info' && !newest.notable
+          ? log.slice(log.length - fresh).reverse().find((line) => line.level === 'info' && line.notable)
+          : newest;
+      if (!shown) return;
       // Only the sentence, in the News panel's plain voice; the panel keeps when it happened.
-      toastLayer.show(newest.text, { onTap: openLog, tapLabel: 'Open the news' });
+      toastLayer.show(shown.text, { onTap: openLog, tapLabel: 'Open the news' });
       return;
     }
     if (!beat || newsShowsAlert || beat.simId === undefined) return;
+    if (shell.classList.contains(WATCH_CLASS)) return;
     const now = performance.now();
     if (now - storyShownAt < STORY_TOAST_GAP_MS) return;
     storyShownAt = now;

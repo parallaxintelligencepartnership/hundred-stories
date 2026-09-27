@@ -47,7 +47,7 @@ it('the first refused Add car shows exactly one notice card and no news toast', 
   expect(game.world.log.at(-1)?.text).toContain('Not enough cash');
 });
 
-it('an accepted Add car still reaches the news', () => {
+it('an accepted Add car reaches the News panel only, not a toast (routine info never toasts)', () => {
   const game = createGame(5);
   game.world.cash = 10_000_000;
   for (let x = 90; x < 130; x += 1) game.apply({ kind: 'build', room: 'lobby', floor: 1, x });
@@ -56,5 +56,6 @@ it('an accepted Add car still reaches the news', () => {
   createUi(root as never, game, {} as never);
   game.select({ shaftId: [...game.world.shafts.keys()][0]! });
   click(root.descendants().find((n) => n.tagName === 'BUTTON' && n.textContent.startsWith('Add car'))!);
-  expect(root.descendants().some((n) => has(n, 'hs-news-toast') && n.textContent.includes('Added a car'))).toBe(true);
+  expect(game.world.log.at(-1)?.text).toContain('Added a car');
+  expect(root.descendants().some((n) => has(n, 'hs-news-toast') && n.textContent.includes('Added a car'))).toBe(false);
 });

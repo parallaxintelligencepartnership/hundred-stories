@@ -271,6 +271,8 @@ export interface LogEntry {
   level: 'info' | 'warn' | 'alert';
   roomId?: Id;
   simId?: Id;
+  /** An info line worth a toast (a VIP, a wedding). Other info lines go to the News panel only. */
+  notable?: boolean;
 }
 
 /** The three things a VIP can care most about. Shown to the player; chosen from the identity hash. */

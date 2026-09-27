@@ -1,5 +1,8 @@
 // Watch mode (design pass 2026-09-25, BB-5): for the player who likes to watch the tower run.
-// After WATCH_IDLE_MS with no pointer, key or pad input and nothing open, the shell takes
+// Turning it on steps the chrome aside at once, after WATCH_ENABLE_GRACE_MS so the Watch
+// button's own tap does not bring it straight back (Matt, 2026-09-26: the toggle "doesn't seem
+// to do much"). After that, WATCH_IDLE_MS with no pointer, key or pad input and nothing open
+// (the phone's build sheet at its row does not count; it closes as the chrome goes), the shell takes
 // WATCH_CLASS and ui.css fades the top bar (all but the clock), the dock, the goals card, the
 // map and the hover card out over --watch-fade, and they take no clicks. Any input takes the
 // class off at once, and that first input only brings the chrome back: the key, the tap (its
@@ -15,6 +18,11 @@ import { PREF_KEYS, getFlag, onPrefChange, setFlag } from './prefs';
 
 /** Real milliseconds without input before the chrome steps aside. */
 export const WATCH_IDLE_MS = 20_000;
+/**
+ * Turned on, the chrome steps aside this long after: the rest of the Watch button's tap (a
+ * mouse leaving it, a late touch event) lands inside it and is not taken as the player's input.
+ */
+export const WATCH_ENABLE_GRACE_MS = 600;
 /** The fade out, matched to --watch-fade in ui.css. */
 export const WATCH_FADE_MS = 400;
 /** The class on the ui shell while the chrome is stepped aside. */
@@ -33,7 +41,7 @@ export function readWatchMode(): boolean {
 }
 
 /** The Watch button's tooltip: what turning it on does. */
-export const WATCH_TIP = 'Watch mode: after 20 seconds with no input, the buttons step aside so you can watch the tower. Any touch or key brings them back.';
+export const WATCH_TIP = 'Watch mode: the buttons step aside so you can watch the tower. Any touch or key brings them back, and after 20 seconds with no input they step aside again.';
 
 export interface WatchToggle {
   /** The round Watch button, for under Views. aria-pressed says whether Watch mode is on. */
@@ -68,8 +76,10 @@ export function createWatchToggle(): WatchToggle {
 
 export interface WatchModeOptions {
   shell: { classList: { toggle(name: string, on?: boolean): boolean } };
-  /** Something is open (a panel, a card, the Views list, the build sheet): stay. */
+  /** Something is open (a panel, a card, the Views list, the full build sheet): stay. */
   busy(): boolean;
+  /** The chrome just stepped aside: put away what may go with it (the build sheet's row). */
+  onWatch?(): void;
 }
 
 export interface WatchMode {
@@ -115,6 +125,8 @@ export function createWatchMode(options: WatchModeOptions): WatchMode {
   /** The click that press would make, until it comes or its grace runs out. */
   let swallowClick = false;
   let clickTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Just turned on: input before this moment is the Watch button's own tap, not the player's. */
+  let graceUntil = 0;
 
   function setWatching(on: boolean): void {
     if (on === watching) return;
@@ -148,10 +160,14 @@ export function createWatchMode(options: WatchModeOptions): WatchMode {
       arm(WATCH_IDLE_MS);
       return;
     }
+    graceUntil = 0;
     setWatching(true);
+    options.onWatch?.();
   }
 
   function input(): boolean {
+    // The rest of the tap that turned Watch on: it neither restores nor restarts the clock.
+    if (!watching && Date.now() < graceUntil) return false;
     const restored = watching;
     lastInput = Date.now();
     setWatching(false);
@@ -212,11 +228,15 @@ export function createWatchMode(options: WatchModeOptions): WatchMode {
     const next = readWatchMode();
     if (next === enabled) return;
     enabled = next;
+    disarm();
     if (enabled) {
-      lastInput = Date.now();
-      arm(WATCH_IDLE_MS);
+      // Turned on: the chrome steps aside once the grace is out, as if already idle 20 s.
+      const now = Date.now();
+      graceUntil = now + WATCH_ENABLE_GRACE_MS;
+      lastInput = now + WATCH_ENABLE_GRACE_MS - WATCH_IDLE_MS;
+      arm(WATCH_ENABLE_GRACE_MS);
     } else {
-      disarm();
+      graceUntil = 0;
       setWatching(false);
     }
   });
@@ -230,6 +250,7 @@ export function createWatchMode(options: WatchModeOptions): WatchMode {
       if (options.busy()) {
         // Opened by itself: the chrome comes back and stays while it is open.
         wasBusy = true;
+        graceUntil = 0;
         lastInput = Date.now();
         setWatching(false);
         return;
@@ -237,6 +258,7 @@ export function createWatchMode(options: WatchModeOptions): WatchMode {
       if (wasBusy) {
         // Closed by itself: the 20 s start from this moment.
         wasBusy = false;
+        graceUntil = 0;
         lastInput = Date.now();
       }
       if (!watching) arm(WATCH_IDLE_MS - (Date.now() - lastInput));
