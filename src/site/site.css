@@ -741,6 +741,12 @@ p {
   max-width: 36ch;
 }
 
+/* The note under the contact address: no paragraph margin inside the column's gap. */
+.foot-col p {
+  margin: 0;
+  max-width: 28ch;
+}
+
 .foot-col {
   display: flex;
   flex-direction: column;

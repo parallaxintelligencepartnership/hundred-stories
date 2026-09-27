@@ -34,7 +34,7 @@ import {
   type Tip,
   type TipId,
 } from './onboarding';
-import { PREF_KEYS, addToList, getFlag, getList, getPref, setFlag, setPref } from './prefs';
+import { PREF_KEYS, addToList, getFlag, getList, getPref, onPrefChange, setFlag, setPref } from './prefs';
 import { createIconSheet, icon, type IconName } from './icons';
 import { chromeInsets, isSheetLayout, placementBoxes, viewInsets } from './layout';
 import { createToasts } from './toast';
@@ -69,6 +69,7 @@ import { createPageHaptics, hapticsEnabled } from './haptics';
 import { createGamepadInput, pageGamepadDeps, type GamepadInput, type PadDirection } from './gamepad';
 import { focusablesIn, SHEET_CARD_MIN_WIDTH } from './sheet';
 import { WATCH_CLASS, createWatchMode, createWatchToggle } from './watch';
+import { createSoundToggle } from './sound-toggle';
 import { UPDATE_TEXT, type Notifier } from './notify';
 
 export interface Ui {
@@ -334,7 +335,13 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   // Watch mode's round button, under Views (placeWatchButton; on a phone, where Views lives in
   // Settings, under the pill on the right). It steps aside with the rest of the chrome.
   const watchToggle = createWatchToggle();
-  top.append(watchToggle.button);
+  // Sound's round button, directly left of Watch (placeWatchButton), the same size and hidden
+  // with it. It and the Settings switch turn the same setting and follow each other.
+  const soundToggle = createSoundToggle(sound);
+  top.append(soundToggle.button, watchToggle.button);
+  const stopSoundPref = onPrefChange((key) => {
+    if (key === PREF_KEYS.sound) mountedPanel?.refresh?.();
+  });
 
   // Speed: one segmented pill of icons. The keys stay: space pauses, comma and period step.
   const speedBar = el('div', 'hs-speed');
@@ -1232,6 +1239,11 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     const placed = views.width > 0;
     watchToggle.button.classList.toggle('is-placed', placed);
     if (placed) watchToggle.button.style.setProperty('--watch-x', `${Math.round(views.left + views.width / 2 - bar.left)}px`);
+    // Sound ends one gap left of Watch's left edge, wherever Watch landed (ui.css adds the gap).
+    const watch = watchToggle.button.getBoundingClientRect();
+    const soundPlaced = watch.width > 0;
+    soundToggle.button.classList.toggle('is-placed', soundPlaced);
+    if (soundPlaced) soundToggle.button.style.setProperty('--sound-x', `${Math.round(watch.left - bar.left)}px`);
   }
 
   /** The view, a media query or a font changed under the chip and the bar: measure them again. */
@@ -1840,6 +1852,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
       if (selectionRaf) cancelAnimationFrame(selectionRaf);
       watch.destroy();
       watchToggle.destroy();
+      soundToggle.destroy();
+      stopSoundPref();
       display.stop();
       unsubscribeHaptics?.();
       pad?.destroy();

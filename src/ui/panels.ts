@@ -67,6 +67,7 @@ import { createSheet, type Sheet } from './sheet';
 import { vipView, vipViewKey, type VipView } from './vip';
 import { chevron, controlsDevice, currentDeviceEnv, fillControlsPage } from './controls';
 import { getFlag, PREF_KEYS, setFlag } from './prefs';
+import { setSoundOn } from './sound-toggle';
 
 /**
  * A panel element may expose a cheap refresh that rewrites live numbers without rebuilding, and
@@ -1493,7 +1494,12 @@ export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElem
   }
   main.append(saving.node);
 
-  if (ctx.sound) main.append(soundSection(ctx.sound));
+  if (ctx.sound) {
+    const soundGroup = soundSection(ctx.sound);
+    main.append(soundGroup.node);
+    // The Sound button beside Watch can turn it while this is open: the switch follows (ui.ts).
+    panel.refresh = soundGroup.sync;
+  }
 
   // Display: the theme, then the switches. Larger text and Color-blind friendly views are read
   // back by the rest of the ui (prefs.ts); See-through buttons marks the page root here.
@@ -1603,13 +1609,18 @@ function notificationsSection(notifications: NonNullable<PanelContext['notificat
   return group.node;
 }
 
-function soundSection(sound: Sound): HTMLDivElement {
+function soundSection(sound: Sound): { node: HTMLDivElement; sync(): void } {
   const group = settingsGroup('Sound');
   const levels: HTMLInputElement[] = [];
   const toggle = switchRow('hs-sound', 'Sound', sound.settings.on, (on) => {
-    sound.setEnabled(on);
+    setSoundOn(sound, on);
     for (const input of levels) input.disabled = !on;
   });
+  /** Show the setting as it is now, however it was turned. */
+  const sync = (): void => {
+    toggle.set(sound.settings.on);
+    for (const input of levels) input.disabled = !sound.settings.on;
+  };
   group.list.append(toggle.row);
 
   const level = (id: string, name: string, value: number, set: (n: number) => void): HTMLDivElement => {
@@ -1646,7 +1657,7 @@ function soundSection(sound: Sound): HTMLDivElement {
   group.node.append(
     el('p', 'hs-note', 'Music grows with the tower. Sound effects play for events and stars. Background sound follows the time of day and the weather.'),
   );
-  return group.node;
+  return { node: group.node, sync };
 }
 
 // ----------------------------------------------------------- share panel

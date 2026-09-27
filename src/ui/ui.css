@@ -2839,6 +2839,27 @@ button.hs-news-toast {
   box-shadow: var(--shadow-1), inset 0 0 0 2px var(--amber-text);
 }
 
+/* Sound: the same round button, directly left of Watch in the same row, one gap between them
+   (ui.ts placeWatchButton measures Watch's left edge into --sound-x). Until the first measure it
+   waits left of an icon-only Watch on the right, which is where a phone keeps it; on a wide screen
+   Watch shows its word, so Sound stays hidden until that first measure. On or off shows in its icon, a speaker with its
+   waves or crossed out; it takes no amber edge, since sound on is not a mode. */
+.hs-sound-btn {
+  position: absolute;
+  top: calc(100% + var(--gap-float));
+  right: calc(var(--touch) + 8px + var(--gap-float));
+}
+
+.hs-sound-btn:not(.is-placed) {
+  visibility: hidden;
+}
+
+.hs-sound-btn.is-placed {
+  right: auto;
+  left: calc(var(--sound-x) - var(--gap-float));
+  translate: -100% 0;
+}
+
 /* The list: a small card of rows, an icon and a name each. Without anchor positioning it sits
    under the top bar on the right, which is where the button is. */
 .hs-views-menu {
@@ -3138,6 +3159,19 @@ button.hs-news-toast {
     left: auto;
     right: 0;
     translate: none;
+  }
+
+  /* Sound beside it, one icon-only round button and a gap in from the right. */
+  .hs-sound-btn,
+  .hs-sound-btn.is-placed {
+    left: auto;
+    right: calc(var(--touch) + 8px + var(--gap-float));
+    translate: none;
+  }
+
+  /* Watch is icon only here, so the fallback is already right: no wait for the measure. */
+  .hs-sound-btn:not(.is-placed) {
+    visibility: visible;
   }
 
   /* Where one row would reach Build (under 390 px, or with Larger text at any phone width) the
@@ -3601,7 +3635,8 @@ button.hs-news-toast {
     left: 0;
     transform: none;
     width: auto;
-    max-width: calc(100% - 80px);
+    /* Clear of Watch and Sound on the right. */
+    max-width: calc(100% - 80px - var(--touch) - 8px - var(--gap-float));
     padding-left: 12px;
   }
 
@@ -3629,7 +3664,8 @@ button.hs-news-toast {
     bottom: auto;
     left: calc(var(--edge) + var(--safe-left));
     transform: none;
-    max-width: calc(100% - 64px - 3 * var(--edge) - var(--safe-left) - var(--safe-right));
+    /* Clear of the map's column and of Sound beside Watch. */
+    max-width: calc(100% - 64px - 3 * var(--edge) - var(--safe-left) - var(--safe-right) - var(--touch) - 8px - var(--gap-float));
   }
 
   /* The sheet and a panel share the bottom of a phone screen, so only one shows at a time. */
@@ -3818,8 +3854,10 @@ button.hs-news-toast {
     bottom: auto;
     left: calc(var(--pad) + var(--safe-left) - var(--toast-bleed));
     /* The map's corner stays free whether it shows or not: the map comes and goes with every
-       pan, and the alerts keep one right edge instead of jumping sideways with it. */
-    right: calc(64px + 2 * var(--edge) + var(--safe-right) - var(--toast-bleed));
+       pan, and the alerts keep one right edge instead of jumping sideways with it. The band starts
+       on Watch and Sound's row, so it also stops one round button and a gap short of Sound: a tap
+       on Sound never lands on an alert. */
+    right: calc(64px + 2 * var(--edge) + var(--safe-right) + var(--touch) + 8px + var(--gap-float) - var(--toast-bleed));
     width: auto;
     max-height: calc(25vh + 2 * var(--toast-bleed));
     padding: var(--toast-bleed);
@@ -3830,7 +3868,7 @@ button.hs-news-toast {
 
   /* The same edge with the map up: this outranks the wide screen's step left of a 96 px map. */
   .hs-minimap:not(.is-hidden) ~ .hs-toasts {
-    right: calc(64px + 2 * var(--edge) + var(--safe-right) - var(--toast-bleed));
+    right: calc(64px + 2 * var(--edge) + var(--safe-right) + var(--touch) + 8px + var(--gap-float) - var(--toast-bleed));
   }
 
   .hs-toast {
@@ -3889,7 +3927,7 @@ button.hs-news-toast {
 /* Hidden, they take no clicks: the first input only brings them back (src/ui/watch.ts). The
    hover card and the placing chip and bar go with them. News toasts are not raised while
    watching (refreshNews); the alert cards and alert toasts in .hs-toasts stay. */
-.hs-ui.is-watching :is(.hs-status-pill > :not(.hs-status-clock), .hs-top-actions, .hs-watch-btn, .hs-view-chip, .hs-palette, .hs-build-fab, .hs-card, .hs-minimap, .hs-hover-card, .hs-place-bar, .hs-place-chip) {
+.hs-ui.is-watching :is(.hs-status-pill > :not(.hs-status-clock), .hs-top-actions, .hs-watch-btn, .hs-sound-btn, .hs-view-chip, .hs-palette, .hs-build-fab, .hs-card, .hs-minimap, .hs-hover-card, .hs-place-bar, .hs-place-chip) {
   opacity: 0;
   pointer-events: none;
   animation: hs-watch-hide var(--watch-fade) var(--ease-standard);

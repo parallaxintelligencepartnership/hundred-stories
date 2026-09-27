@@ -308,7 +308,7 @@ describe('on a phone and beside a card', () => {
     const phone = css.slice(start, css.indexOf('.hs-toast {', start));
     const always = /\.hs-toasts \{[^}]*?\n\s*right: ([^;]+);/.exec(phone)?.[1];
     const withMap = /\.hs-minimap:not\(\.is-hidden\) ~ \.hs-toasts \{\s*right: ([^;]+);/.exec(phone)?.[1];
-    expect(always).toBe('calc(64px + 2 * var(--edge) + var(--safe-right) - var(--toast-bleed))');
+    expect(always).toBe('calc(64px + 2 * var(--edge) + var(--safe-right) + var(--touch) + 8px + var(--gap-float) - var(--toast-bleed))');
     expect(withMap).toBe(always);
     // The edge leaves the phone map's 64 px column free.
     expect(/\.hs-minimap \{[^}]*width: (\d+)px;/.exec(css.slice(css.indexOf('@media (max-width: 720px) {\n  /* A phone\'s bottom belongs')))?.[1]).toBe('64');

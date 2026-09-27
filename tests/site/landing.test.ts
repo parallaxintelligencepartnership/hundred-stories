@@ -49,6 +49,13 @@ describe('landing page', () => {
     expect(guide).not.toContain('pixel art');
   });
 
+  it('points players to the in-game feedback menu from the fineprint and the footer', () => {
+    expect(flat(landing)).toContain(
+      'Free in your browser. No sign-up. Found a bug? Send feedback from the game menu.',
+    );
+    expect(flat(landing)).toContain('Or use Send feedback in the game menu. No account needed.');
+  });
+
   it('serves the still hero image as a preloaded, high priority WebP, with its size reserved', () => {
     const shot = flat(landing).match(/<img id="hero-shot"[^>]*>/)![0];
     expect(shot).toContain('src="/hero-still.webp"');
@@ -173,7 +180,7 @@ describe('guide page', () => {
     expect(text).toContain('The center has collection workers, two at first and more as the tower grows.');
     expect(text).toContain('At Tower status the game writes the tower chronicle');
     expect(text).toContain('Save as image keeps a copy on your device. Nothing is uploaded.');
-    expect(text).toContain('Three sliders set the music, the sound effects and the background sound.');
+    expect(text).toContain('Three sliders in Settings set the music, the sound effects and the background sound.');
   });
 
   it('keeps the house style: no em dashes and no spaced hyphens as dashes', () => {

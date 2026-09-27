@@ -22,6 +22,12 @@ export const PREF_KEYS = {
   haptics: 'hs.haptics',
   /** Watch mode (the Watch button under Views): the chrome steps aside after 5 s idle. Off by default. */
   watchMode: 'hs.watchMode',
+  /**
+   * Sound on or off: the Settings switch and the round Sound button beside Watch. The sound module
+   * owns the stored value (src/audio/audio.ts, SOUND_KEY, the same key); both controls turn it
+   * through setSoundOn (sound-toggle.ts), which announces it here so the other follows.
+   */
+  sound: 'hs.sound',
   /** The Notifications switches in Settings (src/ui/notify.ts). Each off by default. */
   notifyAlerts: 'hs.notify.alerts',
   notifyDaily: 'hs.notify.daily',
@@ -100,6 +106,14 @@ export function setPref(key: PrefKey, value: string, store: PrefStore | null = d
   }
   if (stored) copy.delete(key);
   else copy.set(key, value);
+  announcePref(key);
+}
+
+/**
+ * Tell the listeners a choice changed that its owner stored itself (the sound module keeps its
+ * own settings), so every control that shows it follows.
+ */
+export function announcePref(key: PrefKey): void {
   for (const listener of [...listeners]) {
     try {
       listener(key);

@@ -65,16 +65,18 @@ desk (721 px and wider)
 +------------------------------------------------------------------------+
 | (status pill: cash  pop  stars  dial clock  weather  Floor)            |
 |                                  (speed pill) (Views) (Share) (Menu)   |
+|                                      (Sound) (Watch)                   |
 | +----+-----------+                                  +----------------+ |
 | |rail| dock      |   TOWER VIEW (canvas, full bleed) | card, 360 px   | |
 | | 56 | 288 px    |                                  | (goals, query) | |
 | +----+-----------+                                  +----------------+ |
-|                     (news toasts, centred)       (alerts) (minimap)    |
+|                     (news toasts, centered)       (alerts) (minimap)    |
 +------------------------------------------------------------------------+
 
 phone (720 px and narrower)
 +--------------------------------------+
 | (status pill, one row)               |
+|                     (Sound) (Watch)  |
 |                          (map, while |
 |            TOWER VIEW     the camera |
 |                           moves)     |
@@ -86,9 +88,10 @@ The tower fills the screen edge to edge and the chrome floats over it, 12 px fro
 - The phone build sheet: the round amber Build button (60 px, bottom right) opens the dock as a bottom sheet, the rail across its top and the tiles two to a row, with a drag handle and its own close.
 - The phone's bottom left corner: the speed pill and a round Menu in one row under the left thumb, the night mode label over the pill; under 390 px or with Larger text the corner stacks, My tower and Menu over the speed pill. The corner hides while the build sheet or a panel is open. Views and Share become rows in Settings.
 - Cards and sheets: at 900 px and wider a panel is a 360 px card on the right under the status pill (radius 20, `--shadow-2`); below 900 px it is a bottom sheet with a handle that snaps to half (55 percent) and full height. The goals card sits top right under Share and Menu and folds to a pill ("Goals, 2 of 5", or "Next: 2 stars" with Show).
-- Toasts and News, in place of the old event ticker: routine news is up to two small glass toasts centred above the bottom edge, each fading after 4 s; alerts (fire, bomb) are solid cards bottom right, left of the map, with an alert edge, and stay until tapped (on a phone they sit under the status pill, in the top quarter). The News panel keeps every line, newest first, with when it happened.
+- Toasts and News, in place of the old event ticker: routine news is up to two small glass toasts centered above the bottom edge, each fading after 4 s; alerts (fire, bomb) are solid cards bottom right, left of the map, with an alert edge, and stay until tapped (on a phone they sit under the status pill, in the top quarter). The News panel keeps every line, newest first, with when it happened.
 - The minimap: bottom right on a desk (96 px, hidden while a card is open at 900 px and wider), top right on a phone (64 px) and only while the camera moves. Its rooms take the far zoom's district colours (palette.ts BLOCK) mixed 30 percent toward `#8a9099`.
-- Watch mode (Settings, off by default): after 5 seconds without input and with nothing open, everything but the clock fades out over 400 ms, the clock keeping a glass of its own; any input brings it all back at once.
+- The round buttons under Views: Watch, centered under Views, and Sound directly left of it with an 8 px gap, both glass `.hs-round` buttons out of the bar's flow (a phone, with no Views, puts the pair under the status pill on the right, icons only). Sound turns the same setting as the Settings switch and each follows the other; its icon is a speaker with its waves while sound is on and the speaker crossed out while it is off, with `aria-pressed`, and no amber edge (Watch takes the amber edge while Watch mode is on). Watch mode hides both.
+- Watch mode (the Watch button, off by default): after 5 seconds without input and with nothing open, everything but the clock fades out over 400 ms, the clock keeping a glass of its own; any input brings it all back at once.
 
 Status bar: one floating glass pill, 52 px tall (48 on a phone). Each readout is an icon, a value and a meta line: cash with its change this quarter, population with an arrow and its change today (a dash until the first boundary on an older save), six stars with "Next: n stars" and a tooltip of the next star's needs, a 24 hour dial (midnight at the top, 23:00 to 06:00 shaded) with the time and the date line, the weather icon, and the Floor readout while the cursor is over the tower. Beside it on a desk: the speed pill (Pause, filled amber while paused, then Play, Fast and Fastest, icon only), the night mode as a small label over it ("Paused, night x8"), and round glass buttons with icon and word: Views, Share and Menu. On a phone the pill is one row: cash, population, one star and the count, the time and the weather icon; the date line and both changes move into the tooltips and the dial goes.
 
