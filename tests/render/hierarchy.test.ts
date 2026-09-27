@@ -257,6 +257,34 @@ describe('the renderer by zoom', () => {
     expect([shafts.visible, shafts.alpha]).toEqual([true, 1]);
   });
 
+  it('fades the cables with the shafts at far zoom and in Districts, the car sprites staying at full strength', async () => {
+    const { stage, renderer, world, frame } = await mountAt(1);
+    const cars = find(stage, 'cars');
+    const cables = find(stage, 'cables');
+    const sprites = cars.children.filter((c) => c !== cables);
+    const carsAt = (): number[] => [cars.alpha, ...sprites.map((c) => c.alpha)];
+    // Near tier, no view: full strength.
+    expect(cables.alpha).toBe(1);
+    renderer.setOverlay('districts');
+    expect(cables.alpha).toBeCloseTo(DISTRICTS_SHAFT_ALPHA);
+    expect(carsAt().every((a) => a === 1)).toBe(true);
+    renderer.setOverlay('stress');
+    expect(cables.alpha).toBe(1);
+    // Far tier, any view: the cables fade with the facade's faint strip.
+    renderer.camera.zoomAt(0.4 / renderer.camera.zoom, 400, 300);
+    frame();
+    renderer.render(world, 1);
+    expect(cables.alpha).toBeCloseTo(DISTRICTS_SHAFT_ALPHA);
+    renderer.setOverlay(null);
+    expect(cables.alpha).toBeCloseTo(DISTRICTS_SHAFT_ALPHA);
+    expect(carsAt().every((a) => a === 1)).toBe(true);
+    // Back in with no view: full strength again.
+    renderer.camera.zoomAt(1 / renderer.camera.zoom, 400, 300);
+    frame();
+    renderer.render(world, 1);
+    expect(cables.alpha).toBe(1);
+  });
+
   it('draws only the selected person at far zoom', async () => {
     const { stage, renderer, world } = await mountAt(0.4);
     const sim = {
@@ -302,7 +330,7 @@ function fills(g: Graphics): Drawn[] {
  * On floor 3 an occupied office (tiles 180 to 188) and a vacant one (190 to 198), a lobby run on
  * the ground from 180 to 203, and a standard shaft at 200 from floor 1 to 4.
  */
-async function mountFar(minute: number): Promise<{ stage: Container; world: World }> {
+async function mountFar(minute: number): Promise<{ stage: Container; world: World; renderer: Renderer; frame: () => void }> {
   const world = createWorld(7);
   world.time.minute = minute;
   const occupied = makeRoom(world, 'office', 3, 180);
@@ -320,9 +348,12 @@ async function mountFar(minute: number): Promise<{ stage: Container; world: Worl
   renderer.render(world, 1);
   renderer.camera.setReducedMotion(true);
   renderer.camera.zoomAt(0.4 / renderer.camera.zoom, 400, 300);
-  for (const fn of app.frames) fn();
+  const frame = (): void => {
+    for (const fn of app.frames) fn();
+  };
+  frame();
   renderer.render(world, 1);
-  return { stage: app.stage, world };
+  return { stage: app.stage, world, renderer, frame };
 }
 
 describe('BB-2: the far zoom facade', () => {
@@ -351,6 +382,34 @@ describe('BB-2: the far zoom facade', () => {
     // Only a step darker: a faint column, never a solid dark bar over the view behind it.
     expect(lum(FACADE_SHAFT)).toBeGreaterThan(0.8 * lum(FACADE_WALL));
     expect(fills(find(stage, 'facade lit') as Graphics)).toEqual([]);
+  });
+
+  it('draws the shaft strip at the Districts fade when the Districts view is on, and at full strength otherwise', async () => {
+    const { stage, world, renderer, frame } = await mountFar(13 * 60);
+    const facade = find(stage, 'facade') as Graphics;
+    const stripAlpha = (): number[] => {
+      const out: number[] = [];
+      for (const ins of facade.context.instructions) {
+        const data = ins.data as { style: { color: number; alpha: number } };
+        if (ins.action === 'fill' && data.style.color === FACADE_SHAFT) out.push(data.style.alpha);
+      }
+      return out;
+    };
+    const redraw = (): void => {
+      frame();
+      renderer.render(world, 1);
+    };
+    expect(stripAlpha()).toEqual([1]);
+    renderer.setOverlay('districts');
+    redraw();
+    expect(stripAlpha().map((a) => +a.toFixed(3))).toEqual([DISTRICTS_SHAFT_ALPHA]);
+    // The rest of the facade is untouched: the walls stay at full strength.
+    const walls = facade.context.instructions.filter((i) => i.action === 'fill' && (i.data as { style: { color: number } }).style.color === FACADE_WALL);
+    expect(walls.length).toBeGreaterThan(0);
+    for (const i of walls) expect((i.data as { style: { alpha: number } }).style.alpha).toBe(1);
+    renderer.setOverlay('vacancy');
+    redraw();
+    expect(stripAlpha()).toEqual([1]);
   });
 
   it('lights the panes of occupied rooms and darkens the empty ones on the emissive layer at night', async () => {

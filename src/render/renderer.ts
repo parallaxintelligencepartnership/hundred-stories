@@ -976,6 +976,7 @@ export async function createRenderer(
 
   // Cars draw over their cables: one layer of hoist lines, then the car sprites.
   const cableLayer = new Container();
+  cableLayer.label = 'cables';
   const carSpriteLayer = new Container();
   // Each car's floor indicator, drawn over the housing baked into the car (on the emissive layer).
   const indicatorLayer = new Container();
@@ -1115,6 +1116,12 @@ export async function createRenderer(
   let blocksDirty = true;
   let blocksAge = 0;
   let facadeDirty = true;
+  // The Districts view is on: the shafts step back to a faint column (setOverlay).
+  let districtsOn = false;
+  /** The cables fade with the shafts, at far zoom and in Districts; the car sprites stay at full strength. */
+  function applyCableFade(): void {
+    cableLayer.alpha = districtsOn || plan.facade ? DISTRICTS_SHAFT_ALPHA : 1;
+  }
   let venueClock = -1;
   let sweepAge = 0;
 
@@ -1803,6 +1810,7 @@ export async function createRenderer(
     facadeLit.visible = plan.facade;
     shaftLayer.visible = !plan.facade;
     if (plan.facade) facadeDirty = true;
+    applyCableFade();
   }
 
   /** The wall coloured veil over every window band, muting the repetition at broad zoom. */
@@ -1891,7 +1899,7 @@ export async function createRenderer(
       facade.rect(x, top + FLOOR_PX - SLAB_PX, width, LINE_PX).fill(FACADE_SLAB);
     }
     for (const shaft of w.shafts.values()) {
-      facade.rect(shaft.x * TILE_PX, floorTopY(shaft.floorMax), shaft.width * TILE_PX, shaftFloorSpan(shaft) * FLOOR_PX).fill(FACADE_SHAFT);
+      facade.rect(shaft.x * TILE_PX, floorTopY(shaft.floorMax), shaft.width * TILE_PX, shaftFloorSpan(shaft) * FLOOR_PX).fill({ color: FACADE_SHAFT, alpha: districtsOn ? DISTRICTS_SHAFT_ALPHA : 1 });
     }
   }
 
@@ -2872,6 +2880,10 @@ export async function createRenderer(
       // The Districts view steps the shafts back to a faint column; the cars stay at full strength.
       // Alpha only: the far tier's facade owns shaftLayer.visible (applyTier), so the two never fight.
       shaftLayer.alpha = kind === 'districts' ? DISTRICTS_SHAFT_ALPHA : 1;
+      // The far tier's facade strips follow the same fade; the facade redraws on the next frame.
+      if (districtsOn !== (kind === 'districts')) facadeDirty = true;
+      districtsOn = kind === 'districts';
+      applyCableFade();
     },
     setOverlayColorBlind(on): void {
       overlayPass.setColorBlind(on);
