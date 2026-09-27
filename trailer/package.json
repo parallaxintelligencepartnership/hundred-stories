@@ -1,0 +1,22 @@
+{
+  "name": "hundred-stories-trailer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Standalone Remotion marketing trailer for Hundred Stories. Not part of the game bundle.",
+  "scripts": {
+    "studio": "remotion studio src/index.ts",
+    "render:intro": "remotion render src/index.ts SiteIntro out/site-intro.mp4",
+    "render:share": "remotion render src/index.ts ShareClip out/share-clip.mp4",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.529",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "remotion": "4.0.529"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.2",
+    "typescript": "5.9.3"
+  }
+}
