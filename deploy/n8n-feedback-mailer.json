@@ -90,9 +90,9 @@
     },
     {
       "parameters": {
-        "fromEmail": "matthew@parallaxintelligence.ai",
+        "fromEmail": "Hundred Stories feedback <matthew@parallaxintelligence.ai>",
         "toEmail": "requests@hundredstories.xyz",
-        "subject": "=Hundred Stories feedback ({{ $json.platform || 'unknown' }}, {{ $json.version || '?' }})",
+        "subject": "=[Hundred Stories] feedback from a player ({{ $json.platform || 'unknown' }}, {{ $json.version || '?' }})",
         "emailFormat": "text",
         "text": "={{ $json.text }}\n\n---\nReply to: {{ $json.replyTo || 'not given' }}\nVersion: {{ $json.version || '?' }}\nPlatform: {{ $json.platform || '?' }}\nScreen: {{ $json.screen || '?' }}\nSent: {{ $json.at || '?' }}\nKey: {{ $('One item per key').item.json.name }}",
         "options": {
@@ -242,6 +242,6 @@
     "executionOrder": "v1"
   },
   "meta": {
-    "note": "Imported into n8n on 2026-09-27 as workflow Hundred Stories feedback mailer. Header credential: Cloudflare n8n-feedback-kv (token in the Mac keychain as cloudflare-n8n-feedback-kv, Workers KV Storage:Edit). Mail: the MATTHEW @ AI SMTP credential (Spacemail), from matthew@parallaxintelligence.ai to requests@hundredstories.xyz, Reply-To the player when given."
+    "note": "Imported into n8n on 2026-09-27 as workflow Hundred Stories feedback mailer. Header credential: Cloudflare n8n-feedback-kv (token in the Mac keychain as cloudflare-n8n-feedback-kv, Workers KV Storage:Edit). Mail: the MATTHEW @ AI SMTP credential (Spacemail), from matthew@parallaxintelligence.ai to requests@hundredstories.xyz, Reply-To the player when given. Matt wants the sender to be a hundredstories.xyz address: that needs an n8n SMTP credential for the Microsoft 365 mailbox (smtp.office365.com, port 587, STARTTLS, user requests@hundredstories.xyz, its password or an app password, with authenticated SMTP enabled for that mailbox in Exchange admin); until then the sender is named Hundred Stories feedback on the .ai address."
   }
 }
