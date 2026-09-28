@@ -38,9 +38,18 @@ export function shareStats(world: World): ShareStats {
   return stats;
 }
 
+/** "1 floor", "12 floors", "1 person", "0 people": the count with its noun in the right number. */
+export function countNoun(n: number, one: string, many: string): string {
+  return `${formatCount(n)} ${n === 1 ? one : many}`;
+}
+
+const SHARE_PITCH = 'in Hundred Stories, a free tower-building game you play in your browser. Think you can do better?';
+
 export function shareText(s: ShareStats): string {
+  // Nothing above ground yet: "a 0-floor tower" reads oddly, so say it plainly.
+  if (s.floors === 0) return `I just started a tower ${SHARE_PITCH}`;
   const peopleWord = s.people === 1 ? 'person' : 'people';
-  return `I'm building a ${formatCount(s.floors)}-floor tower with ${formatCount(s.people)} ${peopleWord} in Hundred Stories, a free tower-building game you play in your browser. Think you can do better?`;
+  return `I'm building a ${formatCount(s.floors)}-floor tower with ${formatCount(s.people)} ${peopleWord} ${SHARE_PITCH}`;
 }
 
 /** The full message a share sends: the text, then the link, on their own lines. */
@@ -128,7 +137,7 @@ export function composeShareImage(source: HTMLCanvasElement, s: ShareStats): HTM
   const starGlyphs = starsGlyphs(s.stars);
   ctx.textAlign = 'right';
   ctx.fillText(
-    `${formatCount(s.floors)} floors  ·  ${formatCount(s.people)} people  ·  ${starGlyphs}`,
+    `${countNoun(s.floors, 'floor', 'floors')}  ·  ${countNoun(s.people, 'person', 'people')}  ·  ${starGlyphs}`,
     width - 24,
     bandCenterY,
   );

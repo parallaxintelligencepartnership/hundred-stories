@@ -5,6 +5,7 @@ import { NIGHT_MULTIPLIER } from '../../src/game/api';
 import type { Room, RoomKind, World } from '../../src/sim/types';
 import { applyCommand } from '../../src/sim/build';
 import { createWorld } from '../../src/sim/world';
+import { quarterForecast } from '../../src/sim/economy';
 import {
   cashMetaText,
   createStatusBar,
@@ -113,6 +114,20 @@ describe('status bar deltas', () => {
       bar.update(world, 1);
       expect(cash.textContent).toBe('Cash$4,820,000+$500 earned this quarter');
     });
+
+    it('follows a rent change made while paused, the same minute (audit 2026-09-28, E1 S4)', () => {
+      const bar = createStatusBar();
+      const world = officeTower(1440 + 600);
+      bar.update(world, 0);
+      const cash = bar.cash as unknown as FakeElement;
+      expect(cash.textContent).toBe('Cash$4,820,000$20,000 rent at 5 AM in 2 days');
+      const office = [...world.rooms.values()].find((r) => r.kind === 'office')!;
+      expect(applyCommand(world, { kind: 'room.setRent', roomId: office.id, rent: 150 }).ok).toBe(true);
+      const expected = quarterForecast(world).rent;
+      expect(expected).not.toBe(20_000);
+      bar.update(world, 0);
+      expect(cash.textContent).toBe(`Cash$4,820,000$${expected.toLocaleString('en-US')} rent at 5 AM in 2 days`);
+    });
   });
 
   it('shows a dash for a world with no income table, and population until midnight', () => {
@@ -175,7 +190,8 @@ describe('night speed mode', () => {
   it('names the night multiplier and the effective speed, and nothing by day', () => {
     expect(speedModeText(2, 23 * 60 + 30)).toBe(`Night: ${2 * NIGHT_MULTIPLIER} times as fast`);
     expect(speedModeText(2, 23 * 60 + 30)).toBe('Night: 16 times as fast');
-    expect(speedModeText(0, 2 * 60)).toBe('Paused, night x8');
+    // Plain words, not "x8" shorthand (audit 2026-09-28, E1 S7).
+    expect(speedModeText(0, 2 * 60)).toBe('Paused. Nights run 8 times as fast');
     expect(speedModeText(4, 12 * 60)).toBe('');
   });
 });

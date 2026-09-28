@@ -195,11 +195,20 @@ export function nightArcPath(): string {
  */
 export function speedModeText(speed: Speed, minute: number): string {
   if (!isNightMinute(clockOf(Math.max(0, Math.floor(minute))).minuteOfDay)) return '';
-  if (speed === 0) return `Paused, night x${NIGHT_MULTIPLIER}`;
+  if (speed === 0) return `Paused. Nights run ${NIGHT_MULTIPLIER} times as fast`;
   return `Night: ${speed * NIGHT_MULTIPLIER} times as fast`;
 }
 
 // --------------------------------------------------------------- weather
+
+/** A cheap fingerprint of every office's rent, so the cash pill's rent forecast notices a change. */
+function officeRentSignature(world: World): number {
+  let sig = 0;
+  for (const room of world.rooms.values()) {
+    if (room.kind === 'office') sig = (Math.imul(sig, 31) + room.id * 7 + room.rent) | 0;
+  }
+  return sig;
+}
 
 /** The weather's icon beside the clock. The word goes in its label and tooltip. */
 export function weatherIcon(kind: WeatherKind): IconName {
@@ -385,10 +394,12 @@ export function createStatusBar(options: StatusBarOptions = {}): StatusBar {
   function update(world: World, speed: Speed): void {
     setText(cashValue, formatMoney(world.cash));
     const delta = quarterDelta(world);
-    // The forecast reads every office, so it is worked out once per game minute or build, not per frame;
-    // whether it shows at all is checked every update, so the first income switches it off at once.
+    // The forecast reads every office, so it is worked out once per game minute, build or rent
+    // change, not per frame; whether it shows at all is checked every update, so the first income
+    // switches it off at once. A rent change while paused moves no minute and builds nothing, so
+    // the offices' rents are part of the key.
     const rentShown = rentDue(world, (w) => {
-      const key = `${w.time.minute}|${w.structureVersion}`;
+      const key = `${w.time.minute}|${w.structureVersion}|${officeRentSignature(w)}`;
       if (rentAt !== key || rentWorld !== w) {
         rentAt = key;
         rentWorld = w;

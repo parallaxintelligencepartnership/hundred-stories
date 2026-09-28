@@ -1,6 +1,6 @@
 // The VIP card: live preparation ticks, the breakdown after a rating, and the next chance.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { EVENT_TEST_HOOKS, resetEventTestHooks, startFire } from '../../src/sim/events';
+import { EVENT_TEST_HOOKS, resetEventTestHooks, startBomb, startFire } from '../../src/sim/events';
 import { personName, vipArrivalHour } from '../../src/sim/identity';
 import { EVENTS } from '../../src/sim/rules';
 import { tick } from '../../src/sim/tick';
@@ -8,7 +8,7 @@ import type { ActiveEvent, Room, VipVisitRecord, World } from '../../src/sim/typ
 import { createWorld } from '../../src/sim/world';
 import { createLogPanel, type PanelContext } from '../../src/ui/panels';
 import { vipBreakdown, vipNextChance, vipView } from '../../src/ui/vip';
-import { atOnDay, buildTower, lobbyRun, onlyShaft, roomsMatching } from '../scenarios/helpers';
+import { atOnDay, buildTower, lobbyRun, onlyShaft, roomsMatching, runMinutes } from '../scenarios/helpers';
 import { FakeDom, type FakeElement } from './fake-dom';
 
 type Visit = Extract<ActiveEvent, { kind: 'vip' }>;
@@ -77,6 +77,33 @@ describe('VIP card', () => {
     world.rooms.delete(suite.id);
     expect(ticks(world)['A suite is ready for them']).toBe(false);
     expect(ticks(world)['The suite is clean']).toBe(false);
+  });
+
+  it('a bomb that went off during the stay keeps the last tick off until checkout (audit 2026-09-28, E2 S1)', () => {
+    // Seed 6: the VIP arrives at 10 AM; a bomb from the arrival day's 6 AM roll, with no
+    // security to find it, goes off at 1 PM, while the VIP is in the suite.
+    const world = createWorld(6);
+    world.stars = EVENTS.vip.minStar;
+    world.cash = 100_000_000;
+    buildTower(world, [
+      ...lobbyRun(90, 170),
+      { kind: 'shaft.build', shaft: 'standard', x: 150, floorMin: 1, floorMax: 4 },
+      { kind: 'build', room: 'office', floor: 2, x: 100 },
+      { kind: 'build', room: 'hotelSuite', floor: 3, x: 152 },
+    ]);
+    atOnDay(world, 0, 6, 1);
+    const visit = world.events.find((e): e is Visit => e.kind === 'vip')!;
+    expect(visit.arrivesAt % 1440).toBe(10 * 60);
+    while (world.time.minute < 1440 + 360) runMinutes(world, 1);
+    EVENT_TEST_HOOKS.target.bomb = roomsMatching(world, 'office')[0]!.id;
+    startBomb(world); // what the 6 AM roll does
+    let guard = 0;
+    while (visit.phase !== 'stay' && guard++ < 3000) runMinutes(world, 1);
+    while (world.events.some((e) => e.kind === 'bomb') && guard++ < 6000) runMinutes(world, 1);
+    expect([visit.phase, visit.incident]).toEqual(['stay', true]);
+    const last = vipView(world)?.checklist?.at(-1);
+    expect(last?.done).toBe(false);
+    expect(last?.label).toBe('No fire or bomb during the visit');
   });
 
   it('after the rating shows the breakdown and the next chance', () => {

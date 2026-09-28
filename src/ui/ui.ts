@@ -534,6 +534,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   /** A saved file's text, opened as the menu opens it. */
   function openSavedText(text: string): void {
     const result = game.importSave(text);
+    // The file lands in My tower: the address drops a friend's or today's query with it.
+    if (result.ok) syncAddress();
     notice(result.ok ? 'Tower opened.' : result.reason);
   }
 
@@ -687,6 +689,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     openMyTower() {
       openMyTower();
     },
+    syncAddress,
     // Settings on a phone, where the top bar has no Views or Share button. The modal menu steps
     // aside first, so the view picked is not left behind it.
     openViews() {
@@ -949,6 +952,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     populationWatch = { population: world.population, since: world.time.minute };
     newsStorySeq = world.story?.seq ?? 0; // beats already recorded are history, not news
     newsLogSeen = -1; // and so are its log lines
+    warns = 0; // and the old tower's warnings are not counted in the new one's toast
+    giveUps = 0;
     starStorySeq = world.story?.seq ?? 0;
     starToast?.remove();
     starToast = null;
@@ -1464,6 +1469,9 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     newsLogSeen = world.logTotal;
     for (const line of log.slice(log.length - fresh)) {
       if (line.level !== 'warn') continue;
+      // The player's own refused command is said as a notice, never folded into the next
+      // warning toast's count: logged while acting, or seen a frame later as the notice's words.
+      if ((acting && line === newest) || line.text === lastNoticeText) continue;
       warns += 1;
       if (line.text.startsWith(GIVE_UP_PREFIX)) giveUps += 1;
     }
@@ -1473,7 +1481,12 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
       // The first look is the tower as loaded: its old lines are history, not news.
       if (first) return;
       // Watching: the News panel keeps the line; no toast rises over the tower (alerts still do).
-      if (shell.classList.contains(WATCH_CLASS)) return;
+      if (shell.classList.contains(WATCH_CLASS)) {
+        // Nor do they pile up for the first toast after the chrome comes back.
+        warns = 0;
+        giveUps = 0;
+        return;
+      }
       if (newsShowsAlert) {
         // An alert is its card. A notable line in the same batch still toasts beside it: the
         // quarter settle line is logged just before the debt warnings it explains.

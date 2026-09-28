@@ -20,6 +20,7 @@ import { isVenueKind, venueLine, venueOf } from '../render/venue';
 import { canvasToPng, composeListImage, composeShareImage, shareMessage, shareStats, shareText, shareUrl } from '../share/share';
 import { applyTheme, readTheme, type Theme } from '../site/theme';
 import { nextSettleWords, officeQuarterRent, quarterForecast } from '../sim/economy';
+import { evaluateRoom } from '../sim/evaluation';
 
 export { nextSettleMinute } from '../sim/economy';
 import { ECONOMY, EVAL, LIMITS, RENT, ROOMS, SHAFTS, takesRent, WASTE } from '../sim/rules';
@@ -101,6 +102,11 @@ export interface PanelContext {
   openDaily?: () => void;
   /** Go back to My tower, from the settings panel outside it. */
   openMyTower?: () => void;
+  /**
+   * Point the page address at the tower in hand. An opened file lands in My tower, so a friend's
+   * or today's query must go, or a reload opens that tower instead.
+   */
+  syncAddress?: () => void;
   /** Open the list of views, from the settings panel on a phone, where the top bar has no Views. */
   openViews?: () => void;
   /** Open the share panel, from the settings panel on a phone, where the top bar has no Share. */
@@ -372,7 +378,7 @@ function roomPanel(roomId: Id, game: GameApi, ctx: PanelContext): PanelElement {
     });
     rentReset.setAttribute('aria-label', 'Reset rent');
     rentRow.append(stepper, rentReset);
-    rentMoney = el('span', 'hs-money', rentMoneyText(room));
+    rentMoney = el('span', 'hs-money', rentMoneyText(game.world, room));
     const money = el('p', 'hs-rent-money');
     money.append(rentMoney);
     rent.append(
@@ -441,7 +447,7 @@ function roomPanel(roomId: Id, game: GameApi, ctx: PanelContext): PanelElement {
       if (sim) setText(goal, goalLine(game.world, sim));
     }
     if (rentValue) setText(rentValue, `${room.rent}%`);
-    if (rentMoney) setText(rentMoney, rentMoneyText(room));
+    if (rentMoney) setText(rentMoney, rentMoneyText(game.world, room));
     if (rentMinus) rentMinus.disabled = room.rent <= RENT.min;
     if (rentPlus) rentPlus.disabled = room.rent >= RENT.max;
     if (rentReset) rentReset.hidden = room.rent === RENT.default;
@@ -657,7 +663,10 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
     ctx.apply({ kind: 'shaft.removeCar', shaftId: shaft.id });
   });
   actions.append(add, remove);
-  body.append(actions);
+  // A refused button says why in plain text under the row, not only in its tooltip:
+  // a touch player has no hover to read it.
+  const actionsWhy = el('p', 'hs-note hs-refused');
+  body.append(actions, actionsWhy);
 
   // Stretching a standing elevator, the way the original let you drag one taller or deeper.
   // It costs nothing, so the only question the buttons ask is whether the floor is free.
@@ -673,7 +682,8 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
     ctx.apply({ kind: 'shaft.extend', shaftId, floorMin: stepFloor(now.floorMin, -1), floorMax: now.floorMax });
   });
   reach.append(extendUp, extendDown);
-  body.append(reach);
+  const reachWhy = el('p', 'hs-note hs-refused');
+  body.append(reach, reachWhy);
 
   const stopButtons: { floor: number; node: HTMLButtonElement }[] = [];
   if (shaft.kind === 'express') {
@@ -721,6 +731,7 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
     serves: HTMLButtonElement;
     steps: { node: HTMLButtonElement; edge: 'lo' | 'hi'; step: -1 | 1 }[];
     whole: HTMLButtonElement;
+    why: HTMLParagraphElement;
   }
   let carRows: CarRow[] = [];
   let carSignature = '';
@@ -776,9 +787,10 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
         stepper('Top +', 'hi', 1),
         whole,
       );
-      node.append(label, actions);
+      const why = el('p', 'hs-note hs-refused');
+      node.append(label, actions, why);
       carList.append(node);
-      return { carId: car.id, label, serves, steps, whole };
+      return { carId: car.id, label, serves, steps, whole, why };
     });
   };
 
@@ -819,6 +831,7 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
       row.whole.hidden = car.range === null;
       row.whole.disabled = busy;
       row.whole.title = busy ? 'People are inside.' : 'Stop at every floor of the elevator again';
+      setRefusal(row.why, busy ? ['People are inside.'] : carStepRefusals(row.steps));
     }
   };
 
@@ -836,6 +849,8 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
     remove.title = remove.disabled ? 'An elevator needs at least one car.' : '';
     offerReach(extendUp, game.canExtend(shaftId, shaft.floorMin, stepFloor(shaft.floorMax, 1)), 'Reach one floor higher');
     offerReach(extendDown, game.canExtend(shaftId, stepFloor(shaft.floorMin, -1), shaft.floorMax), 'Reach one floor lower');
+    setRefusal(actionsWhy, refusedLines([[add, 'Add car'], [remove, 'Remove car']]));
+    setRefusal(reachWhy, refusedLines([[extendUp, 'Extend up'], [extendDown, 'Extend down']]));
     for (const stop of stopButtons) {
       stop.node.setAttribute('aria-pressed', shaft.stops.has(stop.floor) ? 'true' : 'false');
     }
@@ -880,6 +895,44 @@ function stepFloor(floor: number, step: number): number {
   return next === 0 ? floor + step * 2 : next;
 }
 
+/**
+ * Each disabled button's reason from its tooltip, named, as in "Extend up: Elevators can span
+ * only 30 floors." Buttons refused for the same reason share one line.
+ */
+function refusedLines(buttons: [HTMLButtonElement, string][]): string[] {
+  const byReason = new Map<string, string[]>();
+  for (const [node, name] of buttons) {
+    if (!node.disabled || node.title === '') continue;
+    byReason.set(node.title, [...(byReason.get(node.title) ?? []), name]);
+  }
+  return [...byReason].map(([reason, names]) => `${names.join(' and ')}: ${reason}`);
+}
+
+/**
+ * Why a car's floor buttons are grey, once each. The two ends a whole-shaft car already
+ * reaches fold into one sentence.
+ */
+function carStepRefusals(steps: { node: HTMLButtonElement }[]): string[] {
+  const seen: string[] = [];
+  for (const step of steps) {
+    if (step.node.disabled && !seen.includes(step.node.title)) seen.push(step.node.title);
+  }
+  const top = 'This car already reaches the top of the elevator.';
+  const bottom = 'This car already reaches the bottom of the elevator.';
+  if (seen.includes(top) && seen.includes(bottom)) {
+    seen.splice(seen.indexOf(bottom), 1);
+    seen[seen.indexOf(top)] = 'This car already reaches the top and bottom of the elevator.';
+  }
+  return seen;
+}
+
+/** The refusal line under a row of buttons: the reasons, or hidden when every button works. */
+function setRefusal(node: HTMLParagraphElement, lines: string[]): void {
+  const text = lines.join(' ');
+  setText(node, text);
+  node.hidden = text === '';
+}
+
 /** Offer the reach, or refuse it in the sim's own words. */
 function offerReach(node: HTMLButtonElement, result: CommandResult, title: string): void {
   node.disabled = !result.ok;
@@ -897,7 +950,7 @@ function expressStopFloors(shaft: Shaft): number[] {
 }
 
 /** What the rent comes to: "$60,000 sale", "$450 per night", "$12,000 per quarter". */
-export function rentMoneyText(room: Room): string {
+export function rentMoneyText(world: World, room: Room): string {
   const rent = room.rent;
   if (room.kind === 'condo') {
     return `${formatMoney(ECONOMY.condoSalePrice * (rent / 100))} sale`;
@@ -908,7 +961,10 @@ export function rentMoneyText(room: Room): string {
     return `${formatMoney(nightly)} per night`;
   }
   if (room.kind === 'office') {
-    return `${formatMoney(officeQuarterRent(room))} per quarter now`;
+    // What the next settle will pay: the settle rates an office at rest (04:30, stress faded),
+    // so the midday rush never shows here as a rent cut. An empty office pays nothing.
+    if (room.vacant) return 'No rent until leased';
+    return `${formatMoney(officeQuarterRent(room, evaluateRoom(world, room, 0)))} per quarter now`;
   }
   const rule = ROOMS[room.kind];
   const quarterly = rule.incomePerQuarter * (rent / 100);
@@ -997,7 +1053,7 @@ export function financeLists(world: World): FinanceLists {
     next.push({ label: `${formatCount(n)} office${n === 1 ? '' : 's'} empty, no rent yet`, amount: null });
   }
   next.push(...upkeepLines(forecast.upkeepByKind, forecast.upkeepCountByKind));
-  if (next.some((line) => line.amount !== null)) next.push({ label: 'Expected profit', amount: forecast.rent - forecast.upkeep });
+  if (next.some((line) => line.amount !== null)) next.push({ label: 'Rent less running costs', amount: forecast.rent - forecast.upkeep });
   const lastLines = [...incomeLines(last.incomeByKind ?? {}), ...upkeepLines(last.upkeepByKind ?? {}, last.upkeepCountByKind), ...lossLines(last.lossesByKind ?? {})];
   if (lastLines.length === 0 && (last.income !== 0 || last.upkeep !== 0 || (last.losses ?? 0) !== 0)) {
     lastLines.push({ label: LAST_QUARTER_DETAILS_LATER, amount: null });
@@ -1576,6 +1632,7 @@ export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElem
         .then((text) => {
           if (text === null) return;
           const result = game.importSave(text);
+          if (result.ok) ctx.syncAddress?.();
           ctx.notice(result.ok ? 'Tower opened.' : result.reason);
         })
         .catch(() => ctx.notice('That file could not be read.'));
@@ -1893,6 +1950,7 @@ function importFileInput(game: GameApi, ctx: PanelContext): HTMLInputElement {
       .text()
       .then((text) => {
         const result = game.importSave(text);
+        if (result.ok) ctx.syncAddress?.();
         ctx.notice(result.ok ? 'Tower opened.' : result.reason);
       })
       .catch(() => ctx.notice('That file could not be read.'))

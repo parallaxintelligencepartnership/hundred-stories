@@ -4,7 +4,8 @@
 
 import type { Tool } from '../game/api';
 import { ROOMS, SCHEDULES, STARS, type StarRule } from '../sim/rules';
-import { clockOf, type Room, type Star, type World } from '../sim/types';
+import { entrances, findRoute } from '../sim/routing';
+import { clockOf, riderClassOf, type Room, type Star, type World } from '../sim/types';
 import { longWaitsInHour } from '../sim/world';
 import { formatCount, formatMoney } from './format';
 
@@ -89,16 +90,33 @@ function offices(world: GuideWorld): Room[] {
   return out;
 }
 
-/** The first office an elevator from the lobby floor reaches, or null. */
+/**
+ * The first office people can get to from the lobby floor, or null: an elevator spanning both
+ * floors, or any way a worker walks there from the lobby door (stairs, escalators), the way
+ * vip.ts asks the router. A leased office was reached, however.
+ */
 function reachedOffice(world: GuideWorld): Room | null {
   for (const office of offices(world)) {
+    if (!office.vacant) return office;
     const lo = Math.min(1, office.floor);
     const hi = Math.max(1, office.floor);
     for (const shaft of world.shafts.values()) {
       if (shaft.floorMin <= lo && shaft.floorMax >= hi) return office;
     }
   }
+  if (!isRoutable(world)) return null;
+  const door = entrances(world).find((p) => p.floor === 1);
+  if (!door) return null;
+  for (const office of offices(world)) {
+    const center = office.x + Math.floor(office.width / 2);
+    if (findRoute(world, door, { floor: office.floor, x: center }, { riderClass: riderClassOf('worker') }) !== null) return office;
+  }
   return null;
+}
+
+/** A whole world the router can read; the guide's tests hand it partial ones. */
+function isRoutable(world: GuideWorld): world is World {
+  return world.rooms instanceof Map && world.shafts instanceof Map && 'floorIndex' in world;
 }
 
 function anyTenants(world: GuideWorld): boolean {

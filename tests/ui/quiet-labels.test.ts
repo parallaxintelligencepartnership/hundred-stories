@@ -56,6 +56,16 @@ describe('quiet labels', () => {
     expect(quiet(shell)).toBe(false);
   });
 
+  it('a wheel or trackpad zoom brings the words back, and is never held up (audit 2026-09-28, E2 S5)', () => {
+    const { shell } = setup();
+    vi.advanceTimersByTime(LABEL_IDLE_MS);
+    expect(quiet(shell)).toBe(true);
+    const wheel = { type: 'wheel', ctrlKey: true, deltaY: -4, target: dom.body, preventDefault: vi.fn(), stopPropagation: vi.fn() };
+    dom.fireWindow('wheel', wheel);
+    expect(quiet(shell)).toBe(false);
+    expect([wheel.preventDefault.mock.calls.length, wheel.stopPropagation.mock.calls.length]).toEqual([0, 0]);
+  });
+
   it('a moving pointer keeps the words out, with one timer at most', () => {
     const { shell, changes } = setup();
     vi.advanceTimersByTime(1500);

@@ -96,7 +96,11 @@ export function vipChecklist(world: VipWorld, visit: VipEvent): VipCheck[] {
       label: floor === null ? 'The VIP can get to the suite' : floor === 1 ? 'The suite is on the lobby floor' : `The VIP can get to ${floorText(floor)}`,
       done: suite !== undefined && vipCanReach(world, suite),
     },
-    { label: 'No fire or bomb in the tower', done: !incidentActive(world) },
+    // Once the VIP is in the tower, a fire or bomb that has come and gone still spoils the
+    // visit (the sim records it on the visit), so the tick stays off after it is out.
+    visit.phase === 'notice'
+      ? { label: 'No fire or bomb in the tower', done: !incidentActive(world) }
+      : { label: 'No fire or bomb during the visit', done: !incidentActive(world) && !visit.incident },
   ];
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseChallenge, shareMessage, shareStats, shareText, shareUrl, SITE_URL } from '../../src/share/share';
+import { composeShareImage, parseChallenge, shareMessage, shareStats, shareText, shareUrl, SITE_URL } from '../../src/share/share';
 import { createWorld } from '../../src/sim/world';
 import type { Room, World } from '../../src/sim/types';
 
@@ -61,8 +61,12 @@ describe('shareText', () => {
     );
   });
 
-  it('keeps the floor count singular even at 0, and pluralizes people at 0', () => {
-    expect(shareText({ floors: 0, people: 0, stars: 1 })).toContain('0-floor tower with 0 people');
+  it('says the tower is just started when nothing stands above ground, never "a 0-floor tower" (audit 2026-09-28, E2 S4)', () => {
+    expect(shareText({ floors: 0, people: 0, stars: 1 })).toBe(
+      'I just started a tower in Hundred Stories, a free tower-building game you play in your browser. Think you can do better?',
+    );
+    // The link still carries floors 0, which the landing page reads.
+    expect(shareMessage({ floors: 0, people: 0, stars: 1 })).toContain(`${SITE_URL}?floors=0&people=0&stars=1`);
   });
 });
 
@@ -144,5 +148,38 @@ describe('parseChallenge', () => {
 
   it('rejects huge values that would still pass a naive number check', () => {
     expect(parseChallenge('?floors=99999999999999999999&people=340&stars=4')).toBeNull();
+  });
+});
+
+describe('composeShareImage caption', () => {
+  /** The band's right-hand caption, drawn on a stub 2D context. */
+  function caption(stats: { floors: number; people: number; stars: number }): string {
+    const drawn: string[] = [];
+    const ctx = {
+      drawImage() {},
+      fillRect() {},
+      fillText(text: string) {
+        drawn.push(text);
+      },
+    };
+    const canvas = { width: 0, height: 0, getContext: () => ctx };
+    const g = globalThis as unknown as { document?: unknown };
+    const before = g.document;
+    g.document = { createElement: () => canvas };
+    try {
+      composeShareImage({ width: 800, height: 600 } as never, stats);
+    } finally {
+      g.document = before;
+    }
+    return drawn.at(-1) ?? '';
+  }
+
+  it('says "1 floor" and "1 person" for one of each (audit 2026-09-28, E2 S3)', () => {
+    expect(caption({ floors: 1, people: 1, stars: 1 })).toMatch(/^1 floor  ·  1 person  ·  /);
+  });
+
+  it('keeps the plural at 0 and at 2 and above', () => {
+    expect(caption({ floors: 12, people: 340, stars: 4 })).toMatch(/^12 floors  ·  340 people  ·  /);
+    expect(caption({ floors: 0, people: 0, stars: 1 })).toMatch(/^0 floors  ·  0 people  ·  /);
   });
 });

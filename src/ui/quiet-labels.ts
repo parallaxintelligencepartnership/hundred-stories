@@ -1,6 +1,6 @@
 // Smart hiding for the round Watch and Sound buttons (Matt, 2026-09-27: "collapse to an icon ...
 // they should collapse when not moving ... the user doesnt need the full label unless they touch
-// it"). A new player sees the words once; after LABEL_IDLE_MS with no pointer move, press or key
+// it"). A new player sees the words once; after LABEL_IDLE_MS with no pointer move, press, wheel or key
 // the shell takes LABELS_QUIET_CLASS and ui.css folds each word away over --label-fade, leaving
 // the icon in its circle. Any input takes the class off at once. Hover or keyboard focus on a
 // button keeps its word out whatever the class says (ui.css). A phone shows icons only anyway.
@@ -14,7 +14,7 @@ export const LABEL_IDLE_MS = 2_000;
 export const LABELS_QUIET_CLASS = 'is-quiet-labels';
 
 /** The window events that count as the player's hand on the game. */
-const INPUT_EVENTS = ['pointermove', 'pointerdown', 'keydown'] as const;
+const INPUT_EVENTS = ['pointermove', 'pointerdown', 'wheel', 'keydown'] as const;
 
 export interface QuietLabelsOptions {
   shell: { classList: { toggle(name: string, on?: boolean): boolean } };

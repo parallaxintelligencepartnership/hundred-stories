@@ -140,4 +140,21 @@ describe('news toasts', () => {
     notify();
     expect(toasts(root)).toEqual(['2 problems in the tower. Tap for the news.']);
   });
+
+  it('warnings logged while Watch hides the chrome do not swell the first toast after (audit 2026-09-28, E1 S6)', () => {
+    const { world, notify, root } = mountWorld();
+    const shell = root.children[0] as FakeElement;
+    notify();
+    shell.classList.add('is-watching');
+    log(world, 'Gave up waiting for an elevator on floor 4.', 'warn');
+    notify();
+    log(world, 'Gave up waiting for an elevator on floor 6.', 'warn');
+    notify();
+    expect(toasts(root)).toEqual([]);
+    shell.classList.remove('is-watching');
+    now += GIVE_UP_TOAST_GAP_MS;
+    log(world, 'Gave up waiting for an elevator on floor 5.', 'warn');
+    notify();
+    expect(toasts(root)).toEqual(['Gave up waiting for an elevator on floor 5.']);
+  });
 });

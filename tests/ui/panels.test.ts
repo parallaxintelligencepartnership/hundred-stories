@@ -1,7 +1,7 @@
 // The log and room panels on a fake DOM: what a refresh builds, and what it leaves alone.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createFinancesPanel, createLogPanel, createQueryPanel, createSettingsPanel, financeLists, nextSettleMinute, nextSettleTitle, type PanelContext } from '../../src/ui/panels';
-import { onQuarterStart } from '../../src/sim/economy';
+import { onQuarterStart, quarterForecast } from '../../src/sim/economy';
 import type { Sound } from '../../src/audio/audio';
 import { RENT } from '../../src/sim/rules';
 import { applyCommand } from '../../src/sim/build';
@@ -183,7 +183,7 @@ describe('room panel flags', () => {
       onFire: false,
       rent: RENT.default,
     };
-    return { game: { world: { rooms: new Map([[1, room]]), shafts: new Map(), sims: new Map() } } as never, room };
+    return { game: { world: { rooms: new Map([[1, room]]), shafts: new Map(), sims: new Map(), floorIndex: { rooms: new Map() } } } as never, room };
   }
 
   const flags = (panel: unknown): FakeElement[] =>
@@ -350,7 +350,7 @@ describe('room panel rent stepper', () => {
       vacant: false, dirty: false, infested: false, onFire: false, rent,
     };
     const applied: unknown[] = [];
-    const game = { world: { seed: 1, rooms: new Map([[1, room]]), shafts: new Map(), sims: new Map() } } as never;
+    const game = { world: { seed: 1, rooms: new Map([[1, room]]), shafts: new Map(), sims: new Map(), floorIndex: { rooms: new Map() } } } as never;
     const c: PanelContext = { ...ctx, apply: (cmd) => (applied.push(cmd), { ok: true }) as never };
     return { game, room, applied, c };
   }
@@ -438,6 +438,27 @@ function financeSections(panel: FakeElement): string[][] {
     });
 }
 
+describe('room panel office rent (audit 2026-09-28, E1 S2)', () => {
+  const moneyOf = (world: World, roomId: number): string => {
+    const panel = node(createQueryPanel({ world } as never, { roomId }, ctx));
+    return (panel.descendants().find((n) => n.className === 'hs-money') as FakeElement).textContent;
+  };
+
+  it('shows what the settle will pay, the resting rating, not the stressed midday one', () => {
+    const world = financeWorld();
+    const leased = [...world.rooms.values()].find((r) => r.kind === 'office' && !r.vacant)!;
+    leased.eval = 0.2; // the midday rush: tenants stressed by slow elevators
+    const settle = quarterForecast(world).rentByKind.office!;
+    expect(moneyOf(world, leased.id)).toBe(`$${settle.toLocaleString('en-US')} per quarter now`);
+  });
+
+  it('says an empty office pays no rent yet', () => {
+    const world = financeWorld();
+    const empty = [...world.rooms.values()].find((r) => r.kind === 'office' && r.vacant)!;
+    expect(moneyOf(world, empty.id)).toBe('No rent until leased');
+  });
+});
+
 describe('finances bento', () => {
   it('shows cash now and last quarter as tiles, a small label over a big number in the money face', () => {
     const world = financeWorld();
@@ -473,7 +494,7 @@ describe('finances bento', () => {
         '1 office empty, no rent yet',
         'Security office, 1 -$20,000',
         'Elevator cars, 2 -$20,000',
-        'Expected profit -$30,000',
+        'Rent less running costs -$30,000',
       ],
     ]);
   });

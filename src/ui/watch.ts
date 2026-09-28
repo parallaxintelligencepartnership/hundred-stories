@@ -41,7 +41,7 @@ export function readWatchMode(): boolean {
 }
 
 /** The Watch button's tooltip: what turning it on does. */
-export const WATCH_TIP = 'Watch mode: the buttons step aside so you can watch the tower. Any touch or key brings them back, and after 5 seconds with no input they step aside again.';
+export const WATCH_TIP = `Watch mode: the buttons step aside so you can watch the tower. Any touch or key brings them back, and after ${WATCH_IDLE_MS / 1000} seconds with no input they step aside again.`;
 
 export interface WatchToggle {
   /** The round Watch button, for under Views. aria-pressed says whether Watch mode is on. */
@@ -185,6 +185,10 @@ export function createWatchMode(options: WatchModeOptions): WatchMode {
     const event = raw as unknown as InputEvent;
     // A new press or key is the player's own: a click still owed to an old tap is not.
     if (event.type === 'pointerdown' || event.type === 'keydown') endClickGrace();
+    // A fresh press of the pointer still marked as the restore press means that press's release
+    // was lost (a context menu, a release outside the window): this press and its release are
+    // the player's own. Another finger's press leaves the restore tap's release swallowed.
+    if (event.type === 'pointerdown' && swallowPointer !== null && event.pointerId === swallowPointer) swallowPointer = null;
     if (!input()) return;
     if (event.type === 'keydown') {
       // A browser shortcut keeps its meaning for the browser; the game still does not hear it.

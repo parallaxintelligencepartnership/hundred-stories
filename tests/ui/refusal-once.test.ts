@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { createGame } from '../../src/game/game';
 import { resetEventTestHooks } from '../../src/sim/events';
+import { log } from '../../src/sim/world';
 import { createUi } from '../../src/ui/ui';
 import { FakeDom, type FakeElement } from './fake-dom';
 
@@ -58,4 +59,22 @@ it('an accepted Add car reaches the News panel only, not a toast (routine info n
   click(root.descendants().find((n) => n.tagName === 'BUTTON' && n.textContent.startsWith('Add car'))!);
   expect(game.world.log.at(-1)?.text).toContain('Added a car');
   expect(root.descendants().some((n) => has(n, 'hs-news-toast') && n.textContent.includes('Added a car'))).toBe(false);
+});
+
+it('a refusal does not swell the next warning toast into a count (audit 2026-09-28, E1 S6)', () => {
+  const game = createGame(5);
+  game.world.cash = 10_000_000;
+  for (let x = 90; x < 130; x += 1) game.apply({ kind: 'build', room: 'lobby', floor: 1, x });
+  game.apply({ kind: 'shaft.build', shaft: 'standard', x: 100, floorMin: 1, floorMax: 3 });
+  const root = dom.createElement('div');
+  createUi(root as never, game, {} as never);
+  game.world.cash = 0;
+  game.select({ shaftId: [...game.world.shafts.keys()][0]! });
+  click(root.descendants().find((n) => n.tagName === 'BUTTON' && n.textContent.startsWith('Add car'))!);
+  game.select({});
+  const sentence = 'Gave up waiting for an elevator on floor 2 and went home.';
+  log(game.world, sentence, 'warn');
+  game.setSpeed(game.getSpeed());
+  const toasts = root.descendants().filter((n) => has(n, 'hs-news-toast')).map((n) => n.textContent);
+  expect(toasts).toEqual([sentence]);
 });

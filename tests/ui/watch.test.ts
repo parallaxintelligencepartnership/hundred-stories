@@ -386,6 +386,22 @@ describe('watch mode', () => {
     expect(keyClick.stopped).toBe(false);
   });
 
+  it('a restore press whose release was lost does not take the next real release (audit 2026-09-28, E1 S5)', () => {
+    setFlag(PREF_KEYS.watchMode, true);
+    const { shell } = mount();
+    vi.advanceTimersByTime(WATCH_IDLE_MS);
+    const d1 = spied({ type: 'pointerdown', pointerId: 1, pointerType: 'mouse' });
+    dom.fireWindow('pointerdown', d1);
+    expect([watching(shell), d1.stopped]).toEqual([false, true]);
+    // No release for it: a right-click's context menu took it.
+    vi.advanceTimersByTime(1000);
+    const d2 = spied({ type: 'pointerdown', pointerId: 1, pointerType: 'mouse' });
+    dom.fireWindow('pointerdown', d2);
+    const u2 = spied({ type: 'pointerup', pointerId: 1, pointerType: 'mouse' });
+    dom.fireWindow('pointerup', u2);
+    expect([d2.stopped, u2.stopped]).toEqual([false, false]);
+  });
+
   it('while hidden, the first pad press only brings the chrome back', () => {
     setFlag(PREF_KEYS.watchMode, true);
     const pads: PadLike[] = [];

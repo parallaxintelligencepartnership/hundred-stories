@@ -17,7 +17,9 @@ import {
   nudgeCounts,
   type GoalsWorld,
 } from '../../src/ui/onboarding';
-import { recordLongWait } from '../../src/sim/world';
+import { createWorld, recordLongWait } from '../../src/sim/world';
+import { applyCommand } from '../../src/sim/build';
+import { lobbyRun } from '../scenarios/helpers';
 
 type StubRoom = { id: number; kind: string; floor: number; x: number; width: number; height: number; occupancy: number; vacant: boolean };
 
@@ -44,6 +46,26 @@ function addShaft(world: GoalsWorld, floorMin: number, floorMax: number): void {
 }
 
 describe('guide steps', () => {
+  it('pass the elevator step when stairs from the lobby reach the office (audit 2026-09-28, E2 S2)', () => {
+    const world = createWorld(5);
+    for (const cmd of [
+      ...lobbyRun(90, 170),
+      { kind: 'build', room: 'office', floor: 2, x: 100 },
+      { kind: 'build', room: 'stairs', floor: 1, x: 120 },
+    ] as const) expect(applyCommand(world, cmd as never).ok).toBe(true);
+    expect(world.shafts.size).toBe(0);
+    // Reached, still empty: on to waiting for tenants, not "Add an elevator".
+    expect(guideStep(world)).toBe(3);
+  });
+
+  it('keep the elevator step while nothing from the lobby reaches the office', () => {
+    const world = createWorld(5);
+    for (const cmd of [...lobbyRun(90, 170), { kind: 'build', room: 'office', floor: 2, x: 100 }] as const) {
+      expect(applyCommand(world, cmd as never).ok).toBe(true);
+    }
+    expect(guideStep(world)).toBe(2);
+  });
+
   it('advance on the world: lobby, office, an elevator that reaches it, tenants, 2 stars', () => {
     const world = stubWorld();
     expect(guideStep(world)).toBe(0);
