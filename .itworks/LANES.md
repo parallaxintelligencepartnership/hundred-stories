@@ -5,7 +5,8 @@ pass, cut along the boundaries that matter here (stored records, game time, cash
 determinism, what the browser is allowed to load) rather than along the directory tree. Lanes are
 re-derived whenever MAP.md's Layout table moves; a lane whose listed files no longer exist is
 stale. Re-cut 2026-09-25 for the second audit, after the story, weather, security, daily, build
-log, audio and UI polish rounds.
+log, audio and UI polish rounds; extended 2026-09-28 for the third audit with the Worker, feedback,
+notifications, watch mode, the site trailer files and the clips page (lane J is new).
 
 ## Lane A: Simulation core and the build log
 Lens id: real-data
@@ -77,6 +78,7 @@ Never re-flag:
 Lens id: real-data
 Files in scope:
 - src/ui/ui.ts, panels.ts, status.ts, sheet.ts, build.ts, palette.ts, layout.ts, display.ts, controls.ts, keys.ts, gamepad.ts, haptics.ts, prefs.ts, toast.ts, icons.ts, format.ts
+- src/ui/watch.ts (watch mode steps the chrome aside; any input brings it back)
 Invariants to attack:
 - Every number on screen traces to world state, never a literal.
 - Replacing the world (import, new game, daily, friend link) leaves no panel or listener reading the old one.
@@ -93,14 +95,16 @@ Never re-flag:
 ## Lane E2: Cards, alerts, onboarding, share and the site
 Lens id: real-data
 Files in scope:
-- src/ui/alerts.ts, vip.ts, cards.ts, onboarding.ts, daily.ts, demo.ts, explain.ts, hover.ts, minimap.ts, overlays.ts
-- src/share/share.ts, src/site/*.ts, public/theme.js
+- src/ui/alerts.ts, vip.ts, cards.ts, onboarding.ts, daily.ts, demo.ts, explain.ts, hover.ts, minimap.ts, overlays.ts, sound-toggle.ts, quiet-labels.ts
+- src/share/share.ts, src/site/*.ts (hero.ts, hero-ready.ts, hero-trailer.ts, specimens.ts, challenge.ts, stores.ts, theme.ts, theme-init.ts), public/theme.js
 Invariants to attack:
 - One alert card per fire or bomb; Pay ransom only while the threat stands; a dismissed card never returns for the same event.
 - The VIP card reflects the real visit.
 - A share link round-trips floors, people and stars, and a foreign or malformed link starts a sane tower, never a crash.
 - Onboarding never blocks a returning player and never fires twice.
 - Theme storage that throws falls back to system.
+- The hero trailer never downloads under reduced motion or save data, never throws, and always ends (ended, error, stall, refused play) with the still or the live tower under it; the specimens never delay the hero's first frame.
+- The Sound button and the Settings switch are one setting; the quiet labels always come back on input.
 Probe recipes:
 - npx vitest run tests/ui/alerts.test.ts tests/ui/vip.test.ts tests/ui/onboarding.test.ts tests/ui/first-run.test.ts tests/ui/daily.test.ts tests/ui/hover.test.ts tests/ui/minimap.test.ts tests/ui/overlays.test.ts tests/share tests/site
 Never re-flag:
@@ -109,7 +113,7 @@ Never re-flag:
 ## Lane F1: Renderer core
 Lens id: production-readiness
 Files in scope:
-- src/render/renderer.ts, camera.ts, input.ts, interpolate.ts, grid.ts, palette.ts, light.ts, anim.ts, ambient.ts, buildfx.ts, overlays.ts, thumbnail.ts, hierarchy.ts, smoke.ts
+- src/render/renderer.ts, camera.ts, input.ts, interpolate.ts, grid.ts, palette.ts, light.ts, anim.ts, ambient.ts, buildfx.ts, overlays.ts, thumbnail.ts, hierarchy.ts, smoke.ts, led.ts
 Invariants to attack:
 - The renderer never mutates the world and never draws from world.rng.
 - The static tower is reconciled only when structureVersion or the lit state moves, and a demolished room leaves no sprite behind.
@@ -165,8 +169,8 @@ Never re-flag:
 Lens id: security-auth
 Files in scope:
 - public/_headers, deploy/*, wrangler.jsonc, vite.config.ts, package.json, tsconfig.json, .nvmrc, capacitor.config.ts, src-tauri/tauri.conf.json, src-tauri/capabilities/default.json, src-tauri/Cargo.toml
-- index.html, play/index.html, how-to-play/index.html, privacy/index.html, 404.html, public/robots.txt, public/sitemap.xml, public/theme.js
-- scripts/*.mjs, scripts/bench/*.ts
+- index.html, play/index.html, how-to-play/index.html, privacy/index.html, clips/index.html, 404.html, public/robots.txt, public/sitemap.xml, public/theme.js
+- scripts/*.mjs, scripts/ship.sh, scripts/bench/*.ts
 Invariants to attack:
 - Every resource the running page loads is permitted by the policy and nothing more; both hosting paths carry the same policy.
 - The service worker scope, precache and revalidation are right for /play/ only.
@@ -192,6 +196,24 @@ Probe recipes:
 Never re-flag:
 - Rendering has no unit tests by design (docs/DESIGN.md 11).
 
+## Lane J: The Worker, feedback and notifications
+Lens id: security-auth
+Files in scope:
+- src/worker/index.ts, feedback.ts, range.ts, wrangler.jsonc (the KV binding, run_worker_first, routes)
+- src/ui/feedback.ts, src/ui/notify.ts, public/notify-sw.js
+- tests/worker/*.test.ts, tests/ui/feedback.test.ts, tests/ui/notify.test.ts (read for what they prove)
+Invariants to attack:
+- The Worker trusts nothing from the client: body size, content type, the honeypot field and the rate limit are checked before any KV write; a refused post writes nothing; a KV failure reaches the player as one plain message and nothing else leaks (no stack, no binding name).
+- Only POST /api/feedback and /trailers/* requests reach Worker logic; every other method and path falls through to the assets layer unchanged, 404 included; no named export other than default exists in index.ts.
+- For every legal Range form (bytes=a-b, a-, -n, a past the end, a>b, several ranges) the answer's status, Content-Range, Content-Length and body slice agree with each other and with the file; 416 carries Content-Range bytes */size and no Content-Type; HEAD, If-Range and a Range on a missing file are answered safely; caching headers from the asset are kept.
+- Notifications fire only with the switch on and the page hidden; alerts at most one a minute; New version fires once per install; a missing Notification API, a denied permission or a service worker that never registers never throws and never blocks the game; the tap handler focuses an existing tab before opening a new one.
+- The feedback card never sends empty text, sends the real version and platform, treats the reply address as optional, and shows one plain message for 429, 400, 413 and a network failure.
+Probe recipes:
+- npx vitest run tests/worker tests/ui/feedback.test.ts tests/ui/notify.test.ts tests/site/feedback-config.test.ts
+- node -e probes against the exported handlers with crafted Request objects (a 2 MB body, a text/plain body, bytes=5-2, bytes=-0, two ranges)
+Never re-flag:
+- KV is write-only from the Worker and drained hourly by n8n over the tailnet; Cloudflare cannot reach n8n (2026-09-27); the mailer's SMTP path and the M365 mailbox (2026-09-26, 2026-09-27); /trailers/* run the Worker first (2026-09-28).
+
 ## Not in scope
 - node_modules/ - vendored; covered by npm audit.
 - dist/, dist-app/ - build output; audited as an artifact in lane H.
@@ -200,6 +222,7 @@ Never re-flag:
 - docs/, README.md, LICENSE, HANDOFF.md, SHIPPED.md, store/*.md - read as the contract, not reviewed for defects.
 - src/ui/ui.css, src/site/site.css, src/fonts.css - style; a real browser pass judges them, not a reader.
 - audio-preview/index.html - dev listening page, not shipped.
+- trailer/ - the Remotion marketing render project; not part of any shipped bundle. public/trailers/*.mp4 and *.webp are its rendered output, served as assets (lane J reads how they are served).
 - tests/ui, tests/render, tests/audio, tests/site, tests/share, tests/store - read by their lane's reviewer for what they prove, not as a lane of their own.
 
 ## Lane-independent rules

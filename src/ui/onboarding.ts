@@ -181,7 +181,7 @@ export function guideCopy(world: GuideWorld, step: GuideStep): GuideStepCopy {
       };
     }
     case 3:
-      return { title: 'Wait for tenants', text: 'Let the clock run. A company moves in once people can reach the office.', tool: null };
+      return { title: 'Wait for tenants', text: 'Let the clock run. A company moves in once people can reach the office. Rent and running costs settle once a quarter, at 5 AM on its first day, so your cash holds still between quarters.', tool: null };
     case 4:
       return {
         title: 'Reach 2 stars',
