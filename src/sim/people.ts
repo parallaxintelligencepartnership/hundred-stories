@@ -38,7 +38,11 @@ export const WALK_TILES_PER_MINUTE = 5;
  * so a trip is never planned on a car dedicated to somebody else.
  */
 function routeOpts(sim: Sim): { staff: boolean; riderClass: ReturnType<typeof riderClassOf> } {
-  return { staff: sim.kind === 'staff' || sim.kind === 'guard' || sim.kind === 'collector', riderClass: riderClassOf(sim.kind) };
+  return routeOptsFor(sim.kind);
+}
+
+function routeOptsFor(kind: SimKind): { staff: boolean; riderClass: ReturnType<typeof riderClassOf> } {
+  return { staff: kind === 'staff' || kind === 'guard' || kind === 'collector', riderClass: riderClassOf(kind) };
 }
 
 // Local rules: rules.ts has no entry for these, so they live here and are marked as our call.
@@ -450,14 +454,15 @@ function leaveTower(world: World, sim: Sim): void {
     sim.route = [];
     return;
   }
-  const legs = findRoute(world, sim.pos, exit, routeOpts(sim));
-  if (!legs || legs.length === 0) {
+  // The nearest door first, then the others: a metro no car reaches yet is not the way out.
+  const way = routeToAnEntrance(world, sim);
+  if (!way || way.legs.length === 0) {
     sim.state = 'outside';
     sim.pos = { floor: exit.floor, x: exit.x };
     sim.route = [];
     return;
   }
-  sim.route = withoutStandingRides(legs);
+  sim.route = withoutStandingRides(way.legs);
   sim.state = 'walking';
   markTripStart(world, sim);
 }
@@ -487,9 +492,7 @@ function stepAlongRoute(world: World, sim: Sim): void {
     } else if (leg.kind === 'ride') {
       const shaft = world.shafts.get(leg.shaftId);
       if (!shaft) {
-        if (sim.kind === 'guard' && !sim.exiting) guardLostRoute(sim);
-        else if (sim.kind === 'collector' && !sim.exiting) collectorLostRoute(sim);
-        else leaveTower(world, sim);
+        routeLost(world, sim);
         return;
       }
       if (leg.toFloor === sim.pos.floor) {
@@ -507,9 +510,7 @@ function stepAlongRoute(world: World, sim: Sim): void {
     } else if (leg.kind === 'stairs') {
       if (!world.rooms.has(leg.roomId)) {
         // The stairs were demolished on the way: nobody climbs what is gone (as a lost shaft).
-        if (sim.kind === 'guard' && !sim.exiting) guardLostRoute(sim);
-        else if (sim.kind === 'collector' && !sim.exiting) collectorLostRoute(sim);
-        else leaveTower(world, sim);
+        routeLost(world, sim);
         return;
       }
       climbStairs(world, sim, leg);
@@ -529,6 +530,17 @@ function stepAlongRoute(world: World, sim: Sim): void {
     }
   }
   if (sim.route.length === 0) arriveWithoutRoom(world, sim);
+}
+
+/**
+ * The shaft or stairs the next leg needs is gone: guards and collectors on duty ask their
+ * own planners again; anyone else heads for the street. A wait on the lost shaft ends here.
+ */
+function routeLost(world: World, sim: Sim): void {
+  sim.waitStart = null;
+  if (sim.kind === 'guard' && !sim.exiting) guardLostRoute(sim);
+  else if (sim.kind === 'collector' && !sim.exiting) collectorLostRoute(sim);
+  else leaveTower(world, sim);
 }
 
 function beginWait(world: World, sim: Sim, leg: Extract<Leg, { kind: 'ride' }>, shaft: Shaft): void {
@@ -585,7 +597,7 @@ function enterRoom(world: World, sim: Sim, room: Room): void {
 
 /** How long this sim stays: a cleaning shift, the plan it is running, or no set time. */
 function stayMinutesFor(sim: Sim, room: Room): number {
-  if (sim.kind === 'staff') return HOTEL_KINDS.has(room.kind) && room.dirty ? SCHEDULES.housekeeping.minutesPerRoom : 0;
+  if (sim.kind === 'staff') return HOTEL_KINDS.has(room.kind) && needsCleaning(room) ? SCHEDULES.housekeeping.minutesPerRoom : 0;
   const entry = sim.schedule[sim.nextScheduleIndex - 1];
   return entry ? entry.stayMinutes : 0;
 }
@@ -672,10 +684,15 @@ function updateStress(world: World): void {
 function retryHallCall(world: World, sim: Sim): void {
   const leg = sim.route[0];
   if (!leg || leg.kind !== 'ride' || sim.waitStart === null) return;
+  const shaft = world.shafts.get(leg.shaftId);
+  if (!shaft) {
+    // Demolished while this sim stood at its doors: no car will ever come, and a sim on
+    // the way out never gives up, so take the same path a walker who finds it gone takes.
+    routeLost(world, sim);
+    return;
+  }
   const waited = world.time.minute - sim.waitStart;
   if (waited <= 0 || waited % HALL_CALL_RETRY_MINUTES !== 0) return;
-  const shaft = world.shafts.get(leg.shaftId);
-  if (!shaft) return;
   if (waited >= HALL_CALL_RETRY_MINUTES * RETRIES_BEFORE_REROUTE) {
     rerouteWaitingSim(world, sim);
     return;
@@ -797,6 +814,8 @@ export function sendAway(world: World, sim: Sim, reason: string): void {
   sim.inCarId = null;
   sim.state = 'leaving';
   sim.route = [];
+  // A wait it was in is over; the walk out calls its own car when it reaches one.
+  sim.waitStart = null;
 }
 
 /** Workers and residents hold a lease. Guests, shoppers, diners, staff and VIPs do not. */
@@ -823,12 +842,12 @@ function runLeaving(world: World): void {
       finishLeave(world, sim);
       continue;
     }
-    const legs = findRoute(world, sim.pos, exit, routeOpts(sim));
-    if (!legs || legs.length === 0) {
+    const way = routeToAnEntrance(world, sim);
+    if (!way || way.legs.length === 0) {
       finishLeave(world, sim);
       continue;
     }
-    sim.route = withoutStandingRides(legs);
+    sim.route = withoutStandingRides(way.legs);
   }
 }
 
@@ -907,9 +926,17 @@ function dirtyHotelRooms(world: World): Room[] {
   const out: Room[] = [];
   for (const room of world.rooms.values()) {
     // A room held dirty by uncollected waste waits for the collectors, not housekeeping.
-    if (HOTEL_KINDS.has(room.kind) && room.dirty && !room.onFire && !inWasteBacklog(room)) out.push(room);
+    if (HOTEL_KINDS.has(room.kind) && needsCleaning(room) && !room.onFire && !inWasteBacklog(room)) out.push(room);
   }
   return out;
+}
+
+/**
+ * Dirty after a stay, or empty and crawling with cockroaches that spread in: an infested
+ * room is never booked, so nobody would ever dirty it again, and only a clean clears it.
+ */
+function needsCleaning(room: Room): boolean {
+  return room.dirty || (room.infested && room.tenants.length === 0);
 }
 
 /** Rooms a keeper is already walking to or standing in. */
@@ -939,6 +966,13 @@ function finishCleaning(world: World, keeper: Sim): void {
     room.dirty = false;
     room.dirtySinceMinute = null;
     log(world, `Housekeeping cleaned a hotel room on ${floorLabel(room.floor)}.`, 'info', { roomId: room.id });
+    if (room.infested) {
+      // The clean takes the cockroaches with it; the daily roll never sees this room dirty.
+      room.infested = false;
+      log(world, `The ${ROOMS[room.kind].label.toLowerCase()} on ${floorLabel(room.floor)} is clean again and the cockroaches are gone.`, 'info', {
+        roomId: room.id,
+      });
+    }
   }
   const office = keeper.homeRoomId !== null ? world.rooms.get(keeper.homeRoomId) : undefined;
   if (!office) {
@@ -1055,7 +1089,7 @@ function spawnWorker(world: World, office: Room, clock: Clock): Sim {
   }
   schedule.push({ minuteOfDay: leave, days, goal: { kind: 'exit' }, stayMinutes: 0 });
   schedule.sort((a, b) => a.minuteOfDay - b.minuteOfDay);
-  const sim = newSim(world, 'worker', entranceFor(world, office.x), office.id, schedule);
+  const sim = newSim(world, 'worker', entranceFor(world, office, 'worker'), office.id, schedule);
   return sim;
 }
 
@@ -1091,7 +1125,7 @@ function spawnGuest(world: World, room: Room, checkIn: number, checkOut: number)
     { minuteOfDay: checkOut, days: ['weekday', 'weekend'], goal: { kind: 'exit' }, stayMinutes: 0 },
     { minuteOfDay: checkIn, days: ['weekday', 'weekend'], goal: { kind: 'room', roomId: room.id }, stayMinutes: 0 },
   ];
-  const sim = newSim(world, 'guest', entranceFor(world, room.x), room.id, schedule);
+  const sim = newSim(world, 'guest', entranceFor(world, room, 'guest'), room.id, schedule);
   sim.nextScheduleIndex = 1; // tonight starts with the check in, not this morning's check out
   return sim;
 }
@@ -1105,28 +1139,46 @@ function spawnVisitor(world: World, room: Room, kind: SimKind, stayMinutes: numb
       stayMinutes,
     },
   ];
-  const sim = newSim(world, kind, entranceFor(world, room.x), null, schedule);
+  const sim = newSim(world, kind, entranceFor(world, room, kind), null, schedule);
   sim.wallet = world.rng.int(500, 8000);
   return sim;
 }
 
-function entranceFor(world: World, x: number): { floor: number; x: number } {
-  const exit = nearestEntrance(world, { floor: 1, x });
-  return exit ? { floor: exit.floor, x: exit.x } : { floor: 1, x };
+/**
+ * Where someone headed for this room comes in: the nearest entrance they can ride from.
+ * The ground doors are the ones the room was found reachable from, so they are taken on
+ * trust; a metro counts only once a route for this person's class joins it to the room,
+ * so a metro no car reaches yet is neither a way in nor, below, a way out.
+ */
+function entranceFor(world: World, room: Room, kind: SimKind): { floor: number; x: number } {
+  const target = { floor: room.floor, x: roomCenter(room) };
+  const doors = entrancesByCost(world, { floor: 1, x: room.x });
+  for (const door of doors) {
+    if (door.floor === 1 || findRoute(world, door, target, routeOptsFor(kind)) !== null) return door;
+  }
+  return doors[0] ?? { floor: 1, x: room.x };
 }
 
 function nearestEntrance(world: World, from: { floor: number; x: number }): { floor: number; x: number } | null {
-  const doors = entrances(world);
-  let best: { floor: number; x: number } | null = null;
-  let bestCost = Number.POSITIVE_INFINITY;
-  for (const door of doors) {
-    const cost = Math.abs(door.floor - from.floor) * FLOOR_PREFERENCE_TILES + Math.abs(door.x - from.x);
-    if (cost < bestCost) {
-      bestCost = cost;
-      best = door;
-    }
+  return entrancesByCost(world, from)[0] ?? null;
+}
+
+/** The entrances nearest first; equal costs keep the order entrances() gives them. */
+function entrancesByCost(world: World, from: { floor: number; x: number }): { floor: number; x: number }[] {
+  const cost = (door: { floor: number; x: number }) => Math.abs(door.floor - from.floor) * FLOOR_PREFERENCE_TILES + Math.abs(door.x - from.x);
+  return entrances(world)
+    .map((door, i) => ({ door, i, c: cost(door) }))
+    .sort((a, b) => a.c - b.c || a.i - b.i)
+    .map((e) => e.door);
+}
+
+/** A route from here to the nearest entrance this sim can reach, trying the others in turn. */
+function routeToAnEntrance(world: World, sim: Sim): { door: { floor: number; x: number }; legs: Leg[] } | null {
+  for (const door of entrancesByCost(world, sim.pos)) {
+    const legs = findRoute(world, sim.pos, door, routeOpts(sim));
+    if (legs) return { door, legs };
   }
-  return best;
+  return null;
 }
 
 function atEntrance(world: World, pos: { floor: number; x: number }): boolean {

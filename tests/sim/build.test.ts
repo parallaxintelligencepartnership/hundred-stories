@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { applyCommand, canBuild, canBuildShaft, canExtendShaft } from '../../src/sim/build';
-import { LIMITS, PLURAL_LABELS, ROOMS, SHAFTS } from '../../src/sim/rules';
+import { LIMITS, PLURAL_LABELS, RENT, ROOMS, SHAFTS } from '../../src/sim/rules';
 import { deserialize, hashWorld, serialize } from '../../src/sim/save';
 import { addRoom, allocId, createWorld } from '../../src/sim/world';
 import type { CommandResult, Room, RoomKind, Shaft, ShaftKind, Star, World } from '../../src/sim/types';
+import { MAX_FLOOR, MIN_FLOOR, TOWER_WIDTH } from '../../src/sim/types';
 
 // economy.ts is still a stub, so the tests run against a minimal spend:
 // it deducts the amount and refuses when the world cannot afford it.
@@ -561,6 +562,27 @@ describe('room.setRent', () => {
     }
   });
 
+  it('words the rent refusal from the RENT rule, not a copy of it (audit 2026-09-28 A S2)', () => {
+    const world = makeWorld();
+    lobby(world);
+    expect(build(world, 'office', 2, 100)).toEqual(OK);
+    const office = [...world.rooms.values()].find((r) => r.kind === 'office')!;
+    const saved = { ...RENT };
+    try {
+      Object.assign(RENT, { min: 40, max: 200, step: 20 });
+      const result = applyCommand(world, { kind: 'room.setRent', roomId: office.id, rent: 50 });
+      expect(reasonOf(result)).toBe('Rent must be between 40% and 200% in steps of 20%.');
+    } finally {
+      Object.assign(RENT, saved);
+    }
+  });
+
+  it('states the tower bounds once: the types constants are the LIMITS values', () => {
+    expect(TOWER_WIDTH).toBe(LIMITS.towerWidth);
+    expect(MAX_FLOOR).toBe(LIMITS.maxFloor);
+    expect(MIN_FLOOR).toBe(LIMITS.minFloor);
+  });
+
   it('refuses rent on a room kind that has no rent', () => {
     const world = makeWorld(20_000_000, 3);
     lobby(world);
@@ -953,7 +975,9 @@ describe('structural support', () => {
     // basement 1 keeps the lobby rule: any ground lobby will do, wherever it is
     expect(build(world, 'parkingSpace', -1, 200)).toEqual(OK);
     expect(build(world, 'parkingSpace', -2, 202)).toEqual(OK); // 202 to 205 under 200 to 203
-    expect(canBuild(world, 'parkingSpace', -2, 250)).toEqual({ ok: false, reason: AIR });
+    // Underground the support is the floor above, so the refusal points up (audit 2026-09-28 A S1).
+    expect(canBuild(world, 'parkingSpace', -2, 250)).toEqual({ ok: false, reason: 'Nothing is holding this up. Build over it first.' });
+    expect(canBuild(world, 'recycling', -3, 250)).toEqual({ ok: false, reason: 'Nothing is holding this up. Build over it first.' });
     const upper = roomAtSpot(world, 'parkingSpace', -1, 200);
     expect(applyCommand(world, { kind: 'demolish', roomId: upper.id })).toEqual({
       ok: false,

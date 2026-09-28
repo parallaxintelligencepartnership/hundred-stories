@@ -250,8 +250,9 @@ function stepCar(
   const span = carRangeOf(shaft, car);
 
   if (car.state === 'doorsOpen') {
-    if (car.y < span.lo || car.y > span.hi) {
-      // Its floors changed while the doors stood open: shut them, nobody boards out here.
+    if (car.y < span.lo || car.y > span.hi || !shaft.stops.has(Math.round(car.y))) {
+      // Its floors changed while the doors stood open (out of its range, or this stop
+      // turned off): shut them, nobody boards out here.
       car.state = 'idle';
       car.doorTimer = 0;
     } else {
@@ -374,6 +375,9 @@ function serveFloor(world: World, shaft: Shaft, car: Car, waiting: WaitIndex): v
     if (!carTakes(shaft, car, sim, leftover)) continue; // wrong car for this rider
     sim.inCarId = car.id;
     sim.state = 'riding';
+    // Boarding ends the wait: the next wait (a transfer, the ride out) starts its own
+    // clock and places its own hall call.
+    sim.waitStart = null;
     car.passengers.push(sim.id);
     const leg = sim.route[0];
     if (leg && leg.kind === 'ride') car.calls.add(leg.toFloor);

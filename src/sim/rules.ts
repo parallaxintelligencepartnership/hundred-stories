@@ -3,7 +3,14 @@
 // or were silent the value is marked "our call" and can be tuned without touching logic.
 
 import type { RoomKind, ShaftKind, Star } from './types';
-import { TOWER_WIDTH } from './types';
+
+/**
+ * The tower's bounds, stated once. types.ts re-exports them for the renderer and the save
+ * checks, and LIMITS below names the same numbers for the panels.
+ */
+export const TOWER_WIDTH = 375;
+export const MAX_FLOOR = 100;
+export const MIN_FLOOR = -10;
 
 export interface RoomRule {
   label: string; // UI name, sentence case, US spelling
@@ -120,9 +127,9 @@ export function takesRent(kind: RoomKind): boolean {
 
 export const LIMITS = {
   maxShafts: 24,
-  towerWidth: 375,
-  maxFloor: 100,
-  minFloor: -10,
+  towerWidth: TOWER_WIDTH,
+  maxFloor: MAX_FLOOR,
+  minFloor: MIN_FLOOR,
   skyLobbyFloors: [15, 30, 45, 60, 75, 90] as readonly number[],
   lobbyUpkeepPerSegmentByStar: { 1: 0, 2: 0, 3: 300, 4: 1_000, 5: 1_000, 6: 1_000 } as Record<Star, number>,
   startingCash: 2_000_000,

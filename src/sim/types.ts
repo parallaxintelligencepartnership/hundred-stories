@@ -5,9 +5,9 @@
 import type { Rng } from './rng';
 import type { StoryState } from './story';
 
-export const TOWER_WIDTH = 375;
-export const MAX_FLOOR = 100;
-export const MIN_FLOOR = -10;
+// The tower's bounds live in rules.ts with every other number; re-exported here for the
+// modules that already read them from the contract.
+export { MAX_FLOOR, MIN_FLOOR, TOWER_WIDTH } from './rules';
 
 export type RoomKind =
   | 'lobby'
@@ -338,7 +338,16 @@ export interface TheftEvent {
 
 export type ActiveEvent =
   | { kind: 'fire'; roomIds: Id[]; startedAt: number; spreadAt: number }
-  | { kind: 'bomb'; roomId: Id; ransom: number; detonateAt: number; found: boolean }
+  | {
+      kind: 'bomb';
+      roomId: Id;
+      ransom: number;
+      detonateAt: number;
+      found: boolean;
+      /** Where it was planted, so it still goes off there if a fire takes its room. Optional: older saves lack it. */
+      floor?: number;
+      x?: number;
+    }
   | VipEvent
   | TheftEvent
   | { kind: 'santa'; startedAt: number; x: number }

@@ -10,7 +10,7 @@ import { EVENT_TEST_HOOKS, resetEventTestHooks, startFire, startVip } from '../.
 import { vipArrivalHour, vipPreference, VIP_PREFERENCES } from '../../src/sim/identity';
 import { EVENTS, ROOMS } from '../../src/sim/rules';
 import { deserialize, hashWorld, serialize } from '../../src/sim/save';
-import { personCard } from '../../src/sim/story';
+import { describeBeat, personCard, sanitizeStory } from '../../src/sim/story';
 import { tick } from '../../src/sim/tick';
 import type { ActiveEvent, Room, Sim, VipPhase, World } from '../../src/sim/types';
 import { allocId, createWorld } from '../../src/sim/world';
@@ -213,6 +213,10 @@ describe('the VIP journey', () => {
     expect(world.log.some((l) => l.text === 'The VIP left: no suite was ready.')).toBe(true);
     const rated = world.story.recent.find((b) => b.code === 'vip.rated');
     expect(rated).toMatchObject({ simId: visit.simId, value: 0 });
+    // The VIP never stayed, so the story says they left; it never invents a rating (audit 2026-09-28 C S3).
+    expect(describeBeat(rated!, world)).toBe('The VIP left without staying.');
+    const reloaded = sanitizeStory(JSON.parse(JSON.stringify(world.story))).recent.find((b) => b.code === 'vip.rated');
+    expect(reloaded?.leftEarly).toBe(true);
     expect(world.stats.vipRating).toBe('poor');
     expect(world.stats.lastVip?.reason).toBe('The VIP left: no suite was ready');
     expect(visitOf(world)).toBeUndefined();

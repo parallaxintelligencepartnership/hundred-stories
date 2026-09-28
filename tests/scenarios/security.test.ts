@@ -370,6 +370,8 @@ describe('below three stars', () => {
     ]);
     resetEventTestHooks();
     runDays(world, 4);
-    expect(hashWorld(world)).toBe('eeb027e5');
+    // Re-recorded for the audit fix wave (2026-09-28, lane B S3): boarding now ends the wait, so
+    // a transfer's second wait places its own hall call; with that line reverted it hashes eeb027e5.
+    expect(hashWorld(world)).toBe('42ecfb60');
   });
 });

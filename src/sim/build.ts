@@ -415,7 +415,8 @@ export function canBuild(world: World, kind: RoomKind, floor: number, x: number)
 
   if (!hasSupport(world, floor, rule.height)) return no(noSupportReason(floor));
   if (!restsOnStructure(world, kind, floor, rule.height, x, rule.width)) {
-    return no('Nothing is holding this up. Build under it first.');
+    // Underground a room hangs from the floor above (restingFloor), so point up there.
+    return no(floor < 0 ? 'Nothing is holding this up. Build over it first.' : 'Nothing is holding this up. Build under it first.');
   }
 
   if (roomInTheWay(world, kind, floors, x, rule.width, floor)) return no('Something is already there.');
@@ -852,7 +853,7 @@ function doSetRent(world: World, roomId: number, rent: number): CommandResult {
   if (!room) return no('No such room.');
   if (!takesRent(room.kind)) return no('This room has no rent to set.');
   if (!Number.isInteger(rent) || rent < RENT.min || rent > RENT.max || (rent - RENT.min) % RENT.step !== 0) {
-    return no('Rent must be between 50% and 150% in steps of 10%.');
+    return no(`Rent must be between ${RENT.min}% and ${RENT.max}% in steps of ${RENT.step}%.`);
   }
 
   room.rent = rent;

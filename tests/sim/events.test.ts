@@ -416,6 +416,21 @@ describe('fire: bounded and billed (review 2026-09-28 C1, I2, I4)', () => {
     expect(world.stats.lastQuarter.lossesByKind).toEqual({ theft: THEFT.lossCash });
   });
 
+  it('an escaped thief leaves a mess for one day, not until the second morning', () => {
+    world.stars = 3;
+    const shop = place(world, 'shop', 2, 100);
+    const escape = 1440 + 10 * 60; // 10:00, well after the 06:00 roll
+    world.events.push({ kind: 'theft', phase: 'leaving', enterAt: 0, simId: 999_999, targetId: shop.id, floor: 2, actUntil: null, guardId: null, noGuard: null });
+    at(world, escape);
+    expect(shop.dirty).toBe(true);
+    // Every hour through the day after (each on the hour, as the tick would reach it).
+    for (let m = escape + 60; m < escape + THEFT.messDays * 1440; m += 60) at(world, m);
+    expect(shop.dirty).toBe(true);
+    at(world, escape + THEFT.messDays * 1440);
+    expect(shop.dirty).toBe(false);
+    expect(world.log.at(-1)?.text).toBe('The shop on floor 2 is tidy again.');
+  });
+
   it('a paid ransom is booked as a loss', () => {
     world.stars = 3;
     const office = place(world, 'office', 2, 100);
@@ -758,12 +773,44 @@ describe('cockroaches', () => {
   });
 
   it('housekeeping cleaning the room clears the cockroaches', () => {
-    const room = place(world, 'hotelSingle', 3, 100, { dirty: true, dirtySinceMinute: 0 });
+    // A real keeper does the clean (audit 2026-09-28 C S1): finishCleaning stops the dirty
+    // countdown, so the clean itself has to take the cockroaches.
+    const tower = createWorld(4242);
+    tower.cash = 50_000_000;
+    tower.stars = 2;
+    buildTower(tower, [
+      ...lobbyRun(100, 200),
+      { kind: 'shaft.build', shaft: 'standard', x: 120, floorMin: 1, floorMax: 4 },
+      { kind: 'build', room: 'hotelSingle', floor: 2, x: 140 },
+      { kind: 'build', room: 'housekeeping', floor: 2, x: 160 },
+    ]);
+    const room = [...tower.rooms.values()].find((r) => r.kind === 'hotelSingle')!;
+    room.dirty = true;
+    room.dirtySinceMinute = 0;
     for (let day = 0; day <= EVENTS.cockroaches.dirtyDaysBeforeInfested; day++) {
-      at(world, ROLL_MINUTE + day * 1440);
+      tower.time.minute = ROLL_MINUTE + day * 1440;
+      tickEvents(tower);
     }
-    room.dirty = false;
-    at(world, ROLL_MINUTE + (EVENTS.cockroaches.dirtyDaysBeforeInfested + 1) * 1440);
+    expect(room.infested).toBe(true);
+    tickMany(tower, 1440);
+    expect(room.dirty).toBe(false);
+    expect(room.infested).toBe(false);
+    expect(tower.log.some((l) => l.text === 'The single room on floor 2 is clean again and the cockroaches are gone.')).toBe(true);
+  });
+
+  it('housekeeping clears an empty room the cockroaches spread into', () => {
+    const tower = createWorld(4242);
+    tower.cash = 50_000_000;
+    tower.stars = 2;
+    buildTower(tower, [
+      ...lobbyRun(100, 200),
+      { kind: 'shaft.build', shaft: 'standard', x: 120, floorMin: 1, floorMax: 4 },
+      { kind: 'build', room: 'hotelSingle', floor: 2, x: 140 },
+      { kind: 'build', room: 'housekeeping', floor: 2, x: 160 },
+    ]);
+    const room = [...tower.rooms.values()].find((r) => r.kind === 'hotelSingle')!;
+    room.infested = true; // clean, caught by spread
+    tickMany(tower, 1440);
     expect(room.infested).toBe(false);
   });
 

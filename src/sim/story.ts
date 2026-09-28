@@ -36,7 +36,8 @@ export type BeatCode =
  * One recorded transition. value: wait.long = wait minutes; trip.arrived = trip minutes; vip.rated = 0 poor,
  * 1 fair, 2 good; star.* = the new star number; theft.escaped = dollars lost. theft.* carry the thief's
  * simId and the target's roomId; guard.dispatched carries the guard's simId and the incident's roomId.
- * waste.backlog and waste.cleared carry the room's roomId.
+ * waste.backlog and waste.cleared carry the room's roomId. vip.rated with leftEarly is a visit that ended
+ * before the stay: the VIP rated nothing, so the line says they left (value stays 0, the stored poor).
  */
 export interface StoryBeat {
   code: BeatCode;
@@ -44,6 +45,7 @@ export interface StoryBeat {
   simId?: number;
   roomId?: number;
   value?: number;
+  leftEarly?: true;
 }
 
 export const STORY_RECENT_CAP = 256;
@@ -256,6 +258,7 @@ function cleanBeat(raw: unknown): StoryBeat | null {
   if (simId !== undefined) beat.simId = simId;
   if (roomId !== undefined) beat.roomId = roomId;
   if (value !== undefined) beat.value = value;
+  if (r.leftEarly === true) beat.leftEarly = true;
   return beat;
 }
 
@@ -457,6 +460,7 @@ function towerLine(beat: StoryBeat, room: Room | undefined): string {
     case 'vip.arrival':
       return room ? `The VIP arrived at ${placeText(room)}.` : 'The VIP arrived.';
     case 'vip.rated':
+      if (beat.leftEarly) return 'The VIP left without staying.';
       return `The VIP rated the tower ${VIP_RATINGS[Math.min(2, Math.max(0, Math.round(beat.value ?? 0)))]}.`;
     case 'star.gained':
       return `The tower reached ${starText(beat.value)}.`;

@@ -9,7 +9,7 @@ import type { ActiveEvent, Command, CommandResult, GuardResponse, Id, Room, Room
 import { personName, vipArrivalHour, vipPreference } from './identity';
 import { fireBurning, roomMiddle, sendAway, sendThiefOut, sendThiefTo, sendVipToSuite } from './people';
 import { ensureRouting, entrances, findRoute } from './routing';
-import { rollWaste } from './recycling';
+import { inWasteBacklog, rollWaste } from './recycling';
 import { dispatchGuard, releaseGuard, routeMinutes } from './security';
 import { isFollowed, recordBeat, type StoryBeat } from './story';
 import { debitLoss } from './economy';
@@ -295,6 +295,8 @@ export function startBomb(world: World): void {
     ransom: EVENTS.bomb.ransom,
     detonateAt: dayStart + EVENTS.bomb.detonateAtMinuteOfDay,
     found: false,
+    floor: room.floor,
+    x: room.x,
   });
   log(
     world,
@@ -308,9 +310,11 @@ export function startBomb(world: World): void {
 
 function detonate(world: World, event: Extract<ActiveEvent, { kind: 'bomb' }>): void {
   const bombRoom = world.rooms.get(event.roomId);
-  const ranked = sortedRooms(world).sort((a, b) => distanceFrom(bombRoom, a) - distanceFrom(bombRoom, b));
+  // A fire can take the bomb's room before it goes off: it still goes off where it was planted.
+  const at = bombRoom ?? (event.floor !== undefined && event.x !== undefined ? { floor: event.floor, x: event.x } : undefined);
+  const ranked = sortedRooms(world).sort((a, b) => distanceFrom(at, a) - distanceFrom(at, b));
   const doomed = ranked.slice(0, EVENTS.bomb.damageRooms);
-  const floor = bombRoom ? bombRoom.floor : 1;
+  const floor = at ? at.floor : 1;
   for (const room of doomed) destroyRoom(world, room, `The bomb on floor ${floor} destroyed the ${label(room.kind)}.`);
   debitLoss(world, 'bomb', EVENTS.bomb.damageCash);
   endEvent(world, event);
@@ -319,7 +323,7 @@ function detonate(world: World, event: Extract<ActiveEvent, { kind: 'bomb' }>): 
   towerBeat(world, 'bomb.failed', bombRoom ? { roomId: bombRoom.id } : {});
 }
 
-function distanceFrom(from: Room | undefined, room: Room): number {
+function distanceFrom(from: { floor: number; x: number } | undefined, room: Room): number {
   if (!from) return room.id;
   return Math.abs(room.floor - from.floor) * TOWER_WIDTH + Math.abs(room.x - from.x);
 }
@@ -454,7 +458,7 @@ function releaseSuite(world: World, event: VipEventState): void {
 }
 
 /** Record the result, write the log line and the beat, and clear the event. */
-function closeVisit(world: World, event: VipEventState, rating: VipRating, reason: string | null): void {
+function closeVisit(world: World, event: VipEventState, rating: VipRating, reason: string | null, leftEarly = false): void {
   const value = VIP_ORDER[rating];
   event.score = value / 2;
   world.stats.vipRating = rating;
@@ -473,6 +477,7 @@ function closeVisit(world: World, event: VipEventState, rating: VipRating, reaso
   endEvent(world, event);
   const beat: Omit<StoryBeat, 'code' | 'minute'> = { simId: event.simId, value };
   if (event.suiteId !== null && world.rooms.has(event.suiteId)) beat.roomId = event.suiteId;
+  if (leftEarly) beat.leftEarly = true;
   if (reason) log(world, `${reason}.`, 'alert', { simId: event.simId });
   else log(world, `The VIP checked out and rated the tower ${rating}.`, 'alert', { simId: event.simId });
   towerBeat(world, 'vip.rated', beat);
@@ -480,7 +485,8 @@ function closeVisit(world: World, event: VipEventState, rating: VipRating, reaso
 
 /**
  * The visit ends before the stay: the VIP turns round. One who never came in is simply gone;
- * one already inside heads for the door like anyone leaving. Rated poor, value 0.
+ * one already inside heads for the door like anyone leaving. Rated poor, value 0; the beat is
+ * marked leftEarly so the story says they left rather than that they rated the tower.
  */
 function failVisit(world: World, event: VipEventState, reason: string): void {
   const sim = world.sims.get(event.simId);
@@ -496,7 +502,7 @@ function failVisit(world: World, event: VipEventState, reason: string): void {
       sendAway(world, sim, `${reason}.`);
     }
   }
-  closeVisit(world, event, 'poor', reason);
+  closeVisit(world, event, 'poor', reason, true);
 }
 
 /** Keep the longest wait up to date. A wait runs from the first minute at the doors to boarding. */
@@ -809,10 +815,16 @@ export function tickTheft(world: World, event: TheftEvent): void {
   if (sim.state === 'riding' || sim.inCarId !== null || sim.pos.floor !== event.floor) theftEscaped(world, event, sim.id);
 }
 
-/** A room a thief left dirty is tidied after THEFT.messDays. Hotel rooms wait for housekeeping. */
-function tidyAfterTheft(world: World): void {
+/**
+ * A room a thief left dirty is tidied once THEFT.messDays have passed, looked at on the hour so
+ * the mess lasts the day the rule gives it, not until the second morning. Hotel rooms wait for
+ * housekeeping. Off the 06:00 roll a room in waste backlog is left alone: the roll's waste pass
+ * owns its dirty flag.
+ */
+function tidyAfterTheft(world: World, skipBacklog = false): void {
   for (const room of sortedRooms(world)) {
     if (!room.dirty || isHotelRoom(room.kind) || room.dirtySinceMinute == null) continue;
+    if (skipBacklog && inWasteBacklog(room)) continue;
     if (world.time.minute - room.dirtySinceMinute < THEFT.messDays * MINUTES_PER_DAY) continue;
     room.dirty = false;
     room.dirtySinceMinute = null;
@@ -833,8 +845,9 @@ export function tickCockroaches(world: World): void {
   for (const room of sortedRooms(world)) {
     if (!isHotelRoom(room.kind)) continue;
     if (!room.dirty) {
-      // Housekeeping cleaning a dirty room takes the cockroaches with it. A clean
-      // room that caught them by spread keeps them until it needs cleaning again.
+      // Housekeeping clears the cockroaches itself when it cleans (people.ts finishCleaning,
+      // which also stops this countdown), and it cleans an empty room they spread into.
+      // This is the fallback for a room made clean some other way with the countdown still set.
       const wasDirty = room.dirtySinceMinute != null;
       room.dirtySinceMinute = null;
       if (wasDirty && room.infested) {
@@ -944,6 +957,8 @@ export function tickEvents(world: World): void {
     const waste = rollWaste(world);
     for (const roomId of waste.cleared) towerBeat(world, 'waste.cleared', { roomId });
     for (const roomId of waste.backlog) towerBeat(world, 'waste.backlog', { roomId });
+  } else if (clock.minuteOfDay % 60 === 0) {
+    tidyAfterTheft(world, true);
   }
   if (clock.isWeekend && clock.minuteOfDay === EVENTS.wedding.weekendMinuteOfDay) startWedding(world);
   if (isYearEndDay(world.time.minute) && clock.minuteOfDay === EVENTS.santa.minuteOfDay) startSanta(world);
