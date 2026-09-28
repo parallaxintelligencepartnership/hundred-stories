@@ -275,7 +275,8 @@ export const ShareClip: React.FC = () => {
           <AbsoluteFill style={{ opacity: 1 - cardOut }}>
             <Wordmark opacity={card} scale={lerp(0.9, 1, popIn(f, 294, 18))} glow={0.9} size={130} />
             <Caption text="Every floor is a story. Everyone's got one." opacity={fade(f, 306, 14)} y={612} size={44} color={ink} />
-            <Caption text="Play free" opacity={fade(f, 318, 12)} y={690} size={36} color={mint} weight={600} />
+            <Caption text="Play Free" opacity={fade(f, 318, 12)} y={690} size={36} color={mint} weight={600} />
+            <Caption text="hundredstories.xyz" opacity={fade(f, 328, 12)} y={744} size={28} color={ink} weight={400} />
           </AbsoluteFill>
         </AbsoluteFill>
       )}

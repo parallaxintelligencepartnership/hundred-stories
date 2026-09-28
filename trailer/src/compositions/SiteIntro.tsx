@@ -414,7 +414,7 @@ const EveryFloor: React.FC = () => {
       <AbsoluteFill style={{ background: `linear-gradient(180deg, ${steel}00 0%, ${steel}00 30%, ${steel}f2 36%, ${steel}f2 76%, ${steel}00 82%, ${steel}00 100%)`, opacity: wmIn }} />
       <Wordmark opacity={wmIn} scale={wmScale} glow={wmIn * (0.8 + 0.2 * Math.sin(f * 0.12))} size={140} />
       <Caption text="Every floor is a story. Everyone's got one." opacity={fade(f, 200, 24)} rise={(1 - fade(f, 200, 24)) * 10} y={640} size={48} color={ink} />
-      <Caption text="Build yours — free to play." opacity={fade(f, 250, 20)} rise={(1 - fade(f, 250, 20)) * 8} y={722} size={34} color={mint} weight={400} />
+      <Caption text="Play Free" opacity={fade(f, 250, 20)} rise={(1 - fade(f, 250, 20)) * 8} y={722} size={34} color={mint} weight={400} />
       <AbsoluteFill style={{ background: black, opacity: blackout }} />
     </AbsoluteFill>
   );
