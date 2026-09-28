@@ -78,6 +78,7 @@ describe('GET /trailers/* byte ranges', () => {
     const res = await worker.fetch(get(VIDEO, { Range: range }), env);
     expect(res.status).toBe(416);
     expect(res.headers.get('content-range')).toBe(`bytes */${SIZE}`);
+    expect(res.headers.get('content-type')).toBeNull();
     expect(await res.text()).toBe('');
   });
 
