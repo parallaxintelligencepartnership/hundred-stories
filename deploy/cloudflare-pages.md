@@ -2,10 +2,13 @@
 
 Cloudflare Workers with static assets is the primary hosting for Hundred
 Stories. It is the successor to Cloudflare Pages: the site is served as a
-set of static assets directly from Cloudflare's edge, asset requests are
-free and unlimited, and there is no Worker code involved (`wrangler.jsonc`
-has no `main` entry). The pi3 package in `deploy/` (see `deploy/README.md`)
-remains the fallback.
+set of static assets directly from Cloudflare's edge, and asset requests are
+free and unlimited. A small Worker (`src/worker/index.ts`, the `main` entry in
+`wrangler.jsonc`) answers two things the static assets cannot: `POST
+/api/feedback` for the in-game feedback card, and byte-range requests for the
+videos under `/trailers/` (`src/worker/range.ts`). Every other request is a
+static asset and never runs the Worker. The pi3 package in `deploy/` (see
+`deploy/README.md`) remains the fallback, for the static site only.
 
 ## One-time setup
 
@@ -74,10 +77,15 @@ their tower.
 
 ## Where the headers live
 
-Security headers are defined once, in `public/_headers`, and are served by
-Workers static assets — no server config or Worker code applies them.
+Security headers are defined in `public/_headers` and served by Workers static
+assets. The responses the Worker builds itself (`/api/feedback`, `/trailers/*`)
+come from `src/worker/`. The pi3 fallback's `deploy/nginx.conf` carries its own
+copy of the Content-Security-Policy; keep it identical to `public/_headers`.
 
 ## Fallback
 
 The pi3 package in `deploy/` (compose.yml, deploy.sh, nginx.conf) remains
-the fallback hosting path. See `deploy/README.md`.
+the fallback hosting path. It serves the static site only: there is no
+`/api/feedback` route (the in-game feedback card shows its plain failure
+message) and no Worker, since nginx answers byte-range requests for the
+trailers itself. See `deploy/README.md`.

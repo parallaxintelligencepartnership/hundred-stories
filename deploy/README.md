@@ -4,6 +4,12 @@ Static Vite build served by nginx, behind the existing Traefik on pi3, same
 shape as stillpub (see `pubworks/docs/deploy-stillpub.md` and
 `claude-knowledge-base/stacks/pi3-stillpub-compose.yml`).
 
+This fallback serves the static site only. It has no `/api/feedback` route,
+so sending feedback from the in-game card gets the card's plain failure
+message, and it has no Worker: nginx answers byte-range requests for the
+videos under `/trailers/` itself. The Content-Security-Policy in `nginx.conf`
+is a copy of the one in `public/_headers`; keep the two identical.
+
 ## One-time setup
 
 0. **Detach the Workers custom domains first** if `SITE_HOST` is currently

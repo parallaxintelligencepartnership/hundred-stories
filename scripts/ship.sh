@@ -1,8 +1,15 @@
 #!/bin/sh
-# Ship a release: bump every version file, commit, tag, deploy to Cloudflare, push origin and
-# the GitHub mirror. Run from the repo root:  sh scripts/ship.sh 0.6.0
+# Ship a release: bump every version file, commit, deploy to Cloudflare, then (only when the
+# deploy succeeded) tag and push origin and the GitHub mirror. Run from the repo root, on main:
+#   sh scripts/ship.sh 0.6.0
 # The tag is ship-<today>; pass a second argument to name it yourself.
 set -eu
+
+BRANCH=$(git rev-parse --abbrev-ref HEAD)
+if [ "$BRANCH" != main ]; then
+  echo "ship from main, not $BRANCH" >&2
+  exit 1
+fi
 
 NEW="${1:?usage: sh scripts/ship.sh <new version> [tag]}"
 TAG="${2:-}"
@@ -34,7 +41,30 @@ OLD_RE=$(printf '%s' "$OLD" | sed 's/\./\\./g')
 
 echo "bumping $OLD -> $NEW"
 sed -i '' "s/\"version\": \"$OLD_RE\"/\"version\": \"$NEW\"/" package.json src-tauri/tauri.conf.json
-sed -i '' "s/^version = \"$OLD_RE\"/version = \"$NEW\"/" src-tauri/Cargo.toml src-tauri/Cargo.lock
+# Cargo: only the app's own version line. A dependency crate can share the old number (zlib-rs
+# 0.6.8 did), so never replace globally: in Cargo.toml the [package] table, in Cargo.lock the
+# [[package]] block named after the app. The app name is read from Cargo.toml.
+APP=$(awk '/^\[/ { t = $0 } t == "[package]" && /^name = "/ { sub(/^name = "/, ""); sub(/".*/, ""); print; exit }' src-tauri/Cargo.toml)
+if [ -z "$APP" ]; then
+  echo "no [package] name in src-tauri/Cargo.toml" >&2
+  exit 1
+fi
+awk -v old="$OLD" -v new="$NEW" '
+  /^\[/ { t = $0 }
+  t == "[package]" && !done && $0 == "version = \"" old "\"" { $0 = "version = \"" new "\""; done = 1 }
+  { print }' src-tauri/Cargo.toml > src-tauri/Cargo.toml.ship && mv src-tauri/Cargo.toml.ship src-tauri/Cargo.toml
+awk -v app="$APP" -v old="$OLD" -v new="$NEW" '
+  /^\[\[package\]\]$/ { mine = 0 }
+  $0 == "name = \"" app "\"" { mine = 1 }
+  mine && $0 == "version = \"" old "\"" { $0 = "version = \"" new "\""; mine = 0 }
+  { print }' src-tauri/Cargo.lock > src-tauri/Cargo.lock.ship && mv src-tauri/Cargo.lock.ship src-tauri/Cargo.lock
+for f in src-tauri/Cargo.toml src-tauri/Cargo.lock; do
+  if [ "$(git diff --numstat -- "$f" | cut -f1,2)" != "$(printf '1\t1')" ]; then
+    echo "the Cargo bump in $f did not change exactly the app's version line:" >&2
+    git diff -- "$f" >&2
+    exit 1
+  fi
+done
 sed -i '' "s/MARKETING_VERSION = $OLD_RE;/MARKETING_VERSION = $NEW;/" ios/App/App.xcodeproj/project.pbxproj
 sed -i '' "s/versionName \"$OLD_RE\"/versionName \"$NEW\"/" android/app/build.gradle
 # Android versionCode is the dotted version as one number (0.6.1 -> 601), see tests/site/versions.test.ts.
@@ -53,12 +83,27 @@ fi
 git add package.json package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml \
   src-tauri/Cargo.lock ios/App/App.xcodeproj/project.pbxproj android/app/build.gradle
 git commit -q -m "$NEW"
-git tag "$TAG"
-echo "committed $(git rev-parse --short HEAD), tagged $TAG"
+COMMIT=$(git rev-parse --short HEAD)
+echo "committed $COMMIT"
 
 echo "deploying"
-npm run deploy 2>&1 | tee /tmp/hundred-stories-deploy.log
+# A pipeline's status is its last command's (tee), and plain sh has no portable pipefail, so the
+# deploy's own exit status goes through a temp file. Nothing below runs unless it is 0.
+STATUS_FILE=$(mktemp)
+{ rc=0; npm run deploy 2>&1 || rc=$?; echo "$rc" > "$STATUS_FILE"; } | tee /tmp/hundred-stories-deploy.log
+DEPLOY_STATUS=$(cat "$STATUS_FILE")
+rm -f "$STATUS_FILE"
+if [ "$DEPLOY_STATUS" != 0 ]; then
+  echo >&2
+  echo "deploy failed (exit $DEPLOY_STATUS); nothing tagged or pushed, the live site is unchanged." >&2
+  echo "The release commit $COMMIT is local only. Fix the failure, then either run npm run deploy" >&2
+  echo "and tag and push by hand, or drop the commit and ship again." >&2
+  exit 1
+fi
 VERSION_ID=$(grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' /tmp/hundred-stories-deploy.log | tail -1 || true)
+
+git tag "$TAG"
+echo "tagged $TAG"
 
 echo "pushing"
 git push origin main --tags
