@@ -27,9 +27,22 @@ import { phraseFor, progressionFor, voicesFor } from '../../src/audio/phrase';
 import { vipRatingCue, cueDuration, beatCue } from '../../src/audio/cues';
 import { weatherAt } from '../../src/game/weather';
 
+// A real AudioParam takes a WebIDL float and throws a TypeError on NaN or infinity; with
+// strictParams on, the stub does the same, and every value written is kept in paramWrites.
+let strictParams = false;
+const paramWrites: number[] = [];
 class StubParam {
-  value = 0;
+  #value = 0;
   calls: string[] = [];
+  get value(): number { return this.#value; }
+  set value(v: number) { this.#value = StubParam.check(v); }
+  static check(v: number): number {
+    if (strictParams) {
+      paramWrites.push(v);
+      if (!Number.isFinite(v)) throw new TypeError(`The provided float value is non-finite: ${v}`);
+    }
+    return v;
+  }
   setValueAtTime(v: number): this {
     this.calls.push('set');
     this.value = v;
@@ -118,8 +131,12 @@ class StubContext {
     this.state = 'running';
     return Promise.resolve();
   }
+  // Safari and Firefox: state reads 'running' until the suspend settles.
+  deferSuspend = false;
+  pendingSuspends: Array<() => void> = [];
   suspend(): Promise<void> {
     this.suspends += 1;
+    if (this.deferSuspend) return new Promise<void>((done) => this.pendingSuspends.push(() => { this.state = 'suspended'; done(); }));
     this.state = 'suspended';
     return Promise.resolve();
   }
@@ -798,5 +815,183 @@ describe('a hidden page', () => {
     expect(ctx.suspends + ctx.resumes).toBe(0);
     sound.destroy();
     expect(page.count()).toBe(0);
+  });
+});
+
+describe('audit 2026-09-28: a bad number never reaches a Web Audio param', () => {
+  afterEach(() => { strictParams = false; paramWrites.length = 0; });
+
+  it('G S1: a restaurant with occupancy "x" gives finite params through wake and ten game minutes of ticks and bars', () => {
+    strictParams = true;
+    const game = fakeGame();
+    game.state.time.minute = 3 * 60 + 30;
+    game.state.rooms.set(1, { kind: 'restaurant', occupancy: 'x' as unknown as number, width: 12 });
+    game.state.rooms.set(2, { kind: 'restaurant', occupancy: {} as unknown as number, width: 8 });
+    const target = fakeTarget(); const ctx = new StubContext();
+    let t = 1000; const timers = new Map<number, () => void>(); let id = 0;
+    const sound = createSound(game, { target, store: memoryStore(), createContext: () => asCtx(ctx), now: () => t,
+      setInterval: fn => { timers.set(++id, fn); return id; }, clearInterval: i => void timers.delete(i) });
+    expect(() => { target.fire('pointerdown'); sound.setEnabled(true); target.fire('pointerdown'); }).not.toThrow();
+    expect(() => {
+      for (let i = 0; i < 10; i++) {
+        game.state.time.minute += 1;
+        game.tick();
+        t += 3000; ctx.currentTime += 3;
+        for (const fn of [...timers.values()]) fn();
+      }
+    }).not.toThrow();
+    expect(paramWrites.length).toBeGreaterThan(20);
+    expect(paramWrites.every(Number.isFinite)).toBe(true);
+    for (const axis of Object.values(sound.mood!)) expect(Number.isFinite(axis)).toBe(true);
+    expect(Number.isFinite(sound.filterHz)).toBe(true);
+    sound.destroy();
+  });
+
+  it('a NaN level from a setter never reaches a bus', () => {
+    strictParams = true;
+    const game = fakeGame(); const target = fakeTarget(); const ctx = new StubContext();
+    const sound = createSound(game, { target, store: memoryStore(), createContext: () => asCtx(ctx), setInterval: () => 1, clearInterval: () => {} });
+    target.fire('pointerdown'); sound.setEnabled(true);
+    expect(() => { sound.setEffects(NaN); sound.setMusic!(NaN); sound.setAmbient(NaN); }).not.toThrow();
+    expect(paramWrites.every(Number.isFinite)).toBe(true);
+    sound.destroy();
+  });
+});
+
+describe('audit 2026-09-28: a suspend that settles late (Safari, Firefox)', () => {
+  const settle = () => new Promise(done => setTimeout(done, 0));
+  function rig() {
+    const game = fakeGame(); const target = fakeTarget(); const page = fakeTarget(); const ctx = new StubContext();
+    let hidden = false;
+    const sound = createSound(game, { target, page, hidden: () => hidden, store: memoryStore(),
+      createContext: () => asCtx(ctx), setInterval: () => 1, clearInterval: () => {} });
+    target.fire('pointerdown'); sound.setEnabled(true);
+    ctx.deferSuspend = true;
+    const hide = () => { hidden = true; page.fire('visibilitychange'); };
+    const show = () => { hidden = false; page.fire('visibilitychange'); };
+    const land = async () => { ctx.pendingSuspends.splice(0).forEach(done => done()); await settle(); };
+    return { ctx, sound, hide, show, land };
+  }
+
+  it('G S2: Sound off then on before the suspend lands ends running', async () => {
+    const { ctx, sound, land } = rig();
+    await settle();
+    expect(ctx.state).toBe('running');
+    sound.setEnabled(false);
+    sound.setEnabled(true);
+    expect(ctx.state).toBe('running'); // the suspend has not landed yet
+    await land();
+    expect(sound.settings.on).toBe(true);
+    expect(ctx.state).toBe('running');
+    sound.destroy();
+  });
+
+  it('G S2: hide then show before the suspend lands ends running', async () => {
+    const { ctx, sound, hide, show, land } = rig();
+    await settle();
+    hide();
+    show();
+    await land();
+    expect(ctx.state).toBe('running');
+    sound.destroy();
+  });
+
+  it('a late suspend stays suspended when sound stays off, the page stays hidden, or the sound is destroyed', async () => {
+    const off = rig();
+    await settle();
+    off.sound.setEnabled(false);
+    await off.land();
+    expect(off.ctx.state).toBe('suspended');
+    off.sound.destroy();
+
+    const away = rig();
+    await settle();
+    away.hide();
+    await away.land();
+    expect(away.ctx.state).toBe('suspended');
+    away.sound.destroy();
+
+    const gone = rig();
+    await settle();
+    gone.sound.destroy();
+    await gone.land();
+    expect(gone.ctx.state).toBe('suspended');
+  });
+});
+
+describe('audit 2026-09-28: overlapping incidents', () => {
+  type Code = 'fire.started' | 'fire.resolved' | 'bomb.started' | 'bomb.resolved' | 'theft.started' | 'theft.caught';
+  const beat = (code: Code): GameEvent => ({ kind: 'beat', beat: { code, minute: 0 } });
+  function rig() {
+    const game = fakeGame(); const target = fakeTarget(); const ctx = new StubContext();
+    const sound = createSound(game, { target, store: memoryStore(), createContext: () => asCtx(ctx),
+      setInterval: () => 1, clearInterval: () => {} });
+    target.fire('pointerdown'); sound.setAmbient(0); sound.setEnabled(true);
+    const events: Record<string, unknown>[] = [];
+    (game.state as Record<string, unknown>)['events'] = events;
+    return { game, ctx, sound, events };
+  }
+  const fire = { kind: 'fire', roomIds: [1], startedAt: 0, spreadAt: 60 };
+  const bomb = { kind: 'bomb', roomId: 2, detonateAt: 999, ransom: 1, found: false };
+  // release.up is two notes rising from 330 Hz (musicalHz may move them into the chapter's key).
+  const releaseNotes = (ctx: StubContext, from: number) => ctx.oscillators.slice(from).length;
+
+  it('G S3: the ransom paid while a fire burns keeps the fire\'s tension, and the fire\'s end still plays its release', () => {
+    const { game, ctx, sound, events } = rig();
+    events.push(fire); game.emit(beat('fire.started'));
+    events.push(bomb); game.emit(beat('bomb.started'));
+    events.splice(events.indexOf(bomb), 1);
+    let before = ctx.oscillators.length;
+    game.emit(beat('bomb.resolved'));
+    expect(releaseNotes(ctx, before)).toBeGreaterThan(0); // the bomb's release cue still plays
+    expect(sound.tension).toBe(true);
+    expect(sound.tensionLevel).toBe(1);
+    expect(ctx.gains[7]!.gain.value).toBe(0); // the kit stays out while the fire burns
+    before = ctx.oscillators.length;
+    game.emit({ kind: 'car.arrive', shaftId: 1, carId: 1 });
+    expect(ctx.oscillators.length).toBe(before); // no elevator bells during the fire
+    events.splice(events.indexOf(fire), 1);
+    before = ctx.oscillators.length;
+    game.emit(beat('fire.resolved'));
+    expect(releaseNotes(ctx, before)).toBe(2);
+    expect(sound.tension).toBe(false);
+    expect(sound.tensionLevel).toBe(0);
+    sound.destroy();
+  });
+
+  it('an end beat heard before the world drops the incident does not re-enter it', () => {
+    const { game, sound, events } = rig();
+    events.push(bomb); game.emit(beat('bomb.started'));
+    game.emit(beat('bomb.resolved')); // the bomb is still in world.events
+    expect(sound.tension).toBe(false);
+    expect(sound.tensionLevel).toBe(0);
+    sound.destroy();
+  });
+
+  it('a theft still acting when a fire ends is heard again, without a start cue', () => {
+    const { game, ctx, sound, events } = rig();
+    events.push(fire); game.emit(beat('fire.started'));
+    events.push({ kind: 'theft', phase: 'acting' });
+    game.emit(beat('theft.started')); // suppressed under the fire
+    events.splice(events.indexOf(fire), 1);
+    const before = ctx.oscillators.length;
+    game.emit(beat('fire.resolved'));
+    expect(sound.tensionLevel).toBe(0.5);
+    // The release (two notes) and the theft drone; no three-note theft start cue.
+    expect(ctx.oscillators.length - before).toBe(3);
+    sound.destroy();
+  });
+
+  it('a single incident keeps its start and end cues', () => {
+    const { game, ctx, sound, events } = rig();
+    let before = ctx.oscillators.length;
+    events.push(fire); game.emit(beat('fire.started'));
+    expect(ctx.oscillators.length - before).toBe(3); // two start notes and the drone
+    events.splice(0);
+    before = ctx.oscillators.length;
+    game.emit(beat('fire.resolved'));
+    expect(ctx.oscillators.length - before).toBe(2);
+    expect(sound.tension).toBe(false);
+    sound.destroy();
   });
 });

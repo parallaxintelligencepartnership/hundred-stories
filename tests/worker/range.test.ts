@@ -115,6 +115,23 @@ describe('GET /trailers/* byte ranges', () => {
     expect(res.body).toBeNull();
   });
 
+  it.each([
+    ['with Range', { Range: 'bytes=0-99' }],
+    ['without Range', {}],
+  ])('HEAD %s keeps the whole file size in Content-Length', async (_name, headers) => {
+    const { env } = makeEnv();
+    const res = await worker.fetch(get(VIDEO, headers, 'HEAD'), env);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-length')).toBe(String(SIZE));
+  });
+
+  it('GET without Range keeps the whole file size in Content-Length', async () => {
+    const { env } = makeEnv();
+    const res = await worker.fetch(get(VIDEO), env);
+    expect(res.headers.get('content-length')).toBe(String(SIZE));
+    expect(await bytes(res)).toHaveLength(SIZE);
+  });
+
   it.each([404, 304])('a %i from the assets binding is passed through untouched', async (status) => {
     const { env } = makeEnv({ status });
     const res = await worker.fetch(get('/trailers/missing.mp4', { Range: 'bytes=0-99' }), env);

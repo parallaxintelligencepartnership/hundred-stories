@@ -7,7 +7,8 @@ self.addEventListener('notificationclick', (event) => {
   event.waitUntil(
     (async () => {
       const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-      const game = windows.find((client) => new URL(client.url).pathname.startsWith('/play/')) || windows[0];
+      // Only a /play/ tab is the game: matchAll also returns the landing and clips pages.
+      const game = windows.find((client) => new URL(client.url).pathname.startsWith('/play/'));
       if (game) {
         await game.focus();
         game.postMessage({ type: 'hs-notification', kind });

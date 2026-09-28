@@ -11,7 +11,10 @@ export interface MoodInput {
   tension: number;
 }
 export interface Mood { energy: number; warmth: number; tension: number }
-const clamp = (n: number): number => Math.min(1, Math.max(0, n));
+// A non-finite value (a NaN from a bad room field) counts as 0: audio must never carry a NaN
+// into a Web Audio param, which throws, and out of the game's frame step.
+const clamp = (n: number): number => (Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0);
+const finiteOr = (n: unknown, fallback: number): number => (typeof n === 'number' && Number.isFinite(n) ? n : fallback);
 const WEATHER_WARMTH: Readonly<Record<WeatherKind, number>> = {
   clear: 1, overcast: 0.6, rain: 0.35, storm: 0.15,
 };
@@ -61,11 +64,22 @@ function approach(from: number, to: number, step: number): number {
 }
 /** Real seconds, independent of simulation speed. */
 export function easeMood(current: Mood, target: Mood, seconds: number): Mood {
-  const dt = Math.max(0, seconds);
+  const dt = Number.isNaN(seconds) ? 0 : Math.max(0, seconds);
+  // A non-finite target holds the current value (or 0); a non-finite current snaps to the target.
+  const to = {
+    energy: finiteOr(target.energy, finiteOr(current.energy, 0)),
+    warmth: finiteOr(target.warmth, finiteOr(current.warmth, 0)),
+    tension: finiteOr(target.tension, finiteOr(current.tension, 0)),
+  };
+  const from = {
+    energy: finiteOr(current.energy, to.energy),
+    warmth: finiteOr(current.warmth, to.warmth),
+    tension: finiteOr(current.tension, to.tension),
+  };
   return {
-    energy: approach(current.energy, target.energy, 0.05 * dt),
-    warmth: approach(current.warmth, target.warmth, 0.05 * dt),
-    tension: approach(current.tension, target.tension, (target.tension > current.tension ? 1 : 0.15) * dt),
+    energy: approach(from.energy, to.energy, 0.05 * dt),
+    warmth: approach(from.warmth, to.warmth, 0.05 * dt),
+    tension: approach(from.tension, to.tension, (to.tension > from.tension ? 1 : 0.15) * dt),
   };
 }
 
@@ -76,8 +90,9 @@ export function venueFillFor(rooms: Iterable<Pick<Room, 'kind' | 'occupancy' | '
   let capacity = 0;
   for (const room of rooms) {
     if (!VENUES.has(room.kind)) continue;
-    occupied += room.occupancy;
-    capacity += room.width * 2;
+    // A bad field (not a finite number) adds nothing rather than a NaN.
+    occupied += finiteOr(room.occupancy, 0);
+    capacity += finiteOr(room.width, 0) * 2;
   }
   return capacity > 0 ? clamp(occupied / capacity) : 0;
 }

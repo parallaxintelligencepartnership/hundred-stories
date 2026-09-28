@@ -39,6 +39,33 @@ describe('pure live mood', () => {
       { kind: 'office', occupancy: 999, width: 1 },
     ])).toBe(0.5);
   });
+  it('a bad occupancy or width (a string, an object, NaN) gives a finite fill and mood', () => {
+    const bad = [
+      { kind: 'restaurant', occupancy: 'x', width: 12 },
+      { kind: 'shop', occupancy: {}, width: 8 },
+      { kind: 'cinema', occupancy: NaN, width: 10 },
+      { kind: 'fastFood', occupancy: 4, width: NaN },
+    ] as unknown as Parameters<typeof venueFillFor>[0];
+    const fill = venueFillFor(bad);
+    expect(Number.isFinite(fill)).toBe(true);
+    const mood = moodFor(input(3 * 60 + 30, false, fill));
+    for (const axis of Object.values(mood)) expect(Number.isFinite(axis)).toBe(true);
+    // A NaN handed straight in counts as an empty room, as 0 fill does.
+    expect(moodFor(input(21 * 60, true, NaN))).toEqual(moodFor(input(21 * 60, true, 0)));
+    // Good rooms beside a bad one still count.
+    expect(venueFillFor([
+      { kind: 'restaurant', occupancy: 12, width: 12 },
+      { kind: 'shop', occupancy: 'x', width: 12 },
+    ] as unknown as Parameters<typeof venueFillFor>[0])).toBe(0.25);
+  });
+  it('easing out of a NaN mood reaches finite values at once, and never makes one', () => {
+    const target = { energy: 0.4, warmth: 0.6, tension: 0 };
+    const eased = easeMood({ energy: NaN, warmth: NaN, tension: NaN }, target, 0.1);
+    expect(eased).toEqual(target);
+    const held = easeMood(target, { energy: NaN, warmth: NaN, tension: NaN }, 5);
+    expect(held).toEqual(target);
+    expect(easeMood(target, target, NaN)).toEqual(target);
+  });
   it('keeps only the foundation at low energy and the first band at full energy', () => {
     expect(activeLayers(6, 0.1, 0)).toEqual(['piano', 'bass']);
     expect(activeLayers(1, 1, 0)).toEqual(['piano', 'bass', 'drums', 'hat']);

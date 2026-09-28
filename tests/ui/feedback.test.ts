@@ -8,6 +8,7 @@ import {
   FEEDBACK_INTRO,
   FEEDBACK_SENT,
   FEEDBACK_TIMEOUT_MS,
+  FEEDBACK_TOO_LONG,
   FEEDBACK_URL,
   feedbackPlatform,
   feedbackUrl,
@@ -248,6 +249,28 @@ describe('the Send feedback card', () => {
     expect(node.textContent).not.toContain(FEEDBACK_SENT);
   });
 
+  it('a 413 says the message is too long, without the try-again-in-a-minute advice', async () => {
+    stubFetch(reply(413, { ok: false, reason: 'too large' }));
+    const { root, node } = openCard();
+    type(byId(root, 'hs-feedback-text'), 'Bug');
+    click(buttonNamed(node, 'Send')!);
+    await flush();
+    expect(FEEDBACK_TOO_LONG).toBe('That message is too long. Shorten it and send again.');
+    expect(node.textContent).toContain(FEEDBACK_TOO_LONG);
+    expect(node.textContent).not.toContain(FEEDBACK_FAILED);
+    expect(buttonNamed(node, 'Send')!.disabled).toBe(false);
+  });
+
+  it('a 429 still says try again in a minute', async () => {
+    stubFetch(reply(429, { ok: false, reason: 'slow down' }));
+    const { root, node } = openCard();
+    type(byId(root, 'hs-feedback-text'), 'Bug');
+    click(buttonNamed(node, 'Send')!);
+    await flush();
+    expect(node.textContent).toContain(FEEDBACK_FAILED);
+    expect(FEEDBACK_FAILED).toContain('Try again in a minute');
+  });
+
   it('gives up after 10 seconds with no answer', async () => {
     stubFetch(() => new Promise(() => {}));
     const { root, node } = openCard();
@@ -377,5 +400,24 @@ describe('the platform label', () => {
     expect(feedbackPlatform({ navigator: { userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1' } })).toBe('web-safari');
     expect(feedbackPlatform({ navigator: { userAgent: 'Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0' } })).toBe('web-firefox');
     expect(feedbackPlatform({})).toBe('web');
+  });
+});
+
+// The Worker's rate limits (wrangler.jsonc), read here because the Worker's tsconfig has no node
+// types. The per-IP limit must sit well below the shared one, or one address holds everyone at 429.
+describe("the Worker's feedback limits", () => {
+  const conf = readFileSync(new URL('../../wrangler.jsonc', import.meta.url), 'utf8');
+  const limitOf = (name: string): { limit: number; period: number } => {
+    const m = new RegExp(`"name":\\s*"${name}"[^}]*"simple":\\s*\\{\\s*"limit":\\s*(\\d+),\\s*"period":\\s*(\\d+)`).exec(conf);
+    expect(m, name).not.toBeNull();
+    return { limit: Number(m![1]), period: Number(m![2]) };
+  };
+
+  it('per IP 2 and shared 6 per 60 s, so one address can take at most a third of the shared bucket', () => {
+    const perIp = limitOf('FEEDBACK_LIMIT');
+    const shared = limitOf('FEEDBACK_GLOBAL');
+    expect(perIp).toEqual({ limit: 2, period: 60 });
+    expect(shared).toEqual({ limit: 6, period: 60 });
+    expect(perIp.limit * 3).toBeLessThanOrEqual(shared.limit);
   });
 });

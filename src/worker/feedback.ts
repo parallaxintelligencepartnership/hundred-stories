@@ -11,8 +11,9 @@ export interface Env {
   ASSETS: Fetcher;
   FEEDBACK: KVNamespace;
   // Optional at runtime: if a binding is missing the endpoint fails open rather than 500.
-  // FEEDBACK_LIMIT is per client IP; FEEDBACK_GLOBAL is one shared bucket for every sender, so
-  // KV writes stay under the free tier's daily cap however many IPs post.
+  // FEEDBACK_LIMIT is per client IP; FEEDBACK_GLOBAL is one shared bucket for every sender that
+  // bounds the KV write rate however many IPs post. The per-IP limit sits well below the shared
+  // one, so one address alone can never hold the shared bucket (numbers in wrangler.jsonc).
   FEEDBACK_LIMIT?: RateLimit;
   FEEDBACK_GLOBAL?: RateLimit;
 }
@@ -144,7 +145,8 @@ async function underLimit(limiter: RateLimit | undefined, name: string, key: str
   }
 }
 
-// Per IP first, so one sender who is over their own limit never spends the shared bucket.
+// Per IP first, so one sender who is over their own limit never spends the shared bucket. Only a
+// request that would be stored reaches this: junk is refused before either limiter counts it.
 async function allowed(request: Request, env: Env): Promise<boolean> {
   const ip = request.headers.get('cf-connecting-ip') ?? 'unknown';
   if (!(await underLimit(env.FEEDBACK_LIMIT, 'FEEDBACK_LIMIT', ip))) return false;
@@ -211,8 +213,6 @@ export async function handleFeedback(request: Request, env: Env): Promise<Respon
   if (request.method !== 'POST') {
     return json(405, { ok: false, reason: 'method not allowed' }, { ...cors, Allow: 'POST' });
   }
-  if (!(await allowed(request, env))) return reply(429, { ok: false, reason: 'slow down' });
-
   const mediaType = (request.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase();
   if (mediaType !== 'application/json') return BAD();
 
@@ -231,6 +231,7 @@ export async function handleFeedback(request: Request, env: Env): Promise<Respon
   const parsed = parseFeedback(body);
   if (parsed.kind === 'bot') return reply(200, { ok: true });
   if (parsed.kind === 'bad') return BAD();
+  if (!(await allowed(request, env))) return reply(429, { ok: false, reason: 'slow down' });
 
   try {
     await storeFeedback(env.FEEDBACK, parsed.fields, new Date(), crypto.randomUUID());

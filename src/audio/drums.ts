@@ -191,7 +191,8 @@ function pieceBuffer(ctx: AudioContextLike, kind: DrumKind): AudioBuffer {
 /** Plays one baked piece at its true peak times velocity; returned so a mute can stop it. */
 export function playDrum(ctx: AudioContextLike, out: AudioNode, hit: DrumHit, at: number): AudioScheduledSourceNode[] {
   const src = ctx.createBufferSource(); src.buffer = pieceBuffer(ctx, hit.kind);
-  const gain = ctx.createGain(); gain.gain.value = 10 ** (KIT_PEAK_DB[hit.kind] / 20) * hit.velocity;
+  const level = 10 ** (KIT_PEAK_DB[hit.kind] / 20) * hit.velocity;
+  const gain = ctx.createGain(); gain.gain.value = Number.isFinite(level) ? level : 0; // a param throws on NaN
   src.connect(gain); gain.connect(out);
   src.start(at);
   src.onended = () => { src.disconnect(); gain.disconnect(); };

@@ -208,6 +208,58 @@ describe('POST /api/feedback', () => {
     expect(put).toHaveBeenCalledTimes(1);
   });
 
+  // Limiters that count, as the bindings do, with the numbers in wrangler.jsonc (per IP 2, shared
+  // 6 per 60 s; tests/ui/feedback.test.ts checks the file still says so).
+  function countingEnv(perIp = 2, shared = 6) {
+    const counter = (max: number) => {
+      const seen = new Map<string, number>();
+      return {
+        limit: vi.fn(async ({ key }: { key: string }) => {
+          const n = (seen.get(key) ?? 0) + 1;
+          seen.set(key, n);
+          return { success: n <= max };
+        }),
+      };
+    };
+    const put = vi.fn(async (_key: string, _value: string) => {});
+    const FEEDBACK_LIMIT = counter(perIp);
+    const FEEDBACK_GLOBAL = counter(shared);
+    const env = { ASSETS: { fetch: vi.fn() }, FEEDBACK: { put }, FEEDBACK_LIMIT, FEEDBACK_GLOBAL } as unknown as Env;
+    return { env, put, perIp: FEEDBACK_LIMIT.limit, shared: FEEDBACK_GLOBAL.limit };
+  }
+
+  it('junk from one address is refused before any limiter counts, so another sender still gets through', async () => {
+    const { env, put, perIp, shared } = countingEnv();
+    for (let i = 0; i < 2; i++) {
+      expect((await call(post({ text: 'x' }, { contentType: 'text/plain', ip: '192.0.2.10' }), env)).res.status).toBe(400);
+    }
+    expect((await call(post(null, { raw: '{"text": ', ip: '192.0.2.10' }), env)).res.status).toBe(400);
+    expect((await call(post({ text: '   ' }, { ip: '192.0.2.10' }), env)).res.status).toBe(400);
+    expect(perIp).not.toHaveBeenCalled();
+    expect(shared).not.toHaveBeenCalled();
+    const b = await call(post({ text: 'real' }, { ip: '198.51.100.4' }), env);
+    expect(b.res.status).toBe(200);
+    expect(put).toHaveBeenCalledTimes(1);
+  });
+
+  it('a honeypot hit is answered without spending either limiter', async () => {
+    const { env, perIp, shared } = countingEnv();
+    expect((await call(post({ text: 'hi', website: 'x' }), env)).res.status).toBe(200);
+    expect(perIp).not.toHaveBeenCalled();
+    expect(shared).not.toHaveBeenCalled();
+  });
+
+  it('one address posting real messages as fast as it can never holds out another sender', async () => {
+    const { env, put } = countingEnv();
+    const statuses: number[] = [];
+    for (let i = 0; i < 10; i++) statuses.push((await call(post({ text: `spam ${i}` }, { ip: '192.0.2.10' }), env)).res.status);
+    expect(statuses).toEqual([200, 200, 429, 429, 429, 429, 429, 429, 429, 429]);
+    for (const ip of ['198.51.100.1', '198.51.100.2', '198.51.100.3']) {
+      expect((await call(post({ text: 'real' }, { ip }), env)).res.status).toBe(200);
+    }
+    expect(put).toHaveBeenCalledTimes(5);
+  });
+
   it('fails open with a warning when the global limit binding is missing', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { env, put } = makeEnv({ noGlobal: true });

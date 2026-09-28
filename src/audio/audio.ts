@@ -46,7 +46,7 @@ function readLevel(raw: string | null, fallback: number): number {
 }
 
 export function clampLevel(n: number): number {
-  return Math.min(100, Math.max(0, Math.round(n)));
+  return Number.isFinite(n) ? Math.min(100, Math.max(0, Math.round(n))) : 0;
 }
 
 export function readSoundSettings(store: SoundStore | null = browserStore()): SoundSettings {
@@ -329,6 +329,15 @@ export function dbToGain(db: number): number {
   return Math.pow(10, db / 20);
 }
 
+/**
+ * A value for a Web Audio param. The params take a WebIDL float and throw on NaN or infinity, and
+ * a throw from the clock listener leaves the game's frame step before it draws or autosaves; a
+ * non-finite value becomes `fallback` instead.
+ */
+export function paramValue(n: number, fallback = 0): number {
+  return Number.isFinite(n) ? n : fallback;
+}
+
 /** Quiet eighth-note echo, locked to the world's tempo. */
 export const REVERB_DELAY_BEATS = 0.5;
 export const REVERB_FEEDBACK = 0.18;
@@ -549,6 +558,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
   // The context was suspended because the page went hidden (not because sound was turned off).
   // iOS keeps a page's audio session, and so every other app's audio, held while it runs.
   let dozing = false;
+  let destroyed = false;
   let ctx: AudioContextLike | null = null;
   let master: GainNode | null = null;
   let musicBus: GainNode | null = null;
@@ -636,12 +646,23 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
 
   /** Resumes a suspended context; suspends it again if sound went off or the page hid meanwhile. */
   function resumeGuarded(resuming: AudioContextLike): void {
-    void resuming.resume().then(() => { if (!settings.on || dozing) void resuming.suspend().catch(() => {}); }).catch(() => {});
+    void resuming.resume().then(() => { if (!settings.on || dozing || destroyed) suspendGuarded(resuming); }).catch(() => {});
+  }
+
+  /**
+   * Suspends a running context; resumes it again if sound came back on and the page showed
+   * meanwhile. Safari and Firefox report 'suspended' only once the suspend settles, so a quick
+   * off-and-on or hide-and-show still saw 'running' and did not resume.
+   */
+  function suspendGuarded(suspending: AudioContextLike): void {
+    void suspending.suspend().then(() => {
+      if (settings.on && !dozing && !destroyed && gestured && suspending === ctx && suspending.state === 'suspended') resumeGuarded(suspending);
+    }).catch(() => {});
   }
 
   const onPageHidden = (): void => {
     if (!ctx || ctx.state === 'closed') return;
-    if (ctx.state === 'running') void ctx.suspend().catch(() => {});
+    if (ctx.state === 'running') suspendGuarded(ctx);
     // Also marked while a resume is still in flight, so it suspends again once it lands.
     dozing = true;
   };
@@ -668,7 +689,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
         return; // no Web Audio in this browser: stay silent
       }
       master = ctx.createGain(); master.gain.value = 1;
-      musicBus = ctx.createGain(); musicBus.gain.value = (settings.music ?? 60) / 100;
+      musicBus = ctx.createGain(); musicBus.gain.value = paramValue((settings.music ?? 60) / 100);
       const c = MASTER_CHAIN;
       musicCompressor = ctx.createDynamicsCompressor();
       musicCompressor.threshold.value = c.compressor.threshold; musicCompressor.knee.value = c.compressor.knee;
@@ -686,7 +707,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
       master.connect(limiter); limiter.connect(ctx.destination);
       // Pitched voices pass the warmth low-pass; the kit goes straight to the compressor.
       musicColour = ctx.createBiquadFilter(); musicColour.type = 'lowpass';
-      musicColour.frequency.value = cutoffForWarmth(easedMood.warmth);
+      musicColour.frequency.value = paramValue(cutoffForWarmth(easedMood.warmth), 3200);
       musicColour.connect(musicCompressor);
       // Feedback delay keeps the keys warm without a convolver or recorded impulse.
       const wet = ctx.createGain(); wet.gain.value = dbToGain(REVERB_WET_DB);
@@ -697,10 +718,10 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
       musicColour.connect(wet); wet.connect(delay); delay.connect(low);
       low.connect(musicCompressor); low.connect(feedback); feedback.connect(delay);
       effectsBus = ctx.createGain();
-      effectsBus.gain.value = settings.effects / 100;
+      effectsBus.gain.value = paramValue(settings.effects / 100);
       effectsBus.connect(master);
       ambientBus = ctx.createGain();
-      ambientBus.gain.value = settings.ambient / 100 * dbToGain(-10);
+      ambientBus.gain.value = paramValue(settings.ambient / 100 * dbToGain(-10));
       ambientBus.connect(master);
       hatBus = ctx.createGain(); hatBus.gain.value = 1; hatBus.connect(musicCompressor);
       drumsBus = ctx.createGain(); drumsBus.gain.value = 1; drumsBus.connect(musicCompressor);
@@ -724,9 +745,9 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
     if (!pinned) { chapter = chapterFor(stars); previousChapter = null; }
     lastMoodMs = now();
     if (master) master.gain.setValueAtTime(1, ctx.currentTime);
-    musicBus?.gain.setValueAtTime((settings.music ?? 60) / 100 * dbToGain(-6 * easedMood.tension), ctx.currentTime);
-    effectsBus?.gain.setValueAtTime(settings.effects / 100, ctx.currentTime);
-    ambientBus?.gain.setValueAtTime(settings.ambient / 100 * dbToGain(-10), ctx.currentTime);
+    musicBus?.gain.setValueAtTime(musicLevel(easedMood.tension), ctx.currentTime);
+    effectsBus?.gain.setValueAtTime(paramValue(settings.effects / 100), ctx.currentTime);
+    ambientBus?.gain.setValueAtTime(paramValue(settings.ambient / 100 * dbToGain(-10)), ctx.currentTime);
     syncThreat(); // an incident that ended unheard clears; one still burning ducks and drones again
     startTape();
     if (!unsubEvents) unsubEvents = game.subscribeEvents(onEvent);
@@ -773,7 +794,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
         bus.gain.setValueAtTime(0, ctx.currentTime);
       }
     }
-    if (ctx && ctx.state === 'running') void ctx.suspend().catch(() => {});
+    if (ctx && ctx.state === 'running') suspendGuarded(ctx);
   }
 
   function onEvent(event: GameEvent): void {
@@ -810,6 +831,9 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
         if (code === 'fire.resolved' && threat !== 'fire') return;
         if ((code === 'bomb.resolved' || code === 'bomb.failed') && threat !== 'bomb') return;
         endThreat(name);
+        // Two incidents can overlap (a fire and a bomb from the same morning roll): tension follows
+        // whatever still burns, re-entered without a start cue, so its own end plays a release.
+        syncThreat(resolvedThreat(code));
         return;
       }
       if (!tension && name) playNamedCue(name);
@@ -848,7 +872,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
     const kitLevel = urgent(next) ? 0 : 0.7;
     hatBus?.gain.setValueAtTime(kitLevel, ctx.currentTime);
     drumsBus?.gain.setValueAtTime(urgent(next) ? 0 : 0.775, ctx.currentTime);
-    musicBus?.gain.setTargetAtTime((settings.music ?? 60) / 100 * dbToGain(-6 * level), ctx.currentTime, 0.1);
+    musicBus?.gain.setTargetAtTime(musicLevel(level), ctx.currentTime, 0.1);
     if (tensionOsc) { try { tensionOsc.stop(); } catch { /* already stopped */ } tensionOsc = null; }
     if (musicBus && (settings.music ?? 60) > 0) {
       tensionOsc = ctx.createOscillator(); tensionOsc.type = 'sine';
@@ -866,10 +890,18 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
     if (tensionOsc) { tensionOsc.stop(ctx.currentTime + 1); tensionOsc = null; tensionGain = null; }
   }
 
-  /** The incident the live world holds now; the one already heard wins a tie between two. */
-  function liveThreat(): Threat {
+  /** The incident an end beat closes. */
+  function resolvedThreat(code: string): Threat {
+    return code.startsWith('fire.') ? 'fire' : code.startsWith('bomb.') ? 'bomb' : code.startsWith('theft.') ? 'theft' : 'none';
+  }
+
+  /**
+   * The incident the live world holds now; the one already heard wins a tie between two. `ended`
+   * is left out: its end beat was just heard, whether or not the world has dropped it yet.
+   */
+  function liveThreat(ended: Threat = 'none'): Threat {
     const events = (game.world as { events?: readonly ActiveEvent[] }).events ?? [];
-    const live = (kind: Threat): boolean => events.some(e => e.kind === kind
+    const live = (kind: Threat): boolean => kind !== ended && events.some(e => e.kind === kind
       && (e.kind !== 'theft' || e.phase === 'acting' || e.phase === 'leaving')); // a theft is heard from theft.started
     if (threat !== 'none' && live(threat) && (urgent(threat) || !live('fire') && !live('bomb'))) return threat;
     return live('fire') ? 'fire' : live('bomb') ? 'bomb' : live('theft') ? 'theft' : 'none';
@@ -880,9 +912,9 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
    * listener while sound is off) and on a tower switch (the game primes its tap, so the old
    * tower's end beat never comes). No cue plays; the drone restarts for one still burning.
    */
-  function syncThreat(): void {
+  function syncThreat(ended: Threat = 'none'): void {
     if (pinned) return;
-    const next = liveThreat();
+    const next = liveThreat(ended);
     if (next === 'none') { if (threat !== 'none' || tension) endThreat(null); return; }
     enterThreat(next, null);
   }
@@ -949,6 +981,11 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
     syncWeather();
   }
 
+  /** The music bus level for a tension: the Music setting, ducked 6 dB at full tension. */
+  function musicLevel(level: number): number {
+    return paramValue((settings.music ?? 60) / 100 * dbToGain(-6 * level));
+  }
+
   /** Tension as the kit hears it: an all-clear lets the drums back in before the mood eases. */
   function kitTension(): number {
     return Math.min(easedMood.tension, targetMood.tension);
@@ -968,14 +1005,14 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
 
   function applyMoodSound(): void {
     if (!ctx) return;
-    filterHz = cutoffForWarmth(easedMood.warmth);
+    filterHz = paramValue(cutoffForWarmth(easedMood.warmth), 3200);
     musicColour?.frequency.setTargetAtTime(filterHz, ctx.currentTime, 0.15);
     const kitStopped = urgent(threat) || kitTension() >= 0.8;
     const minute = inputs().minute;
     // Late at night the hats keep shuffling, softer.
-    hatBus?.gain.setTargetAtTime(kitStopped ? 0 : (isNight(minute) ? 0.6 : hatVelocityMultiplier(minute)) * (1 - 0.6 * easedMood.tension), ctx.currentTime, 0.08);
-    drumsBus?.gain.setTargetAtTime(kitStopped ? 0 : 1 - 0.45 * easedMood.tension, ctx.currentTime, 0.08);
-    musicBus?.gain.setTargetAtTime((settings.music ?? 60) / 100 * dbToGain(-6 * easedMood.tension), ctx.currentTime, 0.1);
+    hatBus?.gain.setTargetAtTime(kitStopped ? 0 : paramValue((isNight(minute) ? 0.6 : hatVelocityMultiplier(minute)) * (1 - 0.6 * easedMood.tension)), ctx.currentTime, 0.08);
+    drumsBus?.gain.setTargetAtTime(kitStopped ? 0 : paramValue(1 - 0.45 * easedMood.tension), ctx.currentTime, 0.08);
+    musicBus?.gain.setTargetAtTime(musicLevel(easedMood.tension), ctx.currentTime, 0.1);
     for (const [filter, cutoff] of musicFilters) filter.frequency.setTargetAtTime(Math.min(cutoff, filterHz), ctx.currentTime, 0.15);
   }
 
@@ -997,7 +1034,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
     if (!ctx || !musicColour || !musicCompressor) return;
     const c = ctx;
     const def = VOICES[voice];
-    const peak = Math.max(0.0002, def.peak * note.vel * fade);
+    const peak = Math.max(0.0002, paramValue(def.peak * note.vel * fade));
     const hold = Math.max(def.attack + 0.02, note.dur * beatSeconds);
     // Struck voices ring out over `release`; held voices sustain for the note, then let go.
     const end = def.sustain === 0 ? when + def.release : when + hold + def.release / 4;
@@ -1228,7 +1265,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
     setEffects(level) {
       settings.effects = clampLevel(level);
       writeSoundSettings(settings, store);
-      if (ctx && effectsBus) effectsBus.gain.setTargetAtTime(settings.effects / 100, ctx.currentTime, 0.02);
+      if (ctx && effectsBus) effectsBus.gain.setTargetAtTime(paramValue(settings.effects / 100), ctx.currentTime, 0.02);
     },
     setMusic(level) {
       settings.music = clampLevel(level);
@@ -1240,7 +1277,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
         layerMix.clear(); activeVoices = [];
       } else if (settings.on) startTape();
       writeSoundSettings(settings, store);
-      if (ctx && musicBus) musicBus.gain.setTargetAtTime((settings.music ?? 60) / 100 * dbToGain(-6 * easedMood.tension), ctx.currentTime, 0.05);
+      if (ctx && musicBus) musicBus.gain.setTargetAtTime(musicLevel(easedMood.tension), ctx.currentTime, 0.05);
     },
     get chapter() { return chapter; },
     get tension() { return tension; },
@@ -1267,7 +1304,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
     setAmbient(level) {
       settings.ambient = clampLevel(level);
       writeSoundSettings(settings, store);
-      if (ctx && ambientBus) ambientBus.gain.setTargetAtTime(settings.ambient / 100 * dbToGain(-10), ctx.currentTime, 0.05);
+      if (ctx && ambientBus) ambientBus.gain.setTargetAtTime(paramValue(settings.ambient / 100 * dbToGain(-10)), ctx.currentTime, 0.05);
       if (settings.ambient === 0) {
         if (weatherSource) { weatherSource.stop(); weatherSource = null; }
         if (weatherLfo) { weatherLfo.stop(); weatherLfo = null; }
@@ -1276,6 +1313,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
       if (settings.on) { syncBed(); syncWeather(); }
     },
     destroy() {
+      destroyed = true;
       target?.removeEventListener('pointerdown', onGesture, true);
       target?.removeEventListener('keydown', onGesture, true);
       page?.removeEventListener('visibilitychange', onVisibility);

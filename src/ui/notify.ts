@@ -374,6 +374,8 @@ interface WorkerLike {
 interface RegistrationLike {
   installing: WorkerLike | null;
   waiting: WorkerLike | null;
+  /** Absent in older fakes; the browser always has it (null before the first activation). */
+  active?: WorkerLike | null;
   addEventListener(type: 'updatefound', listener: () => void): void;
   update(): Promise<unknown>;
 }
@@ -382,12 +384,30 @@ interface RegistrationLike {
 export interface WorkerContainerLike {
   readonly controller: unknown;
   getRegistration(): Promise<RegistrationLike | undefined>;
+  addEventListener?(type: 'controllerchange', listener: () => void): void;
 }
+
+// The worker that controlled this page when this module first ran, early in boot, before the
+// slow loads. A new version with skipWaiting and clientsClaim can take the page over before the
+// update watch attaches, and by then sw.controller already is the new worker; this remembers the
+// one the page started under. Undefined where there is no service worker API at all.
+const PAGE_START_CONTROLLER: unknown = (() => {
+  try {
+    const nav = (globalThis as { navigator?: { serviceWorker?: { controller?: unknown } } }).navigator;
+    return nav?.serviceWorker ? (nav.serviceWorker.controller ?? null) : undefined;
+  } catch {
+    return undefined;
+  }
+})();
 
 /**
  * Tell onReady, once, when a new version has installed over the one running this page. The first
  * install is not an update. An open game asks for a new version every UPDATE_CHECK_MS, since a
  * tab left open never navigates and so would never look. Returns the way to stop.
+ *
+ * startedUnder is the worker that controlled the page when it loaded (null: none, a first
+ * install). A new version that is already active, or already took the page over, when the watch
+ * attaches is an update too, and so is a later change of controller on a page that had one.
  */
 export function watchForUpdate(
   sw: WorkerContainerLike | undefined,
@@ -396,27 +416,40 @@ export function watchForUpdate(
     setInterval: (fn, ms) => setInterval(fn, ms),
     clearInterval: (id) => clearInterval(id as ReturnType<typeof setInterval>),
   },
+  startedUnder: unknown = PAGE_START_CONTROLLER,
 ): () => void {
   if (!sw || typeof sw.getRegistration !== 'function') return () => {};
+  // Not known (no capture): the controller now is the best there is.
+  const started = startedUnder === undefined ? (sw.controller ?? null) : startedUnder;
   let told = false;
   let stopped = false;
   let checker: unknown = null;
-  const follow = (worker: WorkerLike | null): void => {
+  const tell = (): void => {
+    if (told || stopped) return;
+    told = true;
+    onReady();
+  };
+  const follow = (worker: WorkerLike | null | undefined, controller: () => unknown = () => sw.controller): void => {
     if (!worker) return;
     const look = (): void => {
-      if (told || stopped || !isUpdateInstall(worker.state, sw.controller, worker)) return;
-      told = true;
-      onReady();
+      if (isUpdateInstall(worker.state, controller(), worker)) tell();
     };
     worker.addEventListener('statechange', look);
     look();
   };
+  if (started != null && typeof sw.addEventListener === 'function') {
+    sw.addEventListener('controllerchange', () => {
+      if (sw.controller != null && sw.controller !== started) tell();
+    });
+  }
   void sw
     .getRegistration()
     .then((registration) => {
       if (!registration || stopped) return;
       follow(registration.installing);
       follow(registration.waiting);
+      // Measured against the page's first controller, so one that already claimed the page counts.
+      follow(registration.active, () => started);
       registration.addEventListener('updatefound', () => follow(registration.installing));
       checker = timers.setInterval(() => {
         if (!told) void registration.update().catch(() => {});

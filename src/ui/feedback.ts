@@ -30,6 +30,11 @@ export const FEEDBACK_EMAIL_LABEL = 'Email, if you want a reply';
 export const FEEDBACK_EMAIL_CHECK = 'Check the email, or leave it empty.';
 export const FEEDBACK_SENT = 'Sent. Thank you.';
 export const FEEDBACK_FAILED = 'Could not send. Try again in a minute, or email requests@hundredstories.xyz.';
+/** A 413: the body is over the worker's byte limit, so sending it again can never pass. */
+export const FEEDBACK_TOO_LONG = 'That message is too long. Shorten it and send again.';
+
+/** How a send ended: stored, refused as too large (413), or anything else. */
+export type FeedbackOutcome = 'sent' | 'too-long' | 'failed';
 
 /** Exactly what goes to the server, and nothing more. */
 export interface FeedbackBody {
@@ -128,29 +133,33 @@ export interface FeedbackDeps {
   timeoutMs?: number;
 }
 
-/** POST the body. True only for a 200 whose JSON is {"ok":true}; anything else, a network error or the timeout is false. */
-export async function sendFeedback(body: FeedbackBody, deps: FeedbackDeps = {}): Promise<boolean> {
+/**
+ * POST the body. 'sent' only for a 200 whose JSON is {"ok":true}; 'too-long' for a 413; anything
+ * else, a network error or the timeout is 'failed'.
+ */
+export async function sendFeedback(body: FeedbackBody, deps: FeedbackDeps = {}): Promise<FeedbackOutcome> {
   const doFetch = deps.fetch ?? (typeof fetch === 'function' ? (fetch as unknown as FetchLike) : null);
-  if (!doFetch) return false;
+  if (!doFetch) return 'failed';
   const controller = typeof AbortController === 'function' ? new AbortController() : null;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<false>((resolve) => {
+  const timeout = new Promise<FeedbackOutcome>((resolve) => {
     timer = setTimeout(() => {
       controller?.abort();
-      resolve(false);
+      resolve('failed');
     }, deps.timeoutMs ?? FEEDBACK_TIMEOUT_MS);
   });
-  const request = (async (): Promise<boolean> => {
+  const request = (async (): Promise<FeedbackOutcome> => {
     const response = await doFetch(feedbackUrl(), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
       ...(controller ? { signal: controller.signal } : {}),
     });
-    if (response.status !== 200) return false;
+    if (response.status === 413) return 'too-long';
+    if (response.status !== 200) return 'failed';
     const data = (await response.json()) as { ok?: unknown } | null;
-    return data !== null && typeof data === 'object' && data.ok === true;
-  })().catch(() => false);
+    return data !== null && typeof data === 'object' && data.ok === true ? 'sent' : 'failed';
+  })().catch((): FeedbackOutcome => 'failed');
   try {
     return await Promise.race([request, timeout]);
   } finally {
@@ -244,10 +253,10 @@ export function createFeedbackPanel(ctx: Pick<PanelContext, 'close'>, deps: Feed
     sending = true;
     say(null);
     paint();
-    const ok = await sendFeedback(feedbackBody(text.value, email.value, website.value), deps);
+    const outcome = await sendFeedback(feedbackBody(text.value, email.value, website.value), deps);
     sending = false;
     if (closed) return;
-    if (ok) {
+    if (outcome === 'sent') {
       const done = button('Close', 'hs-btn is-primary', close);
       const doneActions = el('div', 'hs-actions');
       doneActions.append(done);
@@ -255,7 +264,7 @@ export function createFeedbackPanel(ctx: Pick<PanelContext, 'close'>, deps: Feed
       done.focus();
       return;
     }
-    say(FEEDBACK_FAILED);
+    say(outcome === 'too-long' ? FEEDBACK_TOO_LONG : FEEDBACK_FAILED);
     paint();
   }
 

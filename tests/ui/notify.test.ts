@@ -1,5 +1,6 @@
 // Opt in notifications (src/ui/notify.ts) and the new version notice: the plain decisions, the
 // notifier driven through a fake env, the Settings switches, and the update toast.
+import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ALERT_NOTIFY_GAP_MS,
@@ -302,6 +303,116 @@ describe('the update watch', () => {
     found.forEach((f) => f());
     later.move('installed');
     expect(told).toBe(1);
+  });
+
+  // A new version with skipWaiting and clientsClaim can take the page over while boot is still
+  // loading, before the watch attaches: installing and waiting are both empty by then.
+  function withActive(controller: unknown, active: ReturnType<typeof worker>) {
+    const made = container(controller);
+    const changes: (() => void)[] = [];
+    const reg = Object.assign(made.registration, { active });
+    const sw = Object.assign(made.sw, {
+      addEventListener: (_type: 'controllerchange', fn: () => void) => changes.push(fn),
+    });
+    return { sw, reg, changes };
+  }
+  const timers = { setInterval: () => 0, clearInterval: () => {} };
+
+  it('says it for a new version that already claimed the page before the watch attached', async () => {
+    const old = { old: true };
+    const fresh = worker('activated');
+    const { sw } = withActive(fresh, fresh);
+    let told = 0;
+    watchForUpdate(sw, () => (told += 1), timers, old);
+    await settle();
+    expect(told).toBe(1);
+  });
+
+  it('says it for a new version still activating, not yet in control, when the watch attached', async () => {
+    const old = { old: true };
+    const fresh = worker('activating');
+    const { sw } = withActive(old, fresh);
+    let told = 0;
+    watchForUpdate(sw, () => (told += 1), timers, old);
+    await settle();
+    expect(told).toBe(1);
+  });
+
+  it('says it once when the controller changes later on a page that had one', async () => {
+    const old = worker('activated');
+    const box = { controller: old as unknown };
+    const { sw, changes } = withActive(old, old);
+    Object.defineProperty(sw, 'controller', { get: () => box.controller });
+    let told = 0;
+    watchForUpdate(sw, () => (told += 1), timers, old);
+    await settle();
+    expect(told).toBe(0);
+    box.controller = { fresh: true };
+    changes.forEach((f) => f());
+    changes.forEach((f) => f());
+    expect(told).toBe(1);
+  });
+
+  it('says nothing for a first install that claimed the page, nor for the running worker itself', async () => {
+    const first = worker('activated');
+    const claimed = withActive(first, first);
+    let told = 0;
+    watchForUpdate(claimed.sw, () => (told += 1), timers, null);
+    await settle();
+    claimed.changes.forEach((f) => f());
+    const running = worker('activated');
+    const same = withActive(running, running);
+    watchForUpdate(same.sw, () => (told += 1), timers, running);
+    await settle();
+    expect(told).toBe(0);
+  });
+});
+
+// The service worker's tap handler (public/notify-sw.js), run against a fake worker global.
+describe('a tap on a notification', () => {
+  const source = readFileSync(new URL('../../public/notify-sw.js', import.meta.url), 'utf8');
+  async function tap(urls: string[]) {
+    const log: string[] = [];
+    let handler: ((event: unknown) => void) | null = null;
+    let done: Promise<unknown> = Promise.resolve();
+    const self = {
+      addEventListener: (_type: string, fn: (event: unknown) => void) => (handler = fn),
+      clients: {
+        matchAll: async () =>
+          urls.map((url) => ({
+            url,
+            focus: async () => log.push(`focus ${url}`),
+            postMessage: (msg: { kind: string }) => log.push(`post ${url} ${msg.kind}`),
+          })),
+        openWindow: async (url: string) => log.push(`open ${url}`),
+      },
+    };
+    new Function('self', source)(self);
+    handler!({
+      notification: { data: { kind: 'alerts' }, close: () => log.push('close') },
+      waitUntil: (p: Promise<unknown>) => (done = p),
+    });
+    await done;
+    return log;
+  }
+
+  it('opens the game when only a landing or clips tab is open', async () => {
+    expect(await tap(['https://hundredstories.xyz/', 'https://hundredstories.xyz/clips/'])).toEqual([
+      'close',
+      'open /play/',
+    ]);
+  });
+
+  it('brings a game tab forward and tells it the kind, even with other tabs open', async () => {
+    expect(await tap(['https://hundredstories.xyz/', 'https://hundredstories.xyz/play/'])).toEqual([
+      'close',
+      'focus https://hundredstories.xyz/play/',
+      'post https://hundredstories.xyz/play/ alerts',
+    ]);
+  });
+
+  it('opens the game when no tab is open', async () => {
+    expect(await tap([])).toEqual(['close', 'open /play/']);
   });
 });
 

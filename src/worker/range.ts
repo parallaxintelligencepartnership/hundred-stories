@@ -7,7 +7,8 @@
 //
 // Every header the assets binding set (the public/_headers rules, ETag, Content-Type,
 // Cache-Control) is copied onto the answer except Content-Length and Content-Range, which are
-// recomputed. Anything the binding answers with other than 200 (304, 404) is returned as is.
+// recomputed (a whole-file answer, HEAD included, keeps the binding's Content-Length). Anything
+// the binding answers with other than 200 (304, 404) is returned as is.
 
 export interface AssetsEnv {
   ASSETS: Fetcher;
@@ -62,7 +63,11 @@ export async function handleRange(request: Request, env: AssetsEnv): Promise<Res
   const ifRange = request.headers.get('If-Range');
   const rangeApplies = range !== null && request.method === 'GET' && (ifRange === null || ifRange === asset.headers.get('ETag'));
   if (!rangeApplies || range.includes(',')) {
-    return new Response(asset.body, { status: 200, statusText: asset.statusText, headers: copyHeaders(asset.headers) });
+    // The whole file as the binding sent it, so its length stands: HEAD has no body to measure.
+    const headers = copyHeaders(asset.headers);
+    const length = asset.headers.get('Content-Length');
+    if (length !== null) headers.set('Content-Length', length);
+    return new Response(asset.body, { status: 200, statusText: asset.statusText, headers });
   }
 
   const body = await asset.arrayBuffer();
