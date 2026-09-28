@@ -67,9 +67,9 @@ const Spark: React.FC = () => {
         <rect x={-2000} y={GROUND} width={6000} height={600} fill={black} />
         <rect x={-2000} y={GROUND} width={6000} height={2} fill={line} opacity={dawn} />
         <rect
-          x={TOWER_X}
+          x={TOWER_X - 10}
           y={floorTop(4)}
-          width={TOWER_W}
+          width={TOWER_W + 20}
           height={GROUND - floorTop(4)}
           fill="none"
           stroke={line}
