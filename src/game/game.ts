@@ -1268,6 +1268,8 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
       }),
     newGame(newSeed) {
       // New game on purpose: this tower replaces whatever the slot holds, read or not.
+      // An idle save of the old tower not yet started must not land after the new one.
+      cancelScheduledSave();
       unread.delete(slot);
       standIn = false;
       world = createWorld(newSeed);

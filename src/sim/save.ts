@@ -285,6 +285,11 @@ function firstInvalidField(d: SaveData): string | null {
   if (d.quarterStartCash != null && !isFiniteNumber(d.quarterStartCash)) return 'quarterStartCash';
   if (d.dayStartPopulation != null && !isFiniteNumber(d.dayStartPopulation)) return 'dayStartPopulation';
   if (d.roachLastSpread != null && (!isInteger(d.roachLastSpread) || d.roachLastSpread < 0)) return 'roachLastSpread';
+  // An empty object stopped the clock with a blank reason card.
+  if (d.gameOver !== null) {
+    const over = d.gameOver as unknown as Record<string, unknown>;
+    if (!isInteger(over.at) || over.at < 0 || typeof over.reason !== 'string' || over.reason === '') return 'gameOver';
+  }
   const badStats = firstInvalidStat(d.stats as unknown);
   if (badStats) return badStats;
 
@@ -314,6 +319,14 @@ function firstInvalidField(d: SaveData): string | null {
     if (!isInteger(room.height) || room.height <= 0 || spanTop(room.floor, room.height) > MAX_FLOOR) return `${at}.height`;
     if (!Array.isArray(room.tenants) || !room.tenants.every((id) => isInteger(id) && id >= 1)) return `${at}.tenants`;
     if (!inRange(room.eval, 0, 1)) return `${at}.eval`;
+    // Every room has carried these since the first save format; they load as they are, so a
+    // head count that is not a count reached the mood and the sound as NaN.
+    if (!isInteger(room.occupancy) || room.occupancy < 0) return `${at}.occupancy`;
+    if (!isFiniteNumber(room.builtAtMinute)) return `${at}.builtAtMinute`;
+    for (const key of ['vacant', 'dirty', 'infested', 'onFire'] as const) {
+      if (typeof room[key] !== 'boolean') return `${at}.${key}`;
+    }
+    if (!isNumberOrNull(room.lowEvalSinceMinute)) return `${at}.lowEvalSinceMinute`;
     if (
       room.rent !== undefined &&
       (!isInteger(room.rent) || room.rent < RENT.min || room.rent > RENT.max || (room.rent - RENT.min) % RENT.step !== 0)
@@ -361,6 +374,13 @@ function firstInvalidField(d: SaveData): string | null {
       if (badCar) return badCar;
       if (!inRange(car.y, shaft.floorMin, shaft.floorMax)) return `${carAt}.y`;
       if (typeof car.state !== 'string' || !Object.hasOwn(CAR_STATES, car.state)) return `${carAt}.state`;
+      // Copied as they are on load; a riders or calls list that is not a list used to be
+      // refused as "not a Hundred Stories save", the wrong reason.
+      if (car.dir !== -1 && car.dir !== 0 && car.dir !== 1) return `${carAt}.dir`;
+      if (!isFiniteNumber(car.doorTimer)) return `${carAt}.doorTimer`;
+      if (!isNumberOrNull(car.idleSince)) return `${carAt}.idleSince`;
+      if (!Array.isArray(car.passengers) || !car.passengers.every(isId)) return `${carAt}.passengers`;
+      if (!Array.isArray(car.calls) || !car.calls.every(isInteger)) return `${carAt}.calls`;
       // v1 cars have neither field; both default on load.
       if (car.serves !== undefined) {
         if (typeof car.serves !== 'string' || !Object.hasOwn(CAR_SERVES, car.serves)) {

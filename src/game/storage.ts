@@ -114,8 +114,11 @@ function nextStamp(): number {
   return lastStamp;
 }
 
-// The last sequence number this page wrote, per slot key. A reload starts it at 0 again, which is
-// why each write also asks both stores for the highest number already there.
+// The highest sequence number this page wrote or read, per slot key. A reload starts it at 0
+// again, which is why each write also asks both stores for the highest number already there, and
+// why the boot read records the numbers it saw: when IndexedDB stops answering later in the
+// session (WebKit's "Connection to Indexed Database server lost"), the write cannot ask it, and
+// the fallback copy must still count on from the IndexedDB copy it could not replace.
 const lastSeq = new Map<string, number>();
 
 function stampOf(raw: unknown): number {
@@ -169,6 +172,26 @@ export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): 
     return seq;
   }
 
+  /** Records a number a read saw, so later writes on this page count on from it. */
+  function sawSeq(seq: number): void {
+    lastSeq.set(KEY, Math.max(seq, lastSeq.get(KEY) ?? 0));
+  }
+
+  /**
+   * After a good IndexedDB write the localStorage copy is older by construction, so it goes.
+   * Any copy left there is then newer than IndexedDB, and a boot where IndexedDB will not open
+   * never serves a stale one.
+   */
+  function dropLocalCopy(): void {
+    try {
+      deps.localStorage?.removeItem(localKey);
+      deps.localStorage?.removeItem(localStampKey);
+      deps.localStorage?.removeItem(localSeqKey);
+    } catch {
+      // a store that throws on remove holds no copy it let us write either
+    }
+  }
+
   function markPresent(): void {
     if (slot !== 'mine') return;
     try {
@@ -205,6 +228,7 @@ export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): 
           tx.onabort = () => reject(tx.error ?? new Error('write aborted'));
         });
         markPresent();
+        dropLocalCopy();
         return;
       } catch {
         // fall through to localStorage
@@ -279,12 +303,16 @@ export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): 
         // fresh tower is saved over it. Only My tower's writes set the marker; a link to Today's
         // or a friend's tower on a first visit reads the same way, so no notice shows there either.
         const local = readLocal();
-        if (local) return local.text;
+        if (local) {
+          sawSeq(local.seq);
+          return local.text;
+        }
         if (!markedPresent()) return null;
         throw e;
       }
     }
     const fromLocal = readLocal();
+    sawSeq(Math.max(fromDb?.seq ?? 0, fromLocal?.seq ?? 0));
     if (fromDb && fromLocal) {
       // A copy with no number was written by a build before sequence numbers, so any numbered
       // copy is newer. The stamp decides only between equal numbers (two copies without one).
