@@ -113,8 +113,8 @@ describe('B S4: occupancy matches the people inside after a room is lost', () =>
     expect(phantomRooms(world)).toEqual([]);
   });
 
-  it('demolish: a condo demolished while its tenant is out frees that seat at once', () => {
-    // The command itself frees the seat; the hourly recount in people.ts only heals old saves.
+  it('demolish: a sold condo cannot be demolished while its owner is out, and the seat stays theirs', () => {
+    // Since 2026-09-28 a sold condo belongs to its owners (DECISIONS.md); the refusal must leave the seat and the tenant intact.
     const world = createWorld(11);
     world.cash = 50_000_000;
     world.stars = 3;
@@ -127,7 +127,10 @@ describe('B S4: occupancy matches the people inside after a room is lost', () =>
     const condos = [...world.rooms.values()].filter((r) => r.kind === 'condo');
     const restaurant = [...world.rooms.values()].find((r) => r.kind === 'restaurant') as Room;
     const { office: condo } = untilTenantAtLunch(world, condos, restaurant, true);
-    expect(applyCommand(world, { kind: 'demolish', roomId: condo.id }).ok).toBe(true);
+    const result = applyCommand(world, { kind: 'demolish', roomId: condo.id });
+    expect(result.ok).toBe(false);
+    expect(result.ok ? '' : result.reason).toContain('belongs to its owners');
+    expect(world.rooms.get(condo.id)?.vacant).toBe(false);
     expect(phantomRooms(world)).toEqual([]);
   });
 });
