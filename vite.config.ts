@@ -142,8 +142,10 @@ export default defineConfig(({ mode }) => {
               globPatterns: ['**/*.{js,css,html,png,svg,woff2}'],
               // App-only chunks (nativeChunk above): the web never loads them. The rest of this
               // list is the landing site: pages, assets and images only index.html, 404.html,
-              // privacy/, terms/ and how-to-play/ reference. The worker's scope is /play/, so it never
-              // gets a fetch event for any of them and precaching them only wastes bandwidth.
+              // privacy/, terms/, clips/ and how-to-play/ reference. The worker's scope is /play/, so it
+              // never gets a fetch event for any of them and precaching them only wastes bandwidth.
+              // trailers/ holds the site's videos and posters: globPatterns already skips mp4, webm
+              // and webp, and the ignore keeps it that way if the patterns ever widen.
               globIgnores: [
                 '**/node_modules/**',
                 'assets/native-*',
@@ -152,6 +154,8 @@ export default defineConfig(({ mode }) => {
                 'privacy/**',
                 'terms/**',
                 'how-to-play/**',
+                'clips/**',
+                'trailers/**',
                 'og.png',
                 'wordmark-*',
                 'assets/site-*',
@@ -175,6 +179,7 @@ export default defineConfig(({ mode }) => {
               play: 'play/index.html',
               privacy: 'privacy/index.html',
               terms: 'terms/index.html',
+              clips: 'clips/index.html',
               notfound: '404.html',
             },
         output: { codeSplitting: { groups: CHUNK_GROUPS } },

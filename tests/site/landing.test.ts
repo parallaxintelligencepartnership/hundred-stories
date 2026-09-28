@@ -108,10 +108,10 @@ describe('the page is the building in cross section', () => {
 
   it('sends the landing page underground below the hero, one floor per section', () => {
     expect(landing).toContain('<div class="underground">');
-    expect(landing.match(/<section class="floor"/g)).toHaveLength(6);
+    expect(landing.match(/<section class="floor"/g)).toHaveLength(5);
     // The tag is the floor alone; the h2 names the section (D-38).
     const tags = [...landing.matchAll(/<p class="floor-tag">([^<]*)<\/p>/g)].map((m) => m[1]);
-    expect(tags).toEqual(['B1', 'B2', 'B3', 'B4', 'B5', 'B6']);
+    expect(tags).toEqual(['B1', 'B2', 'B3', 'B4', 'B5']);
     // The floors carry the sections; no bare .wrap column of copy is left behind.
     expect(flat(landing)).not.toContain('<div class="wrap"> <section aria-labelledby="features">');
   });
@@ -226,9 +226,9 @@ describe('crawler files', () => {
     );
   });
 
-  it('the sitemap lists all five pages', () => {
-    expect(sitemap.match(/<url>/g)).toHaveLength(5);
-    for (const path of ['/', '/how-to-play/', '/play/', '/privacy/', '/terms/']) {
+  it('the sitemap lists all six pages', () => {
+    expect(sitemap.match(/<url>/g)).toHaveLength(6);
+    for (const path of ['/', '/how-to-play/', '/play/', '/privacy/', '/terms/', '/clips/']) {
       expect(sitemap).toContain(`<loc>https://hundredstories.xyz${path}</loc>`);
     }
   });
@@ -367,9 +367,22 @@ describe('sponsor slot', () => {
     expect(landing).not.toMatch(/<img[^>]*src="https?:/);
   });
 
-  it('keeps the floors as they were', () => {
+  it('keeps the floors as they were, less the B6 trailer section the hero now carries', () => {
     const tags = [...landing.matchAll(/<p class="floor-tag">([^<]*)<\/p>/g)].map((m) => m[1]);
-    expect(tags).toEqual(['B1', 'B2', 'B3', 'B4', 'B5', 'B6']);
+    expect(tags).toEqual(['B1', 'B2', 'B3', 'B4', 'B5']);
+  });
+
+  it('has no See it in action section: the clips live on /clips/', () => {
+    expect(landing).not.toContain('id="trailers"');
+    expect(landing).not.toContain('See it in action');
+    expect(landing).not.toContain('class="trailer-feature"');
+    expect(landing).not.toContain('class="trailer-clip"');
+  });
+
+  it('sends the hero secondary button to the clips page', () => {
+    expect(landing).toContain('<a class="button button-secondary" href="/clips/">Watch the clips</a>');
+    expect(landing).not.toContain('Watch the trailer');
+    expect(landing).not.toContain('href="#trailers"');
   });
 
   it('says in the web panel that the game tracks nothing', () => {

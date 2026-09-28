@@ -2,6 +2,7 @@
 // reads the string literals in the game's sources (comments and identifiers are not player
 // text, so `colour` in a variable name is fine) and the visible text of the site pages.
 import notfound from '../../404.html?raw';
+import clips from '../../clips/index.html?raw';
 import guide from '../../how-to-play/index.html?raw';
 import landing from '../../index.html?raw';
 import play from '../../play/index.html?raw';
@@ -30,6 +31,7 @@ const PAGES: Record<string, string> = {
   'privacy/index.html': privacy,
   'terms/index.html': terms,
   '404.html': notfound,
+  'clips/index.html': clips,
 };
 
 /** UK spellings and words, matched at the start of a word, any case. */

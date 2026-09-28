@@ -38,3 +38,6 @@
 /terms/
   Cache-Control: no-cache, must-revalidate
 
+/clips/
+  Cache-Control: no-cache, must-revalidate
+

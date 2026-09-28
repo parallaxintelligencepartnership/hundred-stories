@@ -317,6 +317,38 @@ p {
   display: none;
 }
 
+/* The intro trailer plays once over the hero's picture box (the 320 px strip here, the whole
+   hero from 720 px), above the still and the canvas and below the copy. hero-trailer.ts attaches
+   its sources, adds is-playing on the first frame and takes it off at the end, then hides it. */
+.hero-trailer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 320px;
+  object-fit: cover;
+  object-position: right bottom;
+  opacity: 0;
+  transition: opacity 300ms ease;
+  pointer-events: none;
+}
+
+.hero-trailer.is-playing {
+  opacity: 1;
+}
+
+.hero-trailer[hidden] {
+  display: none;
+}
+
+/* The copy stays above the trailer and takes every click. */
+.hero > .wrap {
+  position: relative;
+  z-index: 2;
+}
+
 /* The copy sits in a lobby cell: white marble, outlined, on its own slab. */
 .hero-panel {
   position: relative;
@@ -869,6 +901,12 @@ p {
     border-bottom: 0;
   }
 
+  /* The trailer covers the same box. */
+  .hero-trailer {
+    inset: 0;
+    height: 100%;
+  }
+
   .hero {
     min-height: 480px;
     display: flex;
@@ -891,6 +929,10 @@ p {
     animation: none !important;
     transition: none !important;
     scroll-behavior: auto !important;
+  }
+
+  .hero-trailer {
+    display: none;
   }
 }
 
