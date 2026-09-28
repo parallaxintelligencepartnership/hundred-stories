@@ -7,6 +7,8 @@
     "studio": "remotion studio src/index.ts",
     "render:intro": "remotion render src/index.ts SiteIntro out/site-intro.mp4",
     "render:share": "remotion render src/index.ts ShareClip out/share-clip.mp4",
+    "render:backlog": "remotion render src/index.ts BacklogClip out/share-clip-backlog.mp4",
+    "render:wait": "remotion render src/index.ts WaitClip out/share-clip-wait.mp4",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
