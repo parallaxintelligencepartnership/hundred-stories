@@ -329,7 +329,9 @@ p {
   width: 100%;
   height: 320px;
   object-fit: cover;
-  object-position: right bottom;
+  /* The trailer is composed around the centre of its 16:9 frame (unlike the still, whose tower
+     sits on the right), so it crops evenly from both sides. */
+  object-position: center center;
   opacity: 0;
   transition: opacity 300ms ease;
   pointer-events: none;
@@ -905,6 +907,7 @@ p {
   .hero-trailer {
     inset: 0;
     height: 100%;
+    object-position: center center;
   }
 
   .hero {

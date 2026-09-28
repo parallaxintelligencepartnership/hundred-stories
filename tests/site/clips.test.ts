@@ -137,6 +137,31 @@ describe('landing hero trailer', () => {
     expect(hero).toContain("import './hero-trailer';");
   });
 
+  // The trailer is composed around the centre of its frame; the still's right bottom anchor cut
+  // the end card to "RED STORIES" on a 375 px phone and hid the tower behind the desktop panel.
+  it('crops the trailer from the centre at every width', () => {
+    const rules = [...css.matchAll(/\.hero-trailer \{([^}]*)\}/g)].map((m) => m[1]!);
+    const sized = rules.filter((body) => /height:/.test(body));
+    expect(sized.length).toBe(2);
+    for (const body of sized) expect(body).toMatch(/object-position: center center;/);
+    for (const body of rules) expect(body).not.toMatch(/object-position: (?!center center)/);
+  });
+
+  // Holds only tower footage: source frames 300 to 745 of the 30 fps intro. The wordmark's title
+  // veil fades in from frame 751 (Scene 3 frame 151), so the cut must stay under 15 s.
+  it('ships a hero cut that ends before the Scene 3 title', () => {
+    const mp4 = readFileSync(join(ROOT, 'public', 'trailers', 'site-intro-hero.mp4'));
+    const at = mp4.indexOf('mvhd');
+    expect(at).toBeGreaterThan(0);
+    expect(mp4.indexOf('moov')).toBeLessThan(mp4.indexOf('mdat'));
+    const v1 = mp4[at + 4] === 1;
+    const timescale = mp4.readUInt32BE(at + (v1 ? 24 : 16));
+    const duration = v1 ? Number(mp4.readBigUInt64BE(at + 28)) : mp4.readUInt32BE(at + 20);
+    const seconds = duration / timescale;
+    expect(seconds).toBeGreaterThan(14.8);
+    expect(seconds).toBeLessThan(15);
+  });
+
   it('fades in on is-playing, stays under the copy and off under reduced motion', () => {
     expect(css).toMatch(/\.hero-trailer \{[^}]*opacity: 0;[^}]*transition: opacity 300ms[^}]*pointer-events: none;/);
     expect(css).toMatch(/\.hero-trailer\.is-playing \{\s*opacity: 1;/);
@@ -160,5 +185,15 @@ describe('landing hero trailer', () => {
     expect(csp).toContain("default-src 'self'");
     expect(csp).not.toContain('media-src');
     expect(csp).toContain("img-src 'self'");
+  });
+});
+
+describe('video byte ranges', () => {
+  // Safari and iOS play mp4 only with 206 range answers. The assets layer ignores Range, so
+  // /trailers/* must reach the Worker first (src/worker/range.ts; tests/worker/range.test.ts).
+  // Production answered bytes=0-99 with the whole 2.5 MB file and 200 before this.
+  it('routes /trailers/* to the Worker first in wrangler.jsonc', () => {
+    const config = readFileSync(join(ROOT, 'wrangler.jsonc'), 'utf8');
+    expect(config).toMatch(/"run_worker_first":\s*\[\s*"\/trailers\/\*"\s*\]/);
   });
 });

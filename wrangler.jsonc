@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "hundred-stories",
-  // The Worker answers /api/feedback only. run_worker_first stays unset, so every request that
+  // The Worker answers /api/feedback and the videos under /trailers/. Every other request that
   // matches a file in dist/ is served as a static asset without invoking the Worker.
   "main": "src/worker/index.ts",
   "compatibility_date": "2026-09-18",
@@ -11,7 +11,10 @@
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
-    "not_found_handling": "404-page"
+    "not_found_handling": "404-page",
+    // The assets binding ignores Range and always answers 200 with the whole file; Safari and iOS
+    // need 206 to play mp4, so the Worker answers /trailers/* first (src/worker/range.ts).
+    "run_worker_first": ["/trailers/*"]
   },
   // Player feedback, held until the mailer on the tailnet reads it.
   "kv_namespaces": [
