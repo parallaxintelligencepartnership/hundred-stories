@@ -283,7 +283,18 @@ describe('stars: each 4-star and Tower requirement on its own (audit I S4)', () 
     { name: 'I S4: no VIP rating, holds at 3', world: () => fourStarWorld('vipRating'), stars: 3 },
     { name: 'I S4: control, a cathedral and a wedding held, rises to Tower', world: () => towerWorld(null), stars: 6 },
     { name: 'I S4: a wedding held but no cathedral, holds at 5', world: () => towerWorld('cathedral'), stars: 5 },
+    // Audit 2026-09-28 I S1: the metro was the one condition with only a positive case.
+    { name: 'I S1: 5-star population and no metro, holds at 4', world: () => fiveStarWorld(false), stars: 4 },
+    { name: 'I S1: control, 5-star population and a metro, rises to 5', world: () => fiveStarWorld(true), stars: 5 },
   ];
+
+  function fiveStarWorld(metro: boolean): World {
+    const world = createWorld(1);
+    world.stars = 4;
+    fillPopulation(world, STARS[5].population);
+    if (metro) addRoom(world, makeRoom({ kind: 'metro', floor: -1, x: 0 }));
+    return world;
+  }
 
   for (const c of cases) {
     it(c.name, () => {
@@ -328,5 +339,16 @@ describe('stars: falling', () => {
     recomputeStars(world);
     expect(world.population).toBe(1002);
     expect(world.stars).toBe(3);
+  });
+
+  // Audit 2026-09-28 lane A M7: a fall capped at one rank per recount survived every test,
+  // because each drops one rank only. From 4 stars, 306 people is 2 stars, in one recount.
+  it('A M7: falls two ranks at once, from 4 stars to 2 with 51 leased offices', () => {
+    const world = createWorld(1);
+    world.stars = 4;
+    fillPopulation(world, 306);
+    recomputeStars(world);
+    expect(world.population).toBe(306);
+    expect(world.stars).toBe(2);
   });
 });

@@ -65,6 +65,29 @@ describe('refusal explainer', () => {
     );
   });
 
+  // Audit 2026-09-28: the underground air refusal points up, and its second line names the
+  // floor over the room, the one it hangs from.
+  it('names the floor over a basement room with nothing over it', () => {
+    const world = lobbyWorld();
+    world.stars = 3;
+    world.cash = 10_000_000;
+    expect(applyCommand(world, { kind: 'build', room: 'parkingSpace', floor: -1, x: 0 }).ok).toBe(true);
+    const reason = reasonOf(canBuild(world, 'parkingSpace', -2, 250));
+    expect(reason).toBe('Nothing is holding this up. Build over it first.');
+    expect(refusalKind(reason)).toEqual({ kind: 'nothingOver' });
+    expect(refusalExplainer(refused(reason, { floor: -2, floorMin: -2, floorMax: -2, label: 'Parking space' }), world)).toBe(
+      'Basement 2 needs something built on basement 1 right above it.',
+    );
+    // A recycling center at B3 covers B3 and B2 and hangs from B1.
+    const tall = reasonOf(canBuild(world, 'recycling', -3, 250));
+    expect(tall).toBe(reason);
+    expect(
+      placementNote(refused(tall, { floor: -3, floorMin: -3, floorMax: -3, label: 'Recycling center' }), { kind: 'room', room: 'recycling' }, world),
+    ).toBe('Basement 3 needs something built on basement 1 right above it.');
+    // Above ground the air refusal is not this one and keeps no second line.
+    expect(refusalKind('Nothing is holding this up. Build under it first.')).toBe(null);
+  });
+
   it('says what it overlaps', () => {
     const world = lobbyWorld();
     applyCommand(world, { kind: 'build', room: 'office', floor: 2, x: 0 });

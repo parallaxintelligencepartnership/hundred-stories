@@ -555,3 +555,89 @@ describe('economy: debt warnings (review 2026-09-28 I5)', () => {
     expect(world.gameOver).not.toBeNull();
   });
 });
+
+// Audit 2026-09-28 lane I (tests as guards). Each case below goes red under a named mutation
+// of src/sim that every other test let through.
+describe('economy: guards (audit 2026-09-28 I)', () => {
+  // I S2. DECISIONS 2026-09-28: upkeep is charged in full for whatever exists at the settle,
+  // a room on fire or infested included. Red if the settle skips a burning or infested room.
+  it('I S2: bills a room burning at the settle and a room infested at the settle in full', () => {
+    const world = createWorld(1);
+    world.cash = 1_000_000;
+    addRoom(world, makeRoom({ kind: 'security', floor: 2, x: 100, onFire: true }));
+    addRoom(world, makeRoom({ kind: 'housekeeping', floor: 3, x: 100, infested: true }));
+    onQuarterStart(world);
+    const upkeep = ROOMS.security.upkeepPerQuarter + ROOMS.housekeeping.upkeepPerQuarter;
+    expect(upkeep).toBe(30_000);
+    expect(world.stats.lastQuarter.upkeep).toBe(upkeep);
+    expect(world.stats.lastQuarter.upkeepByKind).toEqual({ security: 20_000, housekeeping: 10_000 });
+    expect(world.cash).toBe(1_000_000 - upkeep);
+  });
+
+  // I S3. DESIGN.md section 5: the settle (step 5) runs before the star recount (step 6), so
+  // lobby upkeep is billed at the rating the quarter ran at. Red if tick.ts swaps the two.
+  it('I S3: the 5 AM settle bills the lobby at 3 stars before the recount drops the rating', () => {
+    const world = createWorld(1);
+    world.cash = 1_000_000;
+    world.stars = 3;
+    for (let i = 0; i < 10; i++) addRoom(world, makeRoom({ kind: 'lobby', floor: 1, x: 100 + i }));
+    world.time.minute = 3 * 1440 + 300; // 5 AM on the first day of the second quarter
+    tick(world);
+    expect(world.stats.lastQuarter.upkeep).toBe(LIMITS.lobbyUpkeepPerSegmentByStar[3] * 10);
+    expect(world.stats.lastQuarter.upkeep).toBe(3_000);
+    expect(world.stars).toBeLessThan(3); // no population: the recount after the settle drops it
+  });
+
+  // I S5 and lane A M3. DECISIONS 2026-09-20: the rent setting scales hotel nightly income and
+  // the condo sale price. Red if either drops room.rent / RENT.default.
+  it('I S5: a twin at 150% rent earns $4,500 a night', () => {
+    const world = createWorld(1);
+    recordHotelNight(world, makeRoom({ kind: 'hotelTwin', floor: 1, x: 0, rent: 150 }));
+    expect(world.cash).toBe(LIMITS.startingCash + 4_500);
+    expect(world.stats.incomeByKind.hotelTwin).toBe(4_500);
+  });
+
+  it('I S5, A M3: a condo at 50% rent sells for $75,000', () => {
+    const world = createWorld(1);
+    recordCondoSale(world, makeRoom({ kind: 'condo', floor: 1, x: 0, vacant: true, rent: 50 }));
+    expect(world.cash).toBe(LIMITS.startingCash + 75_000);
+    expect(world.stats.incomeByKind.condo).toBe(75_000);
+  });
+
+  // I S6 and lane A M1. The bank text promises "Get to -$500,000 or better": exactly the line is
+  // not a bad quarter. Red if the comparison becomes <=.
+  it('I S6, A M1: cash of exactly -$500,000 resets the streak and never forecloses', () => {
+    const world = createWorld(1);
+    world.stats.badQuarterStreak = 1;
+    world.cash = ECONOMY.bankruptAtCash;
+    expect(world.cash).toBe(-500_000);
+    onQuarterStart(world);
+    expect(world.stats.badQuarterStreak).toBe(0);
+    expect(world.gameOver).toBeNull();
+    expect(world.log.some((l) => l.text.startsWith('The bank gives you'))).toBe(false);
+    world.cash = ECONOMY.bankruptAtCash;
+    onQuarterStart(world); // a second settle on the line: still no strike
+    expect(world.stats.badQuarterStreak).toBe(0);
+    expect(world.gameOver).toBeNull();
+  });
+
+  it('I S6, A M1: one dollar under the line is a bad quarter, and a second one forecloses', () => {
+    const world = createWorld(1);
+    world.cash = ECONOMY.bankruptAtCash - 1;
+    onQuarterStart(world);
+    expect(world.stats.badQuarterStreak).toBe(1);
+    expect(world.gameOver).toBeNull();
+    world.cash = ECONOMY.bankruptAtCash - 1;
+    onQuarterStart(world);
+    expect(world.stats.badQuarterStreak).toBe(2);
+    expect(world.gameOver).not.toBeNull();
+  });
+
+  // I S6, the debt line. Red if the debt warning waits for cash below -1.
+  it('I S6: cash of -$1 after the settle shows the debt line', () => {
+    const world = createWorld(1);
+    world.cash = -1;
+    onQuarterStart(world);
+    expect(world.log.some((l) => l.text.startsWith('You are in debt: -$1.'))).toBe(true);
+  });
+});

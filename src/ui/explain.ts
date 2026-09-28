@@ -12,12 +12,12 @@ import { formatFloor, formatMoney, starsTitle } from './format';
 import { toolUpkeep } from './palette';
 
 /** Which common refusal a build.ts reason is, or null for one the chip shows as is. */
-export type RefusalKind = 'cash' | 'noFloorBelow' | 'overlapsRoom' | 'overlapsShaft' | 'outOfTower' | 'needsStar';
+export type RefusalKind = 'cash' | 'noFloorBelow' | 'nothingOver' | 'overlapsRoom' | 'overlapsShaft' | 'outOfTower' | 'needsStar';
 
 /**
  * Read a refusal reason back into its kind. The sentences are build.ts's (cannotAfford,
- * hasSupport, roomInTheWay, shaftInTheWay, the tower bounds, starText); a change there that
- * this misses only loses the second line.
+ * hasSupport, restsOnStructure underground, roomInTheWay, shaftInTheWay, the tower bounds,
+ * starText); a change there that this misses only loses the second line.
  */
 export function refusalKind(reason: string): { kind: RefusalKind; star?: Star } | null {
   if (reason.startsWith('Not enough cash.')) return { kind: 'cash' };
@@ -28,6 +28,7 @@ export function refusalKind(reason: string): { kind: RefusalKind; star?: Star } 
   ) {
     return { kind: 'noFloorBelow' };
   }
+  if (reason === 'Nothing is holding this up. Build over it first.') return { kind: 'nothingOver' };
   if (reason === 'Something is already there.') return { kind: 'overlapsRoom' };
   if (reason === 'An elevator is in the way.') return { kind: 'overlapsShaft' };
   if (reason === 'That does not fit inside the tower.' || reason === 'That floor does not exist.') return { kind: 'outOfTower' };
@@ -87,6 +88,14 @@ export function refusalExplainer(
       if (placement.floorMin < 0 && under === 1) return 'Basement 1 needs the lobby on floor 1 above it.';
       const side = placement.floorMin > 0 ? 'under' : 'above';
       return `${formatFloor(placement.floorMin)} needs ${floorName(under)} built ${side} it.`;
+    }
+    case 'nothingOver': {
+      // The floor exists but nothing on it covers this stretch: a basement room hangs from the
+      // floor over its top (build.ts restingFloor).
+      const top = Math.max(placement.floorMax, spanTop(placement.floorMin, height));
+      const over = supportFloor(placement.floorMin, top);
+      if (over === 1) return `${formatFloor(placement.floorMin)} needs the lobby on floor 1 right above it.`;
+      return `${formatFloor(placement.floorMin)} needs something built on ${floorName(over)} right above it.`;
     }
     case 'overlapsRoom':
       return 'It overlaps a room. Move it to an empty stretch of floor.';

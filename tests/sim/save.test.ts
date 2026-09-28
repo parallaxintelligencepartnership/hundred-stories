@@ -475,6 +475,80 @@ describe('hashWorld covers every field in types.ts', () => {
     (world.sims.get(20) as Sim).exiting = true;
     expect(hashWorld(world)).not.toBe(before);
   });
+
+  // Audit 2026-09-28 I S7: only Room and Car were checked field by field, so dropping stress,
+  // a guard, a collector, the losses table or the bank streak from the projection went unseen.
+  // Each change runs on a fresh copy of the same world and must move the hash.
+  function simsWorld(): World {
+    const world = richWorld();
+    const guard: GuardState = { shift: 0, task: 'patrol', floor: 2, pauseUntil: null, respond: null, routed: true };
+    const collector: CollectorState = { task: 'toRoom', roomId: 1, load: 1, until: null };
+    addSim(world, buildSim({ id: 21, kind: 'guard', homeRoomId: null, guard }));
+    addSim(world, buildSim({ id: 22, kind: 'collector', homeRoomId: null, collector }));
+    world.nextId = 23;
+    return world;
+  }
+
+  it('I S7: moves when any single hashed Sim field moves, a guard and a collector included', () => {
+    const changes = {
+      id: (s: Sim) => (s.id = 30),
+      kind: (s: Sim) => (s.kind = 'visitor'),
+      homeRoomId: (s: Sim) => (s.homeRoomId = 2),
+      pos: (s: Sim) => (s.pos.x = 106),
+      inCarId: (s: Sim) => (s.inCarId = 11),
+      inRoomId: (s: Sim) => (s.inRoomId = null),
+      route: (s: Sim) => s.route.push({ kind: 'walk', toX: 120 }),
+      state: (s: Sim) => (s.state = 'walking'),
+      stress: (s: Sim) => (s.stress = 0.2),
+      waitStart: (s: Sim) => (s.waitStart = 400),
+      schedule: (s: Sim) => s.schedule.push({ minuteOfDay: 540, days: ['weekday'], goal: { kind: 'exit' }, stayMinutes: 0 }),
+      nextScheduleIndex: (s: Sim) => (s.nextScheduleIndex = 1),
+      stayUntil: (s: Sim) => (s.stayUntil = 900),
+      wallet: (s: Sim) => (s.wallet = 50),
+      leaveReason: (s: Sim) => (s.leaveReason = 'Too noisy.'),
+      exiting: (s: Sim) => (s.exiting = true),
+    } satisfies Record<Exclude<keyof Sim, 'storyTripStart' | 'guard' | 'collector'>, (sim: Sim) => unknown>;
+    const onGuard = {
+      guard: (s: Sim) => ((s.guard as GuardState).floor = 3),
+      guardRespond: (s: Sim) => ((s.guard as GuardState).respond = { kind: 'fire', roomId: 1, floor: 2, x: 105 }),
+    };
+    const onCollector = {
+      collector: (s: Sim) => ((s.collector as CollectorState).load = 2),
+    };
+    const all: [string, number, (s: Sim) => unknown][] = [
+      ...Object.entries(changes).map(([f, c]): [string, number, (s: Sim) => unknown] => [f, 20, c]),
+      ...Object.entries(onGuard).map(([f, c]): [string, number, (s: Sim) => unknown] => [f, 21, c]),
+      ...Object.entries(onCollector).map(([f, c]): [string, number, (s: Sim) => unknown] => [f, 22, c]),
+    ];
+    for (const [field, simId, change] of all) {
+      const world = simsWorld();
+      const before = hashWorld(world);
+      change(world.sims.get(simId) as Sim);
+      expect(hashWorld(world), `Sim.${field} is missing from the hash projection`).not.toBe(before);
+    }
+  });
+
+  it('I S7: moves when any single Stats field moves, the losses table and the bank streak included', () => {
+    const changes = {
+      incomeByKind: (s: World['stats']) => (s.incomeByKind.office = 1),
+      upkeepByKind: (s: World['stats']) => (s.upkeepByKind.security = 1),
+      lossesByKind: (s: World['stats']) => (s.lossesByKind.fire = 1),
+      lastQuarter: (s: World['stats']) => (s.lastQuarter.net = 1),
+      vipRating: (s: World['stats']) => (s.vipRating = 'fair'),
+      weddingsHeld: (s: World['stats']) => (s.weddingsHeld = 1),
+      avgWaitMinutes: (s: World['stats']) => (s.avgWaitMinutes = 1),
+      tenantsLeftReasons: (s: World['stats']) => (s.tenantsLeftReasons['Too noisy.'] = 1),
+      badQuarterStreak: (s: World['stats']) => (s.badQuarterStreak = 1),
+      lastVip: (s: World['stats']) => (s.lastVip = { simId: 1, minute: 2 } as NonNullable<World['stats']['lastVip']>),
+      lastTheftAt: (s: World['stats']) => (s.lastTheftAt = 100),
+    } satisfies Record<keyof World['stats'], (stats: World['stats']) => unknown>;
+    for (const [field, change] of Object.entries(changes)) {
+      const world = simsWorld();
+      const before = hashWorld(world);
+      change(world.stats);
+      expect(hashWorld(world), `Stats.${field} is missing from the hash projection`).not.toBe(before);
+    }
+  });
 });
 
 describe('status bar baselines (save v3)', () => {
@@ -660,6 +734,44 @@ describe('room order, guards, collectors and fire events (audit I S6)', () => {
     }
     expect(hashWorld(reversed)).toBe(hashWorld(world));
   }, 60_000); // two days of a ten-floor tower: about 1 s alone, 17 to 42 s on a busy test host
+
+  // Audit 2026-09-28 I S8. People run in Map order, so their order is part of the state the
+  // hash cannot see. serialize writes them in id order (insertion order is id order in play) and
+  // deserialize keeps file order. A file with people hand-reordered is out of contract: nothing in
+  // the game writes one, and nothing verifies a save by hash (DECISIONS 2026-09-28).
+  it('I S8: a save and load keeps people in id order and the hash equal, and so runs the same', () => {
+    const world = officeTower();
+    while (world.time.minute < 1440 + 8 * 60 + 40) tick(world);
+    expect(world.sims.size).toBeGreaterThan(50);
+    const ascending = (ids: number[]): boolean => ids.every((id, i) => i === 0 || (ids[i - 1] as number) < id);
+    expect(ascending([...world.sims.keys()])).toBe(true);
+    const text = serialize(world);
+    expect(ascending((JSON.parse(text) as { sims: { id: number }[] }).sims.map((s) => s.id))).toBe(true);
+    const loaded = deserialize(text);
+    if (!loaded.ok) throw new Error(loaded.reason);
+    expect([...loaded.world.sims.keys()]).toEqual([...world.sims.keys()]);
+    expect(hashWorld(loaded.world)).toBe(hashWorld(world));
+    for (let i = 0; i < 1440; i++) {
+      tick(world);
+      tick(loaded.world);
+    }
+    expect(hashWorld(loaded.world)).toBe(hashWorld(world));
+  }, 60_000);
+
+  // Audit 2026-09-28 I, note N1: stats.avgWaitMinutes is created at 0, saved, validated and
+  // hashed, but nothing writes it. Writing it where a rider boards moves the pinned hashes in
+  // tests/scenarios/security.test.ts and recycling.test.ts, so that is left for the owner. Until
+  // then this pins what the field is: always 0, however many people have waited for a car.
+  it('N1: stats.avgWaitMinutes stays 0 through a morning of elevator rides (never written)', () => {
+    const world = officeTower();
+    let rode = 0;
+    while (world.time.minute < 1440 + 8 * 60 + 40) {
+      tick(world);
+      for (const sim of world.sims.values()) if (sim.state === 'riding') rode++;
+    }
+    expect(rode).toBeGreaterThan(0);
+    expect(world.stats.avgWaitMinutes).toBe(0);
+  }, 60_000);
 
   it("keeps a guard's state and a collector's round across serialize and deserialize", () => {
     const world = richWorld();

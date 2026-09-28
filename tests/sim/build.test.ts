@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { applyCommand, canBuild, canBuildShaft, canExtendShaft } from '../../src/sim/build';
-import { LIMITS, PLURAL_LABELS, RENT, ROOMS, SHAFTS } from '../../src/sim/rules';
+import { ECONOMY, LIMITS, PLURAL_LABELS, RENT, ROOMS, SHAFTS } from '../../src/sim/rules';
 import { deserialize, hashWorld, serialize } from '../../src/sim/save';
 import { addRoom, allocId, createWorld } from '../../src/sim/world';
 import type { CommandResult, Room, RoomKind, Shaft, ShaftKind, Star, World } from '../../src/sim/types';
@@ -713,13 +713,22 @@ describe('demolish', () => {
     const shaft = onlyShaft(world);
     expect(applyCommand(world, { kind: 'shaft.addCar', shaftId: shaft.id })).toEqual(OK);
     world.stats.incomeByKind = { shop: 1_234 };
+    // Audit 2026-09-28 I S4: a refund booked as negative upkeep or a negative loss inflates
+    // profit just the same, so the upkeep and losses tables must not move either.
+    world.stats.upkeepByKind = { security: 20_000 };
+    world.stats.lossesByKind = { fire: 5_000 };
     const office = [...world.rooms.values()].find((r) => r.kind === 'office')!;
     const cash = world.cash;
     expect(applyCommand(world, { kind: 'demolish', roomId: office.id })).toEqual(OK);
+    expect(world.cash - cash).toBe(Math.round(ROOMS.office.cost * ECONOMY.demolishRefundFraction));
+    expect(world.stats.upkeepByKind).toEqual({ security: 20_000 });
+    expect(world.stats.lossesByKind).toEqual({ fire: 5_000 });
     expect(applyCommand(world, { kind: 'shaft.removeCar', shaftId: shaft.id })).toEqual(OK);
     expect(applyCommand(world, { kind: 'shaft.demolish', shaftId: shaft.id })).toEqual(OK);
     expect(world.cash).toBeGreaterThan(cash);
     expect(world.stats.incomeByKind).toEqual({ shop: 1_234 });
+    expect(world.stats.upkeepByKind).toEqual({ security: 20_000 });
+    expect(world.stats.lossesByKind).toEqual({ fire: 5_000 });
   });
 
   // Review A-5: build, sell, demolish for the refund, rebuild was a money loop.

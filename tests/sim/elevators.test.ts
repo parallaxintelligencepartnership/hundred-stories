@@ -587,3 +587,50 @@ describe('tickElevators: determinism', () => {
   });
 });
 
+
+// PROJECT.md, Verification expectations, Elevators: "a shaft with 8 cars serves a queue;
+// average wait under threshold". Audit 2026-09-28 I: no test ran more than 4 cars through
+// dispatch. A busy hour on one 20-floor standard shaft: every minute for an hour, three people
+// at the lobby want to go up and one person upstairs wants to come down (240 riders in all).
+// Anyone still waiting when the clock stops counts with the wait so far.
+describe('tickElevators: eight cars serve a busy queue (PROJECT.md elevators proof)', () => {
+  // PROJECT.md names no number. 15 minutes is where the wait legend turns a wait pink
+  // (STRESS.waitBandMinutes.pink). Measured at this load: 8 cars about 9, 4 cars about 32, 1 car about 112.
+  const MEAN_WAIT_THRESHOLD_MINUTES = 15;
+
+  /** Mean minutes from the hall call to boarding over every rider, and how many reached their floor. */
+  function busyHour(cars: number): { mean: number; riders: number; delivered: number } {
+    const world = createWorld(8);
+    const shaft = buildShaft(world, { floorMin: 1, floorMax: 20, cars: Array.from({ length: cars }, () => 1) });
+    const waiters: Sim[] = [];
+    const calledAt = new Map<number, number>();
+    const boardedAt = new Map<number, number>();
+    let up = 0;
+    let down = 0;
+    for (let minute = 0; minute < 180; minute++) {
+      if (minute < 60) {
+        for (let i = 0; i < 3; i++) waiters.push(addWaiter(world, shaft, 1, 2 + (up++ % 19)));
+        waiters.push(addWaiter(world, shaft, 20 - (down++ % 19), 1));
+        for (const sim of waiters) if (!calledAt.has(sim.id)) calledAt.set(sim.id, world.time.minute);
+      }
+      tickElevators(world);
+      for (const sim of waiters) if (sim.state !== 'waiting' && !boardedAt.has(sim.id)) boardedAt.set(sim.id, world.time.minute);
+      world.time.minute += 1;
+    }
+    let sum = 0;
+    for (const sim of waiters) sum += (boardedAt.get(sim.id) ?? world.time.minute) - (calledAt.get(sim.id) as number);
+    const delivered = waiters.filter((s) => s.state === 'walking').length;
+    return { mean: sum / waiters.length, riders: waiters.length, delivered };
+  }
+
+  it('8 cars carry all 240 riders with a mean wait under the threshold', () => {
+    const eight = busyHour(8);
+    expect(eight.riders).toBe(240);
+    expect(eight.delivered).toBe(240);
+    expect(eight.mean).toBeLessThan(MEAN_WAIT_THRESHOLD_MINUTES);
+  });
+
+  it('the load is real: one car alone cannot keep the mean under the threshold', () => {
+    expect(busyHour(1).mean).toBeGreaterThan(MEAN_WAIT_THRESHOLD_MINUTES);
+  });
+});
