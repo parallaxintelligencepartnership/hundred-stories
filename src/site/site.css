@@ -500,6 +500,26 @@ p {
   max-width: calc(100% - 36px);
 }
 
+.trailer-feature {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--w-outline);
+  margin: 24px 0;
+}
+
+.trailer-clip {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.card .trailer-clip {
+  margin: 16px 18px 0;
+  max-width: calc(100% - 36px);
+}
+
 /* No blanket `.floor p` rule: it would outrank .floor-tag and put dark text on
    the dark chip. The floor sets the colour once and its children inherit. */
 

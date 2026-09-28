@@ -108,10 +108,10 @@ describe('the page is the building in cross section', () => {
 
   it('sends the landing page underground below the hero, one floor per section', () => {
     expect(landing).toContain('<div class="underground">');
-    expect(landing.match(/<section class="floor"/g)).toHaveLength(5);
+    expect(landing.match(/<section class="floor"/g)).toHaveLength(6);
     // The tag is the floor alone; the h2 names the section (D-38).
     const tags = [...landing.matchAll(/<p class="floor-tag">([^<]*)<\/p>/g)].map((m) => m[1]);
-    expect(tags).toEqual(['B1', 'B2', 'B3', 'B4', 'B5']);
+    expect(tags).toEqual(['B1', 'B2', 'B3', 'B4', 'B5', 'B6']);
     // The floors carry the sections; no bare .wrap column of copy is left behind.
     expect(flat(landing)).not.toContain('<div class="wrap"> <section aria-labelledby="features">');
   });
@@ -369,7 +369,7 @@ describe('sponsor slot', () => {
 
   it('keeps the floors as they were', () => {
     const tags = [...landing.matchAll(/<p class="floor-tag">([^<]*)<\/p>/g)].map((m) => m[1]);
-    expect(tags).toEqual(['B1', 'B2', 'B3', 'B4', 'B5']);
+    expect(tags).toEqual(['B1', 'B2', 'B3', 'B4', 'B5', 'B6']);
   });
 
   it('says in the web panel that the game tracks nothing', () => {
