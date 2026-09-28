@@ -550,9 +550,15 @@ function firstInvalidStat(stats: unknown): string | null {
   if (!isPlainObject(stats)) return 'stats';
   if (!isNumberTable(stats.incomeByKind)) return 'stats.incomeByKind';
   if (!isNumberTable(stats.upkeepByKind)) return 'stats.upkeepByKind';
+  // The losses table and lastQuarter's losses and by-kind tables are optional: older saves have none.
+  if (stats.lossesByKind !== undefined && !isNumberTable(stats.lossesByKind)) return 'stats.lossesByKind';
   const last = stats.lastQuarter;
   if (!isPlainObject(last) || !isFiniteNumber(last.income) || !isFiniteNumber(last.upkeep) || !isFiniteNumber(last.net)) {
     return 'stats.lastQuarter';
+  }
+  if (last.losses !== undefined && !isFiniteNumber(last.losses)) return 'stats.lastQuarter';
+  for (const table of [last.incomeByKind, last.upkeepByKind, last.lossesByKind]) {
+    if (table !== undefined && !isNumberTable(table)) return 'stats.lastQuarter';
   }
   if (typeof stats.vipRating !== 'string' || !Object.hasOwn(VIP_RATINGS, stats.vipRating)) return 'stats.vipRating';
   if (!isFiniteNumber(stats.weddingsHeld)) return 'stats.weddingsHeld';
@@ -562,6 +568,24 @@ function firstInvalidStat(stats: unknown): string | null {
   if (stats.lastVip !== undefined && !isPlainObject(stats.lastVip)) return 'stats.lastVip';
   if (stats.lastTheftAt !== undefined && !isFiniteNumber(stats.lastTheftAt)) return 'stats.lastTheftAt';
   return null;
+}
+
+/** Fill the money fields older saves do not carry: empty tables and zero losses. The validator has checked the rest. */
+function statsWithDefaults(stats: Stats): Stats {
+  const last = stats.lastQuarter as Partial<Stats['lastQuarter']> & Pick<Stats['lastQuarter'], 'income' | 'upkeep' | 'net'>;
+  return {
+    ...stats,
+    lossesByKind: stats.lossesByKind ?? {},
+    lastQuarter: {
+      income: last.income,
+      upkeep: last.upkeep,
+      losses: last.losses ?? 0,
+      net: last.net,
+      incomeByKind: last.incomeByKind ?? {},
+      upkeepByKind: last.upkeepByKind ?? {},
+      lossesByKind: last.lossesByKind ?? {},
+    },
+  };
 }
 
 const VIP_PHASES = { notice: true, route: true, stay: true, checkout: true } satisfies Record<VipPhase, true>;
@@ -702,7 +726,7 @@ export function deserialize(text: string): { ok: true; world: World } | { ok: fa
     world.events = parsed.events.map((event) => (event.kind === 'vip' ? loadVipEvent(world, event) : event));
     // Read by presence, not by version: format 5 carries it as an optional field since 0.5.0.
     world.roachLastSpread = parsed.roachLastSpread ?? null;
-    world.stats = parsed.stats;
+    world.stats = statsWithDefaults(parsed.stats);
     world.gameOver = parsed.gameOver;
     world.log = parsed.log.slice(-LOG_LIMIT);
     world.logTotal = typeof parsed.logTotal === 'number' ? parsed.logTotal : world.log.length;

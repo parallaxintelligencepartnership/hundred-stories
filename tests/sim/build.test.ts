@@ -595,7 +595,7 @@ describe('demolish', () => {
     expect(world.rooms.has(office.id)).toBe(true);
   });
 
-  it('demolishes a vacant room, removes its tenants and refunds nothing', () => {
+  it('demolishes a vacant room, removes its tenants and refunds a quarter of the build price', () => {
     const world = makeWorld();
     lobby(world);
     expect(build(world, 'office', 2, 100)).toEqual(OK);
@@ -621,12 +621,24 @@ describe('demolish', () => {
     world.sims.set(tenant.id, tenant);
     office.tenants = [tenant.id];
     const cash = world.cash;
+    const refund = Math.round(ROOMS.office.cost * 0.25);
     expect(applyCommand(world, { kind: 'demolish', roomId: office.id })).toEqual(OK);
     expect(world.rooms.has(office.id)).toBe(false);
     expect(world.sims.has(tenant.id)).toBe(false);
     expect(tenant.state).toBe('gone');
-    expect(world.cash).toBe(cash);
+    expect(refund).toBe(10_000);
+    expect(world.cash).toBe(cash + refund);
     expect(world.floorIndex.rooms.get(2) ?? []).toHaveLength(0);
+  });
+
+  it('logs the refund amount when demolishing a room', () => {
+    const world = makeWorld();
+    lobby(world);
+    expect(build(world, 'office', 2, 100)).toEqual(OK);
+    const office = [...world.rooms.values()].find((r) => r.kind === 'office');
+    if (!office) throw new Error('office missing');
+    expect(applyCommand(world, { kind: 'demolish', roomId: office.id })).toEqual(OK);
+    expect(world.log.at(-1)?.text).toBe('Demolished the office on floor 2. $10,000 back.');
   });
 
   it('refuses to demolish a shaft while a car carries passengers', () => {
@@ -641,15 +653,31 @@ describe('demolish', () => {
     expect(world.shafts.has(shaft.id)).toBe(true);
   });
 
-  it('demolishes an empty shaft with no refund', () => {
+  it('demolishes an empty shaft and refunds a quarter of the shaft and car price', () => {
     const world = makeWorld();
     expect(buildShaft(world, 'standard', 150, 1, 10)).toEqual(OK);
     const shaft = onlyShaft(world);
     const cash = world.cash;
+    const refund = Math.round((SHAFTS.standard.shaftCost + SHAFTS.standard.carCost) * 0.25);
     expect(applyCommand(world, { kind: 'shaft.demolish', shaftId: shaft.id })).toEqual(OK);
     expect(world.shafts.size).toBe(0);
-    expect(world.cash).toBe(cash);
+    expect(refund).toBe(70_000);
+    expect(world.cash).toBe(cash + refund);
     expect(world.floorIndex.shafts.get(5) ?? []).toHaveLength(0);
+    expect(world.log.at(-1)?.text).toBe('Demolished the elevator at floor 1. $70,000 back.');
+  });
+
+  it('refunds a quarter of the car price when removing a car', () => {
+    const world = makeWorld();
+    expect(buildShaft(world, 'standard', 150, 1, 10)).toEqual(OK);
+    const shaft = onlyShaft(world);
+    expect(applyCommand(world, { kind: 'shaft.addCar', shaftId: shaft.id })).toEqual(OK);
+    const cash = world.cash;
+    const refund = Math.round(SHAFTS.standard.carCost * 0.25);
+    expect(applyCommand(world, { kind: 'shaft.removeCar', shaftId: shaft.id })).toEqual(OK);
+    expect(refund).toBe(20_000);
+    expect(world.cash).toBe(cash + refund);
+    expect(world.log.at(-1)?.text).toBe('Removed a car from the elevator at floor 1. $20,000 back.');
   });
 
   it('refuses to demolish something that is not there', () => {

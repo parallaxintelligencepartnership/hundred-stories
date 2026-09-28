@@ -344,10 +344,25 @@ export type ActiveEvent =
   | { kind: 'santa'; startedAt: number; x: number }
   | { kind: 'wedding'; startedAt: number };
 
+/** Money an event took: fire damage, the helicopter, a bomb, a paid ransom, a thief. */
+export type LossKind = 'fire' | 'helicopter' | 'bomb' | 'ransom' | 'theft';
+
+/** The last settled quarter: totals and the per-kind tables as they stood at the settle. net = income - upkeep - losses. */
+export interface QuarterSummary {
+  income: number;
+  upkeep: number;
+  losses: number;
+  net: number;
+  incomeByKind: Partial<Record<RoomKind, number>>;
+  upkeepByKind: Partial<Record<RoomKind | ShaftKind, number>>;
+  lossesByKind: Partial<Record<LossKind, number>>;
+}
+
 export interface Stats {
   incomeByKind: Partial<Record<RoomKind, number>>;
   upkeepByKind: Partial<Record<RoomKind | ShaftKind, number>>;
-  lastQuarter: { income: number; upkeep: number; net: number };
+  lossesByKind: Partial<Record<LossKind, number>>; // this quarter so far; absent from older saves and loaded as {}
+  lastQuarter: QuarterSummary;
   vipRating: 'none' | 'poor' | 'fair' | 'good';
   weddingsHeld: number;
   avgWaitMinutes: number;

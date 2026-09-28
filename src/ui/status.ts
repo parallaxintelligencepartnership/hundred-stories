@@ -1,4 +1,4 @@
-// The status bar: cash and its change this quarter, population and its change today, the
+// The status bar: cash and what it earned this quarter, population and its change today, the
 // six stars with what the next one needs, a 24 hour dial with the time and date, and the
 // night speed shown as a mode. The pure parts are exported for the tests; the DOM part only
 // runs when createStatusBar is called.
@@ -16,22 +16,37 @@ import { icon, type IconName } from './icons';
 export const UNKNOWN = '–';
 
 type Baselines = Pick<World, 'cash' | 'population'> & {
-  quarterStartCash?: number | null;
   dayStartPopulation?: number | null;
+  stats?: Partial<Pick<World['stats'], 'incomeByKind' | 'lossesByKind'>>;
 };
 
 // ------------------------------------------------------------------ cash
 
-/** Cash minus the cash the quarter started with, spending included; null until known. */
+function tableSum(table: Partial<Record<string, number>> | undefined): number {
+  let sum = 0;
+  for (const value of Object.values(table ?? {})) sum += value ?? 0;
+  return sum;
+}
+
+/**
+ * What the tower has earned this quarter: income so far less money lost to trouble (fire, a
+ * bomb, a ransom, a thief). Building is never counted, and running costs land at the 5 AM
+ * settle, which also starts the tables again, so the readout starts at zero each quarter.
+ * Null when the world carries no income table (never for a real world).
+ */
 export function quarterDelta(world: Baselines): number | null {
-  const base = world.quarterStartCash;
-  return typeof base === 'number' ? world.cash - base : null;
+  const stats = world.stats;
+  if (!stats?.incomeByKind) return null;
+  return tableSum(stats.incomeByKind) - tableSum(stats.lossesByKind);
 }
 
 export function quarterDeltaText(world: Baselines): string {
   const delta = quarterDelta(world);
-  return delta === null ? `${UNKNOWN} this quarter` : `${formatSignedMoney(delta)} this quarter`;
+  return delta === null ? `${UNKNOWN} earned this quarter` : `${formatSignedMoney(delta)} earned this quarter`;
 }
+
+/** The readout's tooltip: what the number counts and what it leaves out. */
+export const QUARTER_DELTA_TITLE = 'Earned this quarter, less money lost to trouble. Building costs are not counted.';
 
 // ------------------------------------------------------------ population
 
@@ -348,7 +363,7 @@ export function createStatusBar(options: StatusBarOptions = {}): StatusBar {
     const delta = quarterDelta(world);
     setText(cashMeta, quarterDeltaText(world));
     cashMeta.classList.toggle('is-down', delta !== null && delta < 0);
-    setAttr(cashMeta, 'title', delta === null ? 'Change this quarter, shown once the next quarter starts' : 'Change since the quarter began');
+    setAttr(cashMeta, 'title', QUARTER_DELTA_TITLE);
     // Under 400 px the delta lines are hidden (ui.css), so each readout's tooltip carries its change.
     setAttr(cash, 'title', `Open finances. ${quarterDeltaText(world)}`);
 

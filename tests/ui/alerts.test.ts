@@ -5,10 +5,10 @@ import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EVENT_TEST_HOOKS, handleEventCommand, resetEventTestHooks, startBomb, tickCockroaches, tickEvents } from '../../src/sim/events';
 import { onQuarterStart } from '../../src/sim/economy';
-import { ECONOMY, EVENTS, ROOMS } from '../../src/sim/rules';
+import { ECONOMY, EVENTS, LIMITS, ROOMS } from '../../src/sim/rules';
 import type { Command, CommandResult, LogEntry, Room, RoomKind, Star, World } from '../../src/sim/types';
 import { addRoom, allocId, createWorld, log } from '../../src/sim/world';
-import { ALERT_LINGER_MS, ROACHES_GONE, SECURITY_LESSON, SECURITY_RESPONDING, fireHeadline, fireOutText, roachHeadline } from '../../src/ui/alerts';
+import { ALERT_LINGER_MS, ROACHES_GONE, SECURITY_LESSON, SECURITY_RESPONDING, SECURITY_SEARCHING, fireHeadline, fireOutText, roachHeadline } from '../../src/ui/alerts';
 import { createUi } from '../../src/ui/ui';
 import { FakeDom, type FakeElement } from './fake-dom';
 
@@ -164,7 +164,7 @@ describe('the fire incident card', () => {
     expect(roomLines(world)).toHaveLength(5);
   });
 
-  it('without a security office offers the helicopter at its price, teaches the fix, and the button calls it', () => {
+  it('without a security office offers the helicopter at its full price, teaches the fix, and the button calls it', () => {
     vi.useFakeTimers();
     const { world } = fiveRoomRow(false);
     const h = mount(world);
@@ -174,14 +174,17 @@ describe('the fire incident card', () => {
     expect(card.textContent).toContain(SECURITY_LESSON);
     expect(card.textContent).not.toContain(SECURITY_RESPONDING);
     const call = helicopterOf(card);
-    expect(call?.textContent).toBe('Call a helicopter ($250,000)');
+    // The flight and the clearing bill for the two offices burning: $250,000 + 2 x $20,000.
+    expect(call?.textContent).toBe('Call a helicopter ($290,000)');
     expect(call?.disabled).toBe(false);
+    const before = world.cash;
     click(call!);
     expect(h.applied).toEqual([{ kind: 'fire.callHelicopter' }]);
     expect(world.events.some((e) => e.kind === 'fire')).toBe(false);
-    // The same card closes the incident, then goes by itself after eight seconds.
+    expect(before - world.cash).toBe(290_000);
+    // The same card closes the incident with the rooms and the money, then goes after eight seconds.
     expect(fireCards(h.root)).toHaveLength(1);
-    expect(card.textContent).toContain(fireOutText(2));
+    expect(card.textContent).toContain('Fire out. 2 rooms lost, $290,000.');
     expect(helicopterOf(card)).toBeUndefined();
     vi.advanceTimersByTime(7999);
     expect(fireCards(h.root)).toHaveLength(1);
@@ -198,17 +201,36 @@ describe('the fire incident card', () => {
     expect(card.textContent).not.toContain(SECURITY_LESSON);
     expect(helicopterOf(card)).toBeDefined();
     h.at(ROLL_MINUTE + EVENTS.fire.securityPutOutMinutes);
-    expect(card.textContent).toContain(fireOutText(1));
+    expect(card.textContent).toContain('Fire out. 1 room lost, $20,000.');
   });
 
-  it('greys the helicopter out with the reason when cash is short', () => {
+  it('enables the helicopter only while cash covers the full charge, which grows as the fire spreads', () => {
     const { world } = fiveRoomRow(false);
-    world.cash = EVENTS.fire.helicopterCost - 1;
+    world.cash = 270_000 - 1; // one office burning: $250,000 + $20,000
     const h = mount(world);
     h.at(ROLL_MINUTE);
     const card = fireCards(h.root)[0]!;
+    expect(helicopterOf(card)?.textContent).toBe('Call a helicopter ($270,000)');
     expect(helicopterOf(card)?.disabled).toBe(true);
-    expect(card.textContent).toContain('Not enough cash. A firefighting helicopter costs $250,000.');
+    expect(card.textContent).toContain('Not enough cash. A firefighting helicopter costs $270,000.');
+    world.cash = 270_000;
+    h.notify();
+    expect(helicopterOf(card)?.disabled).toBe(false);
+    expect(card.textContent).not.toContain('Not enough cash');
+    h.at(ROLL_MINUTE + EVENTS.fire.spreadMinutes);
+    expect(helicopterOf(card)?.textContent).toBe('Call a helicopter ($290,000)');
+    expect(helicopterOf(card)?.disabled).toBe(true);
+  });
+
+  it('closes a fire that burned itself out with the rooms lost and the bill', () => {
+    const { world } = fiveRoomRow(false);
+    const h = mount(world);
+    h.at(ROLL_MINUTE);
+    const card = fireCards(h.root)[0]!;
+    for (let m = EVENTS.fire.spreadMinutes; m <= EVENTS.fire.burnOutMinutes; m += EVENTS.fire.spreadMinutes) h.at(ROLL_MINUTE + m);
+    expect(world.events.some((e) => e.kind === 'fire')).toBe(false);
+    expect(fireCards(h.root)).toHaveLength(1);
+    expect(card.textContent).toBe('×Fire out. 5 rooms lost, $100,000.');
   });
 
   it('closes on its close control, and the fire and the log go on without it', () => {
@@ -239,7 +261,9 @@ describe('the fire incident card', () => {
   it('names a fire that spans floors', () => {
     expect(fireHeadline([12], 1)).toBe('Fire on floor 12');
     expect(fireHeadline([12, 13, 14], 3)).toBe('Fire on floors 12 to 14, 3 rooms burning');
-    expect(fireOutText(3)).toBe('Fire out, 3 rooms damaged');
+    expect(fireOutText(3, 60_000)).toBe('Fire out. 3 rooms lost, $60,000.');
+    expect(fireOutText(1, null)).toBe('Fire out. 1 room lost.');
+    expect(fireOutText(0, 250_000)).toBe('Fire out. No rooms lost, $250,000.');
   });
 });
 
@@ -295,6 +319,38 @@ describe('the bomb card', () => {
     h.notify();
     expect(buttonOf(card, 'bomb.pay')?.disabled).toBe(false);
     expect(card.textContent).not.toContain('Not enough cash');
+  });
+
+  it('without a security office says nothing of a search and keeps the ransom as the action', () => {
+    const world = bombTower();
+    const h = mount(world);
+    startBomb(world);
+    h.notify();
+    const card = bombCards(h.root)[0]!;
+    expect(card.textContent).not.toContain(SECURITY_SEARCHING);
+    expect(buttonOf(card, 'bomb.pay')?.className).toBe('hs-btn');
+  });
+
+  it('with a security office says it will find the bomb before 1 PM and makes the ransom secondary', () => {
+    const world = bombTower();
+    place(world, 'security', 1, 120);
+    const h = mount(world);
+    startBomb(world);
+    h.notify();
+    const card = bombCards(h.root)[0]!;
+    expect(card.textContent).toContain('Your security office is searching and will find it before 1 PM.');
+    const pay = buttonOf(card, 'bomb.pay')!;
+    expect(pay.className).toBe('hs-btn is-secondary');
+    expect(pay.disabled).toBe(false);
+    // The claim holds: the search ends before 1 PM and the card shows the find.
+    h.at(ROLL_MINUTE + 2 * EVENTS.bomb.securitySearchMinutesPerFloor);
+    expect(card.textContent).toContain('Security found the bomb');
+  });
+
+  it('keeps the before 1 PM promise at the tallest tower the lot allows', () => {
+    // The search starts at the 6 AM roll and takes a few minutes per built floor.
+    const floors = LIMITS.maxFloor - LIMITS.minFloor; // every floor from B10 to 100, no floor 0
+    expect(ROLL_MINUTE + floors * EVENTS.bomb.securitySearchMinutesPerFloor).toBeLessThan(EVENTS.bomb.detonateAtMinuteOfDay);
   });
 
   it('shows the blast as the outcome when nobody pays', () => {

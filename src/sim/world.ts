@@ -37,7 +37,8 @@ export function createWorld(seed: number, start: TowerStart = {}): World {
     stats: {
       incomeByKind: {},
       upkeepByKind: {},
-      lastQuarter: { income: 0, upkeep: 0, net: 0 },
+      lossesByKind: {},
+      lastQuarter: { income: 0, upkeep: 0, losses: 0, net: 0, incomeByKind: {}, upkeepByKind: {}, lossesByKind: {} },
       vipRating: 'none',
       weddingsHeld: 0,
       avgWaitMinutes: 0,

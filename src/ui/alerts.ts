@@ -10,6 +10,7 @@
 // The sim logs one line per burning room and has no incident id, so the incident is derived here
 // from the log lines (their text and roomId) and from the fire event in world.events.
 
+import { helicopterCost } from '../sim/events';
 import { EVENTS } from '../sim/rules';
 import type { Command, CommandResult, Id, LogEntry, World } from '../sim/types';
 import { formatMoney } from './format';
@@ -26,6 +27,13 @@ export const NOTICE_LINGER_MS = 6000;
 
 export const SECURITY_RESPONDING = 'Security is on the way.';
 export const SECURITY_LESSON = 'A security office puts fires out on its own.';
+/**
+ * The bomb card's line while the tower has a security office on duty. True at any height the
+ * tower allows: the search (src/sim/events.ts tickBomb) starts at 6 AM, the hour the threat is
+ * rolled, and takes securitySearchMinutesPerFloor per built floor, at most 110 floors, so 11:30
+ * AM at the latest; a security office built later finds it on the next minute.
+ */
+export const SECURITY_SEARCHING = 'Your security office is searching and will find it before 1 PM.';
 
 export interface AlertStackDeps {
   /** The container the cards go in (the ui's toasts region). */
@@ -78,7 +86,13 @@ export function fireLineOf(entry: LogEntry): FireLine | null {
   const text = entry.text;
   if (text.startsWith('Fire broke out in the ')) return 'start';
   if (text.startsWith('The fire spread to the ')) return 'spread';
-  if (text.startsWith('Security put the fire out.') || text.startsWith('The helicopter soaked the fire.')) return 'end';
+  if (
+    text.startsWith('Security put the fire out.') ||
+    text.startsWith('The helicopter soaked the fire.') ||
+    text.startsWith('The fire burned itself out.')
+  ) {
+    return 'end';
+  }
   if (text.startsWith('A firefighting helicopter cost ')) return 'helicopter';
   return null;
 }
@@ -149,8 +163,20 @@ export function isRoachLine(entry: LogEntry): boolean {
   return entry.text.startsWith('Cockroaches moved into the ') || entry.text.startsWith('The cockroaches spread to the ');
 }
 
-export function fireOutText(damaged: number): string {
-  return `Fire out, ${damaged} room${damaged === 1 ? '' : 's'} damaged`;
+/**
+ * The fire card's closing line: the rooms lost and what the fire cost in all, the helicopter
+ * included when one was called. "Fire out. 5 rooms lost, $100,000." The amount is left off
+ * when the card did not hear it (a save loaded as the fire ended).
+ */
+export function fireOutText(lost: number, cost: number | null): string {
+  const rooms = lost === 0 ? 'No rooms lost' : `${lost} room${lost === 1 ? '' : 's'} lost`;
+  return cost === null ? `Fire out. ${rooms}.` : `Fire out. ${rooms}, ${formatMoney(cost)}.`;
+}
+
+/** The dollar amount in a sim money line ("... cost $250,000 and ..."), or null. */
+export function moneyIn(text: string): number | null {
+  const match = /cost \$([\d,]+)/.exec(text);
+  return match?.[1] === undefined ? null : Number(match[1].replace(/,/g, ''));
 }
 
 interface Card {
@@ -165,6 +191,8 @@ interface FireIncident {
   floors: Set<number>;
   /** From the closing log line, when there was one. */
   damaged: number | null;
+  /** What the fire cost: the clearing bill from the closing line plus the helicopter's flight. */
+  cost: number | null;
   closed: boolean;
   /** Null once the player dismissed it; the incident goes on without a card. */
   card: Card | null;
@@ -177,13 +205,18 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
   const cards: Card[] = [];
   const more = el('p', 'hs-toast-more');
   let incident: FireIncident | null = null;
-  /** The bomb threat's card: the ransom line and its button (off while cash is short), then the outcome. */
+  /**
+   * The bomb threat's card: the ransom line and its button (off while cash is short), then the
+   * outcome. With a security office on duty the card says it will find the bomb, and the ransom
+   * steps back to a secondary action.
+   */
   let bomb: {
     card: Card | null;
     body: HTMLElement | null;
     closed: boolean;
     pay: HTMLButtonElement;
     short: HTMLElement;
+    searching: HTMLElement;
   } | null = null;
   /** The theft's card: the response, then the outcome. */
   let theft: { card: Card | null; body: HTMLElement | null; closed: boolean } | null = null;
@@ -253,7 +286,7 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
   function startIncident(key: string): FireIncident {
     if (incident && !incident.closed) closeIncident(incident);
     const { card, body } = open('hs-toast is-fire');
-    incident = { key, rooms: new Set(), floors: new Set(), damaged: null, closed: false, card, body, shown: '' };
+    incident = { key, rooms: new Set(), floors: new Set(), damaged: null, cost: null, closed: false, card, body, shown: '' };
     return incident;
   }
 
@@ -268,11 +301,13 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
     const body = fire.body;
     if (!body) return;
     const world = deps.getWorld();
-    const cost = EVENTS.fire.helicopterCost;
+    // The full charge, flight and clearing bill for every room burning, as the sim will take it.
+    const event = (world.events ?? []).find((e) => e.kind === 'fire');
+    const cost = event && event.kind === 'fire' ? helicopterCost(world, event) : EVENTS.fire.helicopterCost;
     const security = securityOnDuty(world);
     const affordable = world.cash >= cost;
-    const headline = fire.closed ? fireOutText(fire.damaged ?? fire.rooms.size) : fireHeadline([...fire.floors], fire.rooms.size);
-    const key = `${headline}|${fire.closed}|${security}|${affordable}`;
+    const headline = fire.closed ? fireOutText(fire.damaged ?? fire.rooms.size, fire.cost) : fireHeadline([...fire.floors], fire.rooms.size);
+    const key = `${headline}|${fire.closed}|${security}|${affordable}|${cost}`;
     if (key === fire.shown) return;
     fire.shown = key;
     const parts: HTMLElement[] = [el('p', 'hs-toast-text', headline)];
@@ -305,12 +340,19 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
       addRoom(fire, entry.roomId, entry.text);
       return;
     }
+    if (kind === 'helicopter' && incident && !incident.closed) {
+      // The flight's line comes just before the closing line; the card adds the two.
+      const flight = moneyIn(entry.text);
+      if (flight !== null) incident.cost = (incident.cost ?? 0) + flight;
+      return;
+    }
     if (kind === 'end' && incident && !incident.closed) {
       const count = /(\d+) rooms? burned down/.exec(entry.text)?.[1];
       if (count !== undefined) incident.damaged = Number(count);
+      const clearing = moneyIn(entry.text);
+      if (clearing !== null) incident.cost = (incident.cost ?? 0) + clearing;
       closeIncident(incident);
     }
-    // The helicopter's own line is part of the closing; the log keeps it.
   }
 
   function sync(): void {
@@ -378,8 +420,10 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
     row.append(pay);
     const short = el('p', 'hs-toast-note');
     short.hidden = true;
-    body.append(el('p', 'hs-toast-text', text), row, short);
-    bomb = { card, body, closed: false, pay, short };
+    const searching = el('p', 'hs-toast-note');
+    searching.hidden = true;
+    body.append(el('p', 'hs-toast-text', text), searching, row, short);
+    bomb = { card, body, closed: false, pay, short, searching };
     renderRansom(deps.getWorld());
   }
 
@@ -390,6 +434,11 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
     const ransom = event && event.kind === 'bomb' ? event.ransom : EVENTS.bomb.ransom;
     const short = world.cash < ransom;
     if (bomb.pay.disabled !== short) bomb.pay.disabled = short;
+    const security = securityOnDuty(world);
+    const searchLine = security ? SECURITY_SEARCHING : '';
+    if (bomb.searching.textContent !== searchLine) bomb.searching.textContent = searchLine;
+    if (bomb.searching.hidden !== !security) bomb.searching.hidden = !security;
+    bomb.pay.classList.toggle('is-secondary', security);
     const note = short ? `Not enough cash. The ransom is ${formatMoney(ransom)}.` : '';
     if (bomb.short.textContent !== note) bomb.short.textContent = note;
     if (bomb.short.hidden !== !short) bomb.short.hidden = !short;

@@ -1,9 +1,11 @@
 // The log and room panels on a fake DOM: what a refresh builds, and what it leaves alone.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createFinancesPanel, createLogPanel, createQueryPanel, createSettingsPanel, type PanelContext } from '../../src/ui/panels';
+import { createFinancesPanel, createLogPanel, createQueryPanel, createSettingsPanel, nextSettleMinute, nextSettleTitle, type PanelContext } from '../../src/ui/panels';
 import type { Sound } from '../../src/audio/audio';
 import { RENT } from '../../src/sim/rules';
-import type { LogEntry } from '../../src/sim/types';
+import { applyCommand } from '../../src/sim/build';
+import type { LogEntry, World } from '../../src/sim/types';
+import { createWorld } from '../../src/sim/world';
 import { FakeDom, type FakeElement } from './fake-dom';
 
 let dom: FakeDom;
@@ -390,24 +392,114 @@ describe('room panel rent stepper', () => {
   });
 });
 
+/** A small tower on a fixed world: a lobby, two offices (one leased), a security office, an elevator with two cars. */
+function financeWorld(): World {
+  const world = createWorld(7);
+  world.cash = 5_000_000;
+  world.stars = 2;
+  for (let x = 0; x < 40; x += 1) applyCommand(world, { kind: 'build', room: 'lobby', floor: 1, x });
+  expect(applyCommand(world, { kind: 'build', room: 'office', floor: 2, x: 0 }).ok).toBe(true);
+  expect(applyCommand(world, { kind: 'build', room: 'office', floor: 2, x: 9 }).ok).toBe(true);
+  expect(applyCommand(world, { kind: 'build', room: 'security', floor: 2, x: 18 }).ok).toBe(true);
+  expect(applyCommand(world, { kind: 'shaft.build', shaft: 'standard', x: 36, floorMin: 1, floorMax: 3 }).ok).toBe(true);
+  const shaftId = [...world.shafts.keys()][0]!;
+  expect(applyCommand(world, { kind: 'shaft.addCar', shaftId }).ok).toBe(true);
+  const leased = [...world.rooms.values()].find((r) => r.kind === 'office' && r.x === 0)!;
+  leased.vacant = false;
+  leased.eval = 1;
+  world.cash = 250_000;
+  world.time.minute = 1440 + 600; // the quarter's second day, 10 AM: the next settle is 2 days on
+  world.stats.lastQuarter = {
+    income: 100_000,
+    upkeep: 100_000,
+    losses: 20_000,
+    net: -20_000,
+    incomeByKind: { office: 100_000 },
+    upkeepByKind: { standard: 80_000, security: 20_000 },
+    lossesByKind: { fire: 20_000 },
+  };
+  world.stats.incomeByKind = { shop: 5_000 };
+  world.stats.upkeepByKind = {};
+  world.stats.lossesByKind = { theft: 2_000 };
+  return world;
+}
+
+/** Each finances section: its title, then each line as "label value" or the note's words. */
+function financeSections(panel: FakeElement): string[][] {
+  return panel
+    .descendants()
+    .filter((n) => n.className === 'hs-section')
+    .map((section) => {
+      const title = section.children[0]?.textContent ?? '';
+      const list = section.children[1] as FakeElement;
+      return [title, ...list.children.map((line) => (line.className === 'hs-note' ? line.textContent : line.children.map((c) => c.textContent).join(' ')))];
+    });
+}
+
 describe('finances bento', () => {
   it('shows cash now and last quarter as tiles, a small label over a big number in the money face', () => {
-    const stats = { lastQuarter: { income: 30_000, upkeep: 12_000, net: 18_000 }, incomeByKind: { office: 30_000 }, upkeepByKind: {} };
-    const world = { cash: 250_000, stats };
+    const world = financeWorld();
     const panel = node(createFinancesPanel({ world } as never, ctx));
     const bento = panel.descendants().find((n) => n.className === 'hs-bento') as FakeElement;
-    const tiles = bento.children.map((t) => [t.className, t.children[0]?.textContent, t.children[1]?.textContent, t.children[1]?.className]);
+    const tiles = bento.children.map((t) => [t.className, t.children[0]?.textContent, t.children[1]?.textContent, t.hidden]);
     expect(tiles).toEqual([
-      ['hs-tile is-wide', 'Cash now', '$250,000', 'hs-tile-value hs-money'],
-      ['hs-tile', 'Income last quarter', '$30,000', 'hs-tile-value hs-money'],
-      ['hs-tile', 'Costs last quarter', '$12,000', 'hs-tile-value hs-money'],
-      ['hs-tile is-wide is-up', 'Profit last quarter', '+$18,000', 'hs-tile-value hs-money'],
+      ['hs-tile is-wide', 'Cash now', '$250,000', false],
+      ['hs-tile', 'Income last quarter', '$100,000', false],
+      ['hs-tile', 'Running costs last quarter', '$100,000', false],
+      ['hs-tile is-wide', 'Lost to trouble last quarter', '$20,000', false],
+      ['hs-tile is-wide is-down', 'Profit last quarter', '-$20,000', false],
     ]);
+    expect(bento.children[1]?.children[1]?.className).toBe('hs-tile-value hs-money');
     world.cash = 1_000;
-    stats.lastQuarter = { income: 0, upkeep: 5_000, net: -5_000 };
+    world.stats.lastQuarter = { income: 30_000, upkeep: 12_000, losses: 0, net: 18_000, incomeByKind: {}, upkeepByKind: {}, lossesByKind: {} };
     (panel as unknown as { refresh(): void }).refresh();
     expect(bento.children[0]?.children[1]?.textContent).toBe('$1,000');
-    expect(bento.children[3]?.className).toBe('hs-tile is-wide is-down');
-    expect(panel.descendants().some((n) => n.className === 'hs-row-value hs-money' && n.textContent === '$30,000')).toBe(true);
+    // No money lost to trouble: the tile goes.
+    expect(bento.children[3]?.hidden).toBe(true);
+    expect(bento.children[4]?.className).toBe('hs-tile is-wide is-up');
+  });
+
+  it('itemises last quarter, this quarter so far, and the next settle, by kind', () => {
+    const world = financeWorld();
+    const panel = node(createFinancesPanel({ world } as never, ctx));
+    expect(financeSections(panel)).toEqual([
+      ['Last quarter', 'Office +$100,000', 'Elevator cars, 8 -$80,000', 'Security office, 1 -$20,000', 'Fire damage -$20,000'],
+      ['This quarter so far', 'Shop +$5,000', 'Theft -$2,000'],
+      [
+        'Next settle, 5 AM in 2 days',
+        'Office +$10,000',
+        '1 office empty, no rent yet',
+        'Security office, 1 -$20,000',
+        'Elevator cars, 2 -$20,000',
+        'Expected profit -$30,000',
+      ],
+    ]);
+  });
+
+  it('says Nothing yet for an empty list, and leaves out zero rows', () => {
+    const world = createWorld(7);
+    world.stats.incomeByKind = { office: 0 };
+    const panel = node(createFinancesPanel({ world } as never, ctx));
+    expect(financeSections(panel)).toEqual([
+      ['Last quarter', 'Nothing yet.'],
+      ['This quarter so far', 'Nothing yet.'],
+      ['Next settle, 5 AM in 3 days', 'Nothing yet.'],
+    ]);
+  });
+});
+
+describe('next settle', () => {
+  it('is 5 AM on the first day of the quarter, the same minute when it has not run yet', () => {
+    expect(nextSettleMinute(0)).toBe(300);
+    expect(nextSettleMinute(300)).toBe(300);
+    expect(nextSettleMinute(301)).toBe(3 * 1440 + 300);
+    expect(nextSettleMinute(3 * 1440 + 299)).toBe(3 * 1440 + 300);
+  });
+
+  it('says when in words, never a day number: today, tomorrow, or in N days', () => {
+    expect(nextSettleTitle(2 * 60)).toBe('Next settle, 5 AM today');
+    expect(nextSettleTitle(2 * 1440 + 22 * 60)).toBe('Next settle, 5 AM tomorrow');
+    expect(nextSettleTitle(1440 + 600)).toBe('Next settle, 5 AM in 2 days');
+    expect(nextSettleTitle(301)).toBe('Next settle, 5 AM in 3 days');
   });
 });

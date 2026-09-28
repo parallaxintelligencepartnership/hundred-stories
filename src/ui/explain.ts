@@ -9,6 +9,7 @@ import { LIMITS, ROOMS } from '../sim/rules';
 import { spanTop } from '../sim/types';
 import type { ShaftKind, Star, World } from '../sim/types';
 import { formatFloor, formatMoney, starsTitle } from './format';
+import { toolUpkeep } from './palette';
 
 /** Which common refusal a build.ts reason is, or null for one the chip shows as is. */
 export type RefusalKind = 'cash' | 'noFloorBelow' | 'overlapsRoom' | 'overlapsShaft' | 'outOfTower' | 'needsStar';
@@ -51,18 +52,34 @@ function supportFloor(floorMin: number, top: number): number {
   return top + 1;
 }
 
-/** One sentence under a refused chip, or null when the reason is not one of the common ones. */
+/** "It also costs $10,000 a quarter to run." for a placement with a running cost, else empty. */
+export function upkeepSentence(upkeep: number, also: boolean): string {
+  if (upkeep <= 0) return '';
+  return `It ${also ? 'also ' : ''}costs ${formatMoney(upkeep)} a quarter to run.`;
+}
+
+/**
+ * One sentence under a refused chip, or null when the reason is not one of the common ones.
+ * `upkeep` is what the placement would cost to run each quarter (toolUpkeep), said after the
+ * cash refusal so the price and the running cost are read together.
+ */
 export function refusalExplainer(
   placement: Placement,
   world: Pick<World, 'cash' | 'stars'>,
   height = 1,
+  upkeep = 0,
 ): string | null {
   if (placement.ok || !placement.reason) return null;
   const found = refusalKind(placement.reason);
   if (!found) return null;
   switch (found.kind) {
     case 'cash':
-      return `It costs ${formatMoney(placement.cost)} and you have ${formatMoney(world.cash)}. Rent comes in each quarter.`;
+      return [
+        `It costs ${formatMoney(placement.cost)} and you have ${formatMoney(world.cash)}. Rent comes in each quarter.`,
+        upkeepSentence(upkeep, true),
+      ]
+        .filter(Boolean)
+        .join(' ');
     case 'noFloorBelow': {
       // A room's placement keeps floorMax at its floor, so its height gives the span's top.
       const top = Math.max(placement.floorMax, spanTop(placement.floorMin, height));
@@ -97,9 +114,13 @@ export function servesLine(kind: ShaftKind, floorMin: number, floorMax: number):
   return `Stops at ${floors.length} of ${span} floors: lobbies and basements.`;
 }
 
-/** The chip's second line for this placement, or empty for none. */
+/**
+ * The chip's second line for this placement, or empty for none. A new room or elevator with a
+ * running cost says it (one car for an elevator); stretching an elevator adds none.
+ */
 export function placementNote(placement: Placement, tool: Tool, world: Pick<World, 'cash' | 'stars' | 'shafts'>): string {
-  if (!placement.ok) return refusalExplainer(placement, world, tool.kind === 'room' ? ROOMS[tool.room].height : 1) ?? '';
+  const upkeep = placement.shaftId === undefined ? toolUpkeep(tool, world) : 0;
+  if (!placement.ok) return refusalExplainer(placement, world, tool.kind === 'room' ? ROOMS[tool.room].height : 1, upkeep) ?? '';
   const kind = placementShaftKind(placement, tool, world);
-  return kind ? servesLine(kind, placement.floorMin, placement.floorMax) : '';
+  return [kind ? servesLine(kind, placement.floorMin, placement.floorMax) : '', upkeepSentence(upkeep, false)].filter(Boolean).join(' ');
 }

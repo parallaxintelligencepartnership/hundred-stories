@@ -702,3 +702,58 @@ describe('car range on a shaft through the ground floor (audit A S6)', () => {
     expect(withRange({ lo: -1, hi: 1 })).toBe('loaded');
   });
 });
+
+describe('quarter money tables (review 2026-09-28 I1, I2)', () => {
+  function worldWithLosses(): World {
+    const world = richWorld();
+    world.stats.lossesByKind = { theft: 2_000 };
+    world.stats.lastQuarter = {
+      income: 10_000,
+      upkeep: 20_000,
+      losses: 40_000,
+      net: -50_000,
+      incomeByKind: { office: 10_000 },
+      upkeepByKind: { standard: 20_000 },
+      lossesByKind: { fire: 40_000 },
+    };
+    return world;
+  }
+
+  it('writes the losses and the last quarter tables and reads them back, hash and all', () => {
+    const world = worldWithLosses();
+    const result = deserialize(serialize(world));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.world.stats.lossesByKind).toEqual({ theft: 2_000 });
+    expect(result.world.stats.lastQuarter).toEqual(world.stats.lastQuarter);
+    expect(hashWorld(result.world)).toBe(hashWorld(world));
+  });
+
+  it('loads a save written before the fields existed, with empty tables and zero losses', () => {
+    const world = richWorld();
+    world.stats.lastQuarter = { income: 10_000, upkeep: 20_000, losses: 0, net: -10_000, incomeByKind: {}, upkeepByKind: {}, lossesByKind: {} };
+    world.stats.lossesByKind = {};
+    const data = JSON.parse(serialize(world));
+    delete data.stats.lossesByKind;
+    data.stats.lastQuarter = { income: 10_000, upkeep: 20_000, net: -10_000 };
+    const result = deserialize(JSON.stringify(data));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.world.stats.lossesByKind).toEqual({});
+    expect(result.world.stats.lastQuarter).toEqual(world.stats.lastQuarter);
+    expect(hashWorld(result.world)).toBe(hashWorld(world));
+  });
+
+  it('refuses tables that are not tables of numbers', () => {
+    for (const breakIt of [
+      (d: Record<string, any>) => { d.stats.lossesByKind = { fire: 'lots' }; },
+      (d: Record<string, any>) => { d.stats.lastQuarter.losses = 'lots'; },
+      (d: Record<string, any>) => { d.stats.lastQuarter.upkeepByKind = [1]; },
+    ]) {
+      const data = JSON.parse(serialize(worldWithLosses()));
+      breakIt(data);
+      const result = deserialize(JSON.stringify(data));
+      expect(result.ok).toBe(false);
+    }
+  });
+});

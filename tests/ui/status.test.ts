@@ -43,21 +43,31 @@ function stubWorld(overrides: Partial<World> = {}): World {
     stars: 2,
     time: { minute: 12 * 60 },
     rooms: rooms('office'),
-    stats: { vipRating: 'none', weddingsHeld: 0 },
+    stats: { vipRating: 'none', weddingsHeld: 0, incomeByKind: { office: 200_000, shop: 52_000 }, lossesByKind: { theft: 2_000 } },
     ...overrides,
   } as World;
 }
 
 describe('status bar deltas', () => {
-  it('counts cash from the quarter start, spending included, and says so', () => {
+  it('counts what the quarter earned, income less losses to trouble, never construction', () => {
     expect(quarterDelta(stubWorld())).toBe(250_000);
-    expect(quarterDeltaText(stubWorld())).toBe('+$250,000 this quarter');
-    expect(quarterDeltaText(stubWorld({ cash: 900_000 }))).toBe('-$100,000 this quarter');
+    expect(quarterDeltaText(stubWorld())).toBe('+$250,000 earned this quarter');
+    // Building an $80,000 elevator lowers cash and leaves the readout where it was.
+    const built = stubWorld({ cash: 1_250_000 - 80_000 });
+    expect(quarterDeltaText(built)).toBe('+$250,000 earned this quarter');
+    // The opening build of a new tower: cash far under the start, nothing earned yet.
+    const opening = stubWorld({ cash: 1_095_000, quarterStartCash: 2_000_000 });
+    opening.stats.incomeByKind = {};
+    opening.stats.lossesByKind = {};
+    expect(quarterDeltaText(opening)).toBe('$0 earned this quarter');
+    // A fire that cost more than the quarter earned reads as a loss.
+    const burned = stubWorld();
+    burned.stats.lossesByKind = { fire: 300_000 };
+    expect(quarterDeltaText(burned)).toBe('-$48,000 earned this quarter');
   });
 
-  it('shows a dash until a v2 save reaches its first boundary', () => {
-    expect(quarterDelta(stubWorld({ quarterStartCash: null }))).toBe(null);
-    expect(quarterDeltaText(stubWorld({ quarterStartCash: null }))).toBe('– this quarter');
+  it('shows a dash for a world with no income table, and population until midnight', () => {
+    expect(quarterDelta(stubWorld({ stats: { vipRating: 'none', weddingsHeld: 0 } } as Partial<World>))).toBe(null);
     expect(populationTrend(stubWorld({ dayStartPopulation: null }))).toMatchObject({ delta: null, arrow: 'unknown', text: '– today' });
   });
 
@@ -128,7 +138,7 @@ describe('status bar on the page', () => {
     const bar = createStatusBar();
     bar.update(stubWorld(), 2);
     const cash = bar.cash as unknown as FakeElement;
-    expect(cash.textContent).toBe('Cash$1,250,000+$250,000 this quarter');
+    expect(cash.textContent).toBe('Cash$1,250,000+$250,000 earned this quarter');
     const pop = bar.population as unknown as FakeElement;
     expect(find(pop, 'hs-readout-meta')[0]?.getAttribute('aria-label')).toBe('Up 120 today');
 

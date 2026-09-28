@@ -406,6 +406,7 @@ describe('a tower without a center', () => {
       ...buildRow('fastFood', 5, [100]),
     ]);
     runDays(world, 3);
-    expect(hashWorld(world)).toBe('2ee5cd9f');
+    // Re-recorded 2026-09-28: the stats gained loss and by-kind tables and hotel income changed.
+    expect(hashWorld(world)).toBe('36d95265');
   });
 });

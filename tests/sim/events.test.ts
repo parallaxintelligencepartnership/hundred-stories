@@ -3,7 +3,9 @@ import {
   EVENT_TEST_HOOKS,
   formatDollars,
   handleEventCommand,
+  helicopterCost,
   hooksActive,
+  startBomb,
   startFire,
   startTheft,
   startVip,
@@ -151,13 +153,144 @@ describe('fire', () => {
     expect(office.onFire).toBe(true);
     world.cash = 1_000;
     const hash = hashWorld(world);
+    const fire = eventOf(world, 'fire');
+    if (!fire) throw new Error('no fire');
     expect(handleEventCommand(world, { kind: 'fire.callHelicopter' })).toEqual({
       ok: false,
-      reason: `Not enough cash. A firefighting helicopter costs ${formatDollars(EVENTS.fire.helicopterCost)}.`,
+      reason: `Not enough cash. A firefighting helicopter costs ${formatDollars(helicopterCost(world, fire))}.`,
     });
     expect(world.cash).toBe(1_000);
     expect(hashWorld(world)).toBe(hash);
     expect(eventOf(world, 'fire')).toBeDefined();
+  });
+});
+
+describe('fire: bounded and billed (review 2026-09-28 C1, I2, I4)', () => {
+  function startedFire(): Extract<ActiveEvent, { kind: 'fire' }> {
+    const fire = eventOf(world, 'fire');
+    if (!fire) throw new Error('no fire');
+    return fire;
+  }
+
+  it('a rolled fire never starts in a lobby, sky lobby, stairs or escalator', () => {
+    world.stars = 3;
+    for (let x = 101; x < 160; x++) place(world, 'lobby', 1, x);
+    place(world, 'stairs', 1, 170);
+    place(world, 'escalator', 1, 180);
+    place(world, 'skyLobby', 15, 100);
+    const office = place(world, 'office', 2, 100);
+    EVENT_TEST_HOOKS.chance.fire = 1;
+    at(world, ROLL_MINUTE);
+    expect(startedFire().roomIds).toEqual([office.id]);
+  });
+
+  it('with only structure rooms there is no fire, rolled or forced', () => {
+    world.stars = 3;
+    const lobby = place(world, 'lobby', 1, 101);
+    EVENT_TEST_HOOKS.chance.fire = 1;
+    at(world, ROLL_MINUTE);
+    expect(eventOf(world, 'fire')).toBeUndefined();
+    EVENT_TEST_HOOKS.target.fire = lobby.id;
+    startFire(world);
+    expect(eventOf(world, 'fire')).toBeUndefined();
+    expect(lobby.onFire).toBe(false);
+  });
+
+  it('never spreads into a lobby segment next door, but still spreads to the office', () => {
+    world.stars = 2;
+    const lobby = place(world, 'lobby', 2, 99);
+    const office = place(world, 'office', 2, 100);
+    const neighbor = place(world, 'office', 2, 109);
+    EVENT_TEST_HOOKS.target.fire = office.id;
+    startFire(world);
+    const t0 = world.time.minute;
+    at(world, t0 + EVENTS.fire.spreadMinutes);
+    at(world, t0 + 2 * EVENTS.fire.spreadMinutes);
+    expect(neighbor.onFire).toBe(true);
+    expect(lobby.onFire).toBe(false);
+    expect(startedFire().roomIds).not.toContain(lobby.id);
+  });
+
+  it('security puts it out securityPutOutMinutes after it started, however many rooms caught', () => {
+    world.stars = 2;
+    const width = ROOMS.office.width;
+    const row = [0, 1, 2, 3, 4].map((i) => place(world, 'office', 2, 100 + i * width));
+    place(world, 'security', 1, 200);
+    EVENT_TEST_HOOKS.target.fire = row[0]!.id;
+    startFire(world);
+    const t0 = world.time.minute;
+    const cashBefore = world.cash;
+    at(world, t0 + EVENTS.fire.spreadMinutes); // the second office catches
+    expect(startedFire().roomIds).toHaveLength(2);
+    at(world, t0 + EVENTS.fire.securityPutOutMinutes);
+    expect(eventOf(world, 'fire')).toBeUndefined();
+    expect(cashBefore - world.cash).toBe(2 * EVENTS.fire.damagePerRoom);
+    expect(world.stats.lossesByKind.fire).toBe(2 * EVENTS.fire.damagePerRoom);
+    expect(row.slice(2).every((r) => world.rooms.has(r.id))).toBe(true);
+  });
+
+  it('with no security and no helicopter it burns itself out after burnOutMinutes and bills the rooms', () => {
+    expect(EVENTS.fire.burnOutMinutes).toBe(180);
+    world.stars = 2;
+    const office = place(world, 'office', 2, 100);
+    EVENT_TEST_HOOKS.target.fire = office.id;
+    startFire(world);
+    const t0 = world.time.minute;
+    const cashBefore = world.cash;
+    at(world, t0 + EVENTS.fire.burnOutMinutes - 1);
+    expect(eventOf(world, 'fire')).toBeDefined();
+    at(world, t0 + EVENTS.fire.burnOutMinutes);
+    expect(eventOf(world, 'fire')).toBeUndefined();
+    expect(world.rooms.has(office.id)).toBe(false);
+    expect(cashBefore - world.cash).toBe(EVENTS.fire.damagePerRoom);
+    expect(world.log.at(-1)?.text).toBe('The fire burned itself out. 1 room burned down and clearing the damage cost $20,000.');
+  });
+
+  it('bills a burned room no more than it cost to build', () => {
+    world.stars = 3;
+    const space = place(world, 'parkingSpace', -1, 100);
+    place(world, 'security', 1, 200);
+    EVENT_TEST_HOOKS.target.fire = space.id;
+    startFire(world);
+    const t0 = world.time.minute;
+    const cashBefore = world.cash;
+    at(world, t0 + EVENTS.fire.securityPutOutMinutes);
+    expect(cashBefore - world.cash).toBe(ROOMS.parkingSpace.cost);
+    expect(world.stats.lossesByKind.fire).toBe(ROOMS.parkingSpace.cost);
+  });
+
+  it('helicopterCost is what the check tests and what the call takes', () => {
+    world.stars = 3;
+    const office = place(world, 'office', 2, 100);
+    const next = place(world, 'office', 2, 109);
+    EVENT_TEST_HOOKS.target.fire = office.id;
+    startFire(world);
+    at(world, world.time.minute + EVENTS.fire.spreadMinutes);
+    expect(next.onFire).toBe(true);
+    const fire = startedFire();
+    const cost = helicopterCost(world, fire);
+    expect(cost).toBe(EVENTS.fire.helicopterCost + 2 * EVENTS.fire.damagePerRoom);
+
+    world.cash = cost - 1;
+    expect(handleEventCommand(world, { kind: 'fire.callHelicopter' })).toEqual({
+      ok: false,
+      reason: `Not enough cash. A firefighting helicopter costs ${formatDollars(cost)}.`,
+    });
+    expect(world.cash).toBe(cost - 1);
+
+    world.cash = cost;
+    expect(handleEventCommand(world, { kind: 'fire.callHelicopter' })).toEqual({ ok: true });
+    expect(world.cash).toBe(0);
+    expect(world.stats.lossesByKind).toEqual({ helicopter: EVENTS.fire.helicopterCost, fire: 2 * EVENTS.fire.damagePerRoom });
+  });
+
+  it('a paid ransom is booked as a loss', () => {
+    world.stars = 3;
+    const office = place(world, 'office', 2, 100);
+    EVENT_TEST_HOOKS.target.bomb = office.id;
+    startBomb(world);
+    expect(handleEventCommand(world, { kind: 'bomb.pay' })).toEqual({ ok: true });
+    expect(world.stats.lossesByKind.ransom).toBe(EVENTS.bomb.ransom);
   });
 });
 
@@ -188,14 +321,14 @@ describe('fire: nobody walks into a burning building', () => {
 
   it('holds every arrival outside while the fire burns, says so once, and lets them in after', () => {
     const { office, condo } = tower();
-    EVENT_TEST_HOOKS.chance.fire = 1;
+    // 07:00, so the fire (which burns itself out after burnOutMinutes) spans the 08:00 to 09:15 arrivals.
+    tickMany(world, 60);
     EVENT_TEST_HOOKS.target.fire = condo.id;
-    tick(world); // 06:00, the daily roll: the condo catches fire
-    EVENT_TEST_HOOKS.chance.fire = 0;
+    startFire(world);
     expect(condo.onFire).toBe(true);
     expect(world.log.filter((e) => e.text === WAITING)).toHaveLength(1);
 
-    tickMany(world, 6 * 60); // to 12:00: the office leases, the lunch crowd would be arriving
+    tickMany(world, EVENTS.fire.burnOutMinutes - 1); // to 09:59: the office leases, its workers would be arriving
     expect(eventOf(world, 'fire')).toBeDefined();
     expect(office.vacant).toBe(false);
     expect(office.tenants.length).toBeGreaterThan(0);
@@ -252,6 +385,8 @@ describe('fire: nobody walks into a burning building', () => {
       tower();
       const forSale = place(world, 'condo', 2, 300, { vacant: true, eval: 1 });
       const fastFood = [...world.rooms.values()].find((r) => r.kind === 'fastFood') as Room;
+      // 07:00, before the 07:30 window opens, so the fire outlasts the window before it burns itself out.
+      tickMany(world, 60);
       EVENT_TEST_HOOKS.target.fire = fastFood.id;
       startFire(world);
       expect(fastFood.onFire).toBe(true);

@@ -8,8 +8,9 @@
 
 import type { Tool } from '../game/api';
 import type { ThumbnailKind } from '../render/thumbnail';
+import { quarterUpkeepOf } from '../sim/economy';
 import { ROOMS, SHAFTS } from '../sim/rules';
-import type { RoomKind, ShaftKind, Star } from '../sim/types';
+import type { RoomKind, ShaftKind, Star, World } from '../sim/types';
 import { formatMoney } from './format';
 import { icon, type IconName } from './icons';
 import { assignLetters, keysLabel } from './keys';
@@ -93,6 +94,23 @@ export interface ToolRowState {
   progress: { value: number; max: number } | null;
 }
 
+/**
+ * What one of this tool's things costs to run each quarter, at the tower's rating now: a room's
+ * upkeep (a lobby's grows with the stars), or one car for an elevator, which comes with its
+ * first car. Zero for a room with no running cost and for Demolish and Look.
+ */
+export function toolUpkeep(tool: Tool, world: Pick<World, 'stars'>): number {
+  // quarterUpkeepOf reads only the rating from the world.
+  if (tool.kind === 'room') return quarterUpkeepOf(world as World, tool.room);
+  if (tool.kind === 'shaft') return quarterUpkeepOf(world as World, tool.shaft);
+  return 0;
+}
+
+/** "$80,000", or "$200,000, then $10,000 a quarter" for a thing with a running cost. */
+export function priceText(price: number, upkeep: number): string {
+  return upkeep > 0 ? `${formatMoney(price)}, then ${formatMoney(upkeep)} a quarter` : formatMoney(price);
+}
+
 /** What a tile shows for this world and this tool in hand. Pure, so the states are testable. */
 export function toolRowState(
   row: Pick<PaletteRow, 'star' | 'price' | 'tool'>,
@@ -102,11 +120,12 @@ export function toolRowState(
   const locked = world.stars < row.star;
   const selected = !locked && sameTool(row.tool, held);
   const short = !locked && row.price !== null && row.price > world.cash ? row.price - world.cash : 0;
+  const upkeep = toolUpkeep(row.tool, world as Pick<World, 'stars'>);
   return {
     locked,
     selected,
     short,
-    costText: locked ? needsStars(row.star) : row.price === null ? '' : formatMoney(row.price),
+    costText: locked ? needsStars(row.star) : row.price === null ? '' : priceText(row.price, upkeep),
     shortText: short > 0 ? `Short ${formatMoney(short)}` : '',
     progress: locked ? { value: Math.max(0, Math.min(world.stars, row.star)), max: row.star } : null,
   };

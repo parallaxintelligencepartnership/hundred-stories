@@ -1471,9 +1471,16 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     if (logMoved && newest) {
       newsShowsAlert = newest.level === 'alert';
       // The first look is the tower as loaded: its old lines are history, not news.
-      if (first || newsShowsAlert) return;
+      if (first) return;
       // Watching: the News panel keeps the line; no toast rises over the tower (alerts still do).
       if (shell.classList.contains(WATCH_CLASS)) return;
+      if (newsShowsAlert) {
+        // An alert is its card. A notable line in the same batch still toasts beside it: the
+        // quarter settle line is logged just before the debt warnings it explains.
+        const notable = log.slice(log.length - fresh).reverse().find((line) => line.level === 'info' && line.notable);
+        if (notable) toastLayer.show(notable.text, { onTap: openLog, tapLabel: 'Open the news' });
+        return;
+      }
       // A full tower logs warnings in bursts (give-ups, move-outs, people with no way out): one
       // folded toast now and then, not one each. The News panel keeps every line.
       if (newest.level === 'warn' && !acting) {

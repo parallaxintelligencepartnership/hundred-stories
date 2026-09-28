@@ -349,6 +349,9 @@ describe('below three stars', () => {
     // Recorded on 778dee5, before this package: a two star tower without a security office.
     // Re-recorded when rooms had to rest on structure: the same tower with the condo and hotel
     // rooms moved onto the floor 3 offices hashes 3bdf4126 on 778dee5 too.
+    // Re-recorded for the money review (2026-09-28): the stats now carry this quarter's losses
+    // and last quarter's tables, and a hotel night earns a third of its quarter figure, so the
+    // same tower hashes 0f446857. Guards and thieves still change nothing below three stars.
     const world = createWorld(2024);
     world.stars = 2;
     world.cash = 50_000_000;
@@ -365,6 +368,6 @@ describe('below three stars', () => {
     ]);
     resetEventTestHooks();
     runDays(world, 4);
-    expect(hashWorld(world)).toBe('3bdf4126');
+    expect(hashWorld(world)).toBe('0f446857');
   });
 });

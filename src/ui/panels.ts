@@ -19,8 +19,8 @@ import type { Renderer } from '../render/renderer';
 import { isVenueKind, venueLine, venueOf } from '../render/venue';
 import { canvasToPng, composeListImage, composeShareImage, shareMessage, shareStats, shareText, shareUrl } from '../share/share';
 import { applyTheme, readTheme, type Theme } from '../site/theme';
-import { officeQuarterRent } from '../sim/economy';
-import { ECONOMY, EVAL, LIMITS, RENT, ROOMS, SHAFTS, takesRent, WASTE } from '../sim/rules';
+import { officeQuarterRent, quarterForecast, quarterUpkeepOf } from '../sim/economy';
+import { ECONOMY, EVAL, LIMITS, RENT, ROOMS, SCHEDULES, SHAFTS, takesRent, WASTE } from '../sim/rules';
 import {
   describeBeat,
   followSim,
@@ -42,6 +42,7 @@ import type {
   CommandResult,
   Id,
   LogEntry,
+  LossKind,
   Room,
   RoomKind,
   Shaft,
@@ -642,7 +643,7 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
     el(
       'p',
       'hs-note',
-      `A new elevator costs ${formatMoney(rule.shaftCost)} with its first car. More cars cost ${formatMoney(rule.carCost)} each, up to ${rule.maxCars}.`,
+      `A new elevator costs ${formatMoney(rule.shaftCost)} with its first car. More cars cost ${formatMoney(rule.carCost)} each, up to ${rule.maxCars}. Each car costs ${formatMoney(rule.upkeepPerQuarterPerCar)} a quarter to run.`,
     ),
   );
 
@@ -826,7 +827,9 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
     setRowValue(cars, `${formatCount(shaft.cars.length)} of ${formatCount(rule.maxCars)}`);
     setRowValue(riders, formatCount(shaft.cars.reduce((n, c) => n + c.passengers.length, 0)));
     add.disabled = shaft.cars.length >= rule.maxCars;
-    add.title = add.disabled ? `This elevator already has ${shaft.cars.length} cars.` : '';
+    add.title = add.disabled
+      ? `This elevator already has ${shaft.cars.length} cars.`
+      : `${formatMoney(rule.carCost)}, then ${formatMoney(rule.upkeepPerQuarterPerCar)} a quarter`;
     remove.disabled = shaft.cars.length <= 1;
     remove.title = remove.disabled ? 'An elevator needs at least one car.' : '';
     offerReach(extendUp, game.canExtend(shaftId, shaft.floorMin, stepFloor(shaft.floorMax, 1)), 'Reach one floor higher');
@@ -917,54 +920,174 @@ function setRowValue(node: HTMLElement, text: string): void {
 
 // --------------------------------------------------------- finances panel
 
+/** One line of a finances list: a label and a signed amount, or a note with no amount. */
+export interface FinanceLine {
+  label: string;
+  /** Positive for money in, negative for money out; null for a note line. */
+  amount: number | null;
+}
+
+/** The three itemised lists under the tiles, each with its title. */
+export interface FinanceLists {
+  last: { title: string; lines: FinanceLine[] };
+  soFar: { title: string; lines: FinanceLine[] };
+  next: { title: string; lines: FinanceLine[] };
+}
+
+export const LOSS_LABELS: Record<LossKind, string> = {
+  fire: 'Fire damage',
+  helicopter: 'Helicopter',
+  bomb: 'Bomb damage',
+  ransom: 'Ransom',
+  theft: 'Theft',
+};
+
+const MINUTES_PER_QUARTER = 3 * 1440;
+
+/** The minute of the next quarter settle at or after `minute` (5 AM on the quarter's first day). */
+export function nextSettleMinute(minute: number): number {
+  const settle = SCHEDULES.quarterStartMinuteOfDay;
+  const quarterStart = Math.floor(Math.max(0, minute) / MINUTES_PER_QUARTER) * MINUTES_PER_QUARTER;
+  return minute <= quarterStart + settle ? quarterStart + settle : quarterStart + MINUTES_PER_QUARTER + settle;
+}
+
+/**
+ * "Next settle, 5 AM tomorrow", "Next settle, 5 AM in 2 days", or "Next settle, 5 AM today"
+ * before 5 AM on the quarter's first day. Days are calendar days; the game shows no day counter.
+ */
+export function nextSettleTitle(minute: number): string {
+  const at = nextSettleMinute(minute);
+  const hour = Math.floor(SCHEDULES.quarterStartMinuteOfDay / 60);
+  const hourText = `${hour % 12 === 0 ? 12 : hour % 12} ${hour < 12 ? 'AM' : 'PM'}`;
+  const days = Math.floor(at / 1440) - Math.floor(Math.max(0, minute) / 1440);
+  const when = days <= 0 ? 'today' : days === 1 ? 'tomorrow' : `in ${days} days`;
+  return `Next settle, ${hourText} ${when}`;
+}
+
+function isShaftKind(kind: RoomKind | ShaftKind): kind is ShaftKind {
+  return Object.hasOwn(SHAFTS, kind);
+}
+
+/** "Elevator cars, 8", "Lobby tiles, 45", "Security office, 2"; the bare label when no count is known. */
+function upkeepLabel(kind: RoomKind | ShaftKind, count: number | null): string {
+  const base = isShaftKind(kind) ? `${SHAFTS[kind].label} cars` : kind === 'lobby' || kind === 'skyLobby' ? `${ROOMS[kind].label} tiles` : ROOMS[kind].label;
+  return count === null ? base : `${base}, ${formatCount(count)}`;
+}
+
+function sortedEntries<K extends string>(table: Partial<Record<K, number>>): [K, number][] {
+  return (Object.entries(table) as [K, number | undefined][])
+    .filter((entry): entry is [K, number] => typeof entry[1] === 'number' && entry[1] !== 0)
+    .sort((a, b) => b[1] - a[1]);
+}
+
+function incomeLines(table: Partial<Record<RoomKind, number>>): FinanceLine[] {
+  return sortedEntries(table).map(([kind, amount]) => ({ label: kindLabel(kind), amount }));
+}
+
+function lossLines(table: Partial<Record<LossKind, number>>): FinanceLine[] {
+  return sortedEntries(table).map(([kind, amount]) => ({ label: LOSS_LABELS[kind] ?? kind, amount: -amount }));
+}
+
+/** Units that cost this much a quarter each: cars in shafts, rooms, lobby tiles. */
+function upkeepCounts(world: World): Partial<Record<RoomKind | ShaftKind, number>> {
+  const counts: Partial<Record<RoomKind | ShaftKind, number>> = {};
+  for (const room of world.rooms.values()) counts[room.kind] = (counts[room.kind] ?? 0) + 1;
+  for (const shaft of world.shafts.values()) counts[shaft.kind] = (counts[shaft.kind] ?? 0) + shaft.cars.length;
+  return counts;
+}
+
+/**
+ * Running cost lines. With `counts` the count is the tower's own (the forecast); without, it is
+ * read back from the amount when the cost per unit divides it evenly (last quarter's table),
+ * else the line shows no count.
+ */
+function upkeepLines(world: World, table: Partial<Record<RoomKind | ShaftKind, number>>, counts: Partial<Record<RoomKind | ShaftKind, number>> | null): FinanceLine[] {
+  return sortedEntries(table).map(([kind, amount]) => {
+    let count: number | null = counts ? counts[kind] ?? null : null;
+    if (!counts) {
+      const unit = quarterUpkeepOf(world, kind);
+      count = unit > 0 && amount % unit === 0 ? amount / unit : null;
+    }
+    return { label: upkeepLabel(kind, count), amount: -amount };
+  });
+}
+
+/** What the finances panel itemises: last quarter, this quarter so far, and the next settle. */
+export function financeLists(world: World): FinanceLists {
+  const last = world.stats.lastQuarter;
+  const forecast = quarterForecast(world);
+  const next: FinanceLine[] = [...incomeLines(forecast.rentByKind)];
+  if (forecast.vacantOffices > 0) {
+    const n = forecast.vacantOffices;
+    next.push({ label: `${formatCount(n)} office${n === 1 ? '' : 's'} empty, no rent yet`, amount: null });
+  }
+  next.push(...upkeepLines(world, forecast.upkeepByKind, upkeepCounts(world)));
+  if (next.some((line) => line.amount !== null)) next.push({ label: 'Expected profit', amount: forecast.rent - forecast.upkeep });
+  return {
+    last: {
+      title: 'Last quarter',
+      lines: [...incomeLines(last.incomeByKind ?? {}), ...upkeepLines(world, last.upkeepByKind ?? {}, null), ...lossLines(last.lossesByKind ?? {})],
+    },
+    soFar: {
+      title: 'This quarter so far',
+      lines: [...incomeLines(world.stats.incomeByKind), ...lossLines(world.stats.lossesByKind ?? {})],
+    },
+    next: { title: nextSettleTitle(world.time.minute), lines: next },
+  };
+}
+
 export function createFinancesPanel(game: GameApi, ctx: PanelContext): PanelElement {
   const { panel, body } = panelShell('Finances', 'finance', ctx);
-  const stats = game.world.stats;
-  const lastQuarter = (): { income: number; upkeep: number; net: number } =>
-    game.world.stats.lastQuarter;
+  const lastQuarter = (): World['stats']['lastQuarter'] => game.world.stats.lastQuarter;
 
-  // The summary as a bento grid: cash now across the top, then last quarter's three numbers.
+  // The summary as a bento grid: cash now across the top, then last quarter's numbers. Lost to
+  // trouble shows only in a quarter that lost money to a fire, a bomb, a ransom or a thief.
   const bento = el('div', 'hs-bento');
   const cashRow = tile('Cash now', formatMoney(game.world.cash), { wide: true, money: true });
-  const income = tile('Income last quarter', formatMoney(stats.lastQuarter.income), { money: true });
-  const upkeep = tile('Costs last quarter', formatMoney(stats.lastQuarter.upkeep), { money: true });
-  const net = tile('Profit last quarter', formatSignedMoney(stats.lastQuarter.net), { wide: true, money: true });
-  bento.append(cashRow, income, upkeep, net);
+  const income = tile('Income last quarter', formatMoney(lastQuarter().income), { money: true });
+  const upkeep = tile('Running costs last quarter', formatMoney(lastQuarter().upkeep), { money: true });
+  const losses = tile('Lost to trouble last quarter', formatMoney(lastQuarter().losses ?? 0), { wide: true, money: true });
+  const net = tile('Profit last quarter', formatSignedMoney(lastQuarter().net), { wide: true, money: true });
+  bento.append(cashRow, income, upkeep, losses, net);
   body.append(bento);
 
-  const incomeSection = section('Income this quarter so far');
-  const incomeList = el('div', 'hs-list');
-  incomeSection.append(incomeList);
-  const upkeepSection = section('Costs this quarter so far');
-  const upkeepList = el('div', 'hs-list');
-  upkeepSection.append(upkeepList);
-  body.append(incomeSection, upkeepSection);
+  const lists = (['last', 'soFar', 'next'] as const).map((key) => {
+    const node = section('');
+    const title = node.firstElementChild as HTMLElement;
+    const list = el('div', 'hs-list');
+    node.append(list);
+    body.append(node);
+    return { key, title, list };
+  });
 
-  const fillList = (list: HTMLDivElement, map: Partial<Record<string, number>>): void => {
-    const entries = Object.entries(map)
-      .filter((entry): entry is [string, number] => typeof entry[1] === 'number' && entry[1] !== 0)
-      .sort((a, b) => b[1] - a[1]);
-    const key = entries.map(([k, v]) => `${k}:${v}`).join('|');
+  const fillList = (list: HTMLDivElement, lines: FinanceLine[]): void => {
+    const key = lines.map((line) => `${line.label}:${line.amount}`).join('|');
     if (list.dataset['key'] === key) return;
     list.dataset['key'] = key;
-    if (entries.length === 0) {
+    if (lines.length === 0) {
       list.replaceChildren(el('p', 'hs-note', 'Nothing yet.'));
       return;
     }
     list.replaceChildren(
-      ...entries.map(([kind, value]) => moneyRow(kindLabel(kind as RoomKind | ShaftKind), formatMoney(value))),
+      ...lines.map((line) => (line.amount === null ? el('p', 'hs-note', line.label) : moneyRow(line.label, formatSignedMoney(line.amount)))),
     );
   };
 
   const refresh = (): void => {
-    setRowValue(income, formatMoney(lastQuarter().income));
-    setRowValue(upkeep, formatMoney(lastQuarter().upkeep));
-    setRowValue(net, formatSignedMoney(lastQuarter().net));
-    net.classList.toggle('is-up', lastQuarter().net > 0);
-    net.classList.toggle('is-down', lastQuarter().net < 0);
+    const last = lastQuarter();
+    setRowValue(income, formatMoney(last.income));
+    setRowValue(upkeep, formatMoney(last.upkeep));
+    setRowValue(losses, formatMoney(last.losses ?? 0));
+    losses.hidden = !((last.losses ?? 0) > 0);
+    setRowValue(net, formatSignedMoney(last.net));
+    net.classList.toggle('is-up', last.net > 0);
+    net.classList.toggle('is-down', last.net < 0);
     setRowValue(cashRow, formatMoney(game.world.cash));
-    fillList(incomeList, game.world.stats.incomeByKind);
-    fillList(upkeepList, game.world.stats.upkeepByKind);
+    const content = financeLists(game.world);
+    for (const { key, title, list } of lists) {
+      setText(title, content[key].title);
+      fillList(list, content[key].lines);
+    }
   };
   refresh();
   panel.refresh = refresh;

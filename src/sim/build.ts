@@ -7,6 +7,7 @@ import { handleEventCommand } from './events';
 import { isFollowed, recordBeat } from './story';
 import {
   DEMO_CAP_REASON,
+  ECONOMY,
   EDITION,
   insideDemoCap,
   LIMITS,
@@ -544,10 +545,13 @@ function doDemolish(world: World, roomId: number): CommandResult {
     removeSim(world, simId);
   }
   room.tenants = [];
+  const refund = Math.round(ROOMS[room.kind].cost * ECONOMY.demolishRefundFraction);
   removeRoom(world, room.id);
+  // Capital returned, not income: does not go through incomeByKind.
+  world.cash += refund;
 
   const name = ROOMS[room.kind].label.toLowerCase();
-  log(world, `Demolished the ${name} on ${floorName(room.floor)}.`);
+  log(world, `Demolished the ${name} on ${floorName(room.floor)}. ${money(refund)} back.`);
   return OK;
 }
 
@@ -607,9 +611,15 @@ function doDemolishShaft(world: World, shaftId: number): CommandResult {
   }
   const stranded = strandsSomething(world, { shaftId: shaft.id });
   if (stranded) return stranded;
+  const rule = SHAFTS[shaft.kind];
+  const refund = Math.round(
+    (rule.shaftCost + rule.carCost * shaft.cars.length) * ECONOMY.demolishRefundFraction,
+  );
   removeShaft(world, shaft.id);
-  const name = SHAFTS[shaft.kind].label.toLowerCase();
-  log(world, `Demolished the ${name} at ${floorName(shaft.floorMin)}.`);
+  // Capital returned, not income: does not go through incomeByKind.
+  world.cash += refund;
+  const name = rule.label.toLowerCase();
+  log(world, `Demolished the ${name} at ${floorName(shaft.floorMin)}. ${money(refund)} back.`);
   return OK;
 }
 
@@ -718,7 +728,13 @@ function doRemoveCar(world: World, shaftId: number): CommandResult {
   world.routingDirty = true;
   markStructureChanged(world);
   const rule = SHAFTS[shaft.kind];
-  log(world, `Removed a car from the ${rule.label.toLowerCase()} at ${floorName(shaft.floorMin)}.`);
+  const refund = Math.round(rule.carCost * ECONOMY.demolishRefundFraction);
+  // Capital returned, not income: does not go through incomeByKind.
+  world.cash += refund;
+  log(
+    world,
+    `Removed a car from the ${rule.label.toLowerCase()} at ${floorName(shaft.floorMin)}. ${money(refund)} back.`,
+  );
   return OK;
 }
 

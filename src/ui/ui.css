@@ -864,6 +864,15 @@ button.hs-readout:hover {
   cursor: default;
 }
 
+/* A secondary action: outlined, no fill, so the card's advice reads first (the bomb card's
+   ransom while security is searching). */
+.hs-btn.is-secondary {
+  background: transparent;
+  border-color: var(--steel-2);
+  color: var(--ink-dim);
+  font-weight: 400;
+}
+
 /* Build: the dock on a wide screen ------------------------------------- */
 
 /* A floating toolbar on the left: the header that folds it, the category tabs down its left
@@ -1198,11 +1207,12 @@ button.hs-readout:hover {
   line-height: 1.3;
 }
 
+/* The price may carry its running cost ("$200,000, then $10,000 a quarter"), so it wraps
+   between words; a figure never breaks, since it has no spaces. */
 .hs-tool-cost {
   font-family: var(--font-ui);
   font-variant-numeric: tabular-nums;
   font-weight: 600;
-  white-space: nowrap;
 }
 
 .hs-tool-short {
@@ -1782,6 +1792,11 @@ button.hs-readout:hover {
 
 .hs-tile.is-wide {
   grid-column: 1 / -1;
+}
+
+/* The finances panel hides Lost to trouble in a quarter that lost nothing. */
+.hs-tile[hidden] {
+  display: none;
 }
 
 .hs-tile-label {

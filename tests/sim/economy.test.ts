@@ -2,15 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { createWorld, addRoom, addShaft } from '../../src/sim/world';
 import { ECONOMY, LIMITS, ROOMS, SHAFTS } from '../../src/sim/rules';
 import {
+  debitLoss,
   officeQuarterRent,
   onQuarterStart,
+  quarterForecast,
+  quarterUpkeepOf,
   recordCondoSale,
   recordHotelNight,
   recordVisit,
   spend,
 } from '../../src/sim/economy';
 import { applyCommand } from '../../src/sim/build';
-import { deserialize, serialize } from '../../src/sim/save';
+import { deserialize, hashWorld, serialize } from '../../src/sim/save';
 import { tick } from '../../src/sim/tick';
 import type { Room, RoomKind, Shaft, ShaftKind, World } from '../../src/sim/types';
 
@@ -209,7 +212,15 @@ describe('economy: onQuarterStart totals and reset', () => {
     onQuarterStart(world);
     const income = ROOMS.office.incomePerQuarter;
     const upkeep = ROOMS.security.upkeepPerQuarter;
-    expect(world.stats.lastQuarter).toEqual({ income, upkeep, net: income - upkeep });
+    expect(world.stats.lastQuarter).toEqual({
+      income,
+      upkeep,
+      losses: 0,
+      net: income - upkeep,
+      incomeByKind: { office: income },
+      upkeepByKind: { security: upkeep },
+      lossesByKind: {},
+    });
   });
 
   it('resets incomeByKind and upkeepByKind after rolling up', () => {
@@ -316,6 +327,14 @@ describe('economy: record functions', () => {
     expect(world.cash).toBe(LIMITS.startingCash);
   });
 
+  it('a hotel night earns a third of the quarter rate: a twin at $9,000 a quarter earns $3,000 a night', () => {
+    expect(ECONOMY.hotelNightlyIncomeFraction).toBe(1 / 3);
+    const world = createWorld(1);
+    recordHotelNight(world, makeRoom({ kind: 'hotelTwin', floor: 1, x: 0 }));
+    expect(world.cash).toBe(LIMITS.startingCash + 3_000);
+    expect(world.stats.incomeByKind.hotelTwin).toBe(3_000);
+  });
+
   it('recordHotelNight adds incomePerQuarter times the nightly fraction', () => {
     const world = createWorld(1);
     const room = makeRoom({ kind: 'hotelSuite', floor: 1, x: 0 });
@@ -343,7 +362,132 @@ describe('economy: quarter summary money (audit A S8)', () => {
     let guard = 0;
     while (!world.log.some((l) => l.text.startsWith('The quarter is over')) && guard++ < 5 * 1440) tick(world);
     const summary = world.log.find((l) => l.text.startsWith('The quarter is over'))?.text ?? '';
-    expect(summary).toBe('The quarter is over. Earned $0, spent $30,000, profit -$30,000. Cash: -$20,000.');
+    expect(summary).toBe('The quarter is over. Earned $0, spent $30,000 on running costs, profit -$30,000. Cash: -$20,000.');
     expect(summary).not.toContain('$-');
+  });
+});
+
+describe('economy: event losses (review 2026-09-28 I2)', () => {
+  it('debitLoss takes cash and books it under its kind', () => {
+    const world = createWorld(1);
+    world.cash = 1_000_000;
+    debitLoss(world, 'bomb', 200_000);
+    debitLoss(world, 'theft', 2_000);
+    debitLoss(world, 'theft', 2_000);
+    expect(world.cash).toBe(796_000);
+    expect(world.stats.lossesByKind).toEqual({ bomb: 200_000, theft: 4_000 });
+  });
+
+  it('the settle counts losses in lastQuarter and net, keeps the three tables, and says what trouble cost', () => {
+    const world = createWorld(1);
+    world.cash = 1_000_000;
+    addRoom(world, makeRoom({ kind: 'office', floor: 2, x: 100, eval: 1 }));
+    addRoom(world, makeRoom({ kind: 'security', floor: 3, x: 100 }));
+    debitLoss(world, 'fire', 40_000);
+    onQuarterStart(world);
+    const income = ROOMS.office.incomePerQuarter;
+    const upkeep = ROOMS.security.upkeepPerQuarter;
+    expect(world.stats.lastQuarter).toEqual({
+      income,
+      upkeep,
+      losses: 40_000,
+      net: income - upkeep - 40_000,
+      incomeByKind: { office: income },
+      upkeepByKind: { security: upkeep },
+      lossesByKind: { fire: 40_000 },
+    });
+    expect(world.stats.lossesByKind).toEqual({});
+    expect(world.stats.incomeByKind).toEqual({});
+    expect(world.stats.upkeepByKind).toEqual({});
+    const summary = world.log.find((l) => l.text.startsWith('The quarter is over'))?.text;
+    expect(summary).toBe('The quarter is over. Earned $10,000, spent $20,000 on running costs, lost $40,000 to trouble, profit -$50,000. Cash: $950,000.');
+  });
+});
+
+describe('economy: quarter forecast (review 2026-09-28 I1)', () => {
+  function fixedWorld(): World {
+    const world = createWorld(7);
+    world.cash = 5_000_000;
+    world.stars = 3;
+    for (let x = 100; x < 110; x++) addRoom(world, makeRoom({ kind: 'lobby', floor: 1, x }));
+    addRoom(world, makeRoom({ kind: 'office', floor: 2, x: 100, eval: 1 }));
+    addRoom(world, makeRoom({ kind: 'office', floor: 2, x: 110, eval: 0.5, rent: 120 }));
+    addRoom(world, makeRoom({ kind: 'office', floor: 2, x: 120, vacant: true }));
+    addRoom(world, makeRoom({ kind: 'security', floor: 3, x: 100 }));
+    addRoom(world, makeRoom({ kind: 'housekeeping', floor: 4, x: 100 }));
+    const standard = makeShaft({ kind: 'standard', x: 150, floorMin: 1, floorMax: 10, cars: [] });
+    standard.cars = [makeCar(standard.id), makeCar(standard.id), makeCar(standard.id)];
+    addShaft(world, standard);
+    const express = makeShaft({ kind: 'express', x: 200, floorMin: 1, floorMax: 15, cars: [] });
+    express.cars = [makeCar(express.id), makeCar(express.id)];
+    addShaft(world, express);
+    return world;
+  }
+
+  it('equals what the settle then credits and debits, and changes nothing', () => {
+    const world = fixedWorld();
+    const hash = hashWorld(world);
+    const forecast = quarterForecast(world);
+    expect(hashWorld(world)).toBe(hash);
+    expect(forecast.vacantOffices).toBe(1);
+    expect(forecast.upkeepByKind).toEqual({ lobby: 3_000, security: 20_000, housekeeping: 10_000, standard: 30_000, express: 40_000 });
+    onQuarterStart(world);
+    const last = world.stats.lastQuarter;
+    expect(forecast.rent).toBe(last.income);
+    expect(forecast.rentByKind).toEqual(last.incomeByKind);
+    expect(forecast.upkeep).toBe(last.upkeep);
+    expect(forecast.upkeepByKind).toEqual(last.upkeepByKind);
+    expect(forecast.rent).toBe(10_000 + 9_000); // full eval, then 0.75 of the rate at 120% rent
+  });
+
+  it('quarterUpkeepOf prices one car or one room, lobby segments at the current stars', () => {
+    const world = createWorld(1);
+    world.stars = 3;
+    expect(quarterUpkeepOf(world, 'standard')).toBe(10_000);
+    expect(quarterUpkeepOf(world, 'express')).toBe(20_000);
+    expect(quarterUpkeepOf(world, 'security')).toBe(20_000);
+    expect(quarterUpkeepOf(world, 'lobby')).toBe(300);
+    expect(quarterUpkeepOf(world, 'office')).toBe(0);
+    world.stars = 1;
+    expect(quarterUpkeepOf(world, 'lobby')).toBe(0);
+  });
+});
+
+describe('economy: debt warnings (review 2026-09-28 I5)', () => {
+  const DEBT = 'You are in debt: -$100,000. Nothing can be built until you have its price. Removing elevator cars or demolishing costly rooms lowers your running costs.';
+
+  it('warns about debt as a notable alert when cash is below 0 after the settle', () => {
+    const world = createWorld(1);
+    world.cash = -100_000;
+    onQuarterStart(world);
+    const line = world.log.find((l) => l.text.startsWith('You are in debt'));
+    expect(line).toMatchObject({ text: DEBT, level: 'alert', notable: true });
+    expect(world.log.some((l) => l.text.startsWith('The bank gives you'))).toBe(false);
+  });
+
+  it('says nothing about debt when cash is 0 or more', () => {
+    const world = createWorld(1);
+    world.cash = 0;
+    onQuarterStart(world);
+    expect(world.log.some((l) => l.text.startsWith('You are in debt') || l.text.startsWith('The bank'))).toBe(false);
+  });
+
+  it('gives the bank deadline once, at the first quarter below the line, with the next settle in days, never a day number', () => {
+    const world = createWorld(1);
+    world.time.minute = 3 * 1440 + 5 * 60; // the settle on day 4
+    world.cash = ECONOMY.bankruptAtCash - 1;
+    onQuarterStart(world);
+    const bank = world.log.filter((l) => l.text.startsWith('The bank gives you'));
+    expect(bank).toHaveLength(1);
+    expect(bank[0]).toMatchObject({
+      text: 'The bank gives you one quarter. Get above -$500,000 by the next settle, 5 AM in 3 days, or the bank takes the tower.',
+      level: 'alert',
+      notable: true,
+    });
+    expect(world.log.some((l) => l.text === 'You are in debt: -$500,001. Nothing can be built until you have its price. Removing elevator cars or demolishing costly rooms lowers your running costs.')).toBe(true);
+    world.time.minute += 3 * 1440;
+    onQuarterStart(world); // second bad quarter: game over, no second deadline
+    expect(world.log.filter((l) => l.text.startsWith('The bank gives you'))).toHaveLength(1);
+    expect(world.gameOver).not.toBeNull();
   });
 });

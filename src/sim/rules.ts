@@ -216,14 +216,15 @@ export const ECONOMY = {
   restaurantIncomePerVisitor: 45,
   cinemaIncomePerViewer: 10,
   partyHallIncomePerEvent: 15_000,
-  hotelNightlyIncomeFraction: 1 / 45, // of incomePerQuarter, per occupied night; 45 nights a quarter at good occupancy
+  hotelNightlyIncomeFraction: 1 / 3, // of incomePerQuarter, per occupied night; a quarter is 3 nights, so a twin at 9,000 a quarter earns 3,000 a night at full occupancy
   officeRentEvalScale: true, // rent is multiplied by (0.5 + eval / 2)
   bankruptAtCash: -500_000,
   bankruptAfterQuarters: 2,
+  demolishRefundFraction: 0.25, // fraction of the build price credited back when a room, shaft, or car is demolished
 };
 
 export const EVENTS = {
-  fire: { minStar: 2 as Star, dailyChance: 0.01, spreadMinutes: 30, helicopterCost: 250_000, securityPutOutMinutes: 45, damagePerRoom: 20_000 },
+  fire: { minStar: 2 as Star, dailyChance: 0.01, spreadMinutes: 30, helicopterCost: 250_000, securityPutOutMinutes: 45, burnOutMinutes: 180, damagePerRoom: 20_000 },
   bomb: { minStar: 3 as Star, dailyChance: 0.008, ransom: 500_000, detonateAtMinuteOfDay: 13 * 60, securitySearchMinutesPerFloor: 3, damageCash: 2_000_000, damageRooms: 4 },
   /**
    * The VIP visit. The rating is the lowest of three bands: the longest single elevator wait on

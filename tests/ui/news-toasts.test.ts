@@ -3,6 +3,7 @@
 // VIP arriving or checking in, a wedding starting or ending) toasts; every other info line goes
 // to the News panel only. Warn lines still fold into one toast per 20 s; alerts are cards.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { onQuarterStart } from '../../src/sim/economy';
 import { startWedding } from '../../src/sim/events';
 import { ROOMS } from '../../src/sim/rules';
 import type { LogEntry } from '../../src/sim/types';
@@ -94,6 +95,34 @@ describe('news toasts', () => {
     expect(world.log.at(-1)).toMatchObject({ level: 'info', notable: true });
     notify();
     expect(toasts(root)).toEqual([world.log.at(-1)?.text]);
+  });
+
+  it('the quarter settle line is logged notable by the sim, and toasts', () => {
+    const { world, notify, root } = mountWorld();
+    notify(); // the first look at the tower is history
+    onQuarterStart(world);
+    const settle = world.log.at(-1);
+    expect(settle).toMatchObject({ level: 'info', notable: true });
+    expect(settle?.text).toMatch(/^The quarter is over\. /);
+    notify();
+    expect(toasts(root)).toEqual([settle?.text]);
+  });
+
+  it('in debt, the settle line still toasts and each debt warning is an alert card', () => {
+    const { world, notify, root } = mountWorld();
+    notify();
+    world.cash = -600_000;
+    onQuarterStart(world);
+    const settle = world.log.find((l: LogEntry) => l.text.startsWith('The quarter is over.'));
+    const alerts = world.log.filter((l: LogEntry) => l.level === 'alert');
+    expect(alerts.map((l: LogEntry) => l.text.slice(0, 20))).toEqual(['You are in debt: -$6', 'The bank gives you o']);
+    notify();
+    expect(toasts(root)).toEqual([settle?.text]);
+    const cards = root
+      .descendants()
+      .filter((n) => n.className === 'hs-toast')
+      .map((n) => n.textContent.replace(/^×/, ''));
+    expect(cards).toEqual(alerts.map((l: LogEntry) => l.text));
   });
 
   it('warn lines still fold into one toast per 20 s', () => {

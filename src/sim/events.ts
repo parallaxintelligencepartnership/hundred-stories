@@ -12,6 +12,7 @@ import { ensureRouting, entrances, findRoute } from './routing';
 import { rollWaste } from './recycling';
 import { dispatchGuard, releaseGuard, routeMinutes } from './security';
 import { isFollowed, recordBeat, type StoryBeat } from './story';
+import { debitLoss } from './economy';
 import { addSim, allocId, groundLobby, log, removeRoom, removeSim, roomsOfKind, setOccupancy, setOnFire } from './world';
 
 // Defined here because rules.ts has no calendar constants. One tick is one minute.
@@ -97,10 +98,18 @@ function sortedRooms(world: World): Room[] {
   return [...world.rooms.values()].sort((a, b) => a.id - b.id);
 }
 
+/** Lobbies, sky lobbies, stairs and escalators never catch fire. */
+function canBurn(room: Room): boolean {
+  return ROOMS[room.kind].group !== 'structure';
+}
+
 function pickTargetRoom(world: World, key: 'fire' | 'bomb'): Room | undefined {
   const forced = hooksActive() ? EVENT_TEST_HOOKS.target[key] : null;
-  if (forced !== null) return world.rooms.get(forced);
-  const candidates = sortedRooms(world).filter((r) => !r.onFire);
+  if (forced !== null) {
+    const room = world.rooms.get(forced);
+    return room && (key !== 'fire' || canBurn(room)) ? room : undefined;
+  }
+  const candidates = sortedRooms(world).filter((r) => !r.onFire && (key !== 'fire' || canBurn(r)));
   if (candidates.length === 0) return undefined;
   return world.rng.pick(candidates);
 }
@@ -169,7 +178,7 @@ function spreadFire(world: World, event: Extract<ActiveEvent, { kind: 'fire' }>)
   for (const source of burning) {
     for (let f = source.floor; f < source.floor + source.height; f++) {
       for (const other of world.floorIndex.rooms.get(f) ?? []) {
-        if (other.onFire || caught.includes(other)) continue;
+        if (other.onFire || !canBurn(other) || caught.includes(other)) continue;
         const gap = other.x >= source.x + source.width ? other.x - (source.x + source.width) : source.x - (other.x + other.width);
         if (gap <= 1) caught.push(other);
       }
@@ -182,32 +191,59 @@ function spreadFire(world: World, event: Extract<ActiveEvent, { kind: 'fire' }>)
   }
 }
 
-function endFire(world: World, event: Extract<ActiveEvent, { kind: 'fire' }>, how: string): void {
+type FireEvent = Extract<ActiveEvent, { kind: 'fire' }>;
+
+/** The clearing bill for one burned room: damagePerRoom, never more than the room cost to build. */
+function fireRoomBill(room: Room): number {
+  return Math.min(EVENTS.fire.damagePerRoom, ROOMS[room.kind].cost);
+}
+
+/** The clearing bill for every room of this fire that is burning now. */
+function fireDamageBill(world: World, event: FireEvent): number {
+  let bill = 0;
+  for (const id of event.roomIds) {
+    const room = world.rooms.get(id);
+    if (room) bill += fireRoomBill(room);
+  }
+  return bill;
+}
+
+/**
+ * What calling the helicopter costs right now: the flight plus the clearing bill for every room
+ * burning. The affordability check and the charge both use this number.
+ */
+export function helicopterCost(world: World, event: FireEvent): number {
+  return EVENTS.fire.helicopterCost + fireDamageBill(world, event);
+}
+
+function endFire(world: World, event: FireEvent, how: string): void {
   const firstRoom = event.roomIds[0];
   let lost = 0;
   let cost = 0;
   for (const id of event.roomIds) {
     const room = world.rooms.get(id);
     if (!room) continue;
+    cost += fireRoomBill(room);
     destroyRoom(world, room, `The fire on floor ${room.floor} destroyed the ${label(room.kind)}.`);
     lost += 1;
-    cost += EVENTS.fire.damagePerRoom;
   }
-  world.cash -= cost;
+  debitLoss(world, 'fire', cost);
   endEvent(world, event);
   const rooms = `${lost} room${lost === 1 ? '' : 's'}`;
   log(world, `${how}. ${rooms} burned down and clearing the damage cost ${formatDollars(cost)}.`, 'alert');
   towerBeat(world, 'fire.resolved', firstRoom !== undefined ? { roomId: firstRoom, value: lost } : { value: lost });
 }
 
-export function tickFire(world: World, event: Extract<ActiveEvent, { kind: 'fire' }>): void {
-  // A security office puts the fire out at securityPutOutMinutes per burning room.
-  if (securityOnDuty(world)) {
-    const outAt = event.startedAt + EVENTS.fire.securityPutOutMinutes * event.roomIds.length;
-    if (world.time.minute >= outAt) {
-      endFire(world, event, 'Security put the fire out');
-      return;
-    }
+export function tickFire(world: World, event: FireEvent): void {
+  // A security office puts the fire out securityPutOutMinutes after it started, however far it spread.
+  if (securityOnDuty(world) && world.time.minute >= event.startedAt + EVENTS.fire.securityPutOutMinutes) {
+    endFire(world, event, 'Security put the fire out');
+    return;
+  }
+  // With nobody to put it out, the fire burns itself out and ends the same way.
+  if (world.time.minute >= event.startedAt + EVENTS.fire.burnOutMinutes) {
+    endFire(world, event, 'The fire burned itself out');
+    return;
   }
   if (world.time.minute >= event.spreadAt) {
     spreadFire(world, event);
@@ -244,7 +280,7 @@ function detonate(world: World, event: Extract<ActiveEvent, { kind: 'bomb' }>): 
   const doomed = ranked.slice(0, EVENTS.bomb.damageRooms);
   const floor = bombRoom ? bombRoom.floor : 1;
   for (const room of doomed) destroyRoom(world, room, `The bomb on floor ${floor} destroyed the ${label(room.kind)}.`);
-  world.cash -= EVENTS.bomb.damageCash;
+  debitLoss(world, 'bomb', EVENTS.bomb.damageCash);
   endEvent(world, event);
   const rooms = `${doomed.length} room${doomed.length === 1 ? '' : 's'}`;
   log(world, `The bomb went off on floor ${floor}. ${rooms} were destroyed and the repairs cost ${formatDollars(EVENTS.bomb.damageCash)}.`, 'alert');
@@ -684,7 +720,7 @@ function theftCaught(world: World, event: TheftEvent, sim: Sim): void {
  */
 function theftEscaped(world: World, event: TheftEvent, simId: Id): void {
   const target = event.targetId === null ? undefined : world.rooms.get(event.targetId);
-  world.cash -= THEFT.lossCash;
+  debitLoss(world, 'theft', THEFT.lossCash);
   if (target) {
     target.dirty = true;
     target.dirtySinceMinute = world.time.minute;
@@ -909,7 +945,7 @@ export function handleEventCommand(world: World, cmd: Extract<Command, { kind: '
     const event = eventOf(world, 'bomb');
     if (!event) return { ok: false, reason: 'There is no bomb threat right now.' };
     if (world.cash < event.ransom) return { ok: false, reason: `Not enough cash. The ransom is ${formatDollars(event.ransom)}.` };
-    world.cash -= event.ransom;
+    debitLoss(world, 'ransom', event.ransom);
     endEvent(world, event);
     const room = world.rooms.get(event.roomId);
     log(world, `You paid the ${formatDollars(event.ransom)} ransom and the bomb${room ? ` in the ${describe(room)}` : ''} was handed over.`, 'alert');
@@ -919,10 +955,11 @@ export function handleEventCommand(world: World, cmd: Extract<Command, { kind: '
 
   const event = eventOf(world, 'fire');
   if (!event) return { ok: false, reason: 'There is no fire right now.' };
-  const cost = EVENTS.fire.helicopterCost;
+  const cost = helicopterCost(world, event);
   if (world.cash < cost) return { ok: false, reason: `Not enough cash. A firefighting helicopter costs ${formatDollars(cost)}.` };
-  world.cash -= cost;
-  log(world, `A firefighting helicopter cost ${formatDollars(cost)} and put the fire out.`, 'alert');
+  // The flight is booked as the helicopter; endFire books the clearing bill as fire damage. Together they are `cost`.
+  debitLoss(world, 'helicopter', EVENTS.fire.helicopterCost);
+  log(world, `A firefighting helicopter cost ${formatDollars(EVENTS.fire.helicopterCost)} and put the fire out.`, 'alert');
   endFire(world, event, 'The helicopter soaked the fire');
   return { ok: true };
 }

@@ -293,12 +293,12 @@ describe('top bar at phone width', () => {
     expect(rule(phoneBlock(), '.hs-stars-count').display).toBe('flex');
     expect(rule(wide(), '.hs-stars-count').display).toBe('none');
 
-    const root = mount(9 * 60, { cash: 47_522_007, quarterStartCash: 47_000_000, population: 177, dayStartPopulation: 170, stars: 3 });
+    const root = mount(9 * 60, { cash: 47_522_007, stats: { incomeByKind: { office: 522_007 }, lossesByKind: {} }, population: 177, dayStartPopulation: 170, stars: 3 });
     const cash = find(root, 'hs-status-cash');
     const pop = find(root, 'hs-status-pop');
     expect(find(cash, 'hs-readout-value').textContent).toBe('$47,522,007');
-    expect(find(cash, 'hs-readout-meta').textContent).toBe('+$522,007 this quarter');
-    expect(cash.getAttribute('title')).toBe('Open finances. +$522,007 this quarter');
+    expect(find(cash, 'hs-readout-meta').textContent).toBe('+$522,007 earned this quarter');
+    expect(cash.getAttribute('title')).toBe('Open finances. +$522,007 earned this quarter');
     expect(find(pop, 'hs-readout-value').textContent).toBe('177');
     expect(pop.getAttribute('title')).toBe('Up 7 today');
     expect(find(root, 'hs-stars-count-text').textContent).toBe('3');
@@ -322,11 +322,11 @@ describe('top bar at phone width', () => {
     expect(rule(narrow, '.hs-readout-icon').display).toBe('none');
     expect(rule(narrow, '.hs-readout').padding).toBe('2px 4px');
     expect(rule(narrow, '.hs-readout')['column-gap']).toBe('0');
-    const root = mount(12 * 60 + 59, { cash: 123_456_789, quarterStartCash: 123_000_000, population: 15_000, stars: 6 });
+    const root = mount(12 * 60 + 59, { cash: 123_456_789, stats: { incomeByKind: { office: 456_789 }, lossesByKind: {} }, population: 15_000, stars: 6 });
     const cash = find(root, 'hs-status-cash');
     const value = find(cash, 'hs-readout-value').textContent;
     expect(value).toBe('$123,456,789');
-    expect(cash.getAttribute('title')).toBe('Open finances. +$456,789 this quarter');
+    expect(cash.getAttribute('title')).toBe('Open finances. +$456,789 earned this quarter');
     // The budget at 360 px: 8 px from each edge and the pill's own 2 px padding leave 340 px;
     // four readouts at 4 px padding a side and three 4 px gaps take 44 of it. Share Tech Mono
     // advances 0.5 em plus the 0.02 em letter spacing at the 16 px value token; the UI font's

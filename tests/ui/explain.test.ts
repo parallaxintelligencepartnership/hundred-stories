@@ -111,7 +111,28 @@ describe('elevator serves line', () => {
   it('is the note for a buildable elevator and nothing for a buildable room', () => {
     const world = lobbyWorld();
     const ok: Placement = { floor: 1, x: 10, floorMin: 1, floorMax: 6, ok: true, label: 'Elevator', cost: 200_000, pending: false };
-    expect(placementNote(ok, { kind: 'shaft', shaft: 'standard' }, world)).toBe('Serves 6 floors, 1 to 6.');
+    expect(placementNote(ok, { kind: 'shaft', shaft: 'standard' }, world)).toBe('Serves 6 floors, 1 to 6. It costs $10,000 a quarter to run.');
     expect(placementNote({ ...ok, floorMax: 1, label: 'Office' }, { kind: 'room', room: 'office' }, world)).toBe('');
+    // Stretching a standing elevator adds no car, so no running cost.
+    expect(applyCommand(world, { kind: 'shaft.build', shaft: 'standard', x: 10, floorMin: 1, floorMax: 5 }).ok).toBe(true);
+    const shaftId = [...world.shafts.keys()][0]!;
+    expect(placementNote({ ...ok, shaftId, cost: 0 }, { kind: 'shaft', shaft: 'standard' }, world)).toBe('Serves 6 floors, 1 to 6.');
+  });
+
+  it('says what a room with upkeep costs to run, and adds it to the cash refusal', () => {
+    const world = lobbyWorld();
+    const ok: Placement = { floor: 2, x: 0, floorMin: 2, floorMax: 2, ok: true, label: 'Security office', cost: 100_000, pending: false };
+    expect(placementNote(ok, { kind: 'room', room: 'security' }, world)).toBe('It costs $20,000 a quarter to run.');
+    world.stars = 2;
+    world.cash = 12_000;
+    const reason = reasonOf(canBuild(world, 'security', 2, 0));
+    expect(refusalKind(reason)).toEqual({ kind: 'cash' });
+    expect(placementNote({ ...ok, ok: false, reason }, { kind: 'room', room: 'security' }, world)).toBe(
+      'It costs $100,000 and you have $12,000. Rent comes in each quarter. It also costs $20,000 a quarter to run.',
+    );
+    const shaftReason = reasonOf(canBuildShaft(world, 'standard', 60, 1, 4));
+    expect(placementNote({ ...ok, ok: false, reason: shaftReason, label: 'Elevator', cost: 200_000 }, { kind: 'shaft', shaft: 'standard' }, world)).toBe(
+      'It costs $200,000 and you have $12,000. Rent comes in each quarter. It also costs $10,000 a quarter to run.',
+    );
   });
 });

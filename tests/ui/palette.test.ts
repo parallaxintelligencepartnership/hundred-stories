@@ -45,6 +45,21 @@ describe('tool row state', () => {
     expect([query.costText, query.short]).toEqual(['', 0]);
   });
 
+  it('puts the running cost beside the price for an elevator, a room with upkeep, and a lobby at three stars', () => {
+    const world = { stars: 3, cash: 10_000_000 };
+    const elevator = toolRowState({ star: 1, price: SHAFTS.standard.shaftCost, tool: { kind: 'shaft', shaft: 'standard' } }, world, none);
+    expect(elevator.costText).toBe('$200,000, then $10,000 a quarter');
+    const express = toolRowState({ star: 3, price: SHAFTS.express.shaftCost, tool: { kind: 'shaft', shaft: 'express' } }, world, none);
+    expect(express.costText).toBe('$400,000, then $20,000 a quarter');
+    const security = toolRowState({ star: 2, price: ROOMS.security.cost, tool: { kind: 'room', room: 'security' } }, world, none);
+    expect(security.costText).toBe('$100,000, then $20,000 a quarter');
+    const lobby = { star: 1 as const, price: ROOMS.lobby.cost, tool: { kind: 'room', room: 'lobby' } as Tool };
+    expect(toolRowState(lobby, world, none).costText).toBe('$5,000, then $300 a quarter');
+    // No running cost, no second part: an office, and a lobby below three stars.
+    expect(toolRowState({ star: 1, price: ROOMS.office.cost, tool: { kind: 'room', room: 'office' } }, world, none).costText).toBe('$40,000');
+    expect(toolRowState(lobby, { stars: 2, cash: 10_000_000 }, none).costText).toBe('$5,000');
+  });
+
   it('describes footprints in tiles and floors', () => {
     expect(footprintText('office')).toBe(`${ROOMS.office.width} tiles`);
     expect(footprintText('cinema')).toBe(`${ROOMS.cinema.width} tiles, ${ROOMS.cinema.height} floors`);
