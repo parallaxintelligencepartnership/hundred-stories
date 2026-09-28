@@ -3,6 +3,7 @@ import { AbsoluteFill, Easing, useCurrentFrame } from 'remotion';
 import { TenantPeg, walkPose } from '../components/TenantPeg';
 import { ParticleBurst, BurstStar } from '../components/ParticleBurst';
 import { Wordmark, Caption } from '../components/Wordmark';
+import { OpeningBumper, CornerWatermark } from '../components/Watermark';
 import { TrashBag, bagStack } from '../components/TrashBag';
 import { JanitorCart } from '../components/JanitorCart';
 import { keyCam, pegHand } from '../components/rig';
@@ -292,6 +293,9 @@ export const BacklogClip: React.FC = () => {
   const card = ramp(f, 294, 8);
   const cardOut = ramp(f, 344, 15, Easing.in(Easing.quad));
   const openIn = 1 - ramp(f, 0, 8, Easing.out(Easing.quad));
+  const bumperOpacity = fade(f, 0, 6, 16, 12);
+  const bumperScale = 0.9 + 0.1 * popIn(f, 0, 12);
+  const watermarkOpacity = fade(f, 30, 10, 280, 12);
 
   const peg = (p: NonNullable<ReturnType<typeof passer>>, look: Partial<Pose>, seed: string) => (
     <g>
@@ -391,7 +395,9 @@ export const BacklogClip: React.FC = () => {
           </AbsoluteFill>
         </AbsoluteFill>
       )}
+      {watermarkOpacity > 0 && <CornerWatermark opacity={watermarkOpacity} />}
       <AbsoluteFill style={{ background: steel, opacity: openIn }} />
+      {bumperOpacity > 0 && <OpeningBumper opacity={bumperOpacity} scale={bumperScale} />}
     </AbsoluteFill>
   );
 };

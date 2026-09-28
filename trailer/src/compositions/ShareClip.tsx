@@ -5,6 +5,7 @@ import { ElevatorCar, Shaft } from '../components/ElevatorCar';
 import { StairFlight, Railing, onFlight } from '../components/StairFlight';
 import { ParticleBurst, BurstStar } from '../components/ParticleBurst';
 import { Wordmark, Caption } from '../components/Wordmark';
+import { OpeningBumper, CornerWatermark } from '../components/Watermark';
 import { fade, lerp, popIn, ramp, wobble } from '../components/anim';
 import { alert, amber, ink, line, mint, outline, paneDay, people, room, shaftRail, slab, slabEdge, steel, steel2 } from '../style/palette';
 import { display, loadFonts, readout } from '../style/fonts';
@@ -213,6 +214,9 @@ export const ShareClip: React.FC = () => {
   const card = ramp(f, 294, 8);
   const cardOut = ramp(f, 344, 15, Easing.in(Easing.quad));
   const openIn = 1 - ramp(f, 0, 8, Easing.out(Easing.quad));
+  const bumperOpacity = fade(f, 0, 6, 16, 12);
+  const bumperScale = 0.9 + 0.1 * popIn(f, 0, 12);
+  const watermarkOpacity = fade(f, 30, 10, 280, 12);
 
   return (
     <AbsoluteFill style={{ background: steel }}>
@@ -280,7 +284,9 @@ export const ShareClip: React.FC = () => {
           </AbsoluteFill>
         </AbsoluteFill>
       )}
+      {watermarkOpacity > 0 && <CornerWatermark opacity={watermarkOpacity} />}
       <AbsoluteFill style={{ background: steel, opacity: openIn }} />
+      {bumperOpacity > 0 && <OpeningBumper opacity={bumperOpacity} scale={bumperScale} />}
     </AbsoluteFill>
   );
 };
