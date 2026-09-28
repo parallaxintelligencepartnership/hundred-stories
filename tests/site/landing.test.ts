@@ -363,7 +363,9 @@ describe('sponsor slot', () => {
   });
 
   it('adds no script, no outside image and no iframe to the page', () => {
-    expect(landing.match(/<script\b/g)).toHaveLength(5);
+    // Six: the five the page had, plus the splash's before-paint gate (/splash-init.js, same origin).
+    expect(landing.match(/<script\b/g)).toHaveLength(6);
+    expect(landing).toContain('<script src="/splash-init.js"></script>');
     expect(landing).not.toContain('<iframe');
     expect(landing).not.toMatch(/<img[^>]*src="https?:/);
   });

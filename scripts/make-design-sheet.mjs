@@ -1152,7 +1152,9 @@ async function siteShot(browser, base, shot, ctx) {
     await setViewport(browser, vp);
     await browser.send('Page.navigate', { url: `${base}/robots.txt` });
     await sleep(300);
-    await browser.evaluate(`(() => { localStorage.setItem('hs.theme', ${JSON.stringify(shot.theme)}); return true; })()`);
+    // hs.splash: the landing splash (src/site/splash.ts) plays once a session over the page; the
+    // tab's session storage carries over to the next navigation, so the sheet shoots the page itself.
+    await browser.evaluate(`(() => { localStorage.setItem('hs.theme', ${JSON.stringify(shot.theme)}); sessionStorage.setItem('hs.splash', 'seen'); return true; })()`);
     await browser.send('Page.navigate', { url: `${base}${shot.page}` });
     // No fixed wait: the page has loaded with its fonts, and on the landing page the hero has drawn
     // its first frame (src/site/hero-ready.ts, data-hero-settled="drawn" with has-canvas on).

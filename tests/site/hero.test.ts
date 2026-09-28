@@ -282,10 +282,10 @@ describe('the hero leaves the network to the still image', () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
       expect(createRenderer).not.toHaveBeenCalled();
       expect(added).toEqual([]);
-      // Two: hero-trailer.ts's own boot (imported by hero.ts, harmless here: the stub document has
-      // no #hero-trailer) registers first, then hero.ts's own afterPageLoad listener.
-      expect(loads).toHaveLength(2);
-      loads[1]!();
+      // One: hero.ts's own afterPageLoad listener. splash.ts (imported by hero.ts) never waits on
+      // load, and with no splash-pending on the stub document it does nothing.
+      expect(loads).toHaveLength(1);
+      loads[0]!();
       await vi.waitFor(() => expect(warn).toHaveBeenCalledWith('hero: no tower today', expect.any(Error)));
       expect(added).toEqual(['has-canvas']);
     } finally {

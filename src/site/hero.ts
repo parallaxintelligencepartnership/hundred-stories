@@ -11,7 +11,7 @@ import type { Renderer } from '../render/renderer';
 import type { World } from '../sim/types';
 import { markHeroSettled } from './hero-ready';
 import './challenge';
-import './hero-trailer';
+import './splash';
 import './platforms';
 import './stores';
 

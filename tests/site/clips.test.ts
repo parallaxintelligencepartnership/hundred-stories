@@ -117,41 +117,41 @@ describe('every footer links to the clips page', () => {
   });
 });
 
-describe('landing hero trailer', () => {
+describe('landing splash', () => {
   const css = readFileSync(join(ROOT, 'src', 'site', 'site.css'), 'utf8');
+  const tag =
+    '<div id="splash" class="splash" hidden><video id="splash-video" muted playsinline preload="auto" width="1280" height="720" aria-hidden="true"></video><button type="button" id="splash-skip" class="splash-skip">Skip</button></div>';
 
-  it('sits between the still and the copy with no sources, no poster and no autoplay in the markup: the poster is set from the module, so a reduced-motion or data-saver visitor never downloads it', () => {
-    const tag =
-      '<video id="hero-trailer" class="hero-trailer" muted playsinline preload="metadata" width="1280" height="720" aria-hidden="true"></video>';
-    expect(landing).toContain(tag);
-    expect(landing).not.toContain('poster="/trailers/site-intro.webp"');
-    expect(landing.indexOf('id="hero-shot"')).toBeLessThan(landing.indexOf(tag));
-    expect(landing.indexOf(tag)).toBeLessThan(landing.indexOf('<div class="hero-panel">'));
+  it('is the first child of body, hidden, with no sources, no poster and no autoplay in the markup: splash.ts sets the poster on the play path, so a declined visitor downloads nothing', () => {
+    expect(landing).toContain(`<body>\n    ${tag}\n    <header class="site-head">`);
+    expect(landing).not.toContain('poster=');
     expect(landing).not.toMatch(/<video[^>]*autoplay/);
+    expect(landing).not.toMatch(/<source[^>]*site-splash/);
+    expect(landing).not.toContain('hero-trailer');
     expect(landing).not.toContain('site-intro-hero');
   });
 
-  it('ships the mp4 hero encode only and is loaded through hero.ts', () => {
-    expect(existsSync(join(ROOT, 'public', 'trailers', 'site-intro-hero.mp4'))).toBe(true);
-    expect(existsSync(join(ROOT, 'public', 'trailers', 'site-intro-hero.webm'))).toBe(false);
+  it('gates it before first paint with splash-init.js, right after theme.js, on the landing page only', () => {
+    const head = landing.slice(0, landing.indexOf('</head>'));
+    expect(head).toContain('<script src="/theme.js"></script>\n    <script src="/splash-init.js"></script>');
+    for (const page of [guide, privacy, terms, notfound, clips]) expect(page).not.toContain('splash');
+    expect(existsSync(join(ROOT, 'public', 'splash-init.js'))).toBe(true);
+  });
+
+  it('ships the splash mp4 only, drops the hero cut, and is loaded through hero.ts', () => {
+    expect(existsSync(join(ROOT, 'public', 'trailers', 'site-splash.mp4'))).toBe(true);
+    expect(existsSync(join(ROOT, 'public', 'trailers', 'site-intro-hero.mp4'))).toBe(false);
+    expect(existsSync(join(ROOT, 'src', 'site', 'hero-trailer.ts'))).toBe(false);
     const hero = readFileSync(join(ROOT, 'src', 'site', 'hero.ts'), 'utf8');
-    expect(hero).toContain("import './hero-trailer';");
+    expect(hero).toContain("import './splash';");
+    expect(hero).not.toContain('hero-trailer');
   });
 
-  // The trailer is composed around the centre of its frame; the still's right bottom anchor cut
-  // the end card to "RED STORIES" on a 375 px phone and hid the tower behind the desktop panel.
-  it('crops the trailer from the centre at every width', () => {
-    const rules = [...css.matchAll(/\.hero-trailer \{([^}]*)\}/g)].map((m) => m[1]!);
-    const sized = rules.filter((body) => /height:/.test(body));
-    expect(sized.length).toBe(2);
-    for (const body of sized) expect(body).toMatch(/object-position: center center;/);
-    for (const body of rules) expect(body).not.toMatch(/object-position: (?!center center)/);
-  });
-
-  // Holds only tower footage: source frames 300 to 745 of the 30 fps intro. The wordmark's title
-  // veil fades in from frame 751 (Scene 3 frame 151), so the cut must stay under 15 s.
-  it('ships a hero cut that ends before the Scene 3 title', () => {
-    const mp4 = readFileSync(join(ROOT, 'public', 'trailers', 'site-intro-hero.mp4'));
+  // Source frames 300 to 839 of the 30 fps intro: Build, then Every Floor through the wordmark and
+  // its caption, stopping before "Play Free" and the blackout. 18 s, moov first, small.
+  it('ships an 18 s faststart cut under 1.3 MB', () => {
+    const mp4 = readFileSync(join(ROOT, 'public', 'trailers', 'site-splash.mp4'));
+    expect(mp4.length).toBeLessThan(1_300_000);
     const at = mp4.indexOf('mvhd');
     expect(at).toBeGreaterThan(0);
     expect(mp4.indexOf('moov')).toBeLessThan(mp4.indexOf('mdat'));
@@ -159,16 +159,27 @@ describe('landing hero trailer', () => {
     const timescale = mp4.readUInt32BE(at + (v1 ? 24 : 16));
     const duration = v1 ? Number(mp4.readBigUInt64BE(at + 28)) : mp4.readUInt32BE(at + 20);
     const seconds = duration / timescale;
-    expect(seconds).toBeGreaterThan(14.8);
-    expect(seconds).toBeLessThan(15);
+    expect(seconds).toBeGreaterThan(17.9);
+    expect(seconds).toBeLessThan(18.1);
   });
 
-  it('fades in on is-playing, stays under the copy and off under reduced motion', () => {
-    expect(css).toMatch(/\.hero-trailer \{[^}]*opacity: 0;[^}]*transition: opacity 300ms[^}]*pointer-events: none;/);
-    expect(css).toMatch(/\.hero-trailer\.is-playing \{\s*opacity: 1;/);
-    expect(css).toMatch(/\.hero > \.wrap \{\s*position: relative;\s*z-index: 2;/);
-    const reduced = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)') + 1);
-    expect(reduced).toMatch(/^[^@]*\.hero-trailer \{\s*display: none;/);
+  it('shows only under splash-pending, fixed over everything, fading on is-done', () => {
+    expect(css).toMatch(/html\.splash-pending \{\s*overflow: hidden;/);
+    expect(css).toMatch(/html\.splash-pending \.splash\[hidden\] \{\s*display: block;/);
+    expect(css).toMatch(/\.splash \{[^}]*position: fixed;[^}]*inset: 0;[^}]*z-index: 1000;[^}]*transition: opacity 400ms/);
+    expect(css).toMatch(/\.splash\.is-done \{\s*opacity: 0;/);
+    // With no module, the same 30 s mark hides the overlay and gives the page its scroll back.
+    expect(css).toMatch(/html\.splash-pending \{[^}]*animation: splash-failsafe-scroll 0s linear 30s forwards;/);
+    expect(css).toMatch(/@keyframes splash-failsafe-scroll \{\s*to \{\s*overflow: visible;/);
+    expect(css).toMatch(/html\.splash-pending \.splash\[hidden\] \{[^}]*animation: splash-failsafe 0s linear 30s forwards;/);
+    expect(css).not.toContain('.hero-trailer');
+  });
+
+  // The wordmark must never be cropped off a phone: contain below 720 px, cover from it.
+  it('letterboxes below 720 px and fills from 720 px, centred', () => {
+    expect(css).toMatch(/\.splash video \{[^}]*object-fit: contain;[^}]*object-position: center center;/);
+    expect(css).toMatch(/@media \(min-width: 720px\) \{\s*\.splash video \{\s*object-fit: cover;/);
+    expect(css).toMatch(/\.splash-skip \{[^}]*min-height: 44px;/);
   });
 
   it('keeps the trailer videos and posters out of the service worker precache', () => {

@@ -317,38 +317,86 @@ p {
   display: none;
 }
 
-/* The intro trailer plays once over the hero's picture box (the 320 px strip here, the whole
-   hero from 720 px), above the still and the canvas and below the copy. hero-trailer.ts attaches
-   its sources, adds is-playing on the first frame and takes it off at the end, then hides it. */
-.hero-trailer {
-  position: absolute;
-  top: 0;
-  left: 0;
-  z-index: 1;
-  display: block;
-  width: 100%;
-  height: 320px;
-  object-fit: cover;
-  /* The trailer is composed around the centre of its 16:9 frame (unlike the still, whose tower
-     sits on the right), so it crops evenly from both sides. */
-  object-position: center center;
-  opacity: 0;
-  transition: opacity 300ms ease;
-  pointer-events: none;
-}
-
-.hero-trailer.is-playing {
-  opacity: 1;
-}
-
-.hero-trailer[hidden] {
-  display: none;
-}
-
-/* The copy stays above the trailer and takes every click. */
+/* The copy stays above the still and the canvas and takes every click. */
 .hero > .wrap {
   position: relative;
   z-index: 2;
+}
+
+/* The landing splash: the intro trailer over the whole viewport, once a session, before the site.
+   public/splash-init.js puts splash-pending on <html> before first paint (no reduced motion, no
+   save data, not yet seen); only that class shows the overlay, so with no JavaScript it stays
+   hidden. splash.ts plays it, adds is-done to fade it, then takes it out of the DOM and drops the
+   class. The dark is the dark page colour (theme-color), in both schemes: the trailer is dark. */
+html.splash-pending {
+  overflow: hidden;
+  /* Failsafe: if splash.ts never runs, the page scrolls again at the same mark as the overlay
+     steps aside below (splash.ts SPLASH_MAX_MS). */
+  animation: splash-failsafe-scroll 0s linear 30s forwards;
+}
+
+@keyframes splash-failsafe-scroll {
+  to {
+    overflow: visible;
+  }
+}
+
+.splash {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: #0b1020;
+  opacity: 1;
+  transition: opacity 400ms ease;
+}
+
+html.splash-pending .splash[hidden] {
+  display: block;
+  /* Failsafe: if splash.ts never runs, the overlay still steps aside (splash.ts SPLASH_MAX_MS). */
+  animation: splash-failsafe 0s linear 30s forwards;
+}
+
+@keyframes splash-failsafe {
+  to {
+    visibility: hidden;
+  }
+}
+
+.splash.is-done {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* The trailer is composed around the centre of its 16:9 frame. Below 720 px it is letterboxed
+   whole (contain), so the wordmark is never cropped off a phone; from 720 px it fills (cover). */
+.splash video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center center;
+}
+
+@media (min-width: 720px) {
+  .splash video {
+    object-fit: cover;
+  }
+}
+
+.splash-skip {
+  position: absolute;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: max(16px, env(safe-area-inset-bottom));
+  min-height: 44px;
+  padding: 10px 20px;
+  background: rgba(11, 16, 32, 0.6);
+  border: 0;
+  border-radius: 999px;
+  font-family: var(--font-ui);
+  font-size: var(--size-16);
+  font-weight: 600;
+  color: var(--w-lobby);
+  cursor: pointer;
 }
 
 /* The copy sits in a lobby cell: white marble, outlined, on its own slab. */
@@ -903,13 +951,6 @@ p {
     border-bottom: 0;
   }
 
-  /* The trailer covers the same box. */
-  .hero-trailer {
-    inset: 0;
-    height: 100%;
-    object-position: center center;
-  }
-
   .hero {
     min-height: 480px;
     display: flex;
@@ -932,10 +973,6 @@ p {
     animation: none !important;
     transition: none !important;
     scroll-behavior: auto !important;
-  }
-
-  .hero-trailer {
-    display: none;
   }
 }
 

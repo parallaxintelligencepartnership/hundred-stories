@@ -20,6 +20,9 @@
 /theme.js
   Cache-Control: no-cache, must-revalidate
 
+/splash-init.js
+  Cache-Control: no-cache, must-revalidate
+
 /manifest.webmanifest
   Cache-Control: no-cache, must-revalidate
 

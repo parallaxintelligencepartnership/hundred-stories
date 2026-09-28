@@ -32,6 +32,7 @@
     <link rel="icon" href="/icons/icon-192.png" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <script src="/theme.js"></script>
+    <script src="/splash-init.js"></script>
     <link rel="stylesheet" href="/src/site/site.css" />
     <link rel="preload" as="image" href="/hero-still.webp" fetchpriority="high" />
     <script type="application/ld+json">
@@ -39,6 +40,7 @@
     </script>
   </head>
   <body>
+    <div id="splash" class="splash" hidden><video id="splash-video" muted playsinline preload="auto" width="1280" height="720" aria-hidden="true"></video><button type="button" id="splash-skip" class="splash-skip">Skip</button></div>
     <header class="site-head">
       <div class="wrap">
         <a class="site-wordmark" href="/" aria-label="Hundred Stories home"><img class="wordmark wordmark-dark" src="/wordmark-line-dark.svg" alt="Hundred Stories" width="1032" height="112"><img class="wordmark wordmark-light" src="/wordmark-line-light.svg" alt="Hundred Stories" width="1032" height="112"></a>
@@ -63,7 +65,6 @@
           fetchpriority="high"
           decoding="async"
         />
-        <video id="hero-trailer" class="hero-trailer" muted playsinline preload="metadata" width="1280" height="720" aria-hidden="true"></video>
         <div class="wrap">
           <div class="hero-panel">
             <p id="challenge" class="challenge" hidden></p>

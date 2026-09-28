@@ -140,6 +140,10 @@ const SETTLED = `new Promise((resolve) => {
 
 async function shoot(browser, base) {
   await browser.send('Emulation.setDeviceMetricsOverride', { ...VIEWPORT, deviceScaleFactor: 1, mobile: false });
+  // The landing splash (src/site/splash.ts) plays once a session over everything: mark it seen
+  // before public/splash-init.js reads it, so the hero is what loads and the load event is not
+  // held by the video.
+  await browser.send('Page.addScriptToEvaluateOnNewDocument', { source: "try { sessionStorage.setItem('hs.splash', 'seen'); } catch (e) {}" });
   await browser.send('Page.navigate', { url: `${base}/?cb=${Date.now()}` });
   const settled = await browser.evaluate(SETTLED);
   if (settled !== 'drawn') throw new Error(`the hero settled as "${settled}", not "drawn": no frame to capture`);
