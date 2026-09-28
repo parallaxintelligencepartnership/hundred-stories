@@ -15,6 +15,11 @@ import {
 import { applyCommand } from '../../src/sim/build';
 import { deserialize, hashWorld, serialize } from '../../src/sim/save';
 import { tick } from '../../src/sim/tick';
+import { tickEvaluation } from '../../src/sim/evaluation';
+
+function tickUntil(world: World, minute: number): void {
+  while (world.time.minute < minute) tick(world);
+}
 import type { Room, RoomKind, Shaft, ShaftKind, World } from '../../src/sim/types';
 
 let idCounter = 1;
@@ -220,6 +225,7 @@ describe('economy: onQuarterStart totals and reset', () => {
       incomeByKind: { office: income },
       upkeepByKind: { security: upkeep },
       lossesByKind: {},
+      upkeepCountByKind: { security: 1 },
     });
   });
 
@@ -395,6 +401,7 @@ describe('economy: event losses (review 2026-09-28 I2)', () => {
       incomeByKind: { office: income },
       upkeepByKind: { security: upkeep },
       lossesByKind: { fire: 40_000 },
+      upkeepCountByKind: { security: 1 },
     });
     expect(world.stats.lossesByKind).toEqual({});
     expect(world.stats.incomeByKind).toEqual({});
@@ -426,18 +433,49 @@ describe('economy: quarter forecast (review 2026-09-28 I1)', () => {
 
   it('equals what the settle then credits and debits, and changes nothing', () => {
     const world = fixedWorld();
+    tickEvaluation(world); // the 04:30 evaluation: nobody is in, so every office is at its resting rating
     const hash = hashWorld(world);
     const forecast = quarterForecast(world);
     expect(hashWorld(world)).toBe(hash);
     expect(forecast.vacantOffices).toBe(1);
     expect(forecast.upkeepByKind).toEqual({ lobby: 3_000, security: 20_000, housekeeping: 10_000, standard: 30_000, express: 40_000 });
+    expect(forecast.upkeepCountByKind).toEqual({ lobby: 10, security: 1, housekeeping: 1, standard: 3, express: 2 });
     onQuarterStart(world);
     const last = world.stats.lastQuarter;
     expect(forecast.rent).toBe(last.income);
     expect(forecast.rentByKind).toEqual(last.incomeByKind);
     expect(forecast.upkeep).toBe(last.upkeep);
     expect(forecast.upkeepByKind).toEqual(last.upkeepByKind);
-    expect(forecast.rent).toBe(10_000 + 9_000); // full eval, then 0.75 of the rate at 120% rent
+    expect(last.upkeepCountByKind).toEqual(forecast.upkeepCountByKind);
+    // Full eval, then at 120% rent the resting rating is 1 - 0.2 x 0.6 = 0.88: 0.94 of the rate, times 1.2.
+    expect(forecast.rent).toBe(10_000 + 11_280);
+  });
+
+  // Review I-2: the settle reads the 04:30 evaluation, taken with the workers home and their
+  // stress faded; a forecast read at noon from the midday eval came in low.
+  it('an office tower under heavy midday stress forecasts the rent the 5 AM settle then pays', () => {
+    const world = createWorld(12345);
+    world.cash = 50_000_000;
+    const officeXs = [158, 185];
+    const script = [
+      ...Array.from({ length: 51 }, (_, i) => ({ kind: 'build' as const, room: 'lobby' as const, floor: 1, x: 150 + i })),
+      { kind: 'shaft.build' as const, shaft: 'standard' as const, x: 176, floorMin: 1, floorMax: 6 },
+    ];
+    for (const floor of [2, 3, 4, 5]) for (const x of officeXs) script.push({ kind: 'build', room: 'office', floor, x } as never);
+    for (const cmd of script) expect(applyCommand(world, cmd).ok).toBe(true);
+    const offices = [...world.rooms.values()].filter((r) => r.kind === 'office');
+    // To noon on the quarter's last day, then every office worker as stressed as a person gets.
+    tickUntil(world, 2 * 1440 + 12 * 60 + 29);
+    expect(offices.every((o) => !o.vacant && o.tenants.length > 0)).toBe(true);
+    for (const office of offices) for (const id of office.tenants) world.sims.get(id)!.stress = 1;
+    tickUntil(world, 2 * 1440 + 12 * 60 + 31); // through the 12:30 evaluation
+    const forecast = quarterForecast(world);
+    // The midday ratings are low, so rent read from them now would be well under the forecast.
+    const atMiddayEval = offices.reduce((sum, o) => sum + officeQuarterRent(o), 0);
+    expect(atMiddayEval).toBeLessThan(forecast.rent * 0.8);
+    tickUntil(world, 3 * 1440 + 5 * 60 + 1); // through the 5 AM settle
+    expect(world.stats.lastQuarter.incomeByKind.office).toBe(forecast.rentByKind.office);
+    expect(forecast.rent).toBe(offices.length * ROOMS.office.incomePerQuarter);
   });
 
   it('quarterUpkeepOf prices one car or one room, lobby segments at the current stars', () => {
@@ -450,6 +488,32 @@ describe('economy: quarter forecast (review 2026-09-28 I1)', () => {
     expect(quarterUpkeepOf(world, 'office')).toBe(0);
     world.stars = 1;
     expect(quarterUpkeepOf(world, 'lobby')).toBe(0);
+  });
+});
+
+describe('economy: last quarter counts in the save (review A-2)', () => {
+  it('round trips the counts, loads an older save without them, and refuses a table that is not numbers', () => {
+    const world = createWorld(3);
+    world.stars = 3;
+    addRoom(world, makeRoom({ kind: 'lobby', floor: 1, x: 100 }));
+    addRoom(world, makeRoom({ kind: 'lobby', floor: 1, x: 101 }));
+    world.nextId = idCounter; // the rooms took ids from this file's counter
+    onQuarterStart(world);
+    expect(world.stats.lastQuarter.upkeepCountByKind).toEqual({ lobby: 2 });
+    const text = serialize(world);
+    const back = deserialize(text);
+    if (!back.ok) throw new Error(back.reason);
+    expect(back.ok && back.world.stats.lastQuarter.upkeepCountByKind).toEqual({ lobby: 2 });
+    expect(back.ok && hashWorld(back.world)).toBe(hashWorld(world));
+
+    const old = JSON.parse(text);
+    delete old.stats.lastQuarter.upkeepCountByKind;
+    const loaded = deserialize(JSON.stringify(old));
+    expect(loaded.ok && 'upkeepCountByKind' in loaded.world.stats.lastQuarter).toBe(false);
+
+    old.stats.lastQuarter.upkeepCountByKind = { lobby: 'two' };
+    const bad = deserialize(JSON.stringify(old));
+    expect(bad.ok).toBe(false);
   });
 });
 
@@ -480,7 +544,7 @@ describe('economy: debt warnings (review 2026-09-28 I5)', () => {
     const bank = world.log.filter((l) => l.text.startsWith('The bank gives you'));
     expect(bank).toHaveLength(1);
     expect(bank[0]).toMatchObject({
-      text: 'The bank gives you one quarter. Get above -$500,000 by the next settle, 5 AM in 3 days, or the bank takes the tower.',
+      text: 'The bank gives you one quarter. Get to -$500,000 or better by the next settle, 5 AM in 3 days, or the bank takes the tower.',
       level: 'alert',
       notable: true,
     });

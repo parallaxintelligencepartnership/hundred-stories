@@ -557,7 +557,7 @@ function firstInvalidStat(stats: unknown): string | null {
     return 'stats.lastQuarter';
   }
   if (last.losses !== undefined && !isFiniteNumber(last.losses)) return 'stats.lastQuarter';
-  for (const table of [last.incomeByKind, last.upkeepByKind, last.lossesByKind]) {
+  for (const table of [last.incomeByKind, last.upkeepByKind, last.lossesByKind, last.upkeepCountByKind]) {
     if (table !== undefined && !isNumberTable(table)) return 'stats.lastQuarter';
   }
   if (typeof stats.vipRating !== 'string' || !Object.hasOwn(VIP_RATINGS, stats.vipRating)) return 'stats.vipRating';
@@ -584,8 +584,25 @@ function statsWithDefaults(stats: Stats): Stats {
       incomeByKind: last.incomeByKind ?? {},
       upkeepByKind: last.upkeepByKind ?? {},
       lossesByKind: last.lossesByKind ?? {},
+      // No counts in an older save: the panel shows those lines without one.
+      ...(last.upkeepCountByKind ? { upkeepCountByKind: last.upkeepCountByKind } : {}),
     },
   };
+}
+
+/**
+ * Fires never burn structure rooms (lobbies, stairs, escalators), but a save from before that
+ * rule can hold a fire that spread along the lobby row. Those rooms leave the fire unburned; a
+ * fire left with no rooms ends on the next tick with nothing lost (events.ts tickFire).
+ */
+function loadFireEvent(world: World, event: Extract<ActiveEvent, { kind: 'fire' }>): Extract<ActiveEvent, { kind: 'fire' }> {
+  const roomIds = event.roomIds.filter((id) => {
+    const room = world.rooms.get(id);
+    if (!room || ROOMS[room.kind].group !== 'structure') return true;
+    room.onFire = false;
+    return false;
+  });
+  return { ...event, roomIds };
 }
 
 const VIP_PHASES = { notice: true, route: true, stay: true, checkout: true } satisfies Record<VipPhase, true>;
@@ -723,7 +740,9 @@ export function deserialize(text: string): { ok: true; world: World } | { ok: fa
     world.story = parsed.version >= 4 ? sanitizeStory(parsed.story) : createStoryState();
     // The build log sits beside the world, not in it, and not in the hash.
     setBuildLog(world, buildLogFromSave(parsed.version >= 5 ? (parsed.buildLog ?? null) : undefined));
-    world.events = parsed.events.map((event) => (event.kind === 'vip' ? loadVipEvent(world, event) : event));
+    world.events = parsed.events.map((event) =>
+      event.kind === 'vip' ? loadVipEvent(world, event) : event.kind === 'fire' ? loadFireEvent(world, event) : event,
+    );
     // Read by presence, not by version: format 5 carries it as an optional field since 0.5.0.
     world.roachLastSpread = parsed.roachLastSpread ?? null;
     world.stats = statsWithDefaults(parsed.stats);

@@ -172,6 +172,8 @@ describe('the fire incident card', () => {
     h.at(ROLL_MINUTE + EVENTS.fire.spreadMinutes);
     const card = fireCards(h.root)[0]!;
     expect(card.textContent).toContain(SECURITY_LESSON);
+    // Review A-7: with nobody to put it out, the card says how it ends.
+    expect(card.textContent).toContain('It burns itself out in about 3 hours.');
     expect(card.textContent).not.toContain(SECURITY_RESPONDING);
     const call = helicopterOf(card);
     // The flight and the clearing bill for the two offices burning: $250,000 + 2 x $20,000.
@@ -199,6 +201,7 @@ describe('the fire incident card', () => {
     const card = fireCards(h.root)[0]!;
     expect(card.textContent).toContain(SECURITY_RESPONDING);
     expect(card.textContent).not.toContain(SECURITY_LESSON);
+    expect(card.textContent).not.toContain('burns itself out');
     expect(helicopterOf(card)).toBeDefined();
     h.at(ROLL_MINUTE + EVENTS.fire.securityPutOutMinutes);
     expect(card.textContent).toContain('Fire out. 1 room lost, $20,000.');
@@ -233,6 +236,18 @@ describe('the fire incident card', () => {
     expect(card.textContent).toBe('×Fire out. 5 rooms lost, $100,000.');
   });
 
+  // Review A-3: a fire with nothing left burning ends at once; nothing was lost or paid.
+  it('closes a fire whose room was destroyed as "Fire out. No rooms lost." with no amount', () => {
+    const { world, rooms } = fiveRoomRow(false);
+    const h = mount(world);
+    h.at(ROLL_MINUTE);
+    const card = fireCards(h.root)[0]!;
+    world.rooms.delete(rooms[0]!.id); // what a bomb leaves
+    h.at(ROLL_MINUTE + 1);
+    expect(world.events.some((e) => e.kind === 'fire')).toBe(false);
+    expect(card.textContent).toBe('×Fire out. No rooms lost.');
+  });
+
   it('closes on its close control, and the fire and the log go on without it', () => {
     const { world } = fiveRoomRow(false);
     const h = mount(world);
@@ -264,6 +279,7 @@ describe('the fire incident card', () => {
     expect(fireOutText(3, 60_000)).toBe('Fire out. 3 rooms lost, $60,000.');
     expect(fireOutText(1, null)).toBe('Fire out. 1 room lost.');
     expect(fireOutText(0, 250_000)).toBe('Fire out. No rooms lost, $250,000.');
+    expect(fireOutText(0, 0)).toBe('Fire out. No rooms lost.');
   });
 });
 

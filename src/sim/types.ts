@@ -356,6 +356,8 @@ export interface QuarterSummary {
   incomeByKind: Partial<Record<RoomKind, number>>;
   upkeepByKind: Partial<Record<RoomKind | ShaftKind, number>>;
   lossesByKind: Partial<Record<LossKind, number>>;
+  /** Units billed at the settle (rooms, lobby tiles, cars) by kind; absent from older saves, which show no count. */
+  upkeepCountByKind?: Partial<Record<RoomKind | ShaftKind, number>>;
 }
 
 export interface Stats {

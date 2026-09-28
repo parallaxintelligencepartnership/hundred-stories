@@ -653,18 +653,79 @@ describe('demolish', () => {
     expect(world.shafts.has(shaft.id)).toBe(true);
   });
 
-  it('demolishes an empty shaft and refunds a quarter of the shaft and car price', () => {
+  it('demolishes an empty shaft and refunds a quarter of the shaft price, which includes its first car', () => {
     const world = makeWorld();
     expect(buildShaft(world, 'standard', 150, 1, 10)).toEqual(OK);
     const shaft = onlyShaft(world);
     const cash = world.cash;
-    const refund = Math.round((SHAFTS.standard.shaftCost + SHAFTS.standard.carCost) * 0.25);
+    // Review A-4: the first car came with the shaft price, so it is not refunded a second time.
+    const refund = Math.round(SHAFTS.standard.shaftCost * 0.25);
     expect(applyCommand(world, { kind: 'shaft.demolish', shaftId: shaft.id })).toEqual(OK);
     expect(world.shafts.size).toBe(0);
-    expect(refund).toBe(70_000);
+    expect(refund).toBe(50_000);
     expect(world.cash).toBe(cash + refund);
     expect(world.floorIndex.shafts.get(5) ?? []).toHaveLength(0);
-    expect(world.log.at(-1)?.text).toBe('Demolished the elevator at floor 1. $70,000 back.');
+    expect(world.log.at(-1)?.text).toBe('Demolished the elevator at floor 1. $50,000 back.');
+  });
+
+  it('a shaft with three cars refunds a quarter of the shaft price and the two cars bought after it', () => {
+    const world = makeWorld();
+    expect(buildShaft(world, 'standard', 150, 1, 10)).toEqual(OK);
+    const shaft = onlyShaft(world);
+    const paidFrom = world.cash + SHAFTS.standard.shaftCost;
+    expect(applyCommand(world, { kind: 'shaft.addCar', shaftId: shaft.id })).toEqual(OK);
+    expect(applyCommand(world, { kind: 'shaft.addCar', shaftId: shaft.id })).toEqual(OK);
+    const paid = paidFrom - world.cash;
+    const cash = world.cash;
+    expect(applyCommand(world, { kind: 'shaft.demolish', shaftId: shaft.id })).toEqual(OK);
+    expect(world.cash - cash).toBe(90_000);
+    expect(world.cash - cash).toBe(Math.round(paid * 0.25));
+  });
+
+  // Review A-10: a refund is capital returned, never income.
+  it('refunds from a room, a car and a shaft leave the income table unchanged', () => {
+    const world = makeWorld();
+    lobby(world);
+    expect(build(world, 'office', 2, 100)).toEqual(OK);
+    expect(buildShaft(world, 'standard', 150, 1, 10)).toEqual(OK);
+    const shaft = onlyShaft(world);
+    expect(applyCommand(world, { kind: 'shaft.addCar', shaftId: shaft.id })).toEqual(OK);
+    world.stats.incomeByKind = { shop: 1_234 };
+    const office = [...world.rooms.values()].find((r) => r.kind === 'office')!;
+    const cash = world.cash;
+    expect(applyCommand(world, { kind: 'demolish', roomId: office.id })).toEqual(OK);
+    expect(applyCommand(world, { kind: 'shaft.removeCar', shaftId: shaft.id })).toEqual(OK);
+    expect(applyCommand(world, { kind: 'shaft.demolish', shaftId: shaft.id })).toEqual(OK);
+    expect(world.cash).toBeGreaterThan(cash);
+    expect(world.stats.incomeByKind).toEqual({ shop: 1_234 });
+  });
+
+  // Review A-5: build, sell, demolish for the refund, rebuild was a money loop.
+  it('refuses to demolish a sold condo and leaves cash as it was', () => {
+    const world = makeWorld();
+    lobby(world, 100, 16);
+    expect(build(world, 'condo', 2, 100)).toEqual(OK);
+    const condo = [...world.rooms.values()].find((r) => r.kind === 'condo')!;
+    condo.vacant = false; // sold
+    const cash = world.cash;
+    expect(applyCommand(world, { kind: 'demolish', roomId: condo.id })).toEqual({
+      ok: false,
+      reason: 'This condo belongs to its owners now. It cannot be demolished.',
+    });
+    expect(world.rooms.has(condo.id)).toBe(true);
+    expect(world.cash).toBe(cash);
+  });
+
+  it('demolishes an unsold condo with the quarter refund', () => {
+    const world = makeWorld();
+    lobby(world, 100, 16);
+    expect(build(world, 'condo', 2, 100)).toEqual(OK);
+    const condo = [...world.rooms.values()].find((r) => r.kind === 'condo')!;
+    expect(condo.vacant).toBe(true);
+    const cash = world.cash;
+    expect(applyCommand(world, { kind: 'demolish', roomId: condo.id })).toEqual(OK);
+    expect(world.rooms.has(condo.id)).toBe(false);
+    expect(world.cash - cash).toBe(ROOMS.condo.cost * 0.25);
   });
 
   it('refunds a quarter of the car price when removing a car', () => {

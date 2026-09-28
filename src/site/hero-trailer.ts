@@ -36,6 +36,7 @@ export interface TrailerEnv {
     createElement(tag: 'source'): TrailerSource;
     addEventListener(type: string, fn: () => void): void;
   };
+  window: { addEventListener(type: string, fn: () => void): void };
   matchMedia?: ((query: string) => { matches: boolean }) | undefined;
   navigator?: { connection?: { saveData?: boolean | undefined } | undefined } | undefined;
   setTimeout(fn: () => void, ms: number): unknown;
@@ -94,11 +95,15 @@ export function playHeroTrailer(env: TrailerEnv): void {
     });
     video.addEventListener('ended', finish);
     video.addEventListener('error', finish);
+    video.addEventListener('pause', () => {
+      if (!done) finish();
+    });
     video.addEventListener('stalled', () => {
       if (done || stallTimer !== null) return;
       stallTimer = env.setTimeout(finish, HERO_TRAILER_STALL_MS);
     });
 
+    video.setAttribute('poster', '/trailers/site-intro.webp');
     HERO_TRAILER_SOURCES.forEach(({ src, type }, i) => {
       const source = env.document.createElement('source');
       source.setAttribute('src', src);
@@ -116,13 +121,15 @@ export function playHeroTrailer(env: TrailerEnv): void {
   }
 }
 
-/** Plays the trailer once the document is parsed (at once if it already is). */
+/** Plays the trailer once the page has loaded (at once if it already has). A pending source on
+ *  the video delays the window load event, so this waits on load rather than DOMContentLoaded:
+ *  hero.ts waits on load before booting the live tower. */
 export function bootHeroTrailer(env: TrailerEnv): void {
   try {
-    if (env.document.readyState === 'loading') {
-      env.document.addEventListener('DOMContentLoaded', () => playHeroTrailer(env));
-    } else {
+    if (env.document.readyState === 'complete') {
       playHeroTrailer(env);
+    } else {
+      env.window.addEventListener('load', () => playHeroTrailer(env));
     }
   } catch {
     // decoration
@@ -133,6 +140,7 @@ try {
   if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     bootHeroTrailer({
       document,
+      window: { addEventListener: (type, fn) => window.addEventListener(type, fn) },
       matchMedia: typeof window.matchMedia === 'function' ? (q) => window.matchMedia(q) : undefined,
       navigator: navigator as TrailerEnv['navigator'],
       setTimeout: (fn, ms) => window.setTimeout(fn, ms),

@@ -143,6 +143,11 @@ function destroyRoom(world: World, room: Room, reason: string): void {
 
 // ---------------------------------------------------------------- fire
 
+/** How an unattended fire ends, in the start line and on the fire card. */
+export const FIRE_BURN_OUT_TEXT = `It burns itself out in about ${Math.round(EVENTS.fire.burnOutMinutes / 60)} hours.`;
+/** The closing line of a fire with no room left burning (a bomb or a demolition took them). */
+export const FIRE_OUT_EMPTY_TEXT = 'The fire is out.';
+
 export function startFire(world: World): void {
   const room = pickTargetRoom(world, 'fire');
   if (!room) return;
@@ -153,7 +158,9 @@ export function startFire(world: World): void {
     startedAt: world.time.minute,
     spreadAt: world.time.minute + EVENTS.fire.spreadMinutes,
   });
-  log(world, `Fire broke out in the ${describe(room)}. Call a helicopter or wait for security.`, 'alert', { roomId: room.id });
+  // With no security office on duty nobody will come, so the line says how it ends instead.
+  const ending = securityOnDuty(world) ? 'Call a helicopter or wait for security.' : `Call a helicopter. ${FIRE_BURN_OUT_TEXT}`;
+  log(world, `Fire broke out in the ${describe(room)}. ${ending}`, 'alert', { roomId: room.id });
   // Only one fire burns at a time, so this is once per fire: people.ts holds arrivals until it is out.
   log(world, 'People are waiting outside until the fire is out.');
   towerBeat(world, 'fire.started', { roomId: room.id });
@@ -198,13 +205,23 @@ function fireRoomBill(room: Room): number {
   return Math.min(EVENTS.fire.damagePerRoom, ROOMS[room.kind].cost);
 }
 
+/**
+ * The rooms of this fire that still stand and can burn. A structure room in `roomIds` (only an
+ * old save can hold one) is never burned, destroyed or billed.
+ */
+function burningRooms(world: World, event: FireEvent): Room[] {
+  const rooms: Room[] = [];
+  for (const id of event.roomIds) {
+    const room = world.rooms.get(id);
+    if (room && canBurn(room)) rooms.push(room);
+  }
+  return rooms;
+}
+
 /** The clearing bill for every room of this fire that is burning now. */
 function fireDamageBill(world: World, event: FireEvent): number {
   let bill = 0;
-  for (const id of event.roomIds) {
-    const room = world.rooms.get(id);
-    if (room) bill += fireRoomBill(room);
-  }
+  for (const room of burningRooms(world, event)) bill += fireRoomBill(room);
   return bill;
 }
 
@@ -220,9 +237,12 @@ function endFire(world: World, event: FireEvent, how: string): void {
   const firstRoom = event.roomIds[0];
   let lost = 0;
   let cost = 0;
+  // Structure rooms leave the fire standing and unbilled.
   for (const id of event.roomIds) {
     const room = world.rooms.get(id);
-    if (!room) continue;
+    if (room && !canBurn(room)) setOnFire(world, room, false);
+  }
+  for (const room of burningRooms(world, event)) {
     cost += fireRoomBill(room);
     destroyRoom(world, room, `The fire on floor ${room.floor} destroyed the ${label(room.kind)}.`);
     lost += 1;
@@ -235,6 +255,18 @@ function endFire(world: World, event: FireEvent, how: string): void {
 }
 
 export function tickFire(world: World, event: FireEvent): void {
+  // Nothing left burning (a bomb or a demolition took the rooms): the fire ends now, with no bill.
+  if (burningRooms(world, event).length === 0) {
+    for (const id of event.roomIds) {
+      const room = world.rooms.get(id);
+      if (room) setOnFire(world, room, false);
+    }
+    endEvent(world, event);
+    log(world, FIRE_OUT_EMPTY_TEXT, 'alert');
+    const firstRoom = event.roomIds[0];
+    towerBeat(world, 'fire.resolved', firstRoom !== undefined ? { roomId: firstRoom, value: 0 } : { value: 0 });
+    return;
+  }
   // A security office puts the fire out securityPutOutMinutes after it started, however far it spread.
   if (securityOnDuty(world) && world.time.minute >= event.startedAt + EVENTS.fire.securityPutOutMinutes) {
     endFire(world, event, 'Security put the fire out');

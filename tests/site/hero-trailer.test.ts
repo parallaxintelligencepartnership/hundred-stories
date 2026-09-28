@@ -56,12 +56,16 @@ function setup(opts: { reduce?: boolean; saveData?: boolean; readyState?: string
   const video = opts.video === undefined ? new FakeVideo() : opts.video;
   const timers: Array<{ fn: () => void; ms: number; cleared: boolean }> = [];
   const docListeners: Record<string, Listener[]> = {};
+  const windowListeners: Record<string, Listener[]> = {};
   const env: TrailerEnv = {
     document: {
       readyState: opts.readyState ?? 'complete',
       getElementById: (id) => (id === 'hero-trailer' ? video : null),
       createElement: () => new FakeNode(),
       addEventListener: (type, fn) => void (docListeners[type] ??= []).push(fn),
+    },
+    window: {
+      addEventListener: (type, fn) => void (windowListeners[type] ??= []).push(fn),
     },
     matchMedia: (q) => ({ matches: q === '(prefers-reduced-motion: reduce)' && opts.reduce === true }),
     navigator: { connection: { saveData: opts.saveData === true } },
@@ -80,7 +84,7 @@ function setup(opts: { reduce?: boolean; saveData?: boolean; readyState?: string
       t.fn();
     }
   };
-  return { env, video, timers, docListeners, runTimers };
+  return { env, video, timers, docListeners, windowListeners, runTimers };
 }
 
 describe('hero trailer', () => {
@@ -174,12 +178,66 @@ describe('hero trailer', () => {
     expect(video.classes.has('is-playing')).toBe(false);
   });
 
-  it('waits for DOMContentLoaded while the document is still loading', () => {
-    const { env, video, docListeners } = setup({ readyState: 'loading' });
+  it('waits for the window load event while the document has not finished loading', () => {
+    const { env, video, windowListeners } = setup({ readyState: 'loading' });
     bootHeroTrailer(env);
     expect(video!.children).toHaveLength(0);
-    for (const fn of docListeners.DOMContentLoaded ?? []) fn();
+    for (const fn of windowListeners.load ?? []) fn();
     expect(video!.children).toHaveLength(1);
+  });
+
+  it('plays at once when the document has already finished loading', () => {
+    const { env, video, windowListeners } = setup({ readyState: 'complete' });
+    bootHeroTrailer(env);
+    expect(video!.children).toHaveLength(1);
+    expect(windowListeners.load ?? []).toHaveLength(0);
+  });
+
+  it('sets the poster just before the sources are attached, on the normal path', () => {
+    const { env, video } = setup();
+    playHeroTrailer(env);
+    expect(video!.attrs.poster).toBe('/trailers/site-intro.webp');
+  });
+
+  it('never sets the poster when the trailer is declined', () => {
+    const { env, video } = setup({ reduce: true });
+    playHeroTrailer(env);
+    expect(video!.attrs.poster).toBeUndefined();
+  });
+
+  it('finishes on a pause that is not part of finishing, so an outside pause never leaves a frozen frame', () => {
+    const { env, video, runTimers } = setup();
+    playHeroTrailer(env);
+    video!.fire('playing');
+    video!.fire('pause');
+    expect(video!.classes.has('is-playing')).toBe(false);
+    runTimers(HERO_TRAILER_FADE_MS);
+    expect(video!.attrs.hidden).toBe('');
+  });
+
+  it('calling finish twice (ended then error) hides only once', () => {
+    const { env, video, timers } = setup();
+    playHeroTrailer(env);
+    video!.fire('ended');
+    video!.fire('error');
+    expect(timers.filter((t) => t.ms === HERO_TRAILER_FADE_MS)).toHaveLength(1);
+    expect(video!.pauses).toBe(1);
+  });
+
+  it('finish calls pause() on the video', () => {
+    const { env, video } = setup();
+    playHeroTrailer(env);
+    video!.fire('ended');
+    expect(video!.pauses).toBe(1);
+  });
+
+  it('a second stalled while a stall timer is pending does not start a second timer', () => {
+    const { env, video, timers } = setup();
+    playHeroTrailer(env);
+    video!.fire('playing');
+    video!.fire('stalled');
+    video!.fire('stalled');
+    expect(timers.filter((t) => t.ms === HERO_TRAILER_STALL_MS)).toHaveLength(1);
   });
 
   it('never throws when the video is missing or matchMedia throws', () => {

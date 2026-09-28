@@ -352,6 +352,8 @@ describe('below three stars', () => {
     // Re-recorded for the money review (2026-09-28): the stats now carry this quarter's losses
     // and last quarter's tables, and a hotel night earns a third of its quarter figure, so the
     // same tower hashes 0f446857. Guards and thieves still change nothing below three stars.
+    // Re-recorded for the money review fixes (2026-09-28): last quarter records the units it billed
+    // (upkeepCountByKind); with that field left out the tower still hashes 0f446857.
     const world = createWorld(2024);
     world.stars = 2;
     world.cash = 50_000_000;
@@ -368,6 +370,6 @@ describe('below three stars', () => {
     ]);
     resetEventTestHooks();
     runDays(world, 4);
-    expect(hashWorld(world)).toBe('0f446857');
+    expect(hashWorld(world)).toBe('eeb027e5');
   });
 });

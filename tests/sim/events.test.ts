@@ -16,7 +16,8 @@ import {
   vipWaitBand,
 } from '../../src/sim/events';
 import { personName, vipArrivalHour, vipPreference } from '../../src/sim/identity';
-import { EVAL, EVENTS, ROOMS, SCHEDULES } from '../../src/sim/rules';
+import { EVAL, EVENTS, ROOMS, SCHEDULES, THEFT } from '../../src/sim/rules';
+import { onQuarterStart } from '../../src/sim/economy';
 import { deserialize, hashWorld, serialize } from '../../src/sim/save';
 import type { ActiveEvent, Room, RoomKind, Star, World } from '../../src/sim/types';
 import { tick, tickMany } from '../../src/sim/tick';
@@ -94,8 +95,15 @@ describe('fire', () => {
     expect(eventOf(world, 'fire')?.roomIds).toEqual([office.id]);
     const entry = world.log.at(-2);
     expect(entry?.level).toBe('alert');
-    expect(entry?.text).toBe('Fire broke out in the office on floor 2. Call a helicopter or wait for security.');
+    // No security office: the line says how the fire ends on its own (review A-7).
+    expect(entry?.text).toBe('Fire broke out in the office on floor 2. Call a helicopter. It burns itself out in about 3 hours.');
     expect(world.log.at(-1)?.text).toBe('People are waiting outside until the fire is out.');
+  });
+
+  it('with a security office on duty the start line still says to wait for security', () => {
+    burnableTower(EVENTS.fire.minStar, true);
+    at(world, ROLL_MINUTE);
+    expect(world.log.at(-2)?.text).toBe('Fire broke out in the office on floor 2. Call a helicopter or wait for security.');
   });
 
   it('does not spread before the spread interval', () => {
@@ -282,6 +290,130 @@ describe('fire: bounded and billed (review 2026-09-28 C1, I2, I4)', () => {
     expect(handleEventCommand(world, { kind: 'fire.callHelicopter' })).toEqual({ ok: true });
     expect(world.cash).toBe(0);
     expect(world.stats.lossesByKind).toEqual({ helicopter: EVENTS.fire.helicopterCost, fire: 2 * EVENTS.fire.damagePerRoom });
+  });
+
+  // Review I-1: a save from before the structure rule can hold a fire that spread along the lobby row.
+  describe('a fire saved with lobby tiles in it (review I-1)', () => {
+    /** A tower with a 20 tile lobby row and an office, saved mid fire the way the old code left it. */
+    function oldFireSave(opts: { office: boolean; security: boolean }): { text: string; lobbies: Room[]; office: Room | null } {
+      world.stars = 3;
+      const lobbies = [world.rooms.values().next().value as Room];
+      for (let x = 101; x < 120; x++) lobbies.push(place(world, 'lobby', 1, x));
+      const office = opts.office ? place(world, 'office', 2, 100) : null;
+      if (opts.security) place(world, 'security', 3, 100);
+      const burning = [...lobbies, ...(office ? [office] : [])];
+      for (const room of burning) room.onFire = true;
+      world.events.push({ kind: 'fire', roomIds: burning.map((r) => r.id), startedAt: world.time.minute, spreadAt: world.time.minute + EVENTS.fire.spreadMinutes });
+      return { text: serialize(world), lobbies, office };
+    }
+
+    function load(text: string): World {
+      const loaded = deserialize(text);
+      if (!loaded.ok) throw new Error(loaded.reason);
+      return loaded.world;
+    }
+
+    it('on load the lobby tiles leave the fire unburned and the office keeps burning', () => {
+      const { text, lobbies, office } = oldFireSave({ office: true, security: false });
+      const loaded = load(text);
+      const fire = loaded.events.find((e) => e.kind === 'fire') as Extract<ActiveEvent, { kind: 'fire' }>;
+      expect(fire.roomIds).toEqual([office!.id]);
+      for (const lobby of lobbies) expect(loaded.rooms.get(lobby.id)?.onFire).toBe(false);
+      expect(loaded.rooms.get(office!.id)?.onFire).toBe(true);
+    });
+
+    it('a loaded fire that held only lobby tiles ends on the first tick: every tile stays, nothing billed', () => {
+      const { text, lobbies } = oldFireSave({ office: false, security: false });
+      const loaded = load(text);
+      const cash = loaded.cash;
+      tick(loaded);
+      expect(loaded.events.some((e) => e.kind === 'fire')).toBe(false);
+      expect(lobbies.every((l) => loaded.rooms.has(l.id))).toBe(true);
+      expect(loaded.cash).toBe(cash);
+      expect(loaded.stats.lossesByKind.fire ?? 0).toBe(0);
+      expect(loaded.log.some((l) => l.text === 'The fire is out.')).toBe(true);
+    });
+
+    it('the office burns out as before and the lobby row stays, billed for the office only', () => {
+      const { text, lobbies, office } = oldFireSave({ office: true, security: false });
+      const loaded = load(text);
+      const cash = loaded.cash;
+      loaded.time.minute += EVENTS.fire.burnOutMinutes;
+      tickEvents(loaded);
+      expect(loaded.rooms.has(office!.id)).toBe(false);
+      expect(lobbies.every((l) => loaded.rooms.has(l.id))).toBe(true);
+      expect(cash - loaded.cash).toBe(EVENTS.fire.damagePerRoom);
+      expect(loaded.log.at(-1)?.text).toBe('The fire burned itself out. 1 room burned down and clearing the damage cost $20,000.');
+    });
+
+    // Without the load step, each way a fire ends still skips the structure rooms.
+    for (const how of ['security', 'burn-out', 'helicopter'] as const) {
+      it(`ending by ${how}, structure rooms in roomIds are put out, never destroyed or billed`, () => {
+        oldFireSave({ office: true, security: how === 'security' });
+        const fire = eventOf(world, 'fire')!;
+        const lobbyIds = fire.roomIds.filter((id) => world.rooms.get(id)?.kind === 'lobby');
+        expect(lobbyIds).toHaveLength(20);
+        const cash = world.cash;
+        if (how === 'helicopter') {
+          expect(helicopterCost(world, fire)).toBe(EVENTS.fire.helicopterCost + EVENTS.fire.damagePerRoom);
+          expect(handleEventCommand(world, { kind: 'fire.callHelicopter' })).toEqual({ ok: true });
+        } else {
+          at(world, fire.startedAt + (how === 'security' ? EVENTS.fire.securityPutOutMinutes : EVENTS.fire.burnOutMinutes));
+        }
+        expect(eventOf(world, 'fire')).toBeUndefined();
+        expect(lobbyIds.every((id) => world.rooms.has(id) && world.rooms.get(id)?.onFire === false)).toBe(true);
+        expect(world.stats.lossesByKind.fire).toBe(EVENTS.fire.damagePerRoom);
+        expect(cash - world.cash).toBe(EVENTS.fire.damagePerRoom + (how === 'helicopter' ? EVENTS.fire.helicopterCost : 0));
+      });
+    }
+  });
+
+  // Review A-3: a fire whose rooms are all gone ends at once, with nothing billed.
+  it('a fire whose burning room a bomb destroyed ends on the next tick with "The fire is out." and no bill', () => {
+    world.stars = 3;
+    const office = place(world, 'office', 2, 100);
+    EVENT_TEST_HOOKS.target.fire = office.id;
+    startFire(world);
+    const t0 = world.time.minute;
+    world.rooms.delete(office.id); // what the bomb's destroyRoom leaves behind
+    const cashBefore = world.cash;
+    at(world, t0 + 1);
+    expect(eventOf(world, 'fire')).toBeUndefined();
+    expect(world.cash).toBe(cashBefore);
+    expect(world.stats.lossesByKind.fire ?? 0).toBe(0);
+    expect(world.log.at(-1)).toMatchObject({ text: 'The fire is out.', level: 'alert' });
+  });
+
+  // Review A-1: every event loss goes through debitLoss, so it shows in the quarter's losses.
+  it('a detonated bomb is booked as bomb damage and counts in the settle', () => {
+    world.stars = 3;
+    const office = place(world, 'office', 2, 100);
+    EVENT_TEST_HOOKS.target.bomb = office.id;
+    startBomb(world);
+    const bomb = eventOf(world, 'bomb')!;
+    const cashBefore = world.cash;
+    at(world, bomb.detonateAt);
+    expect(eventOf(world, 'bomb')).toBeUndefined();
+    expect(cashBefore - world.cash).toBe(EVENTS.bomb.damageCash);
+    expect(world.stats.lossesByKind).toEqual({ bomb: EVENTS.bomb.damageCash });
+    onQuarterStart(world);
+    expect(world.stats.lastQuarter.losses).toBe(EVENTS.bomb.damageCash);
+    expect(world.stats.lastQuarter.lossesByKind).toEqual({ bomb: EVENTS.bomb.damageCash });
+  });
+
+  it('an escaped thief is booked as theft and counts in the settle', () => {
+    world.stars = 3;
+    const shop = place(world, 'shop', 2, 100);
+    // Leaving, and the thief is already out of the tower: the next tick is the escape.
+    world.events.push({ kind: 'theft', phase: 'leaving', enterAt: 0, simId: 999_999, targetId: shop.id, floor: 2, actUntil: null, guardId: null, noGuard: null });
+    const cashBefore = world.cash;
+    at(world, 10);
+    expect(eventOf(world, 'theft')).toBeUndefined();
+    expect(cashBefore - world.cash).toBe(THEFT.lossCash);
+    expect(world.stats.lossesByKind).toEqual({ theft: THEFT.lossCash });
+    onQuarterStart(world);
+    expect(world.stats.lastQuarter.losses).toBe(THEFT.lossCash);
+    expect(world.stats.lastQuarter.lossesByKind).toEqual({ theft: THEFT.lossCash });
   });
 
   it('a paid ransom is booked as a loss', () => {

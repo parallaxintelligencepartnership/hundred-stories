@@ -650,3 +650,43 @@ Ship checklist: no real data (no backup to verify), no protected routes (no auth
 ### Accepted risks (2026-09-27)
 
 - IMPORTANT, production-readiness: no whole-application audit since 2026-09-25 @7b4e60f; this ship is the ninth since then, past the five-ship trigger. Matt: "accept it tonight". Revisit when: the next session on this project (a project-audit should run before further feature work).
+
+## Checkpoint 2026-09-28 - clips page and hero trailer, f04c745 then 142e620 - lenses: production-readiness, testing
+
+Scope: one reviewer, design verify and lenses in one pass on f04c745 (diff 390c3b7..f04c745). Not covered: application logic (audit tier). Last audit: 2026-09-25 @7b4e60f (due).
+
+### Findings
+
+- [x] IMPORTANT | production-readiness | the hero trailer copied the still's right-bottom anchoring while the trailer is composed around the centre, so a 375px phone showed the end card cut to "RED STORIES" and the desktop copy panel covered the tower (src/site/site.css .hero-trailer) | Evidence: reviewer's ffmpeg frame crops at 375 and 1440 | Evidence to close: object-position center in both breakpoints and a hero cut of tower footage only (source frames 300 to 745, ending before the wordmark veil at 751), tests/site/clips.test.ts pins the duration; fixed at 142e620
+- [x] IMPORTANT | production-readiness | the live host answered `Range: bytes=0-99` on /trailers/*.mp4 with a 200 and the whole body, no Accept-Ranges, so Safari and iOS could not play the clips (assets served before the Worker, wrangler.jsonc) | Evidence: curl -D - against hundredstories.xyz, 200 with content-length 2550247 | Evidence to close: run_worker_first ["/trailers/*"], src/worker/range.ts answers 206 with Content-Range, 416 when unsatisfiable, HEAD and non-200 pass through; wrangler dev probe 206 bytes 0-99/2550247; tests/worker/range.test.ts 17 cases; fixed at 142e620, live check after deploy
+- [x] ADVISORY | production-readiness | the poster attribute in the markup was downloaded by every visitor, including reduced-motion and data-saver ones who never see it | Evidence to close: the poster is set from hero-trailer.ts on the play path only; test in tests/site/hero-trailer.test.ts
+- [x] ADVISORY | production-readiness | attaching the sources at DOMContentLoaded delayed the page load event that hero.ts waits on, so the live tower booted later | Evidence to close: sources attach after window load; tests/site/hero.test.ts expects both load listeners
+- [x] ADVISORY | testing | no pause handler, so an outside pause could leave a frozen frame over the tower; four mutants survived (done guard, pause(), stall de-dupe, timer clear) | Evidence to close: pause ends the trailer; tests for each mutant
+- [x] ADVISORY | testing | the clips page was missing from the favicon and footer page-list tests | Evidence to close: tests/site/landing.test.ts lists clips
+- [x] ADVISORY | production-readiness | MAP.md said there was no Worker code | Evidence to close: Hosting line and a src/worker row corrected
+
+### Reckoning
+Reckoning 2026-09-28: two IMPORTANT fixed in the round at 142e620, five ADVISORY fixed in the close commit. The phone downloads the 1280x720 cut (0.77 MB, preload metadata): kept, the reviewer judged it reasonable.
+
+## Checkpoint 2026-09-28 - money system, 24b0ed4 - lenses: real-data, testing, production-readiness
+
+Scope: an adversarial subsystem review first (docs/reviews/economy-review-2026-09-28.md: 1 CRITICAL, 5 IMPORTANT, 9 ADVISORY, all closed by the package or a ruling in DECISIONS.md), then one reviewer on the package commit 24b0ed4, design verify and lenses in one pass. Not covered: code outside the money paths. Last audit: 2026-09-25 @7b4e60f (due).
+
+### Findings
+
+- [x] IMPORTANT | real-data | an older save caught in the old runaway lobby fire still destroyed and billed its lobby tiles on the first tick (src/sim/events.ts endFire, the helicopter bill) | Evidence: reviewer's probe, 93 of 120 tiles lost and $465,000 billed | Evidence to close: structure rooms are put out, never destroyed or billed, on every end path; load strips them from an active fire; fixture test with a burning lobby
+- [x] IMPORTANT | testing | quarterForecast read each office's current rating while the settle reads the 04:30 one, so the midday forecast underestimated rent ($726k shown against $990k paid) | Evidence: reviewer's busy-tower probe | Evidence to close: evaluateRoom takes a stress argument, the forecast uses stress 0; test where a stressed office forecasts what the settle pays
+- [x] ADVISORY | testing | bomb and theft losses had no test; reverting them to a raw cash write passed everything | Evidence to close: tests that both land in lossesByKind and the settle
+- [x] ADVISORY | production-readiness | the "Last quarter" lobby tile count was derived from amount over the current rate and went wrong after a star change | Evidence to close: the settle records upkeepCountByKind; no count for old saves
+- [x] ADVISORY | production-readiness | a fire whose rooms a bomb destroyed lingered until burn-out and kept people outside | Evidence to close: a fire with nothing burning ends at once ("The fire is out.")
+- [x] ADVISORY | production-readiness | the shaft refund counted the first car, which the shaft price includes | Evidence to close: 25% of shaft plus cars minus one; test amounts updated
+- [x] ADVISORY | production-readiness | the build, sell, demolish, rebuild condo loop gained $20,000 from the refund | Evidence to close: a sold condo cannot be demolished (ruling in DECISIONS.md); tests for sold and vacant
+- [x] ADVISORY | production-readiness | the guide said trouble is outside the quarter total while losses now count in the quarter's profit | Evidence to close: guide wording corrected
+- [x] ADVISORY | production-readiness | nothing told a player without security that a fire burns out | Evidence to close: the start line says it burns itself out in about 3 hours
+- [x] ADVISORY | real-data | an old save showed "Nothing yet" under a non-zero income tile until its next settle | Evidence to close: "Details start next quarter." when the tables are empty
+- [x] ADVISORY | testing | MINUTES_PER_QUARTER and the hours wording were defined twice; the bank warning said "above -$500,000" while exactly that is safe | Evidence to close: one copy in src/sim/economy.ts imported by panels, vip and game/events; wording "Get to -$500,000 or better"
+- [x] ADVISORY | testing | no test kept refunds out of incomeByKind | Evidence to close: test added
+- [x] ADVISORY | production-readiness | an offices-only tower read "+$0 earned this quarter" all quarter | Evidence to close: the status bar shows the rent due and when, until income lands
+
+### Reckoning
+Reckoning 2026-09-28: two IMPORTANT and eleven ADVISORY fixed in one round before the close commit; the hash drift question closed by reading the callers (replay verification is a dev script, DECISIONS.md). Full suite and typecheck run once at the close commit.

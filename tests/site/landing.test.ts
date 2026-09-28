@@ -5,6 +5,7 @@
 // Raw imports rather than node:fs: this repo has no @types/node and adds no
 // dependencies, and Vite hands the files over verbatim either way.
 import notfound from '../../404.html?raw';
+import clips from '../../clips/index.html?raw';
 import guide from '../../how-to-play/index.html?raw';
 import landing from '../../index.html?raw';
 import play from '../../play/index.html?raw';
@@ -413,6 +414,7 @@ describe('favicon', () => {
   const pages: Array<[string, string]> = [
     ['landing', landing],
     ['guide', guide],
+    ['clips', clips],
     ['privacy', privacy],
     ['terms', terms],
     ['404', notfound],
@@ -432,6 +434,7 @@ describe('footer', () => {
   const pages: Array<[string, string]> = [
     ['landing', landing],
     ['guide', guide],
+    ['clips', clips],
     ['404', notfound],
     ['privacy', privacy],
     ['terms', terms],

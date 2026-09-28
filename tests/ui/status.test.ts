@@ -3,7 +3,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { NIGHT_MULTIPLIER } from '../../src/game/api';
 import type { Room, RoomKind, World } from '../../src/sim/types';
+import { applyCommand } from '../../src/sim/build';
+import { createWorld } from '../../src/sim/world';
 import {
+  cashMetaText,
   createStatusBar,
   dialAngle,
   dialPoint,
@@ -14,6 +17,7 @@ import {
   populationTrend,
   quarterDelta,
   quarterDeltaText,
+  rentDue,
   speedModeText,
   weatherIcon,
   weatherShort,
@@ -64,6 +68,51 @@ describe('status bar deltas', () => {
     const burned = stubWorld();
     burned.stats.lossesByKind = { fire: 300_000 };
     expect(quarterDeltaText(burned)).toBe('-$48,000 earned this quarter');
+  });
+
+  // Review question: an offices-only tower is paid only at the settle, so "+$0 earned" read all quarter.
+  describe('before any income lands, the rent the next settle pays', () => {
+    function officeTower(minute: number): World {
+      const world = createWorld(7);
+      world.cash = 5_000_000;
+      for (let x = 0; x < 20; x += 1) applyCommand(world, { kind: 'build', room: 'lobby', floor: 1, x });
+      expect(applyCommand(world, { kind: 'build', room: 'office', floor: 2, x: 0 }).ok).toBe(true);
+      expect(applyCommand(world, { kind: 'build', room: 'office', floor: 2, x: 9 }).ok).toBe(true);
+      for (const room of world.rooms.values()) if (room.kind === 'office') room.vacant = false;
+      world.time.minute = minute;
+      return world;
+    }
+
+    it('says the rent and when, in the settle words, never a day number', () => {
+      expect(cashMetaText(officeTower(2 * 1440 + 9 * 60))).toBe('$20,000 rent at 5 AM tomorrow');
+      expect(cashMetaText(officeTower(2 * 60))).toBe('$20,000 rent at 5 AM today');
+      expect(cashMetaText(officeTower(1440 + 600))).toBe('$20,000 rent at 5 AM in 2 days');
+    });
+
+    it('goes back to what was earned once any income or loss lands, and says nothing of rent with no leased office', () => {
+      const world = officeTower(1440 + 600);
+      world.stats.incomeByKind = { shop: 500 };
+      expect(rentDue(world)).toBe(null);
+      expect(cashMetaText(world)).toBe('+$500 earned this quarter');
+      world.stats.incomeByKind = {};
+      world.stats.lossesByKind = { theft: 2_000 };
+      expect(cashMetaText(world)).toBe('-$2,000 earned this quarter');
+      const empty = officeTower(600);
+      for (const room of empty.rooms.values()) room.vacant = true;
+      expect(cashMetaText(empty)).toBe('$0 earned this quarter');
+    });
+
+    it('on the bar: the rent line and its tooltip, then the earned line once a shop takes money', () => {
+      const bar = createStatusBar();
+      const world = officeTower(2 * 1440 + 9 * 60);
+      bar.update(world, 1);
+      const cash = bar.cash as unknown as FakeElement;
+      expect(cash.textContent).toBe('Cash$4,820,000$20,000 rent at 5 AM tomorrow');
+      expect(cash.getAttribute('title')).toBe('Open finances. $20,000 rent at 5 AM tomorrow');
+      world.stats.incomeByKind = { shop: 500 }; // the same minute: the switch does not wait for the clock
+      bar.update(world, 1);
+      expect(cash.textContent).toBe('Cash$4,820,000+$500 earned this quarter');
+    });
   });
 
   it('shows a dash for a world with no income table, and population until midnight', () => {

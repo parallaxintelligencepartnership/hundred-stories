@@ -1,6 +1,7 @@
 // The log and room panels on a fake DOM: what a refresh builds, and what it leaves alone.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createFinancesPanel, createLogPanel, createQueryPanel, createSettingsPanel, nextSettleMinute, nextSettleTitle, type PanelContext } from '../../src/ui/panels';
+import { createFinancesPanel, createLogPanel, createQueryPanel, createSettingsPanel, financeLists, nextSettleMinute, nextSettleTitle, type PanelContext } from '../../src/ui/panels';
+import { onQuarterStart } from '../../src/sim/economy';
 import type { Sound } from '../../src/audio/audio';
 import { RENT } from '../../src/sim/rules';
 import { applyCommand } from '../../src/sim/build';
@@ -417,6 +418,7 @@ function financeWorld(): World {
     incomeByKind: { office: 100_000 },
     upkeepByKind: { standard: 80_000, security: 20_000 },
     lossesByKind: { fire: 20_000 },
+    upkeepCountByKind: { standard: 8, security: 1 },
   };
   world.stats.incomeByKind = { shop: 5_000 };
   world.stats.upkeepByKind = {};
@@ -485,6 +487,30 @@ describe('finances bento', () => {
       ['This quarter so far', 'Nothing yet.'],
       ['Next settle, 5 AM in 3 days', 'Nothing yet.'],
     ]);
+  });
+});
+
+describe('finances: last quarter counts and older saves (review A-2, A-8)', () => {
+  it('shows the lobby tiles the settle billed, even after the stars change the price per tile', () => {
+    const world = createWorld(7);
+    world.stars = 3;
+    for (let x = 0; x < 100; x += 1) applyCommand(world, { kind: 'build', room: 'lobby', floor: 1, x });
+    onQuarterStart(world);
+    world.stars = 4; // $1,000 a tile now; the quarter was billed at $300
+    expect(financeLists(world).last.lines).toEqual([{ label: 'Lobby tiles, 100', amount: -30_000 }]);
+  });
+
+  it('an older save with no counts shows the lines without one', () => {
+    const world = financeWorld();
+    delete world.stats.lastQuarter.upkeepCountByKind;
+    expect(financeLists(world).last.lines.map((l) => l.label)).toEqual(['Office', 'Elevator cars', 'Security office', 'Fire damage']);
+  });
+
+  it('an older save with totals but no tables says the details start next quarter, not Nothing yet', () => {
+    const world = createWorld(7);
+    world.stats.lastQuarter = { income: 80_000, upkeep: 20_000, losses: 0, net: 60_000, incomeByKind: {}, upkeepByKind: {}, lossesByKind: {} };
+    const panel = node(createFinancesPanel({ world } as never, ctx));
+    expect(financeSections(panel)[0]).toEqual(['Last quarter', 'Details start next quarter.']);
   });
 });
 

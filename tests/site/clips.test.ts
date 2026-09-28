@@ -120,10 +120,11 @@ describe('every footer links to the clips page', () => {
 describe('landing hero trailer', () => {
   const css = readFileSync(join(ROOT, 'src', 'site', 'site.css'), 'utf8');
 
-  it('sits between the still and the copy with no sources and no autoplay in the markup', () => {
+  it('sits between the still and the copy with no sources, no poster and no autoplay in the markup: the poster is set from the module, so a reduced-motion or data-saver visitor never downloads it', () => {
     const tag =
-      '<video id="hero-trailer" class="hero-trailer" muted playsinline preload="metadata" poster="/trailers/site-intro.webp" width="1280" height="720" aria-hidden="true"></video>';
+      '<video id="hero-trailer" class="hero-trailer" muted playsinline preload="metadata" width="1280" height="720" aria-hidden="true"></video>';
     expect(landing).toContain(tag);
+    expect(landing).not.toContain('poster="/trailers/site-intro.webp"');
     expect(landing.indexOf('id="hero-shot"')).toBeLessThan(landing.indexOf(tag));
     expect(landing.indexOf(tag)).toBeLessThan(landing.indexOf('<div class="hero-panel">'));
     expect(landing).not.toMatch(/<video[^>]*autoplay/);

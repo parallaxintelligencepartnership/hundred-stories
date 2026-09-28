@@ -2,6 +2,7 @@
 // it rated as it did and when the next chance comes. Pure words from the world, no DOM, so the
 // event log panel draws it and the tests read it directly.
 
+import { MINUTES_PER_QUARTER } from '../sim/economy';
 import { EVENT_ROLL_MINUTE_OF_DAY, vipSafetyBand, vipWaitBand } from '../sim/events';
 import { personName } from '../sim/identity';
 import { EVENTS } from '../sim/rules';
@@ -42,8 +43,6 @@ export interface VipView {
   nextChance: string | null;
 }
 
-const MINUTES_PER_DAY = 1440;
-const MINUTES_PER_QUARTER = 3 * MINUTES_PER_DAY;
 
 function floorText(floor: number): string {
   return floor < 0 ? `floor B${-floor}` : `floor ${floor}`;

@@ -513,6 +513,9 @@ function freeSeatAndCar(world: World, sim: Sim, homeId: number): void {
   sim.inCarId = null;
 }
 
+/** Why a sold condo cannot be demolished. */
+export const CONDO_SOLD_REASON = 'This condo belongs to its owners now. It cannot be demolished.';
+
 function doDemolish(world: World, roomId: number): CommandResult {
   const room = world.rooms.get(roomId);
   if (!room) return no('There is nothing to demolish.');
@@ -524,6 +527,8 @@ function doDemolish(world: World, roomId: number): CommandResult {
   if (world.events.some((e) => e.kind === 'bomb' && e.roomId === room.id)) {
     return no('Deal with the bomb first.');
   }
+  // A sold condo is its owners' home: demolishing it for the refund and selling it again was a money loop.
+  if (room.kind === 'condo' && !room.vacant) return no(CONDO_SOLD_REASON);
   if (room.occupancy > 0) return no('People are inside.');
   const stranded = strandsSomething(world, { roomId: room.id });
   if (stranded) return stranded;
@@ -612,8 +617,9 @@ function doDemolishShaft(world: World, shaftId: number): CommandResult {
   const stranded = strandsSomething(world, { shaftId: shaft.id });
   if (stranded) return stranded;
   const rule = SHAFTS[shaft.kind];
+  // The shaft price includes its first car, so the refund counts only the cars bought after it.
   const refund = Math.round(
-    (rule.shaftCost + rule.carCost * shaft.cars.length) * ECONOMY.demolishRefundFraction,
+    (rule.shaftCost + rule.carCost * Math.max(0, shaft.cars.length - 1)) * ECONOMY.demolishRefundFraction,
   );
   removeShaft(world, shaft.id);
   // Capital returned, not income: does not go through incomeByKind.

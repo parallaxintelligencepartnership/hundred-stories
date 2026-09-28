@@ -1,6 +1,7 @@
 // The game's event stream: what just happened, for listeners that react to moments rather than
 // state (the sound module). Fed from the tick batches and command results the shell already
 // runs; it only reads the world, and only while someone is listening.
+import { MINUTES_PER_QUARTER } from '../sim/economy';
 import { SCHEDULES } from '../sim/rules';
 import type { Command, Id, LogEntry, World } from '../sim/types';
 import type { StoryBeat } from '../sim/story';
@@ -44,7 +45,6 @@ export interface EventTap {
   storySeq: number;
 }
 
-const MINUTES_PER_QUARTER = 3 * 1440;
 
 /**
  * How many quarters have been settled by this minute. The tick settles a quarter at

@@ -10,7 +10,7 @@
 // The sim logs one line per burning room and has no incident id, so the incident is derived here
 // from the log lines (their text and roomId) and from the fire event in world.events.
 
-import { helicopterCost } from '../sim/events';
+import { FIRE_BURN_OUT_TEXT, FIRE_OUT_EMPTY_TEXT, helicopterCost } from '../sim/events';
 import { EVENTS } from '../sim/rules';
 import type { Command, CommandResult, Id, LogEntry, World } from '../sim/types';
 import { formatMoney } from './format';
@@ -89,7 +89,8 @@ export function fireLineOf(entry: LogEntry): FireLine | null {
   if (
     text.startsWith('Security put the fire out.') ||
     text.startsWith('The helicopter soaked the fire.') ||
-    text.startsWith('The fire burned itself out.')
+    text.startsWith('The fire burned itself out.') ||
+    text === FIRE_OUT_EMPTY_TEXT
   ) {
     return 'end';
   }
@@ -166,11 +167,11 @@ export function isRoachLine(entry: LogEntry): boolean {
 /**
  * The fire card's closing line: the rooms lost and what the fire cost in all, the helicopter
  * included when one was called. "Fire out. 5 rooms lost, $100,000." The amount is left off
- * when the card did not hear it (a save loaded as the fire ended).
+ * when the card did not hear it (a save loaded as the fire ended) and when nothing was paid.
  */
 export function fireOutText(lost: number, cost: number | null): string {
   const rooms = lost === 0 ? 'No rooms lost' : `${lost} room${lost === 1 ? '' : 's'} lost`;
-  return cost === null ? `Fire out. ${rooms}.` : `Fire out. ${rooms}, ${formatMoney(cost)}.`;
+  return cost === null || cost === 0 ? `Fire out. ${rooms}.` : `Fire out. ${rooms}, ${formatMoney(cost)}.`;
 }
 
 /** The dollar amount in a sim money line ("... cost $250,000 and ..."), or null. */
@@ -325,7 +326,7 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
         call.disabled = true;
         parts.push(el('p', 'hs-toast-note', `Not enough cash. A firefighting helicopter costs ${formatMoney(cost)}.`));
       }
-      if (!security) parts.push(el('p', 'hs-toast-note', SECURITY_LESSON));
+      if (!security) parts.push(el('p', 'hs-toast-note', FIRE_BURN_OUT_TEXT), el('p', 'hs-toast-note', SECURITY_LESSON));
     }
     body.replaceChildren(...parts);
   }
@@ -347,6 +348,8 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
       return;
     }
     if (kind === 'end' && incident && !incident.closed) {
+      // "The fire is out." names no rooms: the fire ended with nothing left to burn.
+      if (entry.text === FIRE_OUT_EMPTY_TEXT) incident.damaged = 0;
       const count = /(\d+) rooms? burned down/.exec(entry.text)?.[1];
       if (count !== undefined) incident.damaged = Number(count);
       const clearing = moneyIn(entry.text);

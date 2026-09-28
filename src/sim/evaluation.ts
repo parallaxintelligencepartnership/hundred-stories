@@ -135,10 +135,14 @@ export function leaveReasonFor(world: World, room: Room): string {
   return best.text;
 }
 
-/** Score one room 0..1 without touching any other state. */
-export function evaluateRoom(world: World, room: Room): number {
+/**
+ * Score one room 0..1 without touching any other state. `stress` is the tenants' average stress;
+ * it defaults to theirs now. Stress 0 gives the resting rating: the one the 04:30 evaluation sees,
+ * when the workers are home and their stress has faded (economy.ts forecasts rent with it).
+ */
+export function evaluateRoom(world: World, room: Room, stress: number = averageTenantStress(world, room)): number {
   const quiet = ROOMS[room.kind].quiet;
-  const stressPenalty = quiet ? EVAL.stressWeight * averageTenantStress(world, room) : 0;
+  const stressPenalty = quiet ? EVAL.stressWeight * stress : 0;
   const noisePenalty = quiet ? EVAL.noisePenaltyPerNeighbor * noisyNeighborsOf(world, room).length : 0;
   const dirtyPenalty = room.dirty ? EVAL.dirtyPenalty : 0;
   const infestedPenalty = room.infested ? EVAL.infestedPenalty : 0;

@@ -4,6 +4,7 @@
 // runs when createStatusBar is called.
 
 import { NIGHT_MULTIPLIER, type Speed } from '../game/api';
+import { nextSettleWords, quarterForecast } from '../sim/economy';
 import { weatherLabel, type WeatherKind } from '../game/weather';
 import { shownWeatherKind } from '../render/weather';
 import { ROOMS, SCHEDULES, STARS } from '../sim/rules';
@@ -47,6 +48,26 @@ export function quarterDeltaText(world: Baselines): string {
 
 /** The readout's tooltip: what the number counts and what it leaves out. */
 export const QUARTER_DELTA_TITLE = 'Earned this quarter, less money lost to trouble. Building costs are not counted.';
+/** The tooltip while the readout shows the rent due instead. */
+export const RENT_DUE_TITLE = 'Office rent the next settle will pay. Nothing earned or lost yet this quarter.';
+
+/**
+ * The office rent the next settle will pay, when nothing has been earned or lost this quarter
+ * yet and that rent is above zero; otherwise null. An offices-only tower is paid only at the
+ * settle, so "+$0 earned" would read all quarter: this says what is coming instead.
+ */
+export function rentDue(world: World, forecastRent: (world: World) => number = (w) => quarterForecast(w).rent): number | null {
+  const stats = world.stats;
+  if (!stats?.incomeByKind || tableSum(stats.incomeByKind) !== 0 || tableSum(stats.lossesByKind) !== 0) return null;
+  if (!world.rooms || !world.floorIndex) return null;
+  const rent = forecastRent(world);
+  return rent > 0 ? rent : null;
+}
+
+/** "$990,000 rent at 5 AM tomorrow" before any income lands, else "+$52,000 earned this quarter". */
+export function cashMetaText(world: World, rent: number | null = rentDue(world)): string {
+  return rent === null ? quarterDeltaText(world) : `${formatMoney(rent)} rent at ${nextSettleWords(world.time.minute)}`;
+}
 
 // ------------------------------------------------------------ population
 
@@ -357,15 +378,30 @@ export function createStatusBar(options: StatusBarOptions = {}): StatusBar {
   let weatherShown: WeatherKind | null = null;
   let tipKey = '';
   let earnedShown = -1;
+  let rentAt = '';
+  let rentWorld: World | null = null;
+  let rentCached = 0;
 
   function update(world: World, speed: Speed): void {
     setText(cashValue, formatMoney(world.cash));
     const delta = quarterDelta(world);
-    setText(cashMeta, quarterDeltaText(world));
-    cashMeta.classList.toggle('is-down', delta !== null && delta < 0);
-    setAttr(cashMeta, 'title', QUARTER_DELTA_TITLE);
+    // The forecast reads every office, so it is worked out once per game minute or build, not per frame;
+    // whether it shows at all is checked every update, so the first income switches it off at once.
+    const rentShown = rentDue(world, (w) => {
+      const key = `${w.time.minute}|${w.structureVersion}`;
+      if (rentAt !== key || rentWorld !== w) {
+        rentAt = key;
+        rentWorld = w;
+        rentCached = quarterForecast(w).rent;
+      }
+      return rentCached;
+    });
+    const meta = cashMetaText(world, rentShown);
+    setText(cashMeta, meta);
+    cashMeta.classList.toggle('is-down', rentShown === null && delta !== null && delta < 0);
+    setAttr(cashMeta, 'title', rentShown === null ? QUARTER_DELTA_TITLE : RENT_DUE_TITLE);
     // Under 400 px the delta lines are hidden (ui.css), so each readout's tooltip carries its change.
-    setAttr(cash, 'title', `Open finances. ${quarterDeltaText(world)}`);
+    setAttr(cash, 'title', `Open finances. ${meta}`);
 
     setText(popValue, formatCount(world.population));
     const trend = populationTrend(world);

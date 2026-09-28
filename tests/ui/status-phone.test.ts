@@ -7,6 +7,8 @@
 // ui.css, which is what puts each group where it is.
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { applyCommand } from '../../src/sim/build';
+import { createWorld } from '../../src/sim/world';
 import { createUi } from '../../src/ui/ui';
 import { FakeDom, type FakeElement } from './fake-dom';
 
@@ -302,6 +304,20 @@ describe('top bar at phone width', () => {
     expect(find(pop, 'hs-readout-value').textContent).toBe('177');
     expect(pop.getAttribute('title')).toBe('Up 7 today');
     expect(find(root, 'hs-stars-count-text').textContent).toBe('3');
+  });
+
+  it('before any income lands, the cash tooltip carries the rent the next settle pays', () => {
+    const tower = createWorld(7);
+    tower.cash = 5_000_000;
+    for (let x = 0; x < 20; x += 1) applyCommand(tower, { kind: 'build', room: 'lobby', floor: 1, x });
+    expect(applyCommand(tower, { kind: 'build', room: 'office', floor: 2, x: 0 }).ok).toBe(true);
+    for (const room of tower.rooms.values()) if (room.kind === 'office') room.vacant = false;
+    const root = mount(2 * 1440 + 9 * 60, { ...tower, time: { minute: 2 * 1440 + 9 * 60 }, log: [], logTotal: 0 });
+    const cash = find(root, 'hs-status-cash');
+    expect(find(cash, 'hs-readout-meta').textContent).toBe('$10,000 rent at 5 AM tomorrow');
+    expect(cash.getAttribute('title')).toBe('Open finances. $10,000 rent at 5 AM tomorrow');
+    // At phone width the meta line is hidden and the tooltip says it (checked above for the earned line).
+    expect(rule(phoneBlock(), '.hs-status-cash .hs-readout-meta').display).toBe('none');
   });
 
   it('keeps the readout face for cash and the clock only, with tabular figures', () => {

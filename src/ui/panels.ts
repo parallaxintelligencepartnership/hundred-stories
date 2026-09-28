@@ -19,8 +19,10 @@ import type { Renderer } from '../render/renderer';
 import { isVenueKind, venueLine, venueOf } from '../render/venue';
 import { canvasToPng, composeListImage, composeShareImage, shareMessage, shareStats, shareText, shareUrl } from '../share/share';
 import { applyTheme, readTheme, type Theme } from '../site/theme';
-import { officeQuarterRent, quarterForecast, quarterUpkeepOf } from '../sim/economy';
-import { ECONOMY, EVAL, LIMITS, RENT, ROOMS, SCHEDULES, SHAFTS, takesRent, WASTE } from '../sim/rules';
+import { nextSettleWords, officeQuarterRent, quarterForecast } from '../sim/economy';
+
+export { nextSettleMinute } from '../sim/economy';
+import { ECONOMY, EVAL, LIMITS, RENT, ROOMS, SHAFTS, takesRent, WASTE } from '../sim/rules';
 import {
   describeBeat,
   followSim,
@@ -942,26 +944,12 @@ export const LOSS_LABELS: Record<LossKind, string> = {
   theft: 'Theft',
 };
 
-const MINUTES_PER_QUARTER = 3 * 1440;
-
-/** The minute of the next quarter settle at or after `minute` (5 AM on the quarter's first day). */
-export function nextSettleMinute(minute: number): number {
-  const settle = SCHEDULES.quarterStartMinuteOfDay;
-  const quarterStart = Math.floor(Math.max(0, minute) / MINUTES_PER_QUARTER) * MINUTES_PER_QUARTER;
-  return minute <= quarterStart + settle ? quarterStart + settle : quarterStart + MINUTES_PER_QUARTER + settle;
-}
-
 /**
  * "Next settle, 5 AM tomorrow", "Next settle, 5 AM in 2 days", or "Next settle, 5 AM today"
  * before 5 AM on the quarter's first day. Days are calendar days; the game shows no day counter.
  */
 export function nextSettleTitle(minute: number): string {
-  const at = nextSettleMinute(minute);
-  const hour = Math.floor(SCHEDULES.quarterStartMinuteOfDay / 60);
-  const hourText = `${hour % 12 === 0 ? 12 : hour % 12} ${hour < 12 ? 'AM' : 'PM'}`;
-  const days = Math.floor(at / 1440) - Math.floor(Math.max(0, minute) / 1440);
-  const when = days <= 0 ? 'today' : days === 1 ? 'tomorrow' : `in ${days} days`;
-  return `Next settle, ${hourText} ${when}`;
+  return `Next settle, ${nextSettleWords(minute)}`;
 }
 
 function isShaftKind(kind: RoomKind | ShaftKind): kind is ShaftKind {
@@ -988,29 +976,16 @@ function lossLines(table: Partial<Record<LossKind, number>>): FinanceLine[] {
   return sortedEntries(table).map(([kind, amount]) => ({ label: LOSS_LABELS[kind] ?? kind, amount: -amount }));
 }
 
-/** Units that cost this much a quarter each: cars in shafts, rooms, lobby tiles. */
-function upkeepCounts(world: World): Partial<Record<RoomKind | ShaftKind, number>> {
-  const counts: Partial<Record<RoomKind | ShaftKind, number>> = {};
-  for (const room of world.rooms.values()) counts[room.kind] = (counts[room.kind] ?? 0) + 1;
-  for (const shaft of world.shafts.values()) counts[shaft.kind] = (counts[shaft.kind] ?? 0) + shaft.cars.length;
-  return counts;
+/**
+ * Running cost lines, each with the units it billed (rooms, lobby tiles, cars) as the settle or
+ * the forecast counted them. An older save's last quarter has no counts: its lines show none.
+ */
+function upkeepLines(table: Partial<Record<RoomKind | ShaftKind, number>>, counts: Partial<Record<RoomKind | ShaftKind, number>> | undefined): FinanceLine[] {
+  return sortedEntries(table).map(([kind, amount]) => ({ label: upkeepLabel(kind, counts?.[kind] ?? null), amount: -amount }));
 }
 
-/**
- * Running cost lines. With `counts` the count is the tower's own (the forecast); without, it is
- * read back from the amount when the cost per unit divides it evenly (last quarter's table),
- * else the line shows no count.
- */
-function upkeepLines(world: World, table: Partial<Record<RoomKind | ShaftKind, number>>, counts: Partial<Record<RoomKind | ShaftKind, number>> | null): FinanceLine[] {
-  return sortedEntries(table).map(([kind, amount]) => {
-    let count: number | null = counts ? counts[kind] ?? null : null;
-    if (!counts) {
-      const unit = quarterUpkeepOf(world, kind);
-      count = unit > 0 && amount % unit === 0 ? amount / unit : null;
-    }
-    return { label: upkeepLabel(kind, count), amount: -amount };
-  });
-}
+/** The "Last quarter" list's note for an older save: totals, but no tables until its next settle. */
+export const LAST_QUARTER_DETAILS_LATER = 'Details start next quarter.';
 
 /** What the finances panel itemises: last quarter, this quarter so far, and the next settle. */
 export function financeLists(world: World): FinanceLists {
@@ -1021,13 +996,14 @@ export function financeLists(world: World): FinanceLists {
     const n = forecast.vacantOffices;
     next.push({ label: `${formatCount(n)} office${n === 1 ? '' : 's'} empty, no rent yet`, amount: null });
   }
-  next.push(...upkeepLines(world, forecast.upkeepByKind, upkeepCounts(world)));
+  next.push(...upkeepLines(forecast.upkeepByKind, forecast.upkeepCountByKind));
   if (next.some((line) => line.amount !== null)) next.push({ label: 'Expected profit', amount: forecast.rent - forecast.upkeep });
+  const lastLines = [...incomeLines(last.incomeByKind ?? {}), ...upkeepLines(last.upkeepByKind ?? {}, last.upkeepCountByKind), ...lossLines(last.lossesByKind ?? {})];
+  if (lastLines.length === 0 && (last.income !== 0 || last.upkeep !== 0 || (last.losses ?? 0) !== 0)) {
+    lastLines.push({ label: LAST_QUARTER_DETAILS_LATER, amount: null });
+  }
   return {
-    last: {
-      title: 'Last quarter',
-      lines: [...incomeLines(last.incomeByKind ?? {}), ...upkeepLines(world, last.upkeepByKind ?? {}, null), ...lossLines(last.lossesByKind ?? {})],
-    },
+    last: { title: 'Last quarter', lines: lastLines },
     soFar: {
       title: 'This quarter so far',
       lines: [...incomeLines(world.stats.incomeByKind), ...lossLines(world.stats.lossesByKind ?? {})],
