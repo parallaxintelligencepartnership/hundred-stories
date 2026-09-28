@@ -97,6 +97,15 @@ describe('renderer thumbnails', () => {
     expect(plan.layers.map((l) => l.texture.label)).toEqual([`interior|stairs|${ROOMS.stairs.width}|${ROOMS.stairs.height}|0`]);
   });
 
+  // Audit F2 S1: once the renderer's guard turns the extras off, interior() is an empty texture;
+  // a stairs thumbnail must come from room() (the fallback connector), not come out blank.
+  it('draws stairs from room() once the extras are off', () => {
+    const s = stub();
+    s.art.extrasOn = () => false;
+    const plan = thumbnailPlan(s.art, 'stairs');
+    expect(plan.layers.map((l) => l.texture.label)).toEqual([`room|stairs|${ROOMS.stairs.width}|${ROOMS.stairs.height}|${VENUE_SHELL}|day`]);
+  });
+
   it('draws a shaft from one floor of its texture', () => {
     const s = stub();
     const thumbnail = createThumbnails({ art: () => s.art, extract: s.extract, createCanvas: s.createCanvas });

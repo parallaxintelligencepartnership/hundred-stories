@@ -184,6 +184,46 @@ describe('ambient emitters', () => {
     expect(strip.visible).toBe(false);
   });
 
+  // Audit F1 S3: no neon over flames, and no steam or marquee in a closed room.
+  it('hides a burning shop sign, and shows it again once the fire is out', () => {
+    const world = createWorld(3);
+    const shop = room(world, 'shop', 2, 10);
+    const layer = new Container();
+    const ambient = createAmbient(layer);
+    shop.onFire = true;
+    ambient.sync(world, false);
+    const node = layer.children[0] as Container;
+    const strip = node.children[0] as Sprite;
+    ambient.update(10, true, 20 * 60); // 20:00, open and night
+    expect(strip.visible && node.visible).toBe(false);
+    shop.onFire = false;
+    ambient.sync(world, false);
+    ambient.update(10, true, 20 * 60);
+    expect(strip.visible && node.visible).toBe(true);
+  });
+
+  it('hides the steam and the marquee while the restaurant and the cinema are closed or burning', () => {
+    const world = createWorld(3);
+    const restaurant = room(world, 'restaurant', 2, 10);
+    const cinema = room(world, 'cinema', 4, 10);
+    const layer = new Container();
+    const ambient = createAmbient(layer);
+    ambient.sync(world, false);
+    const [steam, marquee] = layer.children as Container[];
+    ambient.update(10, true, 3 * 60); // 03:00, both closed
+    expect(steam!.visible).toBe(false);
+    expect(marquee!.visible).toBe(false);
+    ambient.update(10, false, 19 * 60 + 30); // 19:30: dinner, and the 19:00 show
+    expect(steam!.visible).toBe(true);
+    expect(marquee!.visible).toBe(true);
+    restaurant.onFire = true;
+    cinema.onFire = true;
+    ambient.sync(world, false);
+    ambient.update(10, false, 19 * 60 + 30);
+    expect(steam!.visible).toBe(false);
+    expect(marquee!.visible).toBe(false);
+  });
+
   it('times the sign, the marquee and the steam on real time', () => {
     expect(SIGN_CYCLE_MS).toBe(3000);
     expect([0, 2599, 2600, 2719, 2720, 2839, 2840, 2919, 2920, 2999, 5600].map(signLit)).toEqual([

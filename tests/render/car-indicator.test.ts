@@ -21,7 +21,7 @@ function read(y: number, dir: number): { text: string; inside: boolean } {
       return { fill: () => g };
     },
   };
-  drawCarIndicator(g as unknown as Graphics, carFloorLabel(y), dir, BOX.w, 0xffb347);
+  drawCarIndicator(g as unknown as Graphics, carFloorLabel(y, dir), dir, BOX.w, 0xffb347);
   const x0 = Math.min(...cells.map(([x]) => x));
   const y0 = Math.min(...cells.map(([, yy]) => yy));
   const glyphs = Math.ceil((Math.max(...cells.map(([x]) => x)) - x0 + 1) / 4);
@@ -53,4 +53,26 @@ describe('the car floor indicator', () => {
       });
     }
   }
+});
+
+// Audit F1 S5: floor 0 does not exist, but the sim parks a car crossing between B1 and 1 at y 0
+// for a tick. Going down it must already read B1, not 1; going up it reads 1.
+describe('the car crossing between B1 and 1', () => {
+  it('reads B1 at y 0 going down', () => {
+    expect(read(0, -1).text).toBe('B1');
+    expect(carFloorLabel(0, -1)).toBe('B1');
+  });
+
+  it('reads 1 at y 0 going up', () => {
+    expect(carFloorLabel(0, 1)).toBe('1');
+  });
+
+  it('reads the floor it is at on whole floors, whatever the direction', () => {
+    for (const dir of [-1, 0, 1]) {
+      expect(carFloorLabel(1, dir)).toBe('1');
+      expect(carFloorLabel(-1, dir)).toBe('B1');
+      expect(carFloorLabel(2, dir)).toBe('2');
+      expect(carFloorLabel(-2, dir)).toBe('B2');
+    }
+  });
 });

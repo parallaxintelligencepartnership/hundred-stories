@@ -29,7 +29,9 @@ export function placePerson(
   y: number,
 ): void {
   p.body.setSize(SIM_W, SIM_H);
-  if (isMirrored(frame)) p.body.scale.x = -Math.abs(p.body.scale.x);
+  // setSize keeps the sign scale.x already has, so the sign is set from the frame every time:
+  // a plain frame after a mirrored one must face the right way again.
+  p.body.scale.x = (isMirrored(frame) ? -1 : 1) * Math.abs(p.body.scale.x);
   p.body.position.set(x, y);
   const place = art.prop ? propPlacement(kind, look, frame) : null;
   if (!place || !art.prop) {

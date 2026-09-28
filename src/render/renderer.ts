@@ -169,6 +169,7 @@ export interface Renderer {
   setOverlay(kind: OverlayKind | null): void;
   /** The information views in the color-blind friendly ramp, worst step striped. Render only. */
   setOverlayColorBlind(on: boolean): void;
+  /** The view. panBy and zoomAt through it count as the player's move (setChrome then keeps the view). */
   camera: Camera;
   screenToTile(sx: number, sy: number): { floor: number; x: number };
   setGhost(g: null | Ghost): void;
@@ -327,7 +328,11 @@ function roomVariant(_room: Room): number {
 export function bakeRoomStates(art: Art, world: World): number {
   const seen = new Set<string>();
   let baked = 0;
+  // Stairs and escalators draw their flight from art.interior, never from room() (roomTexture):
+  // their room() bake would be a blank shell nobody shows. The fallback bakes its connector lazily.
+  const flights = !!art.interior && art.extrasOn?.() !== false;
   for (const room of world.rooms.values()) {
+    if (flights && INTERIORS[room.kind].overlay) continue;
     const variant = roomVariant(room);
     const key = `${room.kind}|${room.width}|${room.height}|${variant}`;
     if (seen.has(key)) continue;
@@ -410,6 +415,8 @@ interface RoomEntry {
   height: number;
   variant: number;
   state: WindowState;
+  /** Drawn as an illustrated flight (art.interior), not a room() texture. */
+  flight: boolean;
 }
 
 interface SlabEntry {
@@ -481,6 +488,15 @@ interface VenueEntry {
   /** The room's top left, world px, for the layers made later (the shutter, the staff). */
   x: number;
   y: number;
+  /**
+   * Some texture the art handed these layers was Texture.EMPTY (a canvas with no 2D context, art.ts
+   * paint, which does not cache it): the layers are made afresh on a later venue clock tick, backing
+   * off after each blank retry, until the art draws them.
+   */
+  blank: boolean;
+  retries: number;
+  /** The venue clock bucket from which the next retry may run. */
+  retryAt: number;
 }
 
 /** Which rooms sit people down or have them browse, for the activity pose. */
@@ -664,7 +680,12 @@ function guardArt(primary: Art, backup: Art): Art {
     };
   };
   const guarded: Art = {
-    room: (kind, width, height, variant, state) => call('room', (a) => a.room(kind, width, height, variant, state)),
+    // With the extras off, a stairs or an escalator (an overlay kind, drawn by interior()) takes
+    // the fallback's connector: the real room() draws those as a blank shell.
+    room: (kind, width, height, variant, state) =>
+      extrasBroken && primary.interior && drawsOverRooms(kind)
+        ? backup.room(kind, width, height, variant, state)
+        : call('room', (a) => a.room(kind, width, height, variant, state)),
     slab: (widthTiles) => call('slab', (a) => a.slab(widthTiles)),
     shaft: (kind, floors) => call('shaft', (a) => a.shaft(kind, floors)),
     car: (kind, door, finish) => call('car', (a) => a.car(kind, door, finish)),
@@ -690,6 +711,7 @@ function guardArt(primary: Art, backup: Art): Art {
   if (p.stats) guarded.stats = p.stats;
   if (p.sweep) guarded.sweep = p.sweep;
   if (p.dropGhosts) guarded.dropGhosts = p.dropGhosts;
+  guarded.extrasOn = () => !broken && !extrasBroken;
   return guarded;
 }
 
@@ -754,8 +776,8 @@ export const PICK_RADIUS_TILES = 1.5;
 /**
  * The sim a tap lands on, or null. Only a sim the screen actually draws can be picked:
  * a tap must never select someone the crowd sample left out, or the panel would open on
- * a person who is not there. On a floor, within the pick radius, newest wins because the
- * newest sim draws on top. Pure and exported so the rule is testable without a GPU.
+ * a person who is not there. On a floor, within the pick radius, a sprite under the tap
+ * wins (newest first, because the newest draws on top), else the nearest. Pure and exported so the rule is testable without a GPU.
  *
  * `drawnAt`, when given, is where the last frame drew each person (renderer: recorded in
  * reconcileSims): only a sim in it can be picked, and it is picked where it is drawn, so a
@@ -769,6 +791,7 @@ export function pickSimAt(
   drawnAt?: ReadonlyMap<Id, DrawPoint>,
 ): Sim | null {
   let best: Sim | null = null;
+  let bestDist = Infinity;
   for (const sim of sims) {
     if (!simIsVisible(sim) || (sample && !inCrowd(sim))) continue;
     let simFloor = sim.pos.floor;
@@ -780,8 +803,24 @@ export function pickSimAt(
       simX = at.x / TILE_PX;
     }
     if (simFloor !== floor) continue;
-    if (Math.abs(simX - tileFloat) > PICK_RADIUS_TILES) continue;
-    if (!best || sim.id > best.id) best = sim;
+    const dist = Math.abs(simX - tileFloat);
+    if (dist > PICK_RADIUS_TILES) continue;
+    // A sprite is one tile wide, centred on its x: a tap within half a tile is on it.
+    // A sprite under the tap beats any it is not on (newest wins among those, since the
+    // newest draws on top); with none under the tap the nearest wins.
+    const on = dist <= 0.5;
+    if (!best) {
+      best = sim;
+      bestDist = dist;
+      continue;
+    }
+    const bestOn = bestDist <= 0.5;
+    const better =
+      on && bestOn ? sim.id > best.id : on !== bestOn ? on : dist < bestDist || (dist === bestDist && sim.id > best.id);
+    if (better) {
+      best = sim;
+      bestDist = dist;
+    }
   }
   return best;
 }
@@ -1453,19 +1492,22 @@ export async function createRenderer(
 
       let entry = roomSprites.get(room.id);
       const placed = !entry;
+      const flightOn = drawsFlight(room);
       if (!entry) {
         const sprite = new Sprite(roomTexture(room, variant, state));
         (drawsOverRooms(room.kind) ? connectorLayer : roomLayer).addChild(sprite);
-        entry = { node: sprite, kind: room.kind, width: room.width, height: room.height, variant, state };
+        entry = { node: sprite, kind: room.kind, width: room.width, height: room.height, variant, state, flight: flightOn };
         roomSprites.set(room.id, entry);
       } else if (
         entry.kind !== room.kind ||
         entry.width !== room.width ||
         entry.height !== room.height ||
         entry.variant !== variant ||
-        entry.state !== state
+        entry.state !== state ||
+        entry.flight !== flightOn
       ) {
         entry.node.texture = roomTexture(room, variant, state);
+        entry.flight = flightOn;
         entry.kind = room.kind;
         entry.width = room.width;
         entry.height = room.height;
@@ -1474,7 +1516,7 @@ export async function createRenderer(
       }
       // An illustrated flight (stairs, escalator) is baked into its band only (interiors.ts
       // FLIGHT), so it goes at the band's top at the band's height, never stretched over the room.
-      const flight = art.interior && INTERIORS[room.kind].overlay ? INTERIORS[room.kind].band(room.height) : null;
+      const flight = flightOn ? INTERIORS[room.kind].band(room.height) : null;
       entry.node.position.set(px, flight ? py + flight.top : py);
       entry.node.setSize(pw, flight ? flight.height : ph);
       // D-4: the night grade by window state (day and lit keep their colours), or the fire.
@@ -1632,8 +1674,12 @@ export async function createRenderer(
    * A room's texture in the room layer: its structural shell, or for stairs and escalators, which
    * draw over the rooms they cross, their illustrated flight (interiors.ts overlay kinds).
    */
+  function drawsFlight(room: Room): boolean {
+    // Once the extras fail, the flight is gone: the fallback's connector (art.room) stands in.
+    return !!art.interior && !!INTERIORS[room.kind].overlay && art.extrasOn?.() !== false;
+  }
   function roomTexture(room: Room, variant: number, state: WindowState): Texture {
-    if (art.interior && INTERIORS[room.kind].overlay) return art.interior(room.kind, room.width, room.height, 0);
+    if (art.interior && drawsFlight(room)) return art.interior(room.kind, room.width, room.height, 0);
     return art.room(room.kind, room.width, room.height, variant, state);
   }
 
@@ -1716,7 +1762,12 @@ export async function createRenderer(
         venuePoolLayer.addChild(pool);
       }
       // The closed overlay and the post are made the first time they show (updateVenues).
-      entry = { kind, width: room.width, floors: room.height, variant, flip, venue, fixtures, decor, wall, sign, signGlow, signLit, closed: null, pool, staff: null, state: '', grade: 0xffffff, x: px, y: py };
+      const blank =
+        fixtures.texture === Texture.EMPTY ||
+        sign?.texture === Texture.EMPTY ||
+        signGlow?.texture === Texture.EMPTY ||
+        [decor, pool].some((c) => c?.children.some((s) => s instanceof Sprite && s.texture === Texture.EMPTY));
+      entry = { kind, width: room.width, floors: room.height, variant, flip, venue, fixtures, decor, wall, sign, signGlow, signLit, closed: null, pool, staff: null, state: '', grade: 0xffffff, x: px, y: py, blank, retries: 0, retryAt: 0 };
       venueSprites.set(room.id, entry);
     }
     if (!entry) return;
@@ -1761,6 +1812,7 @@ export async function createRenderer(
         const r = spec.closed.rect(width, v.floors);
         v.closed = layerSprite(venueClosedLayer, art.shut(v.kind, v.width, v.floors), v.x + r.x, v.y + r.y, r.w, r.h);
         v.closed.tint = v.grade;
+        if (v.closed.texture === Texture.EMPTY) v.blank = true;
       }
       const post = spec.post;
       const manned = !!post && open && (post.when === 'open' || occupied);
@@ -1773,6 +1825,7 @@ export async function createRenderer(
         v.staff.position.set(v.x + post.x(width), v.y + v.floors * FLOOR_PX - SLAB_TOP_PX);
         v.staff.tint = v.grade;
         venueStaffLayer.addChild(v.staff);
+        if (v.staff.texture === Texture.EMPTY) v.blank = true;
       }
       if (v.closed) v.closed.visible = !open;
       if (v.pool) v.pool.visible = night && !burning && (occupied || (manned && post?.when === 'open'));
@@ -1781,6 +1834,28 @@ export async function createRenderer(
       if (v.sign) v.sign.tint = sign === 'dark' ? SIGN_DARK_TINT : 0xffffff;
       if (v.signGlow) v.signGlow.visible = sign === 'lit' && !burning;
       if (v.signLit) v.signLit.visible = sign === 'lit' && !burning;
+    }
+  }
+
+  /**
+   * Make afresh, on the venue clock, the layers of each room that got a blank texture (VenueEntry
+   * blank), now that the art may draw again. Backs off per room (1, 2, 4 ... 64 ticks), and never
+   * while the extras are off for good (guardArt), where every answer is blank by design.
+   */
+  function retryBlankVenues(w: World, bucket: number): void {
+    if (art.extrasOn?.() === false) return;
+    for (const [id, v] of [...venueSprites]) {
+      if (!v.blank || bucket < v.retryAt) continue;
+      const room = w.rooms.get(id);
+      if (!room) continue;
+      const { x, y, variant, grade, retries } = v;
+      dropVenue(id, v);
+      syncVenue(w, room, x, y, variant);
+      const fresh = venueSprites.get(id);
+      if (!fresh) continue;
+      gradeVenue(fresh, grade);
+      fresh.retries = retries + 1;
+      fresh.retryAt = bucket + Math.min(64, 2 ** fresh.retries);
     }
   }
 
@@ -1918,7 +1993,7 @@ export async function createRenderer(
 
   /** The car's floor and direction, lit in the housing baked above its doors. */
   function drawIndicator(entry: CarEntry, car: Car, x: number, y: number): void {
-    const label = carFloorLabel(car.y);
+    const label = carFloorLabel(car.y, car.dir);
     const key = `${label}|${car.dir}`;
     const size = TEXTURE_SIZE.car(entry.kind);
     const box = carIndicator(size.width, 4);
@@ -2825,6 +2900,26 @@ export async function createRenderer(
 
   frameInitial();
 
+  // The camera the ui holds. A panBy or zoomAt through it (the minimap, the gamepad) is the
+  // player moving the view, the same as a canvas drag, so a later chrome re-measure keeps it.
+  // Everything else reads and writes the real camera.
+  const playerCamera = new Proxy(camera, {
+    get(target, prop) {
+      if (prop === 'panBy' || prop === 'zoomAt') {
+        const move = target[prop] as (...args: number[]) => void;
+        return (...args: number[]): void => {
+          userMoved = true;
+          move.apply(target, args);
+        };
+      }
+      const value: unknown = Reflect.get(target, prop, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+    set(target, prop, value) {
+      return Reflect.set(target, prop, value, target);
+    },
+  });
+
   const renderer: Renderer = {
     render(w: World, alpha: number): void {
       if (w !== lastWorld) worldReplaced(w);
@@ -2835,6 +2930,7 @@ export async function createRenderer(
       const bucket = Math.floor(w.time.minute / VENUE_CLOCK_MINUTES);
       if (bucket !== venueClock) {
         venueClock = bucket;
+        retryBlankVenues(w, bucket);
         updateVenues(w, night);
       }
       reconcileCars(w, alpha);
@@ -2897,7 +2993,7 @@ export async function createRenderer(
     setOverlayColorBlind(on): void {
       overlayPass.setColorBlind(on);
     },
-    camera,
+    camera: playerCamera,
     screenToTile,
     setGhost(g): void {
       if (!g && ghost && art.dropGhosts) {

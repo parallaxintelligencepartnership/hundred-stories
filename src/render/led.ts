@@ -41,8 +41,13 @@ export function drawLedText(g: Graphics, text: string, x: number, y: number, cel
   }
 }
 
-/** The floor a car at height `y` shows: the nearest floor, B and the depth below ground. */
-export function carFloorLabel(y: number): string {
+/**
+ * The floor a car at height `y` shows: the nearest floor, B and the depth below ground. Floor 0
+ * does not exist, so a car between B1 and 1 (the sim puts it at y 0 for a tick) is crossing:
+ * moving (`dir`), it shows where it is headed, B1 going down and 1 going up.
+ */
+export function carFloorLabel(y: number, dir = 0): string {
+  if (y > -1 && y < 1 && dir !== 0) return dir < 0 ? 'B1' : '1';
   const floor = Math.round(y);
   return floor < 0 ? `B${-floor}` : `${Math.max(1, floor)}`;
 }

@@ -66,6 +66,20 @@ describe('pickSimAt', () => {
     expect(pickSimAt(sims, 3, 120)?.id).toBe(12);
   });
 
+  // Audit F1 S1: sprites are one tile wide, so two people one tile apart do not overlap.
+  // A tap on the lower id's sprite must pick it, not the higher id a tile away.
+  it('picks the sprite under the tap over a newer sim a tile away', () => {
+    const sims = [walker(4, 3, 120), walker(8, 3, 121)];
+    expect(pickSimAt(sims, 3, 120)?.id).toBe(4);
+    expect(pickSimAt(sims, 3, 119.6)?.id).toBe(4);
+    expect(pickSimAt(sims, 3, 121)?.id).toBe(8);
+  });
+
+  it('with no sprite under the tap, picks the nearest in reach', () => {
+    const sims = [walker(8, 3, 121.4), walker(4, 3, 119.2)];
+    expect(pickSimAt(sims, 3, 120.2)?.id).toBe(4);
+  });
+
   it('with sample false, picks a sim the crowd sample would have skipped', () => {
     const sims = [walker(5, 3, 120)];
     expect(pickSimAt(sims, 3, 120, false)?.id).toBe(5);

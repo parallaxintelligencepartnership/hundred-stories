@@ -15,8 +15,8 @@ import { restaurantSteamPoint, shopSignStrip } from './illustrated';
 import { mix } from './anim';
 import { floorTopY } from './camera';
 import { TILE_PX } from './grid';
+import { INTERIORS } from './interiors';
 import { PALETTE } from './palette';
-import { venueOpen } from './venue';
 
 /** A shop sign's neon stutter repeats this often; it is lit most of the time. */
 export const SIGN_CYCLE_MS = 3000;
@@ -114,11 +114,15 @@ export function steamPuffs(elapsedMs: number): { dx: number; dy: number; alpha: 
 }
 
 export interface Ambient {
-  /** Match the emitters to the rooms in the world. None under reduced motion. */
+  /**
+   * Match the emitters to the rooms in the world. None under reduced motion. Also takes each
+   * room's fire: setOnFire moves the structure version, so the renderer syncs on every change.
+   */
   sync(world: World, reducedMotion: boolean): void;
   /**
-   * Advance by `dtMs` of real time; the shop signs blink only at night, and only while the shop
-   * is open at game minute `minute` (venue.ts venueOpen) when one is given.
+   * Advance by `dtMs` of real time. An emitter shows only while its room is not burning and,
+   * when `minute` is given, while its room is open (interiors.ts INTERIORS[kind].open, the same
+   * rule that draws the room closed); the shop signs also only at night.
    */
   update(dtMs: number, night: boolean, minute?: number): void;
   /** How many emitters are live, for the tests. */
@@ -128,6 +132,8 @@ export interface Ambient {
 
 interface Live {
   emitter: AmbientEmitter;
+  roomKind: RoomKind;
+  onFire: boolean;
   phase: number;
   node: Container;
   sprites: Sprite[];
@@ -162,8 +168,15 @@ export function createAmbient(layer: Container): Ambient {
       const seen = new Set<Id>();
       for (const e of want) {
         seen.add(e.roomId);
+        const room = world.rooms.get(e.roomId);
+        const roomKind = room?.kind ?? 'shop';
+        const onFire = room?.onFire === true;
         const had = live.get(e.roomId);
-        if (had && same(had.emitter, e)) continue;
+        if (had && same(had.emitter, e)) {
+          had.onFire = onFire;
+          had.roomKind = roomKind;
+          continue;
+        }
         if (had) drop(e.roomId);
         const node = new Container();
         const sprites: Sprite[] = [];
@@ -179,21 +192,23 @@ export function createAmbient(layer: Container): Ambient {
         }
         node.addChild(...sprites);
         layer.addChild(node);
-        live.set(e.roomId, { emitter: e, phase: emitterPhase(e.roomId), node, sprites });
+        live.set(e.roomId, { emitter: e, roomKind, onFire, phase: emitterPhase(e.roomId), node, sprites });
       }
       for (const id of [...live.keys()]) if (!seen.has(id)) drop(id);
     },
 
     update(dtMs, night, minute) {
-      const shopOpen = minute === undefined || venueOpen('shop', minute);
       if (live.size === 0) return;
       clock += Math.max(0, dtMs);
       const puffs = steamPuffs(clock);
-      for (const { emitter: e, phase, sprites } of live.values()) {
+      for (const { emitter: e, roomKind, onFire, phase, node, sprites } of live.values()) {
+        const opener = INTERIORS[roomKind].open;
+        const open = minute === undefined || !opener || opener(minute);
+        node.visible = open && !onFire;
         if (e.kind === 'sign') {
           const s = sprites[0];
           if (!s) continue;
-          s.visible = night && shopOpen;
+          s.visible = night && open && !onFire;
           s.tint = signLit(clock + phase) ? PALETTE.amber : SIGN_OFF;
         } else if (e.kind === 'marquee') {
           const s = sprites[0];

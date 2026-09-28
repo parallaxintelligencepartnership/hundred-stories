@@ -71,10 +71,13 @@ export function thumbnailPlan(art: Art, kind: ThumbnailKind): ThumbnailPlan {
   const height = floors * FLOOR_PX;
   const spec = INTERIORS[room];
   const layers: ThumbnailLayer[] = [];
-  if (!(spec.overlay && art.interior)) {
+  // Once the extras fail (renderer guardArt), a stairs or an escalator draws from room(): the
+  // fallback's connector. interior() would only give an empty texture.
+  const extras = !!art.interior && art.extrasOn?.() !== false;
+  if (!(spec.overlay && extras)) {
     layers.push({ texture: art.room(room, tiles, floors, art.interior ? VENUE_SHELL : 0, 'day'), x: 0, y: 0, w: width, h: height, smooth: false });
   }
-  if (art.interior) {
+  if (extras && art.interior) {
     const band = spec.band(floors);
     if (rule.width === 1) {
       // A run of single tiles, each in its place in the rhythm, as a lobby is laid.

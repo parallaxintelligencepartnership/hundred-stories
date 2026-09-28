@@ -157,6 +157,11 @@ export interface Art {
   sweep?(live: ReadonlySet<Texture>, idleMs: number): number;
   /** Free every ghost texture: the placement ended, and a drag's spans should not stay baked. */
   dropGhosts?(): void;
+  /**
+   * False once the illustrated extras have failed (the renderer's guard): interior() then
+   * returns an empty texture, and stairs and escalators draw from room() instead. Absent means on.
+   */
+  extrasOn?(): boolean;
 }
 
 /**

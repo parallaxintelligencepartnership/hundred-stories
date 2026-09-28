@@ -8,7 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Container, Graphics, ParticleContainer, Sprite, Texture } from 'pixi.js';
 import type { Art } from '../../src/render/art';
 import { doorFrameOf } from '../../src/render/anim';
-import { CROWD_ONE_IN, createRenderer, type Renderer } from '../../src/render/renderer';
+import { bakeRoomStates, CROWD_ONE_IN, createRenderer, type Renderer } from '../../src/render/renderer';
+import { windowStatesFor } from '../../src/render/light';
 import { ROOMS } from '../../src/sim/rules';
 import type { Car, Room, RoomKind, Sim, World } from '../../src/sim/types';
 import { addRoom, addShaft, addSim, allocId, createWorld, markStructureChanged, setOccupancy, setOnFire } from '../../src/sim/world';
@@ -913,5 +914,198 @@ describe('the illustrated stairs and escalator sit on the floors they join', () 
       // The band ends on the room's bottom edge, so the foot lands on the lower floor's slab.
       expect(flight!.y + flight!.height).toBe(floorTopY(room.floor) + 72);
     }
+  });
+});
+
+// Audit F1 S2: the minimap and the gamepad move the view through renderer.camera.panBy and
+// zoomAt. That is the player's move, so a later chrome re-measure (the build sheet opening)
+// must keep the view and not snap back to the opening shot.
+describe('a view moved through renderer.camera survives a chrome re-measure', () => {
+  it('keeps a panBy (minimap, gamepad pan) through setChrome', async () => {
+    const world = createWorld(3);
+    world.time.minute = NOON;
+    makeRoom(world, 'lobby', 1, 100);
+    const { renderer, frame } = await mount(world);
+    renderer.setChrome(60, 0);
+    frame(16);
+    renderer.camera.panBy(1500, -400);
+    const moved = { x: renderer.camera.x, y: renderer.camera.y, zoom: renderer.camera.zoom };
+    renderer.setChrome(60, 300);
+    expect({ x: renderer.camera.x, y: renderer.camera.y, zoom: renderer.camera.zoom }).toEqual(moved);
+  });
+
+  it('keeps a zoomAt (gamepad zoom) through setChrome', async () => {
+    const world = createWorld(3);
+    world.time.minute = NOON;
+    makeRoom(world, 'lobby', 1, 100);
+    const { renderer, frame } = await mount(world);
+    renderer.setChrome(60, 0);
+    frame(16);
+    renderer.camera.zoomAt(1.5, 200, 200);
+    const zoom = renderer.camera.zoom;
+    renderer.setChrome(60, 300);
+    expect(renderer.camera.zoom).toBe(zoom);
+  });
+
+  it('still reframes the opening shot on a re-measure before any move', async () => {
+    const world = createWorld(3);
+    world.time.minute = NOON;
+    makeRoom(world, 'lobby', 1, 100);
+    const { renderer, frame } = await mount(world);
+    renderer.setChrome(60, 0);
+    frame(16);
+    const y = renderer.camera.y;
+    renderer.setChrome(60, 300);
+    expect(renderer.camera.y).not.toBe(y);
+  });
+});
+
+// Audit F2 S1 (F1 S4): after the art fails, the tower degrades to flat rectangles, never blank.
+// The stairs and the escalator draw from art.interior, which the guard turns into an empty
+// texture once anything fails; they must fall back to the fallback's connector (room()).
+describe('stairs after an art failure', () => {
+  for (const which of ['interior', 'room'] as const) {
+    it(`draws the fallback connector, not an empty texture, after a throw in ${which}`, async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      let armed = false;
+      artHolder.art = {
+        ...stubArt,
+        room: (kind, w, h, v, s) => {
+          if (which === 'room' && armed) throw new Error('boom');
+          return tex(`room|${kind}|${w}|${h}|${v}|${s}`);
+        },
+        interior: (kind, w, h, v) => {
+          if (which === 'interior' && armed) throw new Error('boom');
+          return tex(`interior|${kind}|${w}|${h}|${v}`);
+        },
+      } satisfies Art;
+      const world = createWorld(1);
+      world.time.minute = NOON;
+      for (let x = 100; x < 140; x++) makeRoom(world, 'lobby', 1, x);
+      const stairs = makeRoom(world, 'stairs', 1, 104);
+      const { renderer, stage, frame } = await mount(world);
+      renderer.render(world, 1);
+      frame(16);
+      const [flight] = spritesWith(stage, 'interior|stairs|');
+      expect(flight).toBeDefined();
+      armed = true;
+      // A shop is built (its layers ask the art again and the throw lands), then night falls.
+      makeRoom(world, 'shop', 2, 100);
+      markStructureChanged(world);
+      renderer.render(world, 1);
+      frame(16);
+      world.time.minute = MIDNIGHT + 60;
+      markStructureChanged(world);
+      renderer.render(world, 1);
+      frame(16);
+      expect(flight!.destroyed).toBe(false);
+      expect(flight!.texture).not.toBe(Texture.EMPTY);
+      // The fallback's canvas texture: with no DOM here, canvasTexture hands back Texture.WHITE.
+      expect(flight!.texture).toBe(Texture.WHITE);
+      // The connector is drawn over the whole room, as fallbackArt paints it.
+      expect(flight!.height).toBe(stairs.height * 72);
+      warn.mockRestore();
+    });
+  }
+});
+
+// Audit F2 S3: with the illustrated art, stairs and escalators never show a room() texture,
+// so the boot bake must not make one (a blank shell, about 295 KB each at DPR 2).
+describe('bakeRoomStates', () => {
+  function countingArt(withInterior: boolean): { art: Art; calls: string[] } {
+    const calls: string[] = [];
+    const art: Art = {
+      ...stubArt,
+      room: (kind, w, h, v, s) => {
+        calls.push(kind);
+        return tex(`room|${kind}|${w}|${h}|${v}|${s}`);
+      },
+    };
+    if (withInterior) art.interior = (kind, w, h, v) => tex(`interior|${kind}|${w}|${h}|${v}`);
+    return { art, calls };
+  }
+
+  it('bakes no room texture for stairs or an escalator when the art draws their flight', () => {
+    const world = createWorld(1);
+    makeRoom(world, 'stairs', 1, 100);
+    makeRoom(world, 'escalator', 3, 120);
+    const { art, calls } = countingArt(true);
+    expect(bakeRoomStates(art, world)).toBe(0);
+    expect(calls).toEqual([]);
+  });
+
+  it('still bakes every state of every other kind, and connectors for art with no flight', () => {
+    const world = createWorld(1);
+    makeRoom(world, 'stairs', 1, 100);
+    makeRoom(world, 'office', 3, 120);
+    const withFlight = countingArt(true);
+    bakeRoomStates(withFlight.art, world);
+    expect(withFlight.calls.filter((k) => k === 'office')).toHaveLength(windowStatesFor('office').length);
+    const flat = countingArt(false);
+    bakeRoomStates(flat.art, world);
+    expect(flat.calls).toContain('stairs');
+  });
+});
+
+// Audit F2 S2: art.ts paint hands back Texture.EMPTY, uncached, when a canvas has no 2D context
+// (iOS at its canvas memory cap), so the next ask can draw. The renderer must ask again: a room
+// whose layers came back blank is made afresh on a later venue clock tick.
+describe('venue layers that came back blank', () => {
+  function labels(root: Container): string[] {
+    const out: string[] = [];
+    const walk = (n: Container): void => {
+      if (n instanceof Sprite && n.texture !== Texture.EMPTY && n.texture.label) out.push(n.texture.label);
+      for (const c of n.children) walk(c as Container);
+    };
+    walk(root);
+    return out;
+  }
+
+  it('draws the shop fixtures and sign once the canvas is back', async () => {
+    let contextBack = false;
+    artHolder.art = {
+      ...stubArt,
+      interior: (kind, w, h, v) => (contextBack ? tex(`interior|${kind}|${w}|${h}|${v}`) : Texture.EMPTY),
+      sign: (k, w, name) => (contextBack ? tex(`sign|${k}|${w}|${name}`) : Texture.EMPTY),
+      glow: () => (contextBack ? tex('glow') : Texture.EMPTY),
+    } satisfies Art;
+    const world = createWorld(1);
+    world.time.minute = NOON;
+    for (let x = 100; x < 140; x++) makeRoom(world, 'lobby', 1, x);
+    makeRoom(world, 'shop', 2, 100);
+    const { renderer, stage } = await mount(world);
+    renderer.render(world, 1);
+    expect(labels(stage).filter((l) => l.startsWith('interior|shop'))).toHaveLength(0);
+    contextBack = true;
+    for (let m = 1; m <= 6; m++) {
+      world.time.minute = NOON + m * 10;
+      renderer.render(world, 1);
+    }
+    const drawn = labels(stage);
+    expect(drawn.filter((l) => l.startsWith('interior|shop')).length).toBeGreaterThan(0);
+    expect(drawn.filter((l) => l.startsWith('sign|')).length).toBeGreaterThan(0);
+    expect(drawn.filter((l) => l.startsWith('interior|lobby')).length).toBe(40);
+  });
+
+  it('never makes afresh a room whose layers drew', async () => {
+    let asks = 0;
+    artHolder.art = {
+      ...stubArt,
+      interior: (kind, w, h, v) => {
+        asks++;
+        return tex(`interior|${kind}|${w}|${h}|${v}`);
+      },
+    } satisfies Art;
+    const world = createWorld(1);
+    world.time.minute = NOON;
+    makeRoom(world, 'shop', 2, 100);
+    const { renderer } = await mount(world);
+    renderer.render(world, 1);
+    const before = asks;
+    for (let m = 1; m <= 20; m++) {
+      world.time.minute = NOON + m * 10;
+      renderer.render(world, 1);
+    }
+    expect(asks).toBe(before);
   });
 });
