@@ -2932,13 +2932,15 @@ export async function createRenderer(
 
   frameInitial();
 
-  // The camera the ui holds. A panBy or zoomAt through it (the minimap, the gamepad) is the
-  // player moving the view, the same as a canvas drag, so a later chrome re-measure keeps it.
+  // The camera the ui holds. A move through it is the player's view, the same as a canvas drag,
+  // so a later chrome re-measure keeps it: panBy and zoomAt (the minimap, the gamepad), centerOn
+  // (a News tap), ensureFloorVisible (a build) and easeToX (a selection kept clear of its card).
   // Everything else reads and writes the real camera.
+  const PLAYER_MOVES: ReadonlySet<PropertyKey> = new Set(['panBy', 'zoomAt', 'centerOn', 'ensureFloorVisible', 'easeToX']);
   const playerCamera = new Proxy(camera, {
     get(target, prop) {
-      if (prop === 'panBy' || prop === 'zoomAt') {
-        const move = target[prop] as (...args: number[]) => void;
+      if (PLAYER_MOVES.has(prop)) {
+        const move = Reflect.get(target, prop, target) as (...args: number[]) => void;
         return (...args: number[]): void => {
           userMoved = true;
           move.apply(target, args);

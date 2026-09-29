@@ -249,6 +249,30 @@ describe('opening framing (D-1, BB-1)', () => {
     expect(renderer.camera.zoom).toBeCloseTo(480 / (21 * FLOOR_PX), 6);
   });
 
+  it('a News centerOn through the player camera survives the next chrome re-measure (phone sheet back)', async () => {
+    const { renderer } = await mount(tower(20), {}, { width: 390, height: 844 });
+    renderer.setChrome(120, 300); // the Build sheet open
+    renderer.setChrome(120, 0); // the News panel open: the sheet hidden
+    renderer.camera.centerOn(18, 105); // ui.ts centerOn, a "Needs you now" tap
+    const at = { x: renderer.camera.x, y: renderer.camera.y, zoom: renderer.camera.zoom };
+    renderer.setChrome(120, 300); // the panel closes on a phone: the sheet comes back
+    expect({ x: renderer.camera.x, y: renderer.camera.y, zoom: renderer.camera.zoom }).toEqual(at);
+  });
+
+  it('a build ensureFloorVisible and a selection easeToX also make the view the player\'s', async () => {
+    for (const move of [
+      (r: Renderer) => r.camera.ensureFloorVisible(19),
+      (r: Renderer) => r.camera.easeToX(40 * TILE_PX),
+    ]) {
+      const { renderer } = await mount(tower(20), {}, { width: 390, height: 844 });
+      renderer.setChrome(120, 0);
+      const opening = renderer.camera.zoom;
+      move(renderer);
+      renderer.setChrome(80, 0); // a different band: the game would reframe at a new zoom
+      expect(renderer.camera.zoom).toBe(opening);
+    }
+  });
+
   it('frameTower on an empty lot is the zoom 1 opening', async () => {
     const { renderer } = await mount(tower(4));
     renderer.setChrome(80, 0);

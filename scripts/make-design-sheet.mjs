@@ -32,8 +32,9 @@
 // page is loaded once more, and a tower that still is not the fixture is one line in
 // NOT-CAPTURED.md ("fixture did not seed") and no capture. The room and person shots click a target the fixture puts inside the canvas band
 // the chrome leaves free at the opening view, and the ghost and place shots aim at the same view:
-// openingView models renderer.ts frameInitial (since design pass package P1, the whole tower at
-// zoom 0.5 when it fits the band, else zoom 1 with the street at camera.ts openingGroundLine). The
+// openingView models renderer.ts frameInitial (BB-1 as extended 2026-09-29: the whole tower at
+// zoom 0.5 when it fits the band, else the largest zoom down to MIN_ZOOM that shows it whole,
+// its middle at the middle of the band; zoom 1 only for an empty lot). The
 // far zoom sends ctrl wheel notches (a plain wheel pans, src/render/input.ts). A state that does not show its DOM within 5 seconds
 // is skipped, with one line in NOT-CAPTURED.md. Output: docs/reviews/design-pass-2026-09-25/sheet/
 // unless --out says otherwise (gitignored). Exits 0 whether or not every shot was taken.
@@ -127,6 +128,8 @@ const DEFAULT_GROUND_LINE = 0.68;
  */
 export const OPENING_WHOLE_TOWER = true;
 export const OPENING_ZOOM = 0.5;
+/** src/render/renderer.ts OPENING_SIDE_MARGIN_PX: a tile beside the widest floor in the whole tower opening. */
+export const OPENING_SIDE_MARGIN_PX = TILE_PX;
 /** src/sim/types.ts TOWER_WIDTH, MAX_FLOOR, MIN_FLOOR; camera.ts PAN_MARGIN_PX (30 tiles). */
 const TOWER_WIDTH = 375;
 const MAX_FLOOR = 100;
@@ -317,12 +320,23 @@ function towerSpan(save) {
   return { top, bottom, built: save.rooms.length + save.shafts.length > 0 };
 }
 
-/** renderer.ts wholeTowerGroundLine: the ground line that centres the whole tower at OPENING_ZOOM, or null when it does not fit. */
-function wholeTowerGroundLine(top, bottom, bandPx) {
-  const roof = floorTopY(top);
-  const base = floorTopY(bottom) + FLOOR_PX;
-  if (!(bandPx > 0) || (base - roof + FLOOR_PX) * OPENING_ZOOM > bandPx) return null;
-  return 0.5 - (((roof + base) / 2) * OPENING_ZOOM) / bandPx;
+/**
+ * renderer.ts wholeTowerZoom, copied line for line (renderer.ts imports pixi): OPENING_ZOOM when
+ * the tower, a floor of sky, and OPENING_SIDE_MARGIN_PX either side of its widest floor fit the
+ * band, else the largest zoom at which they do, never below MIN_ZOOM; null for a band or view with
+ * no size. tests/design/sheet.test.ts holds openingView to the real renderer's frameInitial.
+ */
+export function wholeTowerZoom(top, bottom, widthPx, bandPx, viewW) {
+  if (!(bandPx > 0) || !(viewW > 0)) return null;
+  const tall = floorTopY(bottom) + FLOOR_PX - floorTopY(top) + FLOOR_PX;
+  const wide = Math.max(0, widthPx) + 2 * OPENING_SIDE_MARGIN_PX;
+  return Math.max(CAMERA_MIN_ZOOM, Math.min(OPENING_ZOOM, bandPx / tall, viewW / wide));
+}
+
+/** renderer.ts towerMiddleGroundLine: the ground line that puts the tower's middle at the middle of the band, at `zoom`. */
+function towerMiddleGroundLine(top, bottom, bandPx, zoom) {
+  const middle = (floorTopY(top) + floorTopY(bottom) + FLOOR_PX) / 2;
+  return 0.5 - (middle * zoom) / bandPx;
 }
 
 /** renderer.ts builtFloorExtents, folded to the widest span: the leftmost and rightmost built tile edges. */
@@ -335,26 +349,27 @@ function builtExtent(save) {
 }
 
 /**
- * The camera at the opening view, as renderer.ts frameInitial sets it (lines 1076 to 1103 with
- * design pass package P1): the whole tower at OPENING_ZOOM, centred sideways on the built extent,
- * when it fits the band under the top bar; otherwise zoom 1 on the rooms' mean x with the street at
- * camera.ts openingGroundLine (clamp((top + 1) * FLOOR_PX * zoom / band, 0.68, phone ? 0.8 : 0.9)).
- * The band is the canvas under the top bar: ui.ts hands the renderer viewInsets, whose bottom is 0.
- * Then camera.ts centerOn, setGroundLine and clampPosition. `geo` is measureGeo's.
+ * The camera at the opening view, as renderer.ts frameInitial sets it (BB-1, extended
+ * 2026-09-29): a built tower whole at wholeTowerZoom, centred sideways on the built extent, its
+ * middle at the middle of the band (towerMiddleGroundLine); an empty lot at zoom 1 on the rooms'
+ * mean x with the street at camera.ts openingGroundLine (clamp((top + 1) * FLOOR_PX * zoom / band,
+ * 0.68, phone ? 0.8 : 0.9)). The band is the canvas under the top bar: ui.ts hands the renderer
+ * viewInsets, whose bottom is 0. Then camera.ts centerOn, setGroundLine and clampPosition.
+ * `geo` is measureGeo's.
  */
 export function openingView(save, geo) {
   const band = geo.height - geo.bar;
   const span = towerSpan(save);
-  const whole = OPENING_WHOLE_TOWER && span.built ? wholeTowerGroundLine(span.top, span.bottom, band) : null;
+  const { min, max } = builtExtent(save);
+  const whole = OPENING_WHOLE_TOWER && span.built ? wholeTowerZoom(span.top, span.bottom, (max - min) * TILE_PX, band, geo.width) : null;
   let zoom = 1;
   let x;
   let line;
   if (whole !== null) {
-    const { min, max } = builtExtent(save);
-    zoom = OPENING_ZOOM;
+    zoom = whole;
     // centerOn(6, (min + max) / 2 - 0.5) aims at that tile's middle: the extent's middle.
     x = ((min + max) / 2) * TILE_PX;
-    line = whole;
+    line = towerMiddleGroundLine(span.top, span.bottom, band, zoom);
   } else {
     x = openingCameraX(save);
     line = clamp(((span.top + 1) * FLOOR_PX * zoom) / band, DEFAULT_GROUND_LINE, geo.width <= PHONE_MAX_WIDTH ? 0.8 : 0.9);

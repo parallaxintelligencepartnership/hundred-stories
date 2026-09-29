@@ -9,9 +9,11 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { describe, expect, it } from 'vitest';
-import { MIN_ZOOM, createCamera, nearestSnap, openingGroundLine } from '../../src/render/camera';
-import { OPENING_WHOLE_TOWER, OPENING_ZOOM, builtFloorExtents, towerSpan, wholeTowerGroundLine } from '../../src/render/renderer';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { Texture } from 'pixi.js';
+import type { Art } from '../../src/render/art';
+import { MIN_ZOOM, createCamera, nearestSnap } from '../../src/render/camera';
+import { OPENING_SIDE_MARGIN_PX, OPENING_WHOLE_TOWER, OPENING_ZOOM, createRenderer, wholeTowerZoom, type Renderer } from '../../src/render/renderer';
 import { deserialize } from '../../src/sim/save';
 import { formatClock, formatMoney } from '../../src/ui/format';
 import { weatherAt } from '../../src/game/weather';
@@ -103,6 +105,8 @@ interface SheetModule {
   WHEEL_NOTCH: number;
   OPENING_WHOLE_TOWER: boolean;
   OPENING_ZOOM: number;
+  OPENING_SIDE_MARGIN_PX: number;
+  wholeTowerZoom(top: number, bottom: number, widthPx: number, bandPx: number, viewW: number): number | null;
 }
 
 const url = pathToFileURL(join(ROOT, 'scripts', 'make-design-sheet.mjs')).href;
@@ -265,35 +269,70 @@ describe('flags', () => {
   });
 });
 
-/**
- * The renderer's frameInitial (src/render/renderer.ts) on a real camera, from the exported
- * helpers: the whole tower at OPENING_ZOOM when it fits the band under the top bar, else zoom 1
- * on the rooms' mean x with the street at openingGroundLine.
- */
-function rendererOpening(world: World, geo: Geo) {
-  const camera = createCamera();
-  camera.setViewport(geo.width, geo.height);
-  camera.setObstruction(geo.bar, 0);
-  camera.reset();
-  const span = towerSpan(world);
-  const whole = OPENING_WHOLE_TOWER && span.built ? wholeTowerGroundLine(span.top, span.bottom, geo.height - geo.bar) : null;
-  if (whole !== null) {
-    let min = Infinity;
-    let max = -Infinity;
-    for (const e of builtFloorExtents(world).values()) {
-      min = Math.min(min, e.min);
-      max = Math.max(max, e.max);
+// The real createRenderer on a stub pixi Application and stub art (as tests/render/first-frame.test.ts
+// does): no GPU, no DOM. Its frameInitial is what the sheet script's openingView must match.
+const apps = vi.hoisted(() => [] as { frames: (() => void)[]; screen: { width: number; height: number } }[]);
+vi.mock('pixi.js', async (importOriginal) => {
+  const pixi = await importOriginal<typeof import('pixi.js')>();
+  class FakeApplication {
+    stage = new pixi.Container();
+    screen = { width: 800, height: 600 };
+    canvas = { style: {} as Record<string, string>, addEventListener: (): void => {}, removeEventListener: (): void => {} };
+    renderer = { background: { color: 0 }, render: (): void => {} };
+    frames: (() => void)[] = [];
+    ticker = {
+      add: (fn: () => void): void => {
+        this.frames.push(fn);
+      },
+      remove: (): void => {},
+      deltaMS: 16,
+    };
+    constructor() {
+      apps.push(this);
     }
-    camera.zoom = OPENING_ZOOM;
-    camera.centerOn(6, (min + max) / 2 - 0.5);
-    camera.setGroundLine(whole);
-  } else {
-    let total = 0;
-    for (const r of world.rooms.values()) total += r.x + r.width / 2;
-    camera.centerOn(6, Math.round(world.rooms.size > 0 ? total / world.rooms.size : 375 / 2));
-    camera.setGroundLine(openingGroundLine(span.top, geo.height - geo.bar, camera.zoom, geo.width <= 720));
+    async init(): Promise<void> {}
+    destroy(): void {}
   }
-  return camera;
+  return { ...pixi, Application: FakeApplication, isWebGLSupported: () => true };
+});
+const textures = new Map<string, Texture>();
+function tex(key: string): Texture {
+  let t = textures.get(key);
+  if (!t) textures.set(key, (t = new Texture({ label: key })));
+  return t;
+}
+const stubArt: Art = {
+  room: (kind, width, height, variant, state) => tex(`room|${kind}|${width}|${height}|${variant}|${state}`),
+  slab: (width) => tex(`slab|${width}`),
+  shaft: (kind, floors) => tex(`shaft|${kind}|${floors}`),
+  car: (kind) => tex(`car|${kind}`),
+  sim: (kind, band, frame) => tex(`sim|${kind}|${band}|${frame}`),
+  ghost: (w, h, ok) => tex(`ghost|${w}|${h}|${ok}`),
+};
+vi.mock('../../src/render/art', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../src/render/art')>()), createArt: () => stubArt }));
+vi.mock('../../src/render/sky', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/render/sky')>()),
+  createSky: () => ({ update: (): void => {}, destroy: (): void => {} }),
+}));
+
+const mounted: Renderer[] = [];
+afterEach(() => {
+  for (const r of mounted.splice(0)) r.destroy();
+  vi.unstubAllGlobals();
+});
+
+/** The renderer's own opening camera: a real createRenderer at the geo's size, told the top bar as ui.ts viewInsets does (bottom 0). */
+async function rendererOpening(world: World, geo: Geo) {
+  vi.stubGlobal('window', { devicePixelRatio: 1, addEventListener: () => {}, removeEventListener: () => {} });
+  const renderer = await createRenderer({ appendChild: () => {} } as unknown as HTMLElement, world);
+  mounted.push(renderer);
+  const app = apps[apps.length - 1];
+  if (!app) throw new Error('no application was created');
+  app.screen.width = geo.width;
+  app.screen.height = geo.height;
+  for (const fn of app.frames) fn(); // the frame loop picks the new size up
+  renderer.setChrome(geo.bar, 0);
+  return renderer.camera;
 }
 
 describe('the opening view', () => {
@@ -313,15 +352,28 @@ describe('the opening view', () => {
   it('copies the renderer constants it cannot import', () => {
     expect(sheet.OPENING_WHOLE_TOWER).toBe(OPENING_WHOLE_TOWER);
     expect(sheet.OPENING_ZOOM).toBe(OPENING_ZOOM);
+    expect(sheet.OPENING_SIDE_MARGIN_PX).toBe(OPENING_SIDE_MARGIN_PX);
   });
 
-  it('opens the demo tower whole at 0.5 on the desk and at zoom 1 on the phone', () => {
+  it('copies wholeTowerZoom exactly: tall, wide, fitting, floored at MIN_ZOOM, and no band', () => {
+    const cases: [number, number, number, number, number][] = [
+      [5, 1, 20 * 16, 800, 1440],
+      [40, -3, 150 * 16, 636, 1440],
+      [40, 1, 150 * 16, 748, 390],
+      [100, -10, 375 * 16, 500, 800],
+      [10, 1, 100, 0, 800],
+      [10, 1, 100, 600, 0],
+    ];
+    for (const c of cases) expect(sheet.wholeTowerZoom(...c)).toBe(wholeTowerZoom(...c));
+  });
+
+  it('opens the demo tower whole: at 0.5 on the desk, zoomed out to fit on the short desk and the phone', () => {
     expect(sheet.openingView(save, deskGeo).zoom).toBe(0.5);
-    expect(sheet.openingView(save, shortGeo).zoom).toBe(1);
-    expect(sheet.openingView(save, phoneGeo).zoom).toBe(1);
+    expect(sheet.openingView(save, shortGeo).zoom).toBeCloseTo(0.4015, 4);
+    expect(sheet.openingView(save, phoneGeo).zoom).toBeCloseTo(0.2973, 4);
   });
 
-  it('puts every world point where the renderer camera does', () => {
+  it('puts every world point where the renderer camera does', async () => {
     const points: [number, number][] = [
       [0, 0],
       [(100 + 12) * 16, -612],
@@ -330,7 +382,7 @@ describe('the opening view', () => {
       [181.5 * 16, -396],
     ];
     for (const [, geo] of geos) {
-      const camera = rendererOpening(loaded.world, geo);
+      const camera = await rendererOpening(loaded.world, geo);
       const view = sheet.openingView(save, geo);
       expect(view.zoom).toBe(camera.zoom);
       expect(view.x).toBeCloseTo(camera.x, 6);
@@ -352,14 +404,11 @@ describe('targets inside the band', () => {
   const phone: Geo = { left: 0, top: 0, width: 390, height: 844, bar: 96, bottomCover: 120 };
   const inside = (t: Target, g: Geo) => t.x >= g.left && t.x < g.left + g.width && t.y >= g.top + g.bar && t.y < g.top + g.height - g.bottomCover;
 
-  it('on the phone, where every lobby person is off screen, picks a drawn person on a higher floor inside the band', () => {
+  it('on the phone, where the whole tower opens zoomed out, picks a lobby person inside the band above the sheet', () => {
     const pick = sheet.pickPerson(save, phone);
-    const lobby = pick.candidates.filter((t) => / floor 1 x /.test(t.what));
-    expect(lobby.length).toBeGreaterThan(0);
-    expect(lobby.every((t) => !inside(t, phone))).toBe(true);
     expect(pick.target).not.toBeNull();
     expect(inside(pick.target as Target, phone)).toBe(true);
-    expect(pick.target?.what).not.toMatch(/ floor 1 x /);
+    expect(pick.target?.what).toMatch(/ floor 1 x /);
   });
 
   it('only offers people the renderer draws: one in four by id, never riding or outside', () => {
@@ -385,12 +434,15 @@ describe('targets inside the band', () => {
     expect(inside(pick.target as Target, desk)).toBe(true);
   });
 
-  it('picks the restaurant when the whole tower opens, and none when zoom 1 leaves it above the band', () => {
-    const pick = sheet.pickRoom(save, desk);
-    expect(pick.target).not.toBeNull();
-    expect(inside(pick.target as Target, desk)).toBe(true);
-    expect(sheet.pickRoom(save, short).target).toBeNull();
-    expect(sheet.pickRoom(save, short).candidates.length).toBe(1);
+  it('picks the restaurant on every geometry, since the whole tower opens on each, and none when chrome covers it', () => {
+    for (const g of [desk, short, phone]) {
+      const pick = sheet.pickRoom(save, g);
+      expect(pick.target).not.toBeNull();
+      expect(inside(pick.target as Target, g)).toBe(true);
+    }
+    const covered: Geo = { ...desk, bottomCover: 900 - 64 - 1 };
+    expect(sheet.pickRoom(save, covered).target).toBeNull();
+    expect(sheet.pickRoom(save, covered).candidates.length).toBe(1);
   });
 
   it('aims the room click at a tile no shaft covers, since a shaft wins the pick', () => {
