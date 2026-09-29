@@ -67,6 +67,24 @@ describe('clips page', () => {
     for (const name of VIDEOS) expect(existsSync(join(ROOT, 'public', 'trailers', `${name}.webp`))).toBe(true);
   });
 
+  it('keeps the two lead paragraphs and all three "In the game" notes (a guard against reverting the copy)', () => {
+    expect(clips).toContain(
+      '<p>Thirty seconds, silent on purpose. An empty lot becomes a tower, the tower fills with people, and every floor gets a story of its own. This is the game the way it plays in your browser.</p>',
+    );
+    expect(clips).toContain(
+      '<p>Three things that happen in every tower. They are a lot funnier when they happen to somebody else.</p>',
+    );
+    expect(clips).toContain(
+      'In the game, people take the stairs for a single floor and wait for a car for anything higher, and every minute they wait adds stress. One more car in the shaft is usually the cure.',
+    );
+    expect(clips).toContain(
+      "In the game, the rooms people use make waste every morning. The recycling center's collection workers ride the elevators to pick it up. Let it pile up two mornings in a row and the room counts as dirty, and dirty rooms drag down their rating.",
+    );
+    expect(clips).toContain(
+      'In the game, every minute spent waiting for a car adds stress, and you can see it over each person\'s head. When the lobby crowd wears red marks, add a car, add a shaft, or run an express car to the busiest floors.',
+    );
+  });
+
   it('is in the sitemap', () => {
     expect(sitemap).toContain(`<loc>${SITE}/clips/</loc>\n    <lastmod>2026-09-28</lastmod>`);
     expect(sitemap).toContain(`<loc>${SITE}/</loc>\n    <lastmod>2026-09-28</lastmod>`);
@@ -120,7 +138,7 @@ describe('every footer links to the clips page', () => {
 describe('landing splash', () => {
   const css = readFileSync(join(ROOT, 'src', 'site', 'site.css'), 'utf8');
   const tag =
-    '<div id="splash" class="splash" hidden><video id="splash-video" muted playsinline preload="auto" width="1280" height="720" aria-hidden="true"></video><button type="button" id="splash-skip" class="splash-skip">Skip</button></div>';
+    '<div id="splash" class="splash" hidden><video id="splash-video" muted playsinline preload="auto" width="1280" height="720" aria-hidden="true" tabindex="-1"></video><button type="button" id="splash-skip" class="splash-skip">Skip</button></div>';
 
   it('is the first child of body, hidden, with no sources, no poster and no autoplay in the markup: splash.ts sets the poster on the play path, so a declined visitor downloads nothing', () => {
     expect(landing).toContain(`<body>\n    ${tag}\n    <header class="site-head">`);

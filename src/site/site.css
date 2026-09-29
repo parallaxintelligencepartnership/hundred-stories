@@ -643,6 +643,11 @@ html.splash-pending .splash[hidden] {
   color: var(--w-text-dim);
 }
 
+.card .fineprint {
+  font-size: var(--size-12);
+  color: var(--w-text-dim);
+}
+
 /* Steps: an elevator shaft with a car per stop ------------------------ */
 
 .steps {

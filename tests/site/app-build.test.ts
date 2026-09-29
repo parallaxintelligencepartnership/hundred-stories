@@ -30,7 +30,7 @@ describe('app build output', () => {
 
       const entries = readdirSync(outDir);
 
-      for (const name of ['_headers', 'robots.txt', 'sitemap.xml', 'og.png']) {
+      for (const name of ['_headers', 'robots.txt', 'sitemap.xml', 'og.png', 'splash-init.js']) {
         expect(entries).not.toContain(name);
       }
       expect(entries.some((name) => name.startsWith('wordmark'))).toBe(false);
@@ -107,6 +107,10 @@ describe('web build precache', () => {
       // game (src/ui/panels.ts imports src/site/theme.ts), so it stays.
       expect(precached.some((url) => url.startsWith('assets/specimens-'))).toBe(false);
       expect(precached.some((url) => url.startsWith('assets/theme-') && !url.startsWith('assets/theme-init-'))).toBe(true);
+      // The landing splash gate script and its trailer are index.html-only (D-splash); the worker's
+      // scope is /play/ and never sees a fetch event for either.
+      expect(precached).not.toContain('splash-init.js');
+      expect(precached.some((url) => url.includes('trailers/site-splash.mp4'))).toBe(false);
     },
     120_000,
   );
