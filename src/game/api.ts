@@ -31,6 +31,12 @@ export interface DailyChoice {
    * always sets it; optional only so a choice written before it existed still type-checks.
    */
   ahead?: boolean;
+  /**
+   * Today's tower is locked, and nothing starts: 'clock-back' when the device's date is earlier
+   * than a date already played, 'done' when today's was already finished. The card says why; a
+   * tower dated after today, when one is saved, stands behind it to keep playing.
+   */
+  locked?: 'clock-back' | 'done';
 }
 
 export type Tool =

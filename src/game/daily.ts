@@ -8,6 +8,7 @@
 
 import type { World } from '../sim/types';
 import type { TowerStart } from '../sim/world';
+import type { DailyRecord } from './storage';
 import { SITE_URL } from '../share/share';
 import { formatCount } from '../ui/format';
 
@@ -172,18 +173,61 @@ export function formatDateKey(date: string): string {
 }
 
 /**
- * What opening today's tower does, given the daily slot's save: resume it (it is today's),
- * offer the choice (an unfinished tower from an earlier date), show a tower dated after today
- * (the device's date moved back) with the choice to start today's instead, or start today's
- * fresh (no save, a finished earlier one, or one that cannot be read). A fresh start is only
- * ever today's date, and never replaces a tower dated after today.
+ * What opening today's tower does, given the daily slot's save and the daily record: resume it
+ * (it is today's), offer the choice (an unfinished tower from an earlier date), show a tower
+ * dated after today (the device's date moved back) with the choice to start today's instead, or
+ * start today's fresh (no save, a finished earlier one, or one that cannot be read). A fresh start
+ * is only ever today's date, and never replaces a tower dated after today.
+ *
+ * The record (storage.ts, readDailyRecord) locks a date once played: 'clock-back' when today is
+ * earlier than the newest date ever started or finished, 'done' when today's tower was already
+ * finished and the slot no longer holds it. Neither ever starts a tower.
  */
-export type DailyOpening = 'resume' | 'choose' | 'ahead' | 'fresh';
+export type DailyOpening = 'resume' | 'choose' | 'ahead' | 'fresh' | 'clock-back' | 'done';
 
-export function dailyOpening(saved: { date: string | null; finished: boolean } | null, today: string): DailyOpening {
+export function dailyOpening(
+  saved: { date: string | null; finished: boolean } | null,
+  today: string,
+  record: DailyRecord = emptyDailyRecord(),
+): DailyOpening {
+  if (record.latest !== null && today < record.latest) return 'clock-back';
+  if (record.finished.includes(today)) return saved?.date === today ? 'resume' : 'done';
   if (!saved || saved.date === null) return 'fresh';
   if (saved.date === today) return 'resume';
   if (saved.date > today) return 'ahead';
   if (!saved.finished) return 'choose';
   return 'fresh';
+}
+
+/** The finished dates the record keeps: the newest this many. */
+export const DAILY_RECORD_LIMIT = 60;
+
+/** A device that never played a daily, or an install from before the record. */
+export function emptyDailyRecord(): DailyRecord {
+  return { latest: null, finished: [] };
+}
+
+function laterOf(a: string | null, b: string): string {
+  return a !== null && a > b ? a : b;
+}
+
+/** A daily on `date` began: the newest date moves up to it, never back. */
+export function noteDailyStarted(record: DailyRecord, date: string): DailyRecord {
+  return { latest: laterOf(record.latest, date), finished: [...record.finished] };
+}
+
+/** A daily on `date` finished: its date joins the finished ones (newest 60 kept) and the newest date. */
+export function noteDailyFinished(record: DailyRecord, date: string): DailyRecord {
+  const finished = Array.from(new Set([...record.finished, date])).sort().slice(-DAILY_RECORD_LIMIT);
+  return { latest: laterOf(record.latest, date), finished };
+}
+
+/**
+ * The record to open with: the stored one (null when there is none, as on an install from before
+ * it), with a finished daily in the slot added, so an older install's finished day is locked too.
+ */
+export function seedDailyRecord(stored: DailyRecord | null, saved: { date: string | null; finished: boolean } | null): DailyRecord {
+  const record = stored ?? emptyDailyRecord();
+  if (saved && saved.date !== null && saved.finished && !record.finished.includes(saved.date)) return noteDailyFinished(record, saved.date);
+  return record;
 }

@@ -746,6 +746,7 @@ export const readSlot = (slot: SlotName): Promise<string | null> => active(slot)
 
 const UNREADABLE_KEY = 'hs.save.unreadable';
 const DAILY_KEPT_KEY = 'hs.save.daily-kept';
+const DAILY_RECORD_KEY = 'hs.save.daily-record';
 
 function keep(key: string, text: string): boolean {
   try {
@@ -792,4 +793,36 @@ export function keepDailyCopy(text: string): boolean {
 /** The daily keepDailyCopy kept, or null. */
 export function readDailyCopy(): string | null {
   return kept(DAILY_KEPT_KEY);
+}
+
+/**
+ * Which Today's tower dates this device has played, kept beside the daily slot so a date once
+ * finished never opens fresh again, and moving the device's date back never opens a new one:
+ * `latest` is the newest date ever started or finished, `finished` the finished dates (the
+ * newest 60, src/game/daily.ts). Dates are YYYY-MM-DD.
+ */
+export interface DailyRecord {
+  latest: string | null;
+  finished: string[];
+}
+
+const RECORD_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Stores the record. True only when it is there. */
+export function writeDailyRecord(record: DailyRecord): boolean {
+  return keep(DAILY_RECORD_KEY, JSON.stringify({ latest: record.latest, finished: record.finished }));
+}
+
+/** The stored record, or null when there is none (an install from before it) or it does not read. */
+export function readDailyRecord(): DailyRecord | null {
+  const text = kept(DAILY_RECORD_KEY);
+  if (text === null) return null;
+  try {
+    const raw = JSON.parse(text) as { latest?: unknown; finished?: unknown };
+    const latest = typeof raw.latest === 'string' && RECORD_DATE.test(raw.latest) ? raw.latest : null;
+    const finished = Array.isArray(raw.finished) ? raw.finished.filter((d): d is string => typeof d === 'string' && RECORD_DATE.test(d)) : [];
+    return { latest, finished };
+  } catch {
+    return null;
+  }
 }

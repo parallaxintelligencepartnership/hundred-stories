@@ -51,6 +51,7 @@ import {
   floorBaseY,
   floorTopY,
   floorYFloat,
+  MIN_ZOOM,
   openingGroundLine,
   xToTile,
   yToFloor,
@@ -157,6 +158,12 @@ export interface Renderer {
   commitMotion(world: World): void;
   /** Forget every snapshot, for a world that was replaced (a load, a new game). */
   resetMotion(): void;
+  /**
+   * The opening shot for `world` (BB-1): the whole built tower, at zoom 0.5 when it fits and
+   * zoomed out as far as it takes otherwise (never past MIN_ZOOM). The view is the game's to
+   * compose again, so a later chrome re-measure reframes it until the player moves it.
+   */
+  frameTower(world: World): void;
   /**
    * The guide's translucent amber band over where the next step can be built, in floors and
    * tiles (both ends inclusive), drawn in the overlay layer under the ghost. Null clears it.
@@ -897,12 +904,33 @@ export function towerSpan(world: World): { top: number; bottom: number; built: b
  * middle of the tower (its top floor down to its lowest basement) in the middle of a free band
  * `bandPx` tall at OPENING_ZOOM. It fits when the tower and one floor of sky over it do.
  */
-export function wholeTowerGroundLine(top: number, bottom: number, bandPx: number): number | null {
+export function wholeTowerGroundLine(top: number, bottom: number, bandPx: number, zoom = OPENING_ZOOM): number | null {
   const roof = floorTopY(top);
   const base = floorBaseY(bottom);
-  if (!(bandPx > 0) || (base - roof + FLOOR_PX) * OPENING_ZOOM > bandPx) return null;
-  const middle = (roof + base) / 2;
-  return 0.5 - (middle * OPENING_ZOOM) / bandPx;
+  if (!(bandPx > 0) || (base - roof + FLOOR_PX) * zoom > bandPx) return null;
+  return towerMiddleGroundLine(top, bottom, bandPx, zoom);
+}
+
+/** The ground line fraction that puts the middle of the tower (top floor to lowest basement) in the middle of the band, at `zoom`. */
+export function towerMiddleGroundLine(top: number, bottom: number, bandPx: number, zoom: number): number {
+  const middle = (floorTopY(top) + floorBaseY(bottom)) / 2;
+  return 0.5 - (middle * zoom) / bandPx;
+}
+
+/** Room left beside the widest floor in the whole tower opening, on each side, in world px. */
+export const OPENING_SIDE_MARGIN_PX = TILE_PX;
+
+/**
+ * The whole tower opening's zoom (BB-1, extended 2026-09-29): OPENING_ZOOM when the tower, a
+ * floor of sky, and a tile either side of its widest floor (`widthPx`) fit a free band `bandPx`
+ * tall and `viewW` wide; otherwise the largest zoom at which they do, never below MIN_ZOOM.
+ * Null when the band or the view has no size yet.
+ */
+export function wholeTowerZoom(top: number, bottom: number, widthPx: number, bandPx: number, viewW: number): number | null {
+  if (!(bandPx > 0) || !(viewW > 0)) return null;
+  const tall = floorBaseY(bottom) - floorTopY(top) + FLOOR_PX;
+  const wide = Math.max(0, widthPx) + 2 * OPENING_SIDE_MARGIN_PX;
+  return Math.max(MIN_ZOOM, Math.min(OPENING_ZOOM, bandPx / tall, viewW / wide));
 }
 
 /** A run of lobby or sky lobby tiles side by side on one floor, in tiles: x to end (exclusive). */
@@ -1198,9 +1226,10 @@ export async function createRenderer(
 
   let lastWorld: World = world;
 
-  // Opening composition. A built tower that fits the free band at OPENING_ZOOM opens whole,
-  // centered in the band (BB-1). Otherwise zoom 1, with the street low enough that the roof and
-  // a floor of sky show when they fit (D-1), and two thirds down for an empty lot or a short tower.
+  // Opening composition. A built tower opens whole, centered in the free band (BB-1): at
+  // OPENING_ZOOM when it fits, else zoomed out until it does, never past MIN_ZOOM. Before the
+  // chrome reports, and for an empty lot, zoom 1 with the street low enough that the roof and a
+  // floor of sky show when they fit (D-1), and two thirds down for a short tower.
   let userMoved = false;
   let framedOnce = false;
   const bornAt = performance.now();
@@ -1209,27 +1238,29 @@ export async function createRenderer(
   let chromeTop = 0;
   let chromeBottom = 0;
   let chromeKnown = false;
-  function frameInitial(): void {
+  function frameInitial(w: World = lastWorld): void {
     camera.reset(); // zoom 1, no inertia, street at the default ground line
-    const span = towerSpan(lastWorld);
-    const whole =
-      OPENING_WHOLE_TOWER && chromeKnown && span.built
-        ? wholeTowerGroundLine(span.top, span.bottom, app.screen.height - chromeTop - chromeBottom)
-        : null;
-    if (whole !== null) {
-      const extents = builtFloorExtents(lastWorld);
-      let min = Infinity;
-      let max = -Infinity;
-      for (const e of extents.values()) {
+    const span = towerSpan(w);
+    let min = Infinity;
+    let max = -Infinity;
+    if (span.built) {
+      for (const e of builtFloorExtents(w).values()) {
         min = Math.min(min, e.min);
         max = Math.max(max, e.max);
       }
-      camera.zoom = OPENING_ZOOM;
+    }
+    const bandPx = app.screen.height - chromeTop - chromeBottom;
+    const zoom =
+      OPENING_WHOLE_TOWER && chromeKnown && span.built
+        ? wholeTowerZoom(span.top, span.bottom, (max - min) * TILE_PX, bandPx, app.screen.width)
+        : null;
+    if (zoom !== null) {
+      camera.zoom = zoom;
       // centerOn aims at a tile's middle, so half a tile back puts the tower's middle in the middle.
       camera.centerOn(6, (min + max) / 2 - 0.5);
-      camera.setGroundLine(whole);
+      camera.setGroundLine(towerMiddleGroundLine(span.top, span.bottom, bandPx, zoom));
     } else {
-      const x = lastWorld.rooms.size > 0 ? averageRoomX(lastWorld) : TOWER_WIDTH / 2;
+      const x = w.rooms.size > 0 ? averageRoomX(w) : TOWER_WIDTH / 2;
       camera.centerOn(6, Math.round(x));
       const bandPx = app.screen.height - chromeTop;
       const phone = app.screen.width <= 720;
@@ -2948,6 +2979,10 @@ export async function createRenderer(
       firstRendered = true;
     },
     commitMotion,
+    frameTower(w: World): void {
+      userMoved = false;
+      frameInitial(w);
+    },
     resetMotion(): void {
       carMotion.reset();
       simMotion.reset();

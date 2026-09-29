@@ -43,6 +43,7 @@ function tower(): { game: ReturnType<typeof createGame>; root: FakeElement; pick
     setReducedMotion: () => {},
     setChrome: () => {},
     resetMotion: () => {},
+    frameTower: () => {},
     commitMotion: () => {},
     destroy: () => {},
   } as unknown as Renderer;

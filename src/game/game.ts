@@ -11,7 +11,19 @@ import { SCHEDULES } from '../sim/rules';
 import { classifyPress, isTap, PRESS_SLOP_PX, TOUCH_SLOP_PX } from '../render/input';
 import type { Renderer } from '../render/renderer';
 import { NIGHT_MULTIPLIER, type DailyChoice, type DailyInfo, type GameApi, type Placement, type PlacementRect, type Speed, type Tool } from './api';
-import { keepDailyCopy, readDailyCopy, readSave, readSlot, readUnreadable, stashUnreadable, writeSave, writeSlot, type SlotName } from './storage';
+import {
+  keepDailyCopy,
+  readDailyCopy,
+  readDailyRecord,
+  readSave,
+  readSlot,
+  readUnreadable,
+  stashUnreadable,
+  writeDailyRecord,
+  writeSave,
+  writeSlot,
+  type SlotName,
+} from './storage';
 import {
   DAILY_END_MINUTE,
   dailyFinished,
@@ -20,8 +32,12 @@ import {
   dailyStart,
   dailyTwist,
   dateOfMode,
+  emptyDailyRecord,
   localDateKey,
+  noteDailyFinished,
+  noteDailyStarted,
   previousDateKey,
+  seedDailyRecord,
 } from './daily';
 import { createTap, drainTap, isBuildCommand, primeTap, type GameEvent, type GameEventListener } from './events';
 
@@ -37,6 +53,10 @@ export const NOT_SAVING_NOTICE = 'This device is not saving your tower right now
 export const READ_FAILED_NOTICE = 'We could not read your saved tower. Reload the page to try again.';
 /** Said when "Start today's tower instead" cannot keep a copy of the later tower first. */
 export const DAILY_COPY_FAILED = 'We could not keep a copy of that tower, so it stays for now.';
+/** Said when the device's date is earlier than a Today's tower date already played. */
+export const DAILY_CLOCK_BACK = "Your device's date has moved back. Today's tower opens again once the date catches up.";
+/** Said when today's tower was already finished and the slot no longer holds it. */
+export const DAILY_DONE = "You already finished today's tower. A new one opens tomorrow.";
 
 /**
  * The loader's reason without the field it tripped on: a damaged save's reason ends in the field
@@ -127,6 +147,13 @@ function clampBand(band: number): number {
 
 /** The kinds drawn over the rooms behind them (the renderer's OVERLAY_KINDS). */
 const CONNECTOR_KINDS: ReadonlySet<RoomKind> = new Set<RoomKind>(['stairs', 'escalator']);
+
+/** True when the tower has anything besides lobby: another room or a shaft. Such a tower opens framed whole. */
+export function builtPastLobby(world: World): boolean {
+  if (world.shafts.size > 0) return true;
+  for (const room of world.rooms.values()) if (room.kind !== 'lobby') return true;
+  return false;
+}
 
 /**
  * The room or shaft at a tile, by the renderer's pickTargetAt rule (src/render/renderer.ts),
@@ -282,6 +309,9 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
   // The daily slot's text when it holds a tower dated after today, kept aside before today's
   // tower takes the slot.
   let aheadText: string | null = null;
+  // Set with a locked-day card (DailyChoice.locked) when no tower stands behind it: the player
+  // stayed on the tower in hand, which the card neither stopped nor holds.
+  let lockStays = false;
   let tool: Tool = { kind: 'none' };
   let speed: Speed = 1;
   let speedBeforePause: Speed = 1;
@@ -411,8 +441,16 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     speed = 0;
     loop.accumulator = 0;
     cancelScheduledSave();
+    const date = dailyDate();
+    if (date !== null) noteDaily(date, true); // this date never opens fresh again
     notify();
     void saveWorld('background');
+  }
+
+  /** Write a daily's start or finish into the daily record (storage.ts), beside the daily slot. */
+  function noteDaily(date: string, finished: boolean): void {
+    const record = readDailyRecord() ?? emptyDailyRecord();
+    writeDailyRecord(finished ? noteDailyFinished(record, date) : noteDailyStarted(record, date));
   }
 
   function markDirty(): void {
@@ -580,7 +618,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
   }
 
   /** Put a world in hand: the same reset importSave and newGame do. */
-  function swapWorld(next: World): void {
+  function swapWorld(next: World, fresh = false): void {
     world = next;
     standIn = false;
     dirty = false;
@@ -594,14 +632,23 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     renderer?.resetMotion(); // no sprite may lerp from the old tower into the new one
     renderer?.setSelection(null);
     renderer?.setGhost(null);
-    renderer?.camera.reset();
+    if (renderer) openingShot(renderer, fresh);
+  }
+
+  /**
+   * The camera for the tower in hand: a tower built past its lobby opens framed whole (BB-1);
+   * a fresh tower, and one with only a lobby (the guided start), keeps the reset view.
+   */
+  function openingShot(r: Renderer, fresh: boolean): void {
+    if (!fresh && builtPastLobby(world)) r.frameTower(world);
+    else r.camera.reset();
   }
 
   /** A fresh tower in hand, from its number and its start. */
   function freshTower(newSeed: number, begin: { start?: TowerStart; mode?: string } = {}): void {
     const next = createWorld(newSeed, begin.start);
     startBuildLog(next, undefined, begin);
-    swapWorld(next);
+    swapWorld(next, true);
   }
 
   /**
@@ -671,6 +718,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
   /** Today's tower, begun fresh on today's date and saved into the daily slot at once. */
   async function beginToday(today: string): Promise<void> {
     freshTower(dailyStart(today), { start: dailyTwist(today).start, mode: dailyMode(today) });
+    noteDaily(today, false);
     startSpeed();
     notify();
     await saveWorld('quiet');
@@ -1017,7 +1065,8 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     },
     getTool: () => tool,
     setSpeed(s) {
-      if (dailyOver() || (dailyChoice && s > 0)) return; // the result card or the choice stands
+      // The result card or the choice stands; a locked-day card over a tower it did not stop does not hold it.
+      if (dailyOver() || (dailyChoice && !(dailyChoice.locked && lockStays) && s > 0)) return;
       // Pausing is a natural moment to step away: save what moved.
       if (s === 0 && speed !== 0 && dirty) saveWhenIdle();
       speed = s;
@@ -1198,16 +1247,43 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
         if (!(await readyToLeave('daily'))) return;
         const read = await readWorld('daily');
         const saved = read.world;
+        const savedDate = saved ? dateOfMode(buildLogOf(saved).mode) : null;
+        const savedInfo = saved && savedDate !== null ? { date: savedDate, finished: dailyFinished(saved) } : null;
+        // The record of dates played, with a finished daily in the slot added (an install from
+        // before the record has none): a finished date, or one earlier than the newest played,
+        // never opens a fresh tower.
+        const stored = readDailyRecord();
+        const record = seedDailyRecord(stored, read.failed ? null : savedInfo);
+        if (JSON.stringify(record) !== JSON.stringify(stored)) writeDailyRecord(record);
+        const opening = dailyOpening(read.failed ? null : savedInfo, today, record);
+        if (opening === 'clock-back' || opening === 'done') {
+          // An unfinished tower saved here stands behind the card, to keep playing; nothing else
+          // opens, and the player stays on the tower in hand.
+          if (opening === 'clock-back' && saved && savedDate !== null && !dailyFinished(saved)) {
+            takeSlot('daily');
+            swapWorld(saved);
+            speed = 0;
+            lockStays = false;
+            dailyChoice = { savedDate, today, yesterday: false, ahead: false, locked: opening };
+            notify();
+            return;
+          }
+          // Opened from a boot link: the tower in hand is only the stand-in, so My tower loads.
+          if (standIn && slot === 'mine') await api.load();
+          lockStays = true;
+          dailyChoice = { savedDate: today, today, yesterday: false, ahead: false, locked: opening };
+          notify();
+          return;
+        }
         takeSlot('daily');
         if (read.failed) {
           // Today's tower in hand, never saved over the slot that would not read.
           freshTower(dailyStart(today), { start: dailyTwist(today).start, mode: dailyMode(today) });
+          noteDaily(today, false);
           startSpeed();
           readFailed('daily');
           return;
         }
-        const savedDate = saved ? dateOfMode(buildLogOf(saved).mode) : null;
-        const opening = dailyOpening(saved && savedDate !== null ? { date: savedDate, finished: dailyFinished(saved) } : null, today);
         if (opening === 'fresh' || !saved || savedDate === null) {
           await beginToday(today);
           return;
@@ -1227,7 +1303,14 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     async chooseDaily(which) {
       const choice = dailyChoice;
       if (!choice) return;
-      if (which === 'finish') {
+      if (choice.locked && lockStays) {
+        // Only the card goes: the tower in hand was never stopped for it.
+        dailyChoice = null;
+        notify();
+        return;
+      }
+      // A locked day never starts a tower: its one answer is to keep the tower behind the card.
+      if (which === 'finish' || choice.locked) {
         dailyChoice = null;
         aheadText = null;
         if (dailyFinished(world)) speed = 0; // a finished one stays on its result
@@ -1371,11 +1454,11 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
       r.setToolOwnsDrag(toolOwnsDrag(tool));
       // A ui that measured the chrome before the renderer existed still gets its band.
       if (chrome) r.setChrome(chrome.top, chrome.bottom);
-      // The opening shot: the middle of the lot, with the street low enough to leave the sky
-      // room to fill, inside whatever band the chrome leaves free. On a phone the palette is
-      // a bottom sheet across the lower half, and floor 1, the only place a lobby can go,
-      // would otherwise open behind it.
-      r.camera.reset();
+      // The opening shot: a tower built past its lobby opens framed whole. Otherwise the middle
+      // of the lot, with the street low enough to leave the sky room to fill, inside whatever
+      // band the chrome leaves free. On a phone the palette is a bottom sheet across the lower
+      // half, and floor 1, the only place a lobby can go, would otherwise open behind it.
+      openingShot(r, false);
     },
     stepOnce() {
       step();

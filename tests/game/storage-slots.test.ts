@@ -1,10 +1,12 @@
 // The three named save slots on every platform: My tower keeps its original key and file, and
 // Today's tower and Friend's tower each get their own, so writing one never touches another.
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createFileStorage,
   createStorage,
   createTauriStorage,
+  readDailyRecord,
+  writeDailyRecord,
   SLOT_FILES,
   SLOT_KEYS,
   SLOT_LABELS,
@@ -105,5 +107,34 @@ describe('named save slots', () => {
     await createTauriStorage(fs, 'friend').writeSave('friend');
     expect(Object.fromEntries(fs.files)).toEqual({ 'autosave.json': 'mine', 'daily.json': 'daily', 'friend.json': 'friend' });
     expect(await createTauriStorage(fs, 'friend').readSave()).toBe('friend');
+  });
+});
+
+describe("Today's tower record beside the daily slot", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('reads back what it wrote, under its own key, and leaves the slots alone', () => {
+    const ls = fakeLocalStorage();
+    vi.stubGlobal('localStorage', ls);
+    expect(readDailyRecord()).toBe(null); // an install from before the record
+    const record = { latest: '2026-09-29', finished: ['2026-09-27', '2026-09-28'] };
+    expect(writeDailyRecord(record)).toBe(true);
+    expect(readDailyRecord()).toEqual(record);
+    expect(Array.from(ls.data.keys())).toEqual(['hs.save.daily-record']);
+  });
+
+  it('reads a damaged record as none, and drops dates that are not dates', () => {
+    const ls = fakeLocalStorage();
+    vi.stubGlobal('localStorage', ls);
+    ls.data.set('hs.save.daily-record', '{not json');
+    expect(readDailyRecord()).toBe(null);
+    ls.data.set('hs.save.daily-record', JSON.stringify({ latest: 7, finished: ['2026-09-28', 'soon', 3] }));
+    expect(readDailyRecord()).toEqual({ latest: null, finished: ['2026-09-28'] });
+  });
+
+  it('says so when there is no store to keep it in', () => {
+    vi.stubGlobal('localStorage', undefined);
+    expect(writeDailyRecord({ latest: '2026-09-29', finished: [] })).toBe(false);
+    expect(readDailyRecord()).toBe(null);
   });
 });

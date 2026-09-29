@@ -80,6 +80,9 @@ describe("the kept copy of a later-dated Today's tower", () => {
     await later.save();
     const stored = data.get('hundred-stories:daily')!;
     expect(stored).toBeTruthy();
+    // An install from before the daily record (2026-09-29): with the record, a date earlier than
+    // one already started is locked and "Start today's tower instead" is never offered.
+    data.delete('hs.save.daily-record');
 
     const game = gameOn('2026-09-24');
     await game.openDaily();

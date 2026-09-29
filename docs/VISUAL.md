@@ -109,7 +109,7 @@ Principles:
 2. Every number is a readout, every label is a sentence-case word. An icon stands without its word only on an icon-only button, named by its `aria-label` and `title`.
 3. Copy speaks in the interface's voice: "Not enough cash. Offices cost $40,000." not "Oops!".
 4. US spelling. No em dashes, no spaced hyphens as dashes, anywhere in UI text.
-5. Structural pixel art at integer scales (illustrated textures are smooth by design and sample linear): `antialias: false`, `roundPixels: true`, zoom steps snap to 0.5, 1, 2, 3 for crisp rendering, free zoom between them allowed while the wheel is moving. BB-1: the game opens on the whole tower at zoom 0.5 when it fits the free band, else at zoom 1 with the opening ground line; zoom 1 (a floor 72 css px) stays the working view, and the furthest out is 0.175 (a floor 12.6 css px, unchanged).
+5. Structural pixel art at integer scales (illustrated textures are smooth by design and sample linear): `antialias: false`, `roundPixels: true`, zoom steps snap to 0.5, 1, 2, 3 for crisp rendering, free zoom between them allowed while the wheel is moving. BB-1 (extended 2026-09-29): a tower built past its lobby opens whole, centered in the free band, at zoom 0.5 when it fits and otherwise at the largest zoom down to 0.175 that shows it all (basements included), at boot and on every tower switch; a fresh or lobby-only tower, and a view before the chrome is measured, opens at zoom 1 with the opening ground line; zoom 1 (a floor 72 css px) stays the working view, and the furthest out is 0.175 (a floor 12.6 css px, unchanged).
 
 ### Drift log
 

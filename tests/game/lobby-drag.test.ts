@@ -19,6 +19,8 @@ vi.mock('../../src/game/storage', () => ({
   }),
   readSlot: async (slot: string) => slots.get(slot) ?? null,
   stashUnreadable: vi.fn(),
+  readDailyRecord: () => null,
+  writeDailyRecord: () => true,
 }));
 
 type Handler = (event: unknown) => void;

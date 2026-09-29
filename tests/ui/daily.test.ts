@@ -132,6 +132,16 @@ describe('an older daily', () => {
     expect(actions.calls[0]).toBe('today');
   });
 
+  it('finished, dated after today (the date is behind it): no Start today\'s, and says why', () => {
+    const game = dailyGame({ finished: true, date: '2026-09-30' });
+    const panel = createDailyPanel(game, ctx, recorder(), DATE) as unknown as FakeElement;
+    const notes = panel.descendants().filter((n) => n.className === 'hs-note').map((n) => n.textContent);
+    expect(notes).toContain("Your device's date is behind this tower. A new one opens once the date catches up.");
+    expect(panel.textContent).not.toContain("Today's tower is ready for you.");
+    expect(panel.descendants().some((n) => n.tagName === 'BUTTON' && n.textContent === "Start today's")).toBe(false);
+    buttonNamed(panel, 'Share');
+  });
+
   it('finished on its own day still says come back tomorrow, with no Start button', () => {
     const panel = createDailyPanel(dailyGame({ finished: true }), ctx, recorder(), DATE) as unknown as FakeElement;
     expect(panel.textContent).toContain('Come back tomorrow for a new tower.');
@@ -181,6 +191,46 @@ describe('a saved tower dated after today', () => {
   it('says nothing about a copy before the player has tried', () => {
     const panel = createDailyPanel(dailyGame({ choice: ahead }), ctx, recorder(), DATE) as unknown as FakeElement;
     expect(panel.textContent).not.toContain('We could not keep a copy');
+  });
+});
+
+// 2026-09-29 (Matt: "lock it"): a Today's tower date already played never opens a second try.
+describe('a locked day', () => {
+  const notesOf = (panel: FakeElement): string[] => panel.descendants().filter((n) => n.className === 'hs-note').map((n) => n.textContent);
+  // The card's own buttons, not the sheet's close.
+  const buttonsOf = (panel: FakeElement): string[] =>
+    panel
+      .descendants()
+      .filter((n) => n.className === 'hs-actions')
+      .flatMap((row) => row.descendants().filter((n) => n.tagName === 'BUTTON'))
+      .map((n) => n.textContent);
+
+  it('the date moved back: says so plainly, with no way to start a tower', () => {
+    const locked: DailyChoice = { savedDate: DATE, today: DATE, yesterday: false, ahead: false, locked: 'clock-back' };
+    const actions = recorder();
+    const panel = createDailyPanel(dailyGame({ choice: locked, slot: 'mine', date: '2026-09-01' }), ctx, actions, DATE) as unknown as FakeElement;
+    expect(notesOf(panel)).toEqual(["Your device's date has moved back. Today's tower opens again once the date catches up."]);
+    expect(buttonsOf(panel)).toEqual(['OK']);
+    click(buttonNamed(panel, 'OK'));
+    expect(actions.calls).toEqual(['choose:finish']);
+    expect(panel.textContent).not.toMatch(/seed/i);
+  });
+
+  it("an unfinished later tower behind the card: keep playing it, never start today's", () => {
+    const locked: DailyChoice = { savedDate: '2026-09-30', today: DATE, yesterday: false, ahead: false, locked: 'clock-back' };
+    const panel = createDailyPanel(dailyGame({ choice: locked, date: '2026-09-30' }), ctx, recorder(), DATE) as unknown as FakeElement;
+    expect(notesOf(panel)).toEqual([
+      'The tower saved here is from September 30, 2026, which is later than today.',
+      "Your device's date has moved back. Today's tower opens again once the date catches up.",
+    ]);
+    expect(buttonsOf(panel)).toEqual(['Keep playing that tower']);
+  });
+
+  it("today's already finished: says a new one opens tomorrow", () => {
+    const locked: DailyChoice = { savedDate: DATE, today: DATE, yesterday: false, ahead: false, locked: 'done' };
+    const panel = createDailyPanel(dailyGame({ choice: locked, slot: 'mine', date: '2026-09-01' }), ctx, recorder(), DATE) as unknown as FakeElement;
+    expect(notesOf(panel)).toEqual(["You already finished today's tower. A new one opens tomorrow."]);
+    expect(buttonsOf(panel)).toEqual(['OK']);
   });
 });
 

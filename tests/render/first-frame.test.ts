@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Container, Graphics, Texture } from 'pixi.js';
 import type { Art } from '../../src/render/art';
 import { FLOOR_PX, TILE_PX } from '../../src/render/art';
-import { floorBaseY, floorTopY } from '../../src/render/camera';
+import { floorBaseY, floorTopY, MIN_ZOOM } from '../../src/render/camera';
 import { createRenderer, lobbyRuns, OPENING_ZOOM, towerSpan, wholeTowerGroundLine, type Renderer, type RendererOptions } from '../../src/render/renderer';
 import type { Room, RoomKind, World } from '../../src/sim/types';
 import { addRoom, allocId, createWorld } from '../../src/sim/world';
@@ -171,20 +171,90 @@ describe('opening framing (D-1, BB-1)', () => {
     expect(Math.abs(renderer.camera.worldToScreen(110 * TILE_PX, 0).x - 400)).toBeLessThanOrEqual(0.5);
   });
 
-  it('opens a tower too tall for the band at zoom 1 with the street at 0.9 of the band', async () => {
-    const world = tower(20);
-    const { renderer } = await mount(world);
+  /** Screen y of the roof and of the lowest slab, and whether both sit inside the band. */
+  function frameOf(renderer: Renderer, top: number, bottom: number) {
+    const roof = renderer.camera.worldToScreen(0, floorTopY(top)).y;
+    const base = renderer.camera.worldToScreen(0, floorBaseY(bottom)).y;
+    return { roof, base, middle: (roof + base) / 2 };
+  }
+
+  it('zooms a tower too tall for the band below 0.5 until it shows whole, centered in the band', async () => {
+    const { renderer } = await mount(tower(20));
     renderer.setChrome(80, 0);
-    expect(renderer.camera.zoom).toBe(1);
-    expect(Math.abs(renderer.camera.worldToScreen(0, 0).y - (80 + 0.9 * 520))).toBeLessThanOrEqual(0.5);
+    // 20 floors and one of sky, 1512 px, in a 520 px band.
+    expect(renderer.camera.zoom).toBeCloseTo(520 / (21 * FLOOR_PX), 6);
+    expect(renderer.camera.zoom).toBeLessThan(OPENING_ZOOM);
+    const f = frameOf(renderer, 20, 1);
+    expect(f.roof).toBeGreaterThanOrEqual(80);
+    expect(f.base).toBeLessThanOrEqual(600);
+    expect(Math.abs(f.middle - (80 + 520 / 2))).toBeLessThanOrEqual(0.5);
   });
 
-  it('stops the street at 0.8 of the band on a phone', async () => {
-    const world = tower(30);
-    const { renderer } = await mount(world, {}, { width: 390, height: 844 });
-    renderer.setChrome(120, 0);
+  it('on a phone, a tall tower fits the band the palette leaves', async () => {
+    const { renderer } = await mount(tower(30), {}, { width: 390, height: 844 });
+    renderer.setChrome(120, 200);
+    expect(renderer.camera.zoom).toBeCloseTo(524 / (31 * FLOOR_PX), 6);
+    const f = frameOf(renderer, 30, 1);
+    expect(f.roof).toBeGreaterThanOrEqual(120);
+    expect(f.base).toBeLessThanOrEqual(644);
+    expect(Math.abs(f.middle - (120 + 524 / 2))).toBeLessThanOrEqual(0.5);
+  });
+
+  it('zooms a tower too wide for the view out to its width, centered on it', async () => {
+    const world = createWorld(1);
+    world.time.minute = 12 * 60;
+    for (let x = 20; x < 200; x++) room(world, 'lobby', 1, x, 1);
+    room(world, 'office', 2, 20, 9);
+    const { renderer } = await mount(world);
+    renderer.setChrome(80, 0);
+    // 180 tiles and a tile either side, 2912 px, in an 800 px view.
+    expect(renderer.camera.zoom).toBeCloseTo(800 / (182 * TILE_PX), 6);
+    expect(renderer.camera.worldToScreen(20 * TILE_PX, 0).x).toBeCloseTo(800 * (1 / 182), 3);
+    expect(renderer.camera.worldToScreen(200 * TILE_PX, 0).x).toBeCloseTo(800 * (181 / 182), 3);
+  });
+
+  it('stops at MIN_ZOOM for a tower no zoom can show whole, still centered', async () => {
+    const { renderer } = await mount(tower(100));
+    renderer.setChrome(80, 0);
+    expect(renderer.camera.zoom).toBe(MIN_ZOOM);
+    expect(Math.abs(frameOf(renderer, 100, 1).middle - (80 + 520 / 2))).toBeLessThanOrEqual(0.5);
+  });
+
+  it('keeps the basement in the shot when the tower has one', async () => {
+    const world = tower(20);
+    room(world, 'parkingSpace', -3, 100, 4);
+    const { renderer } = await mount(world);
+    renderer.setChrome(80, 0);
+    expect(renderer.camera.zoom).toBeCloseTo(520 / (24 * FLOOR_PX), 6);
+    const f = frameOf(renderer, 20, -3);
+    expect(f.roof).toBeGreaterThanOrEqual(80);
+    expect(f.base).toBeLessThanOrEqual(600);
+    expect(Math.abs(f.middle - (80 + 520 / 2))).toBeLessThanOrEqual(0.5);
+  });
+
+  it('frameTower reframes a swapped-in tower after the player moved, and hands the view back to the chrome', async () => {
+    const { renderer } = await mount(tower(4));
+    renderer.setChrome(80, 0);
+    renderer.camera.panBy(900, 400); // through the player camera: the view is now the player's
+    renderer.camera.zoomAt(2, 400, 300);
+    renderer.setChrome(80, 0);
+    expect(renderer.camera.zoom).not.toBe(OPENING_ZOOM); // a re-measure keeps the player's view
+
+    const next = tower(20);
+    renderer.frameTower(next);
+    expect(renderer.camera.zoom).toBeCloseTo(520 / (21 * FLOOR_PX), 6);
+    expect(Math.abs(frameOf(renderer, 20, 1).middle - (80 + 520 / 2))).toBeLessThanOrEqual(0.5);
+    renderer.render(next, 1);
+    renderer.setChrome(120, 0); // the game composes again until the player moves
+    expect(renderer.camera.zoom).toBeCloseTo(480 / (21 * FLOOR_PX), 6);
+  });
+
+  it('frameTower on an empty lot is the zoom 1 opening', async () => {
+    const { renderer } = await mount(tower(4));
+    renderer.setChrome(80, 0);
+    renderer.frameTower(createWorld(2));
     expect(renderer.camera.zoom).toBe(1);
-    expect(Math.abs(renderer.camera.worldToScreen(0, 0).y - (120 + 0.8 * 724))).toBeLessThanOrEqual(0.5);
+    expect(Math.abs(renderer.camera.worldToScreen(0, 0).y - (80 + 0.68 * 520))).toBeLessThanOrEqual(0.5);
   });
 
   it('keeps an empty lot at zoom 1 with the street two thirds down', async () => {

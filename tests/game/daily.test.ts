@@ -6,7 +6,12 @@ import {
   DAILY_END_MINUTE,
   TIGHT_MONEY_CASH,
   TWISTS,
+  DAILY_RECORD_LIMIT,
   dailyOpening,
+  emptyDailyRecord,
+  noteDailyFinished,
+  noteDailyStarted,
+  seedDailyRecord,
   dailyResult,
   dailyShareText,
   dailyShareUrl,
@@ -111,5 +116,68 @@ describe('opening the daily slot', () => {
     expect(dailyOpening({ date: '2026-09-20', finished: false }, today)).toBe('choose');
     expect(dailyOpening({ date: '2026-09-23', finished: true }, today)).toBe('fresh');
     expect(dailyOpening({ date: null, finished: false }, today)).toBe('fresh');
+  });
+});
+
+describe('the daily record locks a date once played', () => {
+  const finishedOn = (...dates: string[]) => dates.reduce(noteDailyFinished, emptyDailyRecord());
+
+  it('a clock moved back to a finished date opens nothing new', () => {
+    const record = finishedOn('2026-09-23', '2026-09-24');
+    // The slot holds the 24th, finished: before the record this was 'ahead', with a fresh start on offer.
+    expect(dailyOpening({ date: '2026-09-24', finished: true }, '2026-09-23', record)).toBe('clock-back');
+    expect(dailyOpening(null, '2026-09-23', record)).toBe('clock-back');
+    expect(dailyOpening(null, '2026-09-20', record)).toBe('clock-back');
+  });
+
+  it('forward then back: the later date started, the earlier one is locked until the date catches up', () => {
+    let record = noteDailyStarted(emptyDailyRecord(), '2026-09-24');
+    record = noteDailyStarted(record, '2026-09-26'); // the clock moved forward and that day began
+    expect(record).toEqual({ latest: '2026-09-26', finished: [] });
+    expect(dailyOpening({ date: '2026-09-26', finished: false }, '2026-09-24', record)).toBe('clock-back');
+    expect(dailyOpening({ date: '2026-09-26', finished: false }, '2026-09-25', record)).toBe('clock-back');
+    // Once the date catches up, it is today's tower again.
+    expect(dailyOpening({ date: '2026-09-26', finished: false }, '2026-09-26', record)).toBe('resume');
+    expect(dailyOpening({ date: '2026-09-26', finished: false }, '2026-09-27', record)).toBe('choose');
+    // A started date moves latest up, never back.
+    expect(noteDailyStarted(record, '2026-09-20').latest).toBe('2026-09-26');
+  });
+
+  it('today, finished, with the slot no longer holding it, is done; holding it, it resumes', () => {
+    const record = finishedOn('2026-09-24');
+    expect(dailyOpening(null, '2026-09-24', record)).toBe('done');
+    expect(dailyOpening({ date: '2026-09-23', finished: false }, '2026-09-24', record)).toBe('done');
+    expect(dailyOpening({ date: '2026-09-24', finished: true }, '2026-09-24', record)).toBe('resume');
+    expect(dailyOpening({ date: '2026-09-24', finished: true }, '2026-09-25', record)).toBe('fresh'); // the next day is new
+  });
+
+  it('a fresh device opens as before', () => {
+    const record = emptyDailyRecord();
+    expect(record).toEqual({ latest: null, finished: [] });
+    expect(dailyOpening(null, '2026-09-24', record)).toBe('fresh');
+    expect(dailyOpening({ date: '2026-09-25', finished: false }, '2026-09-24', record)).toBe('ahead');
+    expect(dailyOpening({ date: '2026-09-23', finished: false }, '2026-09-24', record)).toBe('choose');
+  });
+
+  it('an older install with no record is seeded from a finished daily in the slot', () => {
+    const seeded = seedDailyRecord(null, { date: '2026-09-24', finished: true });
+    expect(seeded).toEqual({ latest: '2026-09-24', finished: ['2026-09-24'] });
+    expect(dailyOpening({ date: '2026-09-24', finished: true }, '2026-09-24', seeded)).toBe('resume');
+    expect(dailyOpening({ date: '2026-09-24', finished: true }, '2026-09-23', seeded)).toBe('clock-back');
+    // An unfinished one, an undated one or none seeds nothing; a stored record is kept as it is.
+    expect(seedDailyRecord(null, { date: '2026-09-24', finished: false })).toEqual(emptyDailyRecord());
+    expect(seedDailyRecord(null, { date: null, finished: true })).toEqual(emptyDailyRecord());
+    expect(seedDailyRecord(null, null)).toEqual(emptyDailyRecord());
+    const stored = finishedOn('2026-09-26');
+    expect(seedDailyRecord(stored, { date: '2026-09-24', finished: true })).toEqual({ latest: '2026-09-26', finished: ['2026-09-24', '2026-09-26'] });
+  });
+
+  it('keeps the newest 60 finished dates', () => {
+    const dates = datesFrom('2026-06-01', DAILY_RECORD_LIMIT + 5);
+    const record = finishedOn(...dates);
+    expect(record.finished).toHaveLength(DAILY_RECORD_LIMIT);
+    expect(record.finished).toEqual(dates.slice(-DAILY_RECORD_LIMIT));
+    expect(record.latest).toBe(dates[dates.length - 1]);
+    expect(noteDailyFinished(record, dates[dates.length - 1]!).finished).toHaveLength(DAILY_RECORD_LIMIT); // no doubles
   });
 });

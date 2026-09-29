@@ -19,6 +19,14 @@ vi.mock('../../src/game/storage', () => ({
   }),
   readSlot: async (slot: string) => slots.get(slot) ?? null,
   stashUnreadable: vi.fn(),
+  readDailyRecord: () => {
+    const text = slots.get('daily-record');
+    return text ? JSON.parse(text) : null;
+  },
+  writeDailyRecord: (record: unknown) => {
+    slots.set('daily-record', JSON.stringify(record));
+    return true;
+  },
 }));
 
 beforeEach(() => slots.clear());
@@ -164,6 +172,101 @@ describe("today's tower", () => {
     await game.openDaily();
     expect(game.getDailyChoice()).toBe(null);
     expect(game.getDaily()?.date).toBe(TIGHT_DAY);
+  });
+});
+
+// 2026-09-29 (Matt: "lock it"): moving the device's date back and forward never gives a second
+// try at a Today's tower date. The record of dates played sits beside the daily slot.
+describe("a Today's tower date already played", () => {
+  async function finishDaily(date: string) {
+    const played = gameOn(date);
+    await played.game.openDaily();
+    played.game.world.time.minute = DAILY_END_MINUTE - 1;
+    played.second();
+    await settle();
+    expect(played.game.getDaily()?.finished).toBe(true);
+    return played;
+  }
+
+  it('the date moved back to a finished day opens no fresh tower, and a boot link lands on My tower', async () => {
+    const mine = gameOn('2026-09-27');
+    mine.game.apply({ kind: 'build', room: 'lobby', floor: 1, x: 150 });
+    await mine.game.save();
+    await finishDaily('2026-09-27');
+    await finishDaily(TIGHT_DAY);
+    const daily = slots.get('daily');
+
+    const { game } = gameOn('2026-09-27'); // a fresh page, as from a ?daily link
+    await game.openDaily();
+    expect(game.getDailyChoice()).toMatchObject({ locked: 'clock-back', today: '2026-09-27' });
+    expect(game.getSlot()).toBe('mine');
+    expect(game.world.cash).toBe(JSON.parse(slots.get('mine')!).cash); // My tower, not the stand-in
+    expect(game.world.cash).toBeLessThan(LIMITS.startingCash);
+    expect(slots.get('daily')).toBe(daily); // the finished tower is untouched
+    await game.chooseDaily('today'); // no way to start one, even asked
+    expect(game.getSlot()).toBe('mine');
+    expect(slots.get('daily')).toBe(daily);
+    expect(game.getDailyChoice()).toBe(null);
+  });
+
+  it('forward then back: the later tower stands behind the card to keep playing, and today never starts', async () => {
+    const later = gameOn('2026-09-29');
+    await later.game.openDaily();
+    later.game.apply({ kind: 'build', room: 'lobby', floor: 1, x: 150 });
+    await later.game.save();
+
+    const { game } = gameOn(TIGHT_DAY);
+    await game.openDaily();
+    expect(game.getDailyChoice()).toEqual({ savedDate: '2026-09-29', today: TIGHT_DAY, yesterday: false, ahead: false, locked: 'clock-back' });
+    expect(game.getDaily()?.date).toBe('2026-09-29');
+    expect(game.getSpeed()).toBe(0);
+    await game.chooseDaily('today');
+    expect(game.getDaily()?.date).toBe('2026-09-29'); // kept, not replaced
+    expect(game.getSpeed()).toBe(1);
+    expect(JSON.parse(slots.get('daily')!).seed).toBe(dailyStart('2026-09-29'));
+  });
+
+  it('today finished and gone from the slot: done, and no second try', async () => {
+    await finishDaily(TIGHT_DAY);
+    slots.delete('daily');
+    const { game } = gameOn(TIGHT_DAY);
+    await game.openDaily();
+    expect(game.getDailyChoice()).toMatchObject({ locked: 'done' });
+    expect(game.getSlot()).toBe('mine');
+    expect(slots.has('daily')).toBe(false);
+  });
+
+  it('the same date, finished and still in the slot, opens on its result as before', async () => {
+    await finishDaily(TIGHT_DAY);
+    const { game } = gameOn(TIGHT_DAY);
+    await game.openDaily();
+    expect(game.getDailyChoice()).toBe(null);
+    expect(game.getDaily()).toMatchObject({ date: TIGHT_DAY, finished: true });
+    expect(game.getSpeed()).toBe(0);
+  });
+
+  it('an older install with a finished daily and no record is locked from its first open', async () => {
+    await finishDaily(TIGHT_DAY);
+    slots.delete('daily-record'); // as before the record existed
+    const daily = slots.get('daily');
+    const { game } = gameOn('2026-09-27');
+    await game.openDaily();
+    expect(game.getDailyChoice()).toMatchObject({ locked: 'clock-back' });
+    expect(slots.get('daily')).toBe(daily);
+    expect(JSON.parse(slots.get('daily-record')!)).toEqual({ latest: TIGHT_DAY, finished: [TIGHT_DAY] });
+  });
+
+  it('a daily the bank takes back is finished for the record too', async () => {
+    const { game, second } = gameOn(TIGHT_DAY);
+    await game.openDaily();
+    // One bad quarter behind it, deep in debt, a minute before the next settle (day 3, 05:00).
+    game.world.cash = -1_000_000;
+    game.world.stats.badQuarterStreak = 1;
+    game.world.time.minute = 3 * 1440 + 5 * 60 - 1;
+    second();
+    await settle();
+    expect(game.world.gameOver).not.toBe(null);
+    expect(JSON.parse(slots.get('daily-record')!).finished).toEqual([TIGHT_DAY]);
   });
 });
 

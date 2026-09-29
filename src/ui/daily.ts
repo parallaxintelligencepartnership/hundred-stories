@@ -4,7 +4,7 @@
 
 import type { GameApi } from '../game/api';
 import { dailyResult, dailyShareText, dailyShareUrl, dailyTwistLine, formatDateKey, localDateKey, DAILY_DAYS } from '../game/daily';
-import { DAILY_COPY_FAILED } from '../game/game';
+import { DAILY_CLOCK_BACK, DAILY_COPY_FAILED, DAILY_DONE } from '../game/game';
 import { formatCount, formatMoney, starsGlyphs } from './format';
 import { button, el, exportSave, panelShell, row, tile, type PanelContext, type PanelElement } from './panels';
 
@@ -13,6 +13,8 @@ export const DAILY_TITLE = "Today's tower";
 export const COPY_FAILED_NOTE = 'We could not keep a copy, so that tower is still here.';
 /** The button that gets the kept copy of a later-dated tower back out, as a file. */
 export const SAVE_KEPT_DAILY = 'Save the kept tower to a file';
+/** The result card of a tower dated after today, in place of "Today's tower is ready for you." */
+export const DATE_BEHIND_NOTE = "Your device's date is behind this tower. A new one opens once the date catches up.";
 
 export interface DailyPanelActions {
   /** Open the share panel with the daily's own message and link. */
@@ -47,6 +49,18 @@ export function createDailyPanel(
   panel.dataset.card = card ?? '';
 
   const choice = game.getDailyChoice();
+  if (card === 'choose' && choice?.locked) {
+    // A day already played: nothing starts. An unfinished tower saved here may stand behind it.
+    const behind = game.getDaily()?.date === choice.savedDate && choice.locked === 'clock-back';
+    if (behind && choice.savedDate > choice.today) {
+      body.append(el('p', 'hs-note', `The tower saved here is from ${formatDateKey(choice.savedDate)}, which is later than today.`));
+    }
+    body.append(el('p', 'hs-note', choice.locked === 'clock-back' ? DAILY_CLOCK_BACK : DAILY_DONE));
+    const buttons = el('div', 'hs-actions');
+    buttons.append(button(behind ? 'Keep playing that tower' : 'OK', 'hs-btn', () => actions.choose('finish')));
+    body.append(buttons);
+    return panel;
+  }
   if (card === 'choose' && choice?.ahead) {
     // The saved tower is dated after today: the device's date moved back. It is never replaced
     // without the player's say, and starting today's keeps a copy of it first.
@@ -88,6 +102,8 @@ export function createDailyPanel(
   };
   // An older daily, finished after the choice: today's tower is still there to play.
   const older = daily.date !== today;
+  // Dated after today: the device's date is behind a tower already played, and nothing new opens.
+  const behind = daily.date > today;
 
   if (card === 'result') {
     const result = dailyResult(game.world, daily.date);
@@ -110,13 +126,18 @@ export function createDailyPanel(
       el(
         'p',
         'hs-note',
-        older ? `That was the tower from ${formatDateKey(daily.date)}. Today's tower is ready for you.` : 'Come back tomorrow for a new tower.',
+        behind
+          ? DATE_BEHIND_NOTE
+          : older
+            ? `That was the tower from ${formatDateKey(daily.date)}. Today's tower is ready for you.`
+            : 'Come back tomorrow for a new tower.',
       ),
     );
     const buttons = el('div', 'hs-actions');
-    if (older) buttons.append(button("Start today's", 'hs-btn is-primary', () => actions.startToday()));
+    // A tower dated after today: that date was already played, so today's stays locked (game.ts).
+    if (older && !behind) buttons.append(button("Start today's", 'hs-btn is-primary', () => actions.startToday()));
     buttons.append(
-      button('Share', older ? 'hs-btn' : 'hs-btn is-primary', () =>
+      button('Share', older && !behind ? 'hs-btn' : 'hs-btn is-primary', () =>
         actions.share(dailyShareText(result.people, result.date, today), dailyShareUrl(result.date)),
       ),
       button('My tower', 'hs-btn', () => actions.myTower()),
