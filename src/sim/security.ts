@@ -123,6 +123,7 @@ function sendAlong(sim: Sim, legs: Leg[]): void {
   sim.route = withoutStandingRides(legs);
   sim.state = 'walking';
   sim.waitStart = null;
+  delete sim.firstWaitStart; // a fresh trip: a rerouted wait does not carry into it
   sim.inRoomId = null;
 }
 

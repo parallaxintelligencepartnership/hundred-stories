@@ -377,9 +377,12 @@ function serveFloor(world: World, shaft: Shaft, car: Car, waiting: WaitIndex): v
     sim.inCarId = car.id;
     sim.state = 'riding';
     // Boarding ends the wait: the next wait (a transfer, the ride out) starts its own
-    // clock and places its own hall call.
-    if (sim.waitStart !== null) recordBoardedWait(world, world.time.minute - sim.waitStart);
+    // clock and places its own hall call. The average takes the whole wait, from the
+    // first call, across any reroute (people.ts keeps firstWaitStart for that).
+    const since = sim.firstWaitStart ?? sim.waitStart;
+    if (since !== null) recordBoardedWait(world, world.time.minute - since);
     sim.waitStart = null;
+    delete sim.firstWaitStart;
     car.passengers.push(sim.id);
     const leg = sim.route[0];
     if (leg && leg.kind === 'ride') car.calls.add(leg.toFloor);

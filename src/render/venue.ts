@@ -4,7 +4,7 @@
 // Never reads or advances world.rng. See docs/VISUAL.md (venues) and the package 2 spec.
 
 import { SCHEDULES } from '../sim/rules';
-import { clockOf, type Id, type RoomKind } from '../sim/types';
+import { clockOf, type Id, type Room, type RoomKind, type World } from '../sim/types';
 
 export type VenueKind = 'office' | 'shop' | 'restaurant';
 export const VENUE_KINDS: readonly VenueKind[] = ['office', 'shop', 'restaurant'];
@@ -118,6 +118,29 @@ export function venueOpen(kind: VenueKind, minute: number): boolean {
   if (kind === 'office') return !clock.isWeekend && m >= SCHEDULES.worker.arriveStart && m < SCHEDULES.worker.leaveEnd;
   if (kind === 'shop') return m >= SCHEDULES.shopper.open && m < SCHEDULES.shopper.close;
   return m >= SCHEDULES.diner.lunchStart && m < SCHEDULES.diner.dinnerEnd;
+}
+
+/**
+ * The minute of day an office's company goes home: the last weekday exit on its workers'
+ * saved schedules (people.ts draws one quitting time per company at the lease and each
+ * worker's leave within quitJitterMinutes of it). A vacant office keeps the tower-wide
+ * close. Reads the saved sims only, never world.rng.
+ */
+export function officeCloseMinute(world: Pick<World, 'sims'>, room: Pick<Room, 'tenants'>): number {
+  let close = -1;
+  for (const id of room.tenants) {
+    const sim = world.sims.get(id);
+    if (!sim) continue;
+    for (const entry of sim.schedule) {
+      if (entry.goal.kind === 'exit' && entry.days.includes('weekday') && entry.minuteOfDay > close) close = entry.minuteOfDay;
+    }
+  }
+  return close < 0 ? SCHEDULES.worker.leaveEnd : close;
+}
+
+/** Whether this office shows open at `minute`: working hours on a weekday, until its own company quits. */
+export function officeOpen(world: Pick<World, 'sims'>, room: Pick<Room, 'tenants'>, minute: number): boolean {
+  return venueOpen('office', minute) && clockOf(minute).minuteOfDay < officeCloseMinute(world, room);
 }
 
 /** The room panel's line for a venue: "Juniper & Co., a boutique" or "A finance office". */

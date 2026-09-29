@@ -374,6 +374,8 @@ describe('below three stars', () => {
     // a transfer's second wait places its own hall call; with that line reverted it hashes eeb027e5.
     // Re-recorded again 2026-09-28 (was 42ecfb60): the evening rush spread (company quitting times,
     // new worker and resident windows) and stats.avgWaitMinutes written at boarding.
-    expect(hashWorld(world)).toBe('5bb82411');
+    // Re-recorded again 2026-09-28 (was 5bb82411): avgWaitMinutes takes the whole wait across a
+    // reroute (Sim.firstWaitStart, review of ccc0f7e I1).
+    expect(hashWorld(world)).toBe('89fc5ec6');
   });
 });

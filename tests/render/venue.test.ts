@@ -2,9 +2,9 @@
 // function of the seed and the room id, and the room panel names the venue the way its sign does.
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { TREATMENT_LABELS, VENUE_NAMES, venueLine, venueOf, venueOpen, type VenueKind } from '../../src/render/venue';
-import { ROOMS } from '../../src/sim/rules';
-import type { Room, RoomKind } from '../../src/sim/types';
+import { officeCloseMinute, officeOpen, TREATMENT_LABELS, VENUE_NAMES, venueLine, venueOf, venueOpen, type VenueKind } from '../../src/render/venue';
+import { ROOMS, SCHEDULES } from '../../src/sim/rules';
+import type { Room, RoomKind, Sim } from '../../src/sim/types';
 import { addRoom, allocId, createWorld } from '../../src/sim/world';
 import { createQueryPanel, type PanelContext } from '../../src/ui/panels';
 import { FakeDom, type FakeElement } from '../ui/fake-dom';
@@ -61,6 +61,38 @@ describe('venueOf', () => {
     expect(venueOpen('office', at(0, 13))).toBe(true);
     expect(venueOpen('office', at(0, 22))).toBe(false);
     expect(venueOpen('office', at(2, 13))).toBe(false); // the weekend day
+  });
+
+  // Review of ccc0f7e A4: each company has its own quitting time, so its office closes then,
+  // not at the end of the tower-wide window (7:30 PM).
+  it('an office closes when its own company goes home, a vacant one at the end of the window', () => {
+    const at = (day: number, hour: number, minute = 0): number => day * 1440 + hour * 60 + minute;
+    const world = createWorld(3);
+    const office = { id: allocId(world), kind: 'office', floor: 2, x: 100, tenants: [] as number[] } as unknown as Room;
+    const exits = [16 * 60 + 35, 16 * 60 + 45, 17 * 60 + 5];
+    for (const leave of exits) {
+      const id = allocId(world);
+      world.sims.set(id, {
+        id, kind: 'worker', homeRoomId: office.id,
+        schedule: [
+          { minuteOfDay: 8 * 60, days: ['weekday'], goal: { kind: 'room', roomId: office.id }, stayMinutes: 0 },
+          { minuteOfDay: leave, days: ['weekday'], goal: { kind: 'exit' }, stayMinutes: 0 },
+        ],
+      } as unknown as Sim);
+      office.tenants.push(id);
+    }
+    const rng = world.rng.state();
+    expect(officeCloseMinute(world, office)).toBe(17 * 60 + 5);
+    expect(officeOpen(world, office, at(0, 13))).toBe(true);
+    expect(officeOpen(world, office, at(0, 17, 4))).toBe(true);
+    expect(officeOpen(world, office, at(0, 17, 5))).toBe(false);
+    expect(officeOpen(world, office, at(0, 19))).toBe(false);
+    expect(officeOpen(world, office, at(2, 13))).toBe(false); // the weekend day
+    expect(world.rng.state()).toBe(rng); // read from the saved schedules, never the rng
+
+    const vacant = { id: allocId(world), kind: 'office', floor: 3, x: 100, tenants: [] } as unknown as Room;
+    expect(officeCloseMinute(world, vacant)).toBe(SCHEDULES.worker.leaveEnd);
+    expect(officeOpen(world, vacant, at(0, 19))).toBe(true);
   });
 });
 

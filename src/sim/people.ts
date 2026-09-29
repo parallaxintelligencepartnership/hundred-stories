@@ -371,6 +371,7 @@ function startTrip(world: World, sim: Sim, goal: ScheduleEntry['goal']): boolean
   sim.route = [...withoutStandingRides(legs), { kind: 'enter', roomId: room.id }];
   sim.state = 'walking';
   sim.waitStart = null;
+  delete sim.firstWaitStart;
   markTripStart(world, sim);
   return true;
 }
@@ -388,6 +389,7 @@ export function sendVipToSuite(world: World, sim: Sim, suite: Room): boolean {
   sim.route = [...withoutStandingRides(legs), { kind: 'enter', roomId: suite.id }];
   sim.state = 'walking';
   sim.waitStart = null;
+  delete sim.firstWaitStart;
   markTripStart(world, sim);
   return true;
 }
@@ -404,6 +406,7 @@ export function sendThiefTo(world: World, sim: Sim, target: Room): boolean {
   sim.route = withoutStandingRides(legs);
   sim.state = 'walking';
   sim.waitStart = null;
+  delete sim.firstWaitStart;
   return true;
 }
 
@@ -412,6 +415,7 @@ export function sendThiefOut(world: World, sim: Sim): void {
   ensureRouting(world);
   sim.exiting = true;
   sim.waitStart = null;
+  delete sim.firstWaitStart;
   const door = entrances(world).find((p) => p.floor === 1);
   const legs = door ? findRoute(world, sim.pos, door, routeOpts(sim)) : null;
   sim.state = 'leaving';
@@ -543,6 +547,7 @@ function stepAlongRoute(world: World, sim: Sim): void {
  */
 function routeLost(world: World, sim: Sim): void {
   sim.waitStart = null;
+  delete sim.firstWaitStart;
   if (sim.kind === 'guard' && !sim.exiting) guardLostRoute(sim);
   else if (sim.kind === 'collector' && !sim.exiting) collectorLostRoute(sim);
   else leaveTower(world, sim);
@@ -572,6 +577,7 @@ function climbStairs(world: World, sim: Sim, leg: Extract<Leg, { kind: 'stairs' 
   const stairs = world.rooms.get(leg.roomId);
   sim.pos = { floor: leg.toFloor, x: stairs ? roomCenter(stairs) : sim.pos.x };
   sim.route.shift();
+  delete sim.firstWaitStart; // a rerouted wait that took the stairs never boarded
 }
 
 function enterRoom(world: World, sim: Sim, room: Room): void {
@@ -660,6 +666,8 @@ function checkOutOfHotel(world: World, sim: Sim, room: Room): void {
 function updateStress(world: World): void {
   followOpenWaits(world);
   for (const sim of [...world.sims.values()]) {
+    // A rerouted wait carries its first minute only on the walk to the next hall.
+    if (sim.firstWaitStart !== undefined && sim.state !== 'waiting' && sim.state !== 'walking') delete sim.firstWaitStart;
     if (sim.state === 'waiting') {
       // The goals card's count of waits over five minutes: each counts once, the minute it passes.
       if (sim.waitStart !== null) {
@@ -724,6 +732,9 @@ function rerouteWaitingSim(world: World, sim: Sim): void {
   const enter: Leg[] = dest.roomId !== null ? [{ kind: 'enter', roomId: dest.roomId }] : [];
   sim.route = [...withoutStandingRides(legs), ...enter];
   sim.state = 'walking';
+  // The next hall wait restarts the retry clock, but the wait itself goes on: keep its
+  // first minute for stats.avgWaitMinutes (elevators.ts reads it at boarding).
+  sim.firstWaitStart ??= sim.waitStart ?? world.time.minute;
   sim.waitStart = null;
 }
 
@@ -760,6 +771,7 @@ function giveUp(world: World, sim: Sim): void {
   sim.stress = STRESS.giveUp;
   sim.route = [];
   sim.waitStart = null;
+  delete sim.firstWaitStart; // a give-up never boarded, so it is not averaged
   if (isTenant(sim)) {
     // A fed up tenant abandons today's trip, not the lease. It sulks outside with its
     // stress intact, which is what the room's evaluation averages, so a tower that keeps
@@ -821,6 +833,7 @@ export function sendAway(world: World, sim: Sim, reason: string): void {
   sim.route = [];
   // A wait it was in is over; the walk out calls its own car when it reaches one.
   sim.waitStart = null;
+  delete sim.firstWaitStart;
 }
 
 /** Workers and residents hold a lease. Guests, shoppers, diners, staff and VIPs do not. */

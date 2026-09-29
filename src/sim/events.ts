@@ -499,6 +499,7 @@ function failVisit(world: World, event: VipEventState, reason: string): void {
     } else if (sim.state !== 'gone') {
       sim.exiting = true;
       sim.waitStart = null;
+      delete sim.firstWaitStart;
       sendAway(world, sim, `${reason}.`);
     }
   }

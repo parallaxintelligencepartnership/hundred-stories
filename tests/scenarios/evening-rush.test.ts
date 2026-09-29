@@ -75,5 +75,20 @@ describe('the evening rush is spread across 4:30 to 7:30 PM', () => {
     const buckets = new Map<number, number>();
     for (const m of left) buckets.set(Math.floor(m / 10), (buckets.get(Math.floor(m / 10)) ?? 0) + 1);
     expect(Math.max(...buckets.values())).toBeLessThanOrEqual(workers.length / 3);
+
+    // The observed departures themselves, so this half fails on the old single window (every
+    // worker drawn alone from 5:00 to 6:30 PM): each company walks out together, and the
+    // companies' own quitting times, read from when their staff actually left, spread wide.
+    const quits: number[] = [];
+    for (const office of offices) {
+      const own = workers.filter((w) => w.homeRoomId === office.id && leftAt.has(w.id)).map((w) => leftAt.get(w.id)!);
+      expect(own.length).toBeGreaterThan(0);
+      expect(Math.max(...own) - Math.min(...own)).toBeLessThanOrEqual(2 * quitJitterMinutes + 2);
+      quits.push(own.reduce((sum, m) => sum + m, 0) / own.length);
+    }
+    expect(Math.max(...left) - Math.min(...left)).toBeGreaterThanOrEqual(120);
+    expect(Math.max(...quits) - Math.min(...quits)).toBeGreaterThanOrEqual(90);
+    expect(quits.some((q) => q < 17 * 60)).toBe(true); // a company home before five
+    expect(quits.some((q) => q > 18 * 60 + 30)).toBe(true); // and one still at work after half past six
   }, 60_000);
 });

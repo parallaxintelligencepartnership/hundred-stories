@@ -432,6 +432,7 @@ function firstInvalidField(d: SaveData): string | null {
     if (!isIdOrNull(sim.inRoomId)) return `${at}.inRoomId`;
     if (!Array.isArray(sim.route) || !sim.route.every(isLeg)) return `${at}.route`;
     if (!isNumberOrNull(sim.waitStart)) return `${at}.waitStart`;
+    if (sim.firstWaitStart !== undefined && !isFiniteNumber(sim.firstWaitStart)) return `${at}.firstWaitStart`;
     if (!Array.isArray(sim.schedule) || !sim.schedule.every(isScheduleEntry)) return `${at}.schedule`;
     if (!isInteger(sim.nextScheduleIndex) || sim.nextScheduleIndex < 0) return `${at}.nextScheduleIndex`;
     if (!isNumberOrNull(sim.stayUntil)) return `${at}.stayUntil`;
@@ -902,6 +903,8 @@ function simForHash(sim: Sim) {
     state: sim.state,
     stress: sim.stress,
     waitStart: sim.waitStart,
+    // set only across a reroute; undefined drops out of the JSON, so other sims hash as before
+    firstWaitStart: sim.firstWaitStart,
     schedule: sim.schedule.map((entry) => ({ ...entry, days: [...entry.days], goal: { ...entry.goal } })),
     nextScheduleIndex: sim.nextScheduleIndex,
     stayUntil: sim.stayUntil,

@@ -501,6 +501,7 @@ describe('hashWorld covers every field in types.ts', () => {
       state: (s: Sim) => (s.state = 'walking'),
       stress: (s: Sim) => (s.stress = 0.2),
       waitStart: (s: Sim) => (s.waitStart = 400),
+      firstWaitStart: (s: Sim) => (s.firstWaitStart = 380),
       schedule: (s: Sim) => s.schedule.push({ minuteOfDay: 540, days: ['weekday'], goal: { kind: 'exit' }, stayMinutes: 0 }),
       nextScheduleIndex: (s: Sim) => (s.nextScheduleIndex = 1),
       stayUntil: (s: Sim) => (s.stayUntil = 900),

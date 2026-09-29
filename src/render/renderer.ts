@@ -112,7 +112,7 @@ import {
   type SignState,
 } from './illustrated';
 import { PALETTE, shade } from './palette';
-import { isVenueKind, venueOf, type Venue } from './venue';
+import { isVenueKind, officeOpen, venueOf, type Venue } from './venue';
 import { createBuildFx, priceLabel, type RevealBand } from './buildfx';
 import { carFloorLabel, drawCarIndicator } from './led';
 import { Motion, TELEPORT_TILES } from './interpolate';
@@ -1800,7 +1800,8 @@ export async function createRenderer(
       const room = w.rooms.get(id);
       if (!room) continue;
       const spec = INTERIORS[v.kind];
-      const open = interiorOpen(v.kind, w.time.minute);
+      // An office closes when its own company goes home, not at the end of the tower's window.
+      const open = v.kind === 'office' ? officeOpen(w, room, w.time.minute) : interiorOpen(v.kind, w.time.minute);
       const occupied = room.occupancy > 0;
       // A burning room gives no light: its pools and its lit sign go out while it burns.
       const burning = room.onFire;

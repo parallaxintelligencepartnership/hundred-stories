@@ -192,6 +192,12 @@ export interface Sim {
   state: 'inRoom' | 'walking' | 'waiting' | 'riding' | 'leaving' | 'gone' | 'outside';
   stress: number; // 0..1
   waitStart: number | null;
+  /**
+   * The minute a hall wait first began, kept when a reroute (people.ts) restarts waitStart,
+   * so stats.avgWaitMinutes averages the whole wait from the first call to boarding. Set
+   * only between a reroute and the boarding or the end of that trip. Saved and hashed.
+   */
+  firstWaitStart?: number;
   schedule: ScheduleEntry[];
   nextScheduleIndex: number;
   stayUntil: number | null; // minute to leave the current room
