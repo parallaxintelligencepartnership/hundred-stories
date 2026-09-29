@@ -816,3 +816,13 @@ Scope: target sha 0f05723. Thirteen lanes A, B, C, D, E1, E2, F1, F2, F3, G, H, 
 - UNVERIFIABLE HERE, lane F3: whether the rain sheet's Graphics mask clips correctly at the tower edge on a real GPU; run `npm run dev` in a scratch copy, open `/play/?weather=storm&hour=13` in Chrome with `--use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader`, and watch a walker with a briefcase at zoom 2.
 
 Counts: Confirmed: 60 (5 critical, 12 important, 43 advisory). Refuted: 3.
+
+## Checkpoint 2026-09-28 - Matt's playtest of 0.6.8 (live), diagnosed at 0f05723 - lenses: real-data, production-readiness
+
+Scope: three reports from Matt playing the live site, each reproduced by a read-only Opus diagnosis in the detached 0f05723 checkout (probes under docs/reviews/audit-2026-09-28/playtest/). Not covered: application logic beyond the paths named (audit tier, run the same day).
+
+### Findings
+- [ ] CRITICAL | production-readiness | the News panel cannot be closed by any pointer path at 900 px and wider, and only by accident below it: createLogPanel gives the sheet the toast region's class hs-news, whose rule sets pointer-events none, an absolute position and a transform on it, so every tap on Close falls through to what is underneath; live since the 2026-09-25 ship (src/ui/panels.ts:1179, src/ui/ui.css:2717) | Evidence to close: the log panel node and the toast news node share no class, no sheet class has a top-level pointer-events none rule, and elementFromPoint at Close's center is the Close button at 390 and 1280 wide
+- [ ] IMPORTANT | real-data | with the Demolish tool a tap that lands on a drawn person is dropped with no message, and a single hotel room's guest stands one tile in, so most of the room cannot be demolished by tapping it (src/game/game.ts:1312) | Evidence to close: with a build tool a tap resolves to the room at the tile, never a person; a scenario test with a guest inside demolishes on a tap over the guest once the room is empty, and a refused demolish shows its reason through the explainer, not a droppable toast
+- [ ] ADVISORY | production-readiness | Watch lights up while a panel keeps it waiting, which reads as broken; Matt: "I cant get the Watch button to work even though it lights up" (src/ui/watch.ts:157) | Evidence to close: turning Watch on closes whatever is open and starts the countdown at once (decision 2026-09-28)
+- [ ] ADVISORY | production-readiness | the Build sheet on a phone has no visible close control, only the drag handle; Matt: "should offer an obvious collapse button" (src/ui/build.ts) | Evidence to close: a 44 px "Close" button in the sheet head collapses it, tested
