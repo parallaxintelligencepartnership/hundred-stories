@@ -7,8 +7,11 @@
 //
 // Every header the assets binding set (the public/_headers rules, ETag, Content-Type,
 // Cache-Control) is copied onto the answer except Content-Length and Content-Range, which are
-// recomputed (a whole-file answer, HEAD included, keeps the binding's Content-Length). Anything
-// the binding answers with other than 200 (304, 404) is returned as is.
+// recomputed. The binding's answer carries no Content-Length header, on GET or HEAD (seen under
+// wrangler dev 4.135; live HEAD had none either): a GET gets one on the wire only because the
+// runtime measures the body it sends. A HEAD has no body, so it is sent to the binding as a GET
+// whose body is counted (streamed, not held) and dropped, and the count is set as Content-Length.
+// Anything the binding answers with other than 200 (304, 404) is returned as is (HEAD: no body).
 
 export interface AssetsEnv {
   ASSETS: Fetcher;
@@ -49,21 +52,43 @@ function copyHeaders(from: Headers): Headers {
   return headers;
 }
 
+/** Counts a response body's bytes without holding them. */
+async function bodyLength(res: Response): Promise<number> {
+  if (res.body === null) return 0;
+  const reader = res.body.getReader();
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return total;
+    total += value.byteLength;
+  }
+}
+
 export async function handleRange(request: Request, env: AssetsEnv): Promise<Response> {
   if (request.method !== 'GET' && request.method !== 'HEAD') return env.ASSETS.fetch(request);
 
   const assetHeaders = new Headers(request.headers);
   assetHeaders.delete('Range');
   assetHeaders.delete('If-Range');
-  const asset = await env.ASSETS.fetch(new Request(request.url, { method: request.method, headers: assetHeaders }));
+  const asset = await env.ASSETS.fetch(new Request(request.url, { method: 'GET', headers: assetHeaders }));
+  if (request.method === 'HEAD') {
+    // Range is ignored on HEAD: the whole file's headers and its length, no body.
+    if (asset.status !== 200) {
+      await asset.body?.cancel();
+      return new Response(null, { status: asset.status, statusText: asset.statusText, headers: asset.headers });
+    }
+    const headers = copyHeaders(asset.headers);
+    headers.set('Content-Length', String(await bodyLength(asset)));
+    return new Response(null, { status: 200, statusText: asset.statusText, headers });
+  }
   if (asset.status !== 200) return asset;
 
   const range = request.headers.get('Range');
   // If-Range: send the range only when the validator still matches the asset's ETag.
   const ifRange = request.headers.get('If-Range');
-  const rangeApplies = range !== null && request.method === 'GET' && (ifRange === null || ifRange === asset.headers.get('ETag'));
+  const rangeApplies = range !== null && (ifRange === null || ifRange === asset.headers.get('ETag'));
   if (!rangeApplies || range.includes(',')) {
-    // The whole file as the binding sent it, so its length stands: HEAD has no body to measure.
+    // The whole file as the binding sent it; the runtime sets Content-Length from the body.
     const headers = copyHeaders(asset.headers);
     const length = asset.headers.get('Content-Length');
     if (length !== null) headers.set('Content-Length', length);

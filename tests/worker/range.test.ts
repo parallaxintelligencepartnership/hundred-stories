@@ -125,6 +125,24 @@ describe('GET /trailers/* byte ranges', () => {
     expect(res.headers.get('content-length')).toBe(String(SIZE));
   });
 
+  it('HEAD asks the binding for GET and sets Content-Length from its body (the binding sends no Content-Length header)', async () => {
+    // Under wrangler dev 4.135 the assets binding's answer has no Content-Length header on GET or
+    // HEAD; a GET only gets one on the wire because the runtime measures the body.
+    const assetsFetch = vi.fn(async (req: Request) => {
+      const headers = new Headers({ 'Content-Type': 'video/mp4', ETag: '"abc"' });
+      return new Response(req.method === 'HEAD' ? null : BYTES.slice(), { status: 200, headers });
+    });
+    const env = { ASSETS: { fetch: assetsFetch }, FEEDBACK: {} } as unknown as Env;
+    const res = await worker.fetch(get(VIDEO, { Range: 'bytes=0-99' }, 'HEAD'), env);
+    expect(res.status).toBe(200);
+    expect(res.body).toBeNull();
+    expect(res.headers.get('content-length')).toBe(String(SIZE));
+    expect(res.headers.get('etag')).toBe('"abc"');
+    expect(res.headers.get('content-range')).toBeNull();
+    expect(assetsFetch).toHaveBeenCalledTimes(1);
+    expect(assetsFetch.mock.calls[0]![0].method).toBe('GET');
+  });
+
   it('GET without Range keeps the whole file size in Content-Length', async () => {
     const { env } = makeEnv();
     const res = await worker.fetch(get(VIDEO), env);
