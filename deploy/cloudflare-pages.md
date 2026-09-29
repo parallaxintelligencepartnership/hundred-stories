@@ -6,9 +6,11 @@ set of static assets directly from Cloudflare's edge, and asset requests are
 free and unlimited. A small Worker (`src/worker/index.ts`, the `main` entry in
 `wrangler.jsonc`) answers two things the static assets cannot: `POST
 /api/feedback` for the in-game feedback card, and byte-range requests for the
-videos under `/trailers/` (`src/worker/range.ts`). Every other request is a
-static asset and never runs the Worker. The pi3 package in `deploy/` (see
-`deploy/README.md`) remains the fallback, for the static site only.
+videos under `/trailers/` (`src/worker/range.ts`). Static assets are served first;
+a request that matches no static asset, plus every `/trailers/*` request, reaches
+the Worker, which answers `POST /api/feedback` and byte ranges and hands anything
+else to the 404 page. The pi3 package in `deploy/` (see `deploy/README.md`)
+remains the fallback, for the static site only.
 
 ## One-time setup
 
@@ -29,11 +31,12 @@ npm run deploy
 
 This runs `npm run build`, then `scripts/predeploy-check.mjs`, then `npx wrangler deploy`,
 which uploads `dist/` as static assets and attaches the custom domains from `wrangler.jsonc`.
-The predeploy check is a static gate on the `dist/` output: it fails the build before
-anything is uploaded if `dist/_headers` no longer sends a `script-src 'self'` CSP with no
-`unsafe-eval` for `/play/`, if `dist/play/index.html` is missing, or if the PixiJS
+The predeploy check gates on the built `dist/` output plus `src-tauri/Cargo.lock`: it fails
+the build before anything is uploaded if `dist/_headers` no longer sends a `script-src 'self'`
+CSP with no `unsafe-eval` for `/play/`, if `dist/play/index.html` is missing, if the PixiJS
 `unsafe-eval` shim is missing from the built JS (that shim is required because the CSP has
-no `unsafe-eval`).
+no `unsafe-eval`), or if `cargo metadata --locked --offline` cannot resolve the Cargo lock
+(skipped, with a warning, when cargo is not installed on the machine running the check).
 
 ## Verification
 

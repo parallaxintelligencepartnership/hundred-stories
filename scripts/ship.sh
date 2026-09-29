@@ -80,6 +80,23 @@ if [ "$PKG" != "$NEW" ] || [ "$LOCK" != "$NEW $NEW" ]; then
   exit 1
 fi
 
+# Same rule as scripts/predeploy-check.mjs's findCargo/cargoMetadataCheck: run before the
+# release commit, so a lock that does not resolve stops the ship before anything is committed.
+CARGO=$(command -v cargo || true)
+if [ -z "$CARGO" ]; then
+  FALLBACK="${CARGO_HOME:-$HOME/.cargo}/bin/cargo"
+  [ -x "$FALLBACK" ] && CARGO="$FALLBACK"
+fi
+if [ -n "$CARGO" ]; then
+  if ! CARGO_METADATA_ERR=$("$CARGO" metadata --locked --offline --format-version 1 --manifest-path src-tauri/Cargo.toml 2>&1 >/dev/null); then
+    echo "cargo metadata --locked --offline failed on src-tauri/Cargo.lock; nothing committed:" >&2
+    printf '%s\n' "$CARGO_METADATA_ERR" | tail -n 3 >&2
+    exit 1
+  fi
+else
+  echo "cargo not found, skipping cargo metadata --locked --offline" >&2
+fi
+
 git add package.json package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml \
   src-tauri/Cargo.lock ios/App/App.xcodeproj/project.pbxproj android/app/build.gradle
 git commit -q -m "$NEW"

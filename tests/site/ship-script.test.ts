@@ -26,6 +26,14 @@ fi
 exit 0
 `;
 
+const CARGO_STUB = `#!/bin/sh
+if [ "$1" = metadata ]; then
+  if [ "\${CARGO_FAIL:-0}" != 0 ]; then echo "fake cargo metadata failure" >&2; exit 1; fi
+  exit 0
+fi
+exit 0
+`;
+
 const FILES = [
   'package.json',
   'package-lock.json',
@@ -52,6 +60,10 @@ function scratch() {
   mkdirSync(join(root, 'bin'));
   writeFileSync(join(root, 'bin', 'npm'), NPM_STUB);
   chmodSync(join(root, 'bin', 'npm'), 0o755);
+  // Always on PATH ahead of any real cargo, so the release-commit-blocking check is
+  // deterministic here regardless of what is installed on the host running the test.
+  writeFileSync(join(root, 'bin', 'cargo'), CARGO_STUB);
+  chmodSync(join(root, 'bin', 'cargo'), 0o755);
   const work = join(root, 'repo');
   mkdirSync(work);
   git(work, 'init', '-q', '-b', 'main');
@@ -69,8 +81,12 @@ function scratch() {
   git(work, 'commit', '-q', '-m', 'init');
   git(work, 'remote', 'add', 'origin', '../origin.git');
   git(work, 'remote', 'add', 'github', '../github.git');
-  const ship = (version: string, tag: string, deployFail: number) =>
-    spawnSync('sh', ['scripts/ship.sh', version, tag], { cwd: work, env: { ...env, DEPLOY_FAIL: String(deployFail) }, encoding: 'utf8' });
+  const ship = (version: string, tag: string, deployFail: number, cargoFail = 0) =>
+    spawnSync('sh', ['scripts/ship.sh', version, tag], {
+      cwd: work,
+      env: { ...env, DEPLOY_FAIL: String(deployFail), CARGO_FAIL: String(cargoFail) },
+      encoding: 'utf8',
+    });
   const refs = (bare: string) => spawnSync('git', ['for-each-ref', '--format=%(refname)'], { cwd: join(root, bare), env, encoding: 'utf8' }).stdout.trim();
   return { root, work, git, ship, refs };
 }
@@ -106,6 +122,19 @@ describe.skipIf(!runnable)('scripts/ship.sh in a scratch repo', () => {
       expect(s.git(join(s.root, bare), 'rev-parse', 'main')).toBe(head);
     }
     expect(run.stdout).toContain('Cloudflare version id: 12345678-aaaa-bbbb-cccc-1234567890ab');
+  }, 60_000);
+
+  it('a failing cargo metadata check exits 1 with no release commit, no tag and no push', () => {
+    const s = scratch();
+    const before = s.git(s.work, 'rev-parse', 'HEAD');
+    const run = s.ship(next(), 'ship-test-c', 0, 1);
+    expect(run.status).toBe(1);
+    expect(s.git(s.work, 'rev-parse', 'HEAD')).toBe(before);
+    expect(s.git(s.work, 'log', '-1', '--format=%s')).toBe('init');
+    expect(s.git(s.work, 'tag', '--list')).toBe('');
+    expect(s.refs('origin.git')).toBe('');
+    expect(s.refs('github.git')).toBe('');
+    expect(run.stderr).toContain('cargo metadata --locked --offline failed');
   }, 60_000);
 });
 
