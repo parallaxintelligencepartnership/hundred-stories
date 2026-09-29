@@ -16,12 +16,12 @@ the user plus anyone with the link (public) - auth needed: no; roles needed: no
 | "leaderboards" | deferred: anonymous signed score post, no accounts (not in v1) |
 
 ## Stack
-TypeScript 5, Vite 7 build, strict mode, no framework
+TypeScript 7, Vite 8 build, strict mode, no framework
 Simulation: pure TypeScript module, fixed tick, seeded PRNG, no DOM access, fully unit tested
 Rendering: PixiJS 8 (WebGL) for the tower view; DOM overlay for HUD and build palette
 Tests: Vitest for the sim core and save format
 PWA: web manifest plus service worker (vite-plugin-pwa)
-Hosting target: static files on Cloudflare Pages (primary); pi3 (x86_64 Ubuntu 24.04) behind Traefik as the fallback; domain hundredstories.xyz, not bought yet
+Hosting target: Cloudflare Workers static assets plus a small Worker (primary); pi3 (x86_64 Ubuntu 24.04) behind Traefik as the fallback; domain hundredstories.xyz, live on Cloudflare since 2026-09-19; store listings still pending
 
 ## Data
 Real data: player feedback messages (text, optional reply address, game version, platform, screen, time; never the IP) in a Cloudflare KV namespace, read hourly by the n8n mailer and mailed to requests@hundredstories.xyz; nothing else server side | Sample data: scripted tower builds under tests/scenarios (helpers.ts plus the scripted runs) used by the headless simulation tests | Sensitive: no; save games live only in the player's browser (IndexedDB, localStorage fallback), in the desktop and phone shells' own app data file, and in files they export themselves

@@ -236,3 +236,21 @@ describe('F4: a boot that read only the localStorage copy counts on from it', ()
     expect(Number(ls.getItem('hundred-stories:autosave:seq'))).toBeGreaterThan(5);
   });
 });
+
+describe('IMPORTANT 2026-09-28: the clock-floor number for a slot this page never read', () => {
+  it('a 0.6.8-shaped IndexedDB (no :seq-high yet), a link boot, then Open a saved file while IndexedDB is lost: the opened file still wins on the next healthy boot', async () => {
+    const ls = fakeLocalStorage();
+    const { factory, ctl } = fakeIdb();
+    // Seed IndexedDB the way an 0.6.8 build left it: a numbered save (seq 57), and no
+    // `:seq-high` record in localStorage (that key did not exist before 0.6.9).
+    ctl.data.set('autosave', '{"minute":9000}');
+    ctl.data.set('autosave:seq', 57);
+    let m = await reload(); // a link boot: My tower is never read, so its number is never learned
+    const mine = () => m.createStorage({ indexedDB: factory, localStorage: ls });
+    ctl.mode = 'txThrows'; // IndexedDB is lost for this write
+    await mine().writeSave('{"imported":1}'); // Open a saved file
+    ctl.mode = 'ok';
+    m = await reload(); // the next healthy boot
+    expect(await mine().readSave()).toBe('{"imported":1}');
+  });
+});
