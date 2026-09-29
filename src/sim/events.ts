@@ -242,9 +242,11 @@ function endFire(world: World, event: FireEvent, how: string): void {
     const room = world.rooms.get(id);
     if (room && !canBurn(room)) setOnFire(world, room, false);
   }
+  const burned = new Set<Id>();
   for (const room of burningRooms(world, event)) {
     cost += fireRoomBill(room);
     destroyRoom(world, room, `The fire on floor ${room.floor} destroyed the ${label(room.kind)}.`);
+    burned.add(room.id);
     lost += 1;
   }
   debitLoss(world, 'fire', cost);
@@ -252,6 +254,10 @@ function endFire(world: World, event: FireEvent, how: string): void {
   const rooms = `${lost} room${lost === 1 ? '' : 's'}`;
   log(world, `${how}. ${rooms} burned down and clearing the damage cost ${formatDollars(cost)}.`, 'alert');
   towerBeat(world, 'fire.resolved', firstRoom !== undefined ? { roomId: firstRoom, value: lost } : { value: lost });
+  // A bomb in a room the fire took is gone with it (Matt, 2026-09-29).
+  for (const other of [...world.events]) {
+    if (other.kind === 'bomb' && burned.has(other.roomId)) bombBurned(world, other);
+  }
 }
 
 export function tickFire(world: World, event: FireEvent): void {
@@ -308,13 +314,28 @@ export function startBomb(world: World): void {
   sendGuard(world, { kind: 'bomb', roomId: room.id, floor: room.floor, x: roomMiddle(room) });
 }
 
-function detonate(world: World, event: Extract<ActiveEvent, { kind: 'bomb' }>): void {
+type BombEvent = Extract<ActiveEvent, { kind: 'bomb' }>;
+
+/** The player line when a fire takes the bomb's room before it goes off. */
+export const BOMB_BURNED_TEXT = 'The fire took the bomb with it. The threat is over.';
+
+/**
+ * A fire destroyed the bomb's room: the bomb is gone with it (Matt, 2026-09-29, replacing the
+ * 2026-09-28 rule that it still went off where it was planted). No blast, no loss, no ransom.
+ */
+function bombBurned(world: World, event: BombEvent): void {
+  endEvent(world, event);
+  log(world, BOMB_BURNED_TEXT, 'info');
+  towerBeat(world, 'bomb.resolved', { roomId: event.roomId });
+}
+
+function detonate(world: World, event: BombEvent): void {
+  // Only reached while the bomb's room stands: a fire that takes the room ends the bomb
+  // (bombBurned). floor and x stay in the event (saves carry them) but are not read here.
   const bombRoom = world.rooms.get(event.roomId);
-  // A fire can take the bomb's room before it goes off: it still goes off where it was planted.
-  const at = bombRoom ?? (event.floor !== undefined && event.x !== undefined ? { floor: event.floor, x: event.x } : undefined);
-  const ranked = sortedRooms(world).sort((a, b) => distanceFrom(at, a) - distanceFrom(at, b));
+  const ranked = sortedRooms(world).sort((a, b) => distanceFrom(bombRoom, a) - distanceFrom(bombRoom, b));
   const doomed = ranked.slice(0, EVENTS.bomb.damageRooms);
-  const floor = at ? at.floor : 1;
+  const floor = bombRoom ? bombRoom.floor : 1;
   for (const room of doomed) destroyRoom(world, room, `The bomb on floor ${floor} destroyed the ${label(room.kind)}.`);
   debitLoss(world, 'bomb', EVENTS.bomb.damageCash);
   endEvent(world, event);
@@ -328,7 +349,15 @@ function distanceFrom(from: { floor: number; x: number } | undefined, room: Room
   return Math.abs(room.floor - from.floor) * TOWER_WIDTH + Math.abs(room.x - from.x);
 }
 
-export function tickBomb(world: World, event: Extract<ActiveEvent, { kind: 'bomb' }>): void {
+export function tickBomb(world: World, event: BombEvent): void {
+  // Ended earlier this tick (a fire took its room while the loop held a copy of the list).
+  if (!world.events.includes(event)) return;
+  // Its room is gone (a save from before the 2026-09-29 rule, when the fire did not end it).
+  // Only a fire removes a bomb's room: demolition is refused and the blast ends the event.
+  if (!world.rooms.has(event.roomId)) {
+    bombBurned(world, event);
+    return;
+  }
   const dayStart = event.detonateAt - EVENTS.bomb.detonateAtMinuteOfDay;
   const searchStart = dayStart + EVENT_ROLL_MINUTE_OF_DAY;
   if (securityOnDuty(world)) {
