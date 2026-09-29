@@ -79,6 +79,9 @@ export interface PopulationTrend {
   label: string;
 }
 
+/** The population tooltip's plain note: why the figure swings through the day. */
+export const POPULATION_HOTEL_NOTE = 'Hotel guests count while they are in their rooms, so this number is higher at night.';
+
 export function populationTrend(world: Baselines): PopulationTrend {
   const base = world.dayStartPopulation;
   if (typeof base !== 'number') {
@@ -419,7 +422,7 @@ export function createStatusBar(options: StatusBarOptions = {}): StatusBar {
     setText(popMeta, trend.text);
     setAttr(popMeta, 'aria-label', trend.label);
     setAttr(popMeta, 'title', trend.label);
-    setAttr(population, 'title', trend.label);
+    setAttr(population, 'title', `${trend.label}. ${POPULATION_HOTEL_NOTE}`);
     popMeta.classList.toggle('is-down', trend.arrow === 'down');
     popMeta.classList.toggle('is-up', trend.arrow === 'up');
 

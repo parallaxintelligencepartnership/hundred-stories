@@ -1,7 +1,7 @@
 // The tower's milestones: the firsts the News panel lists under Milestones. Written by the sim
 // (recomputeStars and the build command), so they are saved with the tower and a replay of the
-// same commands writes the same list. Each kind is kept once: a star lost and won back, or a
-// population that dips under a mark and passes it again, is not a second milestone.
+// same commands writes the same list. Each kind is kept once: a population that dips under a
+// mark and passes it again is not a second milestone.
 
 import type { Milestone, Star, World } from './types';
 
@@ -29,6 +29,22 @@ export function starMilestoneText(star: Star): string {
 /** The star just gained, the first time the tower holds it. */
 export function noteStarGained(world: World, star: Star): void {
   recordMilestone(world, `star:${star}`, starMilestoneText(star));
+}
+
+/**
+ * The highest star this milestone list says the tower earned, or null when it records none. A
+ * star once earned is never taken away (DECISIONS 2026-09-29), so a save written while stars
+ * could fall loads at this star at least.
+ */
+export function highestStarMilestone(milestones: readonly Milestone[]): Star | null {
+  let best: Star | null = null;
+  for (const m of milestones) {
+    const match = /^star:([1-6])$/.exec(m.kind);
+    if (!match) continue;
+    const star = Number(match[1]) as Star;
+    if (best === null || star > best) best = star;
+  }
+  return best;
 }
 
 /**

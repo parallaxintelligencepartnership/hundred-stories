@@ -575,17 +575,21 @@ describe('economy: guards (audit 2026-09-28 I)', () => {
   });
 
   // I S3. DESIGN.md section 5: the settle (step 5) runs before the star recount (step 6), so
-  // lobby upkeep is billed at the rating the quarter ran at. Red if tick.ts swaps the two.
-  it('I S3: the 5 AM settle bills the lobby at 3 stars before the recount drops the rating', () => {
+  // lobby upkeep is billed at the rating the quarter ran at. Stars never fall (DECISIONS
+  // 2026-09-29), so the order shows on a rise: a tower that earns 3 stars at the 5 AM recount is
+  // billed its lobby at 2 stars. Red if tick.ts swaps the two.
+  it('I S3: the 5 AM settle bills the lobby at 2 stars before the recount raises the rating', () => {
     const world = createWorld(1);
     world.cash = 1_000_000;
-    world.stars = 3;
+    world.stars = 2;
     for (let i = 0; i < 10; i++) addRoom(world, makeRoom({ kind: 'lobby', floor: 1, x: 100 + i }));
+    addRoom(world, makeRoom({ kind: 'security', floor: 2, x: 0 }));
+    for (let i = 0; i < 167; i++) addRoom(world, makeRoom({ kind: 'office', floor: 10 + Math.floor(i / 20), x: (i % 20) * 10 }));
     world.time.minute = 3 * 1440 + 300; // 5 AM on the first day of the second quarter
     tick(world);
-    expect(world.stats.lastQuarter.upkeep).toBe(LIMITS.lobbyUpkeepPerSegmentByStar[3] * 10);
-    expect(world.stats.lastQuarter.upkeep).toBe(3_000);
-    expect(world.stars).toBeLessThan(3); // no population: the recount after the settle drops it
+    expect(LIMITS.lobbyUpkeepPerSegmentByStar[3]).toBeGreaterThan(LIMITS.lobbyUpkeepPerSegmentByStar[2]);
+    expect(world.stats.lastQuarter.upkeepByKind.lobby ?? 0).toBe(LIMITS.lobbyUpkeepPerSegmentByStar[2] * 10);
+    expect(world.stars).toBe(3); // the recount after the settle raised it
   });
 
   // I S5 and lane A M3. DECISIONS 2026-09-20: the rent setting scales hotel nightly income and

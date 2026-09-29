@@ -68,11 +68,8 @@ export function recomputeStars(world: World): void {
   world.population = population;
   const before = world.stars;
 
-  // Falling is driven by population alone, and never below 1 star.
-  while (world.stars > 1 && population < STARS[world.stars].population) {
-    world.stars = (world.stars - 1) as Star;
-  }
-
+  // A star once earned is never taken away (DECISIONS 2026-09-29): population can dip under a
+  // threshold, as hotel rooms empty at checkout, without losing the rating.
   // Rising is gated by population and requirements, one star at a time.
   if (world.stars < 6) {
     const next = (world.stars + 1) as Star;
@@ -83,15 +80,10 @@ export function recomputeStars(world: World): void {
   }
 
   if (world.stars !== before) {
-    const verb = world.stars > before ? 'Reached' : 'Fell to';
-    log(world, `${verb} ${STARS[world.stars].label}.`);
-    recordBeat(world.story, {
-      code: world.stars > before ? 'star.gained' : 'star.lost',
-      minute: world.time.minute,
-      value: world.stars,
-    });
+    log(world, `Reached ${STARS[world.stars].label}.`);
+    recordBeat(world.story, { code: 'star.gained', minute: world.time.minute, value: world.stars });
     // Tower status writes the chronicle: presentation state, outside the hash like every beat.
     if (world.stars === 6) world.story.chronicle = assembleChronicle(world);
-    if (world.stars > before) noteStarGained(world, world.stars);
+    noteStarGained(world, world.stars);
   }
 }

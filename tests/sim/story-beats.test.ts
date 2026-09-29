@@ -115,9 +115,13 @@ describe('recording', () => {
     expect(world.stars).toBe(2);
     expect(world.log[world.log.length - 1]?.text).toBe('Reached 2 stars.');
     expect(world.story.recent).toEqual([{ code: 'star.gained', minute: world.time.minute, value: 2 }]);
+    // Stars never fall (DECISIONS 2026-09-29): an emptied tower records no beat and no log line.
+    const lines = world.log.length;
     for (const r of world.rooms.values()) r.vacant = true;
     recomputeStars(world);
-    expect(world.story.recent[1]).toEqual({ code: 'star.lost', minute: world.time.minute, value: 1 });
+    expect(world.stars).toBe(2);
+    expect(world.story.recent).toHaveLength(1);
+    expect(world.log).toHaveLength(lines);
   });
 
   it('records a fire beside its log line, which keeps its wording', () => {

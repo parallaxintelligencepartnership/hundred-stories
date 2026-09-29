@@ -77,7 +77,7 @@ onQuarterStart: office rent incomePerQuarter scaled by (0.5 + eval / 2) for non-
 export function recomputeStars(world: World): void;
 export function populationOf(world: World): number; // non-vacant offices * 6, sold condos * 3, occupied hotel rooms by capacity
 ```
-Ladder from STARS; a star is granted when population and every `requires` key hold; stars can fall by population only, never below 1; log on change; star 6 also needs stats.weddingsHeld > 0.
+Ladder from STARS; a star is granted when population and every `requires` key hold; a star once earned is never taken away, whatever the population does afterwards (DECISIONS 2026-09-29), and a save from before that rule loads at its highest `star:N` milestone; log on change; star 6 also needs stats.weddingsHeld > 0.
 
 ### sim/evaluation.ts
 ```ts

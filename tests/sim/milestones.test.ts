@@ -54,10 +54,10 @@ describe('milestones', () => {
     recomputeStars(world);
     expect(world.stars).toBe(2);
     expect(world.milestones.find((m) => m.kind === 'star:2')).toEqual({ kind: 'star:2', minute: 2040, text: 'The tower reached 2 stars.' });
-    // Lost with the tenants, then won back: still one star 2 milestone.
+    // The tenants go and come back: the star stays (DECISIONS 2026-09-29), one star 2 milestone.
     for (const room of rooms) room.vacant = true;
     recomputeStars(world);
-    expect(world.stars).toBe(1);
+    expect(world.stars).toBe(2);
     for (const room of rooms) room.vacant = false;
     world.time.minute += 60;
     recomputeStars(world);

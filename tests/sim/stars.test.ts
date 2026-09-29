@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { addRoom, addSim, allocId, createWorld } from '../../src/sim/world';
 import { ROOMS, STARS } from '../../src/sim/rules';
 import { populationOf, recomputeStars } from '../../src/sim/stars';
-import type { Room, RoomKind, World } from '../../src/sim/types';
+import { canBuild } from '../../src/sim/build';
+import { deserialize, serialize } from '../../src/sim/save';
+import type { Room, RoomKind, Star, World } from '../../src/sim/types';
 
 let idCounter = 1;
 
@@ -305,50 +307,107 @@ describe('stars: each 4-star and Tower requirement on its own (audit I S4)', () 
   }
 });
 
-describe('stars: falling', () => {
-  it('falls back a star when population drops below the threshold', () => {
+// DECISIONS 2026-09-29, Matt: "Stars never fall". A star once earned stays, whatever the
+// population does afterwards; these replace the old fall tests (audit I S3, A M7).
+describe('stars: never fall', () => {
+  it('keeps 2 stars when every tenant has gone', () => {
     const world = createWorld(1);
     world.stars = 2;
     world.rooms.clear();
     recomputeStars(world);
-    expect(world.stars).toBe(1);
+    expect(world.population).toBe(0);
+    expect(world.stars).toBe(2);
   });
 
-  it('never falls below 1 star', () => {
+  it('stays at 1 star with nobody in the tower', () => {
     const world = createWorld(1);
     world.stars = 1;
     recomputeStars(world);
     expect(world.stars).toBe(1);
   });
 
-  it('does not fall just because a requirement (like security) is no longer met', () => {
+  it('keeps 3 stars when a requirement (like security) is no longer met', () => {
     const world = createWorld(1);
     world.stars = 3;
     fillPopulation(world, STARS[3].population);
-    // No security office built, but population alone should not cause a fall from 3.
     recomputeStars(world);
     expect(world.stars).toBe(3);
   });
 
-  // Audit 2026-09-25 I S3: every fall test above starts at 2 stars, where the clamp at 1
-  // hides a fall of two ranks. From 4 stars, 1,002 people is 3 stars, not 2.
-  it('I S3: falls one rank from 4 stars to 3 with 167 leased offices', () => {
-    const world = createWorld(1);
-    world.stars = 4;
-    fillPopulation(world, 1002);
-    recomputeStars(world);
-    expect(world.population).toBe(1002);
-    expect(world.stars).toBe(3);
+  it('keeps 4 stars at 1,002 people and at 306 people', () => {
+    for (const people of [1002, 306]) {
+      const world = createWorld(1);
+      world.stars = 4;
+      fillPopulation(world, people);
+      recomputeStars(world);
+      expect(world.population).toBe(people);
+      expect(world.stars).toBe(4);
+      expect(world.log.some((l) => /Fell to/.test(l.text))).toBe(false);
+    }
   });
 
-  // Audit 2026-09-28 lane A M7: a fall capped at one rank per recount survived every test,
-  // because each drops one rank only. From 4 stars, 306 people is 2 stars, in one recount.
-  it('A M7: falls two ranks at once, from 4 stars to 2 with 51 leased offices', () => {
+  // The report behind the decision: 155 offices (930 people) and twin rooms that count only while
+  // a guest is inside. The tower sits over 1,000 at night and under it every afternoon.
+  it('holds 3 stars through the afternoon hotel dip: one star.gained, and 3-star rooms stay open', () => {
     const world = createWorld(1);
-    world.stars = 4;
-    fillPopulation(world, 306);
-    recomputeStars(world);
-    expect(world.population).toBe(306);
-    expect(world.stars).toBe(2);
+    world.stars = 2;
+    for (let x = 100; x < 220; x++) addRoom(world, makeRoom({ kind: 'lobby', floor: 1, x }));
+    addRoom(world, makeRoom({ kind: 'security', floor: 3, x: 0 }));
+    for (let i = 0; i < 155; i++) {
+      addRoom(world, makeRoom({ kind: 'office', floor: 10 + Math.floor(i / 20), x: (i % 20) * 10 }));
+    }
+    const twins: Room[] = [];
+    for (let i = 0; i < 40; i++) {
+      const twin = makeRoom({ kind: 'hotelTwin', floor: 30 + Math.floor(i / 20), x: (i % 20) * 7 });
+      addRoom(world, twin);
+      twins.push(twin);
+    }
+    const guestsIn = (inside: boolean): void => {
+      for (const twin of twins) twin.occupancy = inside ? 1 : 0;
+    };
+
+    for (let day = 0; day < 3; day++) {
+      guestsIn(true); // night
+      world.time.minute = day * 1440 + 22 * 60;
+      recomputeStars(world);
+      expect(world.population).toBe(1010);
+      expect(world.stars).toBe(3);
+      guestsIn(false); // afternoon: every guest has checked out
+      world.time.minute = day * 1440 + 1440 + 13 * 60;
+      recomputeStars(world);
+      expect(world.population).toBe(930);
+      expect(world.stars).toBe(3);
+      // A 3-star room still builds while the tower is under 1,000.
+      expect(canBuild(world, 'parkingSpace', -1, 150 + day * 5)).toEqual({ ok: true });
+    }
+    expect(world.story.recent.filter((b) => b.code === 'star.gained')).toHaveLength(1);
+    expect(world.story.recent.some((b) => b.code === 'star.lost')).toBe(false);
+    expect(world.milestones.filter((m) => m.kind === 'star:3')).toHaveLength(1);
+  });
+});
+
+// A save written while stars could fall may hold a rating under a star it already earned.
+describe('stars: a save from the old rule', () => {
+  function reloaded(stars: Star, milestoneStars: Star[]): { before: World; after: World } {
+    const before = createWorld(1);
+    before.stars = stars;
+    before.milestones = milestoneStars.map((n) => ({ kind: `star:${n}`, minute: 100 * n, text: `The tower reached ${n} stars.` }));
+    const loaded = deserialize(serialize(before));
+    if (!loaded.ok) throw new Error(loaded.reason);
+    return { before, after: loaded.world };
+  }
+
+  it('loads at the highest star it earned, silently', () => {
+    const { before, after } = reloaded(2, [2, 3]);
+    expect(after.stars).toBe(3);
+    expect(after.log).toEqual(before.log);
+    expect(after.story.recent).toEqual(before.story.recent);
+    expect(after.milestones).toEqual(before.milestones);
+  });
+
+  it('loads as it is with no star milestones, or with a rating already at or above them', () => {
+    expect(reloaded(2, []).after.stars).toBe(2);
+    expect(reloaded(4, [2, 3]).after.stars).toBe(4);
+    expect(reloaded(3, [2, 3]).after.stars).toBe(3);
   });
 });

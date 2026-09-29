@@ -140,6 +140,13 @@ describe('status bar deltas', () => {
     expect(populationTrend(stubWorld({ population: 650 }))).toMatchObject({ delta: -50, arrow: 'down', text: '▼ -50 today' });
     expect(populationTrend(stubWorld({ population: 700 }))).toMatchObject({ delta: 0, arrow: 'flat', text: 'No change today' });
   });
+
+  it('explains the hotel swing in the population tooltip (DECISIONS 2026-09-29)', () => {
+    const bar = createStatusBar();
+    bar.update(createWorld(1), 1);
+    const title = (bar.population as unknown as FakeElement).getAttribute('title') ?? '';
+    expect(title.endsWith('. Hotel guests count while they are in their rooms, so this number is higher at night.')).toBe(true);
+  });
 });
 
 describe('next star', () => {

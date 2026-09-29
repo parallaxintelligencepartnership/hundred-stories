@@ -13,7 +13,7 @@ import { buildLogFromSave, buildLogToSave, setBuildLog, type SavedBuildLog } fro
 import { createRng } from './rng';
 import { EVENTS, RENT, ROOMS, SHAFTS, WASTE } from './rules';
 import { VIP_PREFERENCES, vipPreference } from './identity';
-import { sanitizeMilestones } from './milestones';
+import { highestStarMilestone, sanitizeMilestones } from './milestones';
 import { createStoryState, sanitizeStory } from './story';
 import { createWorld, rebuildFloorIndex } from './world';
 import { MAX_FLOOR, MIN_FLOOR, TOWER_WIDTH, floorDistance, spanTop } from './types';
@@ -783,6 +783,11 @@ export function deserialize(text: string): { ok: true; world: World } | { ok: fa
     world.roachLastSpread = parsed.roachLastSpread ?? null;
     // Read by presence too: a save from before milestones loads with none.
     world.milestones = sanitizeMilestones(parsed.milestones);
+    // A star once earned is never taken away (DECISIONS 2026-09-29). A save written while stars
+    // could fall may hold a rating under a star it already earned: it loads at that star, silently
+    // (no beat, no log line), and the save format is unchanged.
+    const earned = highestStarMilestone(world.milestones);
+    if (earned !== null && earned > world.stars) world.stars = earned;
     world.stats = statsWithDefaults(parsed.stats);
     world.gameOver = parsed.gameOver;
     world.log = parsed.log.slice(-LOG_LIMIT);
