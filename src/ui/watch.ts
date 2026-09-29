@@ -12,6 +12,8 @@
 //
 // The chrome rule "controls never move or hide" still holds while it is off, which is today's
 // behavior, and while anything is open (a panel, a card, a menu), since then the player is busy.
+// Turning Watch on closes whatever is open first (Matt, 2026-09-28), all but the guided first
+// tower, so the countdown starts at once.
 
 import { icon } from './icons';
 import { PREF_KEYS, getFlag, onPrefChange, setFlag } from './prefs';
@@ -80,6 +82,12 @@ export interface WatchModeOptions {
   busy(): boolean;
   /** The chrome just stepped aside: put away what may go with it (the build sheet's row). */
   onWatch?(): void;
+  /**
+   * Just turned on: close whatever is open (a panel, a card, the Views list, the build sheet),
+   * so the countdown starts at once and the lit button never waits on it. The owner leaves open
+   * what must hold Watch off (the guided first tower).
+   */
+  onEnable?(): void;
 }
 
 export interface WatchMode {
@@ -231,6 +239,8 @@ export function createWatchMode(options: WatchModeOptions): WatchMode {
     if (key !== PREF_KEYS.watchMode) return;
     const next = readWatchMode();
     if (next === enabled) return;
+    // Closed while still off, so the closing does not restart the idle clock (sync is a no-op).
+    if (next) options.onEnable?.();
     enabled = next;
     disarm();
     if (enabled) {

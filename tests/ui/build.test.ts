@@ -214,7 +214,32 @@ describe('build dock on its own', () => {
     expect([build.sheet(), dom.activeElement]).toEqual(['closed', fab]);
   });
 
-  it('shows that close only on the open phone sheet, 44 px round in its own cell right of the tabs, with the Build button hidden', () => {
+  it('says Close in words beside the x, and a click shuts the sheet as a drag down does', () => {
+    const { build, nav } = dock(true);
+    click(build.fab as unknown as FakeElement);
+    expect(build.sheet()).toBe('row');
+    const close = nav.children.find((n) => has(n, 'hs-build-close')) as FakeElement;
+    const label = close.children.find((n) => has(n, 'hs-build-close-label'));
+    expect(label?.textContent).toBe('Close');
+    expect(close.children.some((n) => n.tagName.toLowerCase() === 'svg')).toBe(true);
+    click(close);
+    expect([build.sheet(), has(nav, 'is-sheet-closed')]).toEqual(['closed', true]);
+    // The drag down still closes it too.
+    click(build.fab as unknown as FakeElement);
+    fire(nav, 'pointerdown', { clientY: 100, timeStamp: 1000, pointerId: 4, target: nav });
+    fire(nav, 'pointerup', { clientY: 240, timeStamp: 1400, pointerId: 4 });
+    expect(build.sheet()).toBe('closed');
+    // On the phone the word shows: nothing hides it, and the button is a pill at least 44 px tall.
+    const phone = phoneBlock();
+    const rule = ruleIn(phone, '.hs-palette:is(.is-sheet-row, .is-sheet-full) .hs-build-close');
+    expect(rule).toContain('min-height: var(--touch);');
+    expect(rule).toContain('grid-row: 2;');
+    expect(rule).toContain('grid-column: 2;');
+    expect(ruleIn(phone, '.hs-build-close-label')).not.toMatch(/clip|display: none|width: 1px/);
+    expect(ruleIn(css, '.hs-build-close-label')).not.toMatch(/clip|display: none|width: 1px/);
+  });
+
+  it('shows that close only on the open phone sheet, a 44 px pill in its own cell right of the tabs, with the Build button hidden', () => {
     expect(css).toMatch(/\n\.hs-build-close \{\s*display: none;\s*\}/);
     const phone = phoneBlock();
     const close = ruleIn(phone, '.hs-palette:is(.is-sheet-row, .is-sheet-full) .hs-build-close');
@@ -224,12 +249,12 @@ describe('build dock on its own', () => {
       'grid-row: 2;',
       'align-self: start;',
       'margin-right: 8px;',
-      'width: var(--touch);',
+      'min-height: var(--touch);',
       'height: var(--touch);',
       'align-items: center;',
       'justify-content: center;',
       'border: 0;',
-      'border-radius: 50%;',
+      'border-radius: var(--radius-pill);',
       'background: var(--press-tint);',
     ]) {
       expect(close).toContain(line);
@@ -256,14 +281,14 @@ describe('build dock on its own', () => {
     expect(tabs).toContain('overflow-x: auto;'); // the strip scrolls inside its own column
     expect(ruleIn(phone, '.hs-build-items')).toContain('grid-column: 1 / -1;');
     expect(ruleIn(phone, '.hs-build-items')).toContain('grid-row: 3;');
-    // At 390 px, from the css: the close's column is its width and its right margin, and the
-    // strip's box, which clips every tab, ends where that column starts. The close keeps 44 px.
+    // The close's column is as wide as its x and its word; the strip's box, which clips every
+    // tab, ends where that column starts. The close keeps 44 px of height.
     const close = ruleIn(phone, '.hs-palette:is(.is-sheet-row, .is-sheet-full) .hs-build-close');
     const touch = 44 * Number(/--ui-scale: ([\d.]+);/.exec(css)?.[1]);
     expect(css).toMatch(/--touch: calc\(44px \* var\(--ui-scale\)\);/);
-    expect(/width: var\(--touch\);/.test(close)).toBe(true);
-    const margin = Number(/margin-right: (\d+)px;/.exec(close)?.[1]);
-    expect(390 - margin - touch).toBe(338); // the close spans 338 to 382, its column's start
+    expect(close).toContain('min-height: var(--touch);');
+    expect(close).toContain('white-space: nowrap;');
+    expect(close).not.toMatch(/\n  width:/);
     expect(touch).toBeGreaterThanOrEqual(44);
   });
 

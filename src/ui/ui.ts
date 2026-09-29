@@ -59,7 +59,7 @@ import { hasTextField, isFormField, keyAction, stepSpeed } from './keys';
 import { createMinimap, type Minimap } from './minimap';
 import type { PaletteRow } from './palette';
 import { createStatusBar, speedModeText } from './status';
-import { placementNote } from './explain';
+import { demolishNotice, placementNote } from './explain';
 import { createHoverCard } from './hover';
 import { createViewControl } from './overlays';
 import { createDailyPanel, dailyCard } from './daily';
@@ -648,6 +648,16 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     busy: () => mountedPanel !== null || view.isOpen() || build.sheet() === 'full' || guideActive() || placing(),
     onWatch: () => {
       if (build.sheet() === 'row') build.close();
+    },
+    // Turned on: whatever is open closes, so the countdown starts at once (Matt, 2026-09-28).
+    // The guided first tower still holds Watch off; a room in hand stays in hand.
+    onEnable: () => {
+      if (guideActive()) return;
+      if (view.isOpen()) view.close();
+      const sheet = build.sheet();
+      if (sheet === 'row' || sheet === 'full') build.close();
+      if (game.getSelection()) game.select(null);
+      setPanel('none');
     },
   });
 
@@ -1467,11 +1477,21 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     const first = newsLogSeen < 0;
     const fresh = first ? 0 : Math.min(world.logTotal - newsLogSeen, log.length);
     newsLogSeen = world.logTotal;
+    /** The newest line was a refused demolish from a tap on the tower, already said as a notice. */
+    let newestNoticed = false;
     for (const line of log.slice(log.length - fresh)) {
       if (line.level !== 'warn') continue;
       // The player's own refused command is said as a notice, never folded into the next
       // warning toast's count: logged while acting, or seen a frame later as the notice's words.
       if ((acting && line === newest) || line.text === lastNoticeText) continue;
+      // A refused demolish from a tap on the tower is the player's own too: a notice with what to
+      // do, where the warning toast's gap, its count and Watch mode cannot swallow it.
+      const said = acting ? null : demolishNotice(line.text);
+      if (said !== null) {
+        notice(said);
+        if (line === newest) newestNoticed = true;
+        continue;
+      }
       warns += 1;
       if (line.text.startsWith(GIVE_UP_PREFIX)) giveUps += 1;
     }
@@ -1494,6 +1514,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
         if (notable) toastLayer.show(notable.text, { onTap: openLog, tapLabel: 'Open the news' });
         return;
       }
+      if (newestNoticed) return;
       // A full tower logs warnings in bursts (give-ups, move-outs, people with no way out): one
       // folded toast now and then, not one each. The News panel keeps every line.
       if (newest.level === 'warn' && !acting) {

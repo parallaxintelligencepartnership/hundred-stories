@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PAD_BUTTONS, type PadLike } from '../../src/ui/gamepad';
 import { createSettingsPanel, type PanelContext } from '../../src/ui/panels';
 import { getFlag, PREF_KEYS, setFlag } from '../../src/ui/prefs';
+import { applyCommand } from '../../src/sim/build';
 import { ROOMS } from '../../src/sim/rules';
 import type { RoomKind } from '../../src/sim/types';
 import { addRoom, allocId, createWorld, log } from '../../src/sim/world';
@@ -543,6 +544,76 @@ describe('watch mode keeps the chrome up while anything is open', () => {
     expect(watching(shell)).toBe(false);
     vi.advanceTimersByTime(1);
     expect(watching(shell)).toBe(true);
+  });
+});
+
+// Matt's playtest, 2026-09-28: turning Watch on over an open panel left the button lit with
+// nothing happening. Decided: turning it on closes whatever is open and the countdown starts at once.
+describe('turning Watch on closes whatever is open', () => {
+  const byClass = (root: FakeElement, name: string): FakeElement => {
+    const found = root.descendants().find((n) => classesOf(n).includes(name));
+    if (!found) throw new Error(`no .${name}`);
+    return found;
+  };
+  const dialogs = (shell: FakeElement): FakeElement[] => shell.descendants().filter((n) => n.getAttribute('role') === 'dialog');
+
+  it('a panel: it closes, and the chrome steps aside with no other input', () => {
+    const { root, shell } = mount();
+    click(menuButton(root));
+    expect(dialogs(shell)).toHaveLength(1);
+    click(watchButton(root));
+    expect(dialogs(shell)).toHaveLength(0);
+    vi.advanceTimersByTime(WATCH_IDLE_MS);
+    expect(watching(shell)).toBe(true);
+    expect(dialogs(shell)).toHaveLength(0);
+  });
+
+  it('the full build sheet and the Views list', () => {
+    (globalThis as unknown as { window: { innerWidth?: number } }).window.innerWidth = 390;
+    const { root, shell } = mount();
+    click(byClass(shell, 'hs-build-fab'));
+    click(byClass(shell, 'hs-build-handle'));
+    expect(classesOf(byClass(shell, 'hs-palette'))).toContain('is-sheet-full');
+    click(byClass(shell, 'hs-views-btn'));
+    expect(byClass(shell, 'hs-views-menu').hidden).toBe(false);
+    click(watchButton(root));
+    vi.advanceTimersByTime(WATCH_IDLE_MS);
+    expect(watching(shell)).toBe(true);
+    expect(classesOf(byClass(shell, 'hs-palette'))).toContain('is-sheet-closed');
+    expect(byClass(shell, 'hs-views-menu').hidden).toBe(true);
+  });
+
+  it('a query card: the selection is let go', () => {
+    const root = dom.createElement('div');
+    const game = mkGame() as unknown as Record<string, unknown>;
+    const world = createWorld(3);
+    world.cash = 1e7;
+    expect(applyCommand(world, { kind: 'build', room: 'lobby', floor: 1, x: 0 }).ok).toBe(true);
+    game['world'] = world;
+    let selection: { roomId?: number } | null = { roomId: [...world.rooms.keys()][0]! };
+    game['getSelection'] = () => selection;
+    game['select'] = (next: typeof selection) => {
+      selection = next;
+    };
+    createUi(root as never, game as never, {} as never);
+    const shell = root.children[0] as FakeElement;
+    const watchBtn = watchButton(root);
+    click(watchBtn);
+    expect(selection).toBe(null);
+    vi.advanceTimersByTime(WATCH_IDLE_MS);
+    expect(watching(shell)).toBe(true);
+  });
+
+  it('but not the guided first tower: it still holds Watch off', () => {
+    const store = (globalThis as unknown as { window: { localStorage: { setItem(k: string, v: string): void } } }).window.localStorage;
+    store.setItem('hs.guide.done', 'false');
+    const { root, shell } = mount();
+    const card = byClass(shell, 'hs-card');
+    expect(card.textContent).toContain('First tower');
+    click(watchButton(root));
+    vi.advanceTimersByTime(3 * WATCH_IDLE_MS);
+    expect(watching(shell)).toBe(false);
+    expect(classesOf(card)).not.toContain('is-hidden');
   });
 });
 

@@ -5,8 +5,9 @@
 //
 // Phone: nothing until the round Build button in the bottom right corner, which never moves.
 // It opens a bottom sheet: the category row and a sideways row of tiles. Drag up for the full
-// grid, swipe down to close. The open sheet carries its own close at the end of its tab row, and
-// the Build button steps aside until it shuts, so no tile sits under it. With a tool in hand the
+// grid, swipe down to close. The open sheet carries its own Close (the x and the word) at the top
+// right, at the end of its tab row, and the Build button steps aside until it shuts, so no tile
+// sits under it. With a tool in hand the
 // sheet shrinks to a small bar that names the item and its cost, with Cancel. Nothing here is
 // remembered: every load starts closed.
 //
@@ -96,7 +97,8 @@ export function createBuildDock(options: BuildDockOptions): BuildDock {
   sheetClose.type = 'button';
   sheetClose.setAttribute('aria-label', 'Close build');
   sheetClose.title = 'Close build';
-  sheetClose.append(icon('close', 'hs-icon') as unknown as HTMLElement);
+  // The x and the word, so the way out reads at a glance (Matt's playtest, 2026-09-28).
+  sheetClose.append(icon('close', 'hs-icon') as unknown as HTMLElement, el('span', 'hs-build-close-label', 'Close'));
   palette.prepend(handle, sheetClose);
 
   // The placing bar: the item's picture, its name and cost, and Cancel.

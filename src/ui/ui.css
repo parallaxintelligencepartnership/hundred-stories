@@ -1886,7 +1886,7 @@ button.hs-readout:hover {
 
 /* On a phone the News sheet opens tall enough for the VIP card and the ten newest lines. */
 @media (max-width: 899px) {
-  .hs-sheet.hs-news[data-snap='half'] {
+  .hs-sheet.hs-news-panel[data-snap='half'] {
     --sheet-h: 75vh;
     --sheet-h: 75dvh;
   }
@@ -3484,20 +3484,28 @@ button.hs-news-toast {
     grid-template-rows: auto auto minmax(0, 1fr);
   }
 
-  /* The open sheet's close: a 44 px round button, its own cell right of the tabs. */
+  /* The open sheet's close: the x and the word Close on a 44 px pill, top right in its own cell
+     right of the tabs. */
   .hs-palette:is(.is-sheet-row, .is-sheet-full) .hs-build-close {
     display: inline-flex;
     grid-column: 2;
     grid-row: 2;
     align-self: start;
     margin-right: 8px;
-    width: var(--touch);
+    min-height: var(--touch);
     height: var(--touch);
+    padding: 0 14px 0 12px;
+    gap: 6px;
     align-items: center;
     justify-content: center;
     border: 0;
-    border-radius: 50%;
+    border-radius: var(--radius-pill);
     background: var(--press-tint);
+    color: var(--ink);
+    font: inherit;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
   }
 
   .hs-build-fab-label {

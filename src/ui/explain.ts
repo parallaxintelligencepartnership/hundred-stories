@@ -5,6 +5,7 @@
 
 import type { Placement, Tool } from '../game/api';
 import { servedFloors } from '../render/overlays';
+import { CONDO_SOLD_REASON } from '../sim/build';
 import { LIMITS, ROOMS } from '../sim/rules';
 import { spanTop } from '../sim/types';
 import type { ShaftKind, Star, World } from '../sim/types';
@@ -132,4 +133,30 @@ export function placementNote(placement: Placement, tool: Tool, world: Pick<Worl
   if (!placement.ok) return refusalExplainer(placement, world, tool.kind === 'room' ? ROOMS[tool.room].height : 1, upkeep) ?? '';
   const kind = placementShaftKind(placement, tool, world);
   return [kind ? servesLine(kind, placement.floorMin, placement.floorMax) : '', upkeepSentence(upkeep, false)].filter(Boolean).join(' ');
+}
+
+/**
+ * The demolish refusals, by build.ts's words (doDemolish, doDemolishShaft, strandsSomething),
+ * each with the sentence said after it, or empty where the reason already says what to do.
+ */
+const DEMOLISH_NEXT: ReadonlyMap<string, string> = new Map([
+  ['People are inside.', 'Wait until the room is empty.'],
+  ['Wait until the cars are empty.', ''],
+  ['Put the fire out first.', ''],
+  ['Deal with the bomb first.', ''],
+  ['There is nothing to demolish.', ''],
+  [CONDO_SOLD_REASON, ''],
+  ['Something above rests on this. Remove that first.', 'Demolish from the top down.'],
+  ['Something below rests on this. Remove that first.', 'Underground, demolish from the deepest floor up.'],
+]);
+
+/**
+ * What the notice says for a refused demolish from a tap on the tower: the sim's reason and, for
+ * the common ones, one plain sentence on what to do. Null for a line that is not a demolish
+ * refusal, which stays a news line as before.
+ */
+export function demolishNotice(reason: string): string | null {
+  const next = DEMOLISH_NEXT.get(reason);
+  if (next === undefined) return null;
+  return next ? `${reason} ${next}` : reason;
 }

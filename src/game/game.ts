@@ -5,8 +5,8 @@ import { markCheckpoint } from '../sim/replay';
 import { LIMITS, ROOMS, SHAFTS } from '../sim/rules';
 import { deserialize, serialize } from '../sim/save';
 import { tick } from '../sim/tick';
-import { clockOf, type Command, type CommandResult, type Id, type Shaft, type World } from '../sim/types';
-import { createWorld, log as logEvent, type TowerStart } from '../sim/world';
+import { clockOf, type Command, type CommandResult, type Id, type Room, type RoomKind, type Shaft, type World } from '../sim/types';
+import { createWorld, log as logEvent, roomsOnFloor, shaftAt, type TowerStart } from '../sim/world';
 import { SCHEDULES } from '../sim/rules';
 import { classifyPress, isTap, PRESS_SLOP_PX, TOUCH_SLOP_PX } from '../render/input';
 import type { Renderer } from '../render/renderer';
@@ -123,6 +123,27 @@ const BAND_MAX = bandOf(LIMITS.maxFloor);
 
 function clampBand(band: number): number {
   return Math.max(BAND_MIN, Math.min(BAND_MAX, band));
+}
+
+/** The kinds drawn over the rooms behind them (the renderer's OVERLAY_KINDS). */
+const CONNECTOR_KINDS: ReadonlySet<RoomKind> = new Set<RoomKind>(['stairs', 'escalator']);
+
+/**
+ * The room or shaft at a tile, by the renderer's pickTargetAt rule (src/render/renderer.ts),
+ * kept here so the game does not load the renderer: stairs and escalators first (the highest id
+ * where two overlap), then a shaft, then the room behind it.
+ */
+export function structureAt(world: World, floor: number, x: number): { roomId?: Id; shaftId?: Id } | null {
+  let room: Room | undefined;
+  for (const r of roomsOnFloor(world, floor)) {
+    if (x < r.x || x >= r.x + r.width) continue;
+    if (!room) room = r;
+    else if (CONNECTOR_KINDS.has(r.kind) && (!CONNECTOR_KINDS.has(room.kind) || r.id > room.id)) room = r;
+  }
+  if (room && CONNECTOR_KINDS.has(room.kind)) return { roomId: room.id };
+  const shaft = shaftAt(world, floor, x);
+  if (shaft) return { shaftId: shaft.id };
+  return room ? { roomId: room.id } : null;
 }
 
 /** Wall time, the idle slot and the tab's visibility the loop runs on, so a test can drive all three. */
@@ -1312,8 +1333,12 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
       r.setReducedMotion(reducedMotion);
       r.onPick((hit) => {
         if (tool.kind === 'demolish') {
-          if (hit.roomId !== undefined) api.apply({ kind: 'demolish', roomId: hit.roomId });
-          else if (hit.shaftId !== undefined) api.apply({ kind: 'shaft.demolish', shaftId: hit.shaftId });
+          // A build tool is about the structure at the tapped tile, never a person drawn over
+          // it: the renderer's hit names a drawn person instead of the room behind them, and a
+          // hotel guest one tile in covered most of a single room (Matt's playtest, 2026-09-28).
+          const target = hit.simId !== undefined ? structureAt(world, hit.floor, hit.x) : hit;
+          if (target?.roomId !== undefined) api.apply({ kind: 'demolish', roomId: target.roomId });
+          else if (target?.shaftId !== undefined) api.apply({ kind: 'shaft.demolish', shaftId: target.shaftId });
           return;
         }
         if (tool.kind === 'query' || tool.kind === 'none') {

@@ -4,6 +4,7 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NEWS_TOAST_MAX, NEWS_TOAST_MS, TOAST_FADE_MS, createToasts, type Toasts } from '../../src/ui/toast';
+import { createLogPanel, createSettingsPanel, type PanelContext } from '../../src/ui/panels';
 import { FakeDom, type FakeElement } from './fake-dom';
 
 let dom: FakeDom;
@@ -147,5 +148,41 @@ describe('the look', () => {
     // Under reduced motion the toast only fades: it does not rise.
     const reduced = css.slice(css.indexOf('.hs-ui.is-reduced {'), css.indexOf('}', css.indexOf('.hs-ui.is-reduced {')));
     expect(reduced).toContain('--toast-rise: 0px;');
+  });
+});
+
+// The News sheet once carried the toast region's class, whose rule sets pointer-events none,
+// an absolute position and a transform: every tap fell through the sheet and Close never closed it.
+describe('the News sheet and the toasts', () => {
+  const css = readFileSync(new URL('../../src/ui/ui.css', import.meta.url), 'utf8');
+  const panelCtx: PanelContext = { apply: () => ({ ok: true }) as never, notice: () => {}, close: () => {}, reducedMotion: false, setReducedMotion: () => {} };
+  const game = { world: { seed: 1, log: [], logTotal: 0, time: { minute: 0 } } } as never;
+  const classesOf = (n: unknown): string[] => (n as FakeElement).className.split(/\s+/).filter(Boolean);
+  const sheetClasses = (): string[] => [
+    ...new Set([...classesOf(createLogPanel(game, panelCtx)), ...classesOf(createSettingsPanel(game, panelCtx))]),
+  ];
+
+  it('the News panel and the toast region share no class', () => {
+    const panel = classesOf(createLogPanel(game, panelCtx));
+    expect(panel).toContain('hs-sheet');
+    const region = classesOf(toasts.news);
+    expect(region.length).toBeGreaterThan(0);
+    expect(panel.filter((c) => region.includes(c))).toEqual([]);
+  });
+
+  it('no ui.css rule on a class a sheet carries sets pointer-events none', () => {
+    const classes = sheetClasses();
+    expect(classes).toEqual(expect.arrayContaining(['hs-sheet', 'hs-panel']));
+    const plain = css.replace(/\/\*[\s\S]*?\*\//g, '');
+    const offending: string[] = [];
+    for (const m of plain.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      if (!/pointer-events:\s*none/.test(m[2] ?? '')) continue;
+      for (const selector of (m[1] ?? '').split(',').map((s) => s.trim())) {
+        const subject = selector.split(/[\s>+~]+/).pop() ?? '';
+        const own = [...subject.matchAll(/\.([\w-]+)/g)].map((c) => c[1] ?? '');
+        if (own.some((c) => classes.includes(c))) offending.push(selector);
+      }
+    }
+    expect(offending).toEqual([]);
   });
 });

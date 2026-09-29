@@ -1176,7 +1176,7 @@ export function newsTime(now: number, minute: number): string {
  */
 export function createLogPanel(game: GameApi, ctx: PanelContext): PanelElement {
   const { panel, body } = panelShell('News', 'log', ctx);
-  panel.classList.add('hs-news');
+  panel.classList.add('hs-news-panel');
   const list = el('ul', 'hs-log-list');
   let limit = NEWS_LINES;
   const older = button('Show older', 'hs-news-older', () => {
