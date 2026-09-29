@@ -77,7 +77,13 @@ import { setSoundOn } from './sound-toggle';
  * A panel element may expose a cheap refresh that rewrites live numbers without rebuilding, and
  * the control that takes focus once it is up (the feedback card's text box).
  */
-export type PanelElement = HTMLDivElement & { refresh?: () => void; sheet?: Sheet; initialFocus?: HTMLElement };
+export type PanelElement = HTMLDivElement & {
+  refresh?: () => void;
+  sheet?: Sheet;
+  initialFocus?: HTMLElement;
+  /** True while closing would throw away the player's work (unsent words, an image still being made); Watch leaves it open. */
+  holdsWork?: () => boolean;
+};
 
 export interface PanelContext {
   /** Applies a command, reports the reason when it is refused, and marks the panels dirty. */
@@ -1873,6 +1879,10 @@ export function createSharePanel(
 
   let blob: Blob | null = null;
   let previewUrl: string | null = null;
+  /** The snapshot is still being made: toBlob has not answered. */
+  let capturing = false;
+  /** Taken down: a late toBlob answer makes no object URL nobody would revoke. */
+  let gone = false;
 
   const saveButton = button('Save image', 'hs-btn', () => {
     if (!blob) return;
@@ -1926,7 +1936,10 @@ export function createSharePanel(
   try {
     const source = renderer.snapshot();
     const composed = composeShareImage(source, stats);
+    capturing = true;
     composed.toBlob((result) => {
+      capturing = false;
+      if (gone) return;
       if (!result) {
         ctx.notice('Could not take a picture of the tower.');
         return;
@@ -1946,9 +1959,12 @@ export function createSharePanel(
 
   const removeSelf = panel.remove.bind(panel);
   panel.remove = () => {
+    gone = true;
     if (previewUrl) URL.revokeObjectURL(previewUrl);
+    previewUrl = null;
     removeSelf();
   };
+  panel.holdsWork = () => capturing && !gone;
 
   return panel;
 }

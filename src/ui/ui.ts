@@ -650,14 +650,16 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
       if (build.sheet() === 'row') build.close();
     },
     // Turned on: whatever is open closes, so the countdown starts at once (Matt, 2026-09-28).
-    // The guided first tower still holds Watch off; a room in hand stays in hand.
+    // The guided first tower still holds Watch off; a room in hand stays in hand. A panel holding
+    // the player's work (unsent feedback, a share image still being made) is never thrown away:
+    // it stays open and Watch waits for it as before (Matt, 2026-09-28, review of 38f23ec).
     onEnable: () => {
       if (guideActive()) return;
       if (view.isOpen()) view.close();
       const sheet = build.sheet();
       if (sheet === 'row' || sheet === 'full') build.close();
       if (game.getSelection()) game.select(null);
-      setPanel('none');
+      if (!mountedPanel?.holdsWork?.()) setPanel('none');
     },
   });
 
@@ -1488,7 +1490,10 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
       // do, where the warning toast's gap, its count and Watch mode cannot swallow it.
       const said = acting ? null : demolishNotice(line.text);
       if (said !== null) {
-        notice(said);
+        // Straight to the stack, not notice(): this line is already handled, and its words kept
+        // as lastNoticeText would make the skip above eat the next tap's identical line (review
+        // of 38f23ec, S1). A repeat replaces the card on screen instead of stacking.
+        alerts.notice(said, { replace: true });
         if (line === newest) newestNoticed = true;
         continue;
       }

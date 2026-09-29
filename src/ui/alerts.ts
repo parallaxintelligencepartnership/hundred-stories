@@ -68,8 +68,11 @@ export function gameOverBody(newTower: boolean): string {
 export interface AlertStack {
   /** A fresh alert line from the log. Fire lines feed the incident card instead of a card each. */
   onAlert(entry: LogEntry): void;
-  /** A short notice, such as a refusal reason. */
-  notice(text: string): void;
+  /**
+   * A short notice, such as a refusal reason. With `replace`, a notice with the same words still
+   * on screen closes first, so a repeat shows fresh rather than stacking beside it.
+   */
+  notice(text: string, options?: { replace?: boolean }): void;
   /** Bring the fire card in line with the world. Run after every drain of the log. */
   sync(): void;
   /** Escape: close the newest visible card. False when there is none. */
@@ -183,6 +186,8 @@ export function moneyIn(text: string): number | null {
 interface Card {
   node: HTMLElement;
   gone: boolean;
+  /** A notice's words, for a repeat that replaces it. */
+  notice?: string;
 }
 
 interface FireIncident {
@@ -557,8 +562,10 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
     body.append(el('p', 'hs-toast-text', entry.text));
   }
 
-  function notice(text: string): void {
+  function notice(text: string, options: { replace?: boolean } = {}): void {
+    if (options.replace) for (const held of [...cards]) if (!held.gone && held.notice === text) close(held);
     const { card, body } = open('hs-toast is-notice');
+    card.notice = text;
     body.append(el('p', 'hs-toast-text', text));
     deps.later(() => close(card), NOTICE_LINGER_MS);
   }

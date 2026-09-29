@@ -99,4 +99,34 @@ describe('the structure at a tile', () => {
       for (let x = 90; x < 150; x += 1) expect(structureAt(world, floor, x)).toEqual(pickTargetAt(world, floor, x));
     }
   });
+
+  // Review of 38f23ec, A1: the two branches that differ from a plain room lookup, an escalator
+  // over the rooms behind it and two stair flights sharing a floor (the newer one wins), with
+  // basements and a shaft from B1 up.
+  it('follows the renderer pick with an escalator, stacked stair flights and basements', () => {
+    const world = createWorld(1);
+    world.cash = 1e10;
+    world.stars = 5;
+    const build = (cmd: Parameters<typeof applyCommand>[1]): boolean => applyCommand(world, cmd).ok;
+    for (let x = 100; x < 160; x += 1) build({ kind: 'build', room: 'lobby', floor: 1, x });
+    for (const floor of [2, 3, 4]) for (let x = 100; x < 160; x += 9) build({ kind: 'build', room: 'office', floor, x });
+    for (const floor of [-1, -2]) for (let x = 100; x < 160; x += 4) build({ kind: 'build', room: 'parkingSpace', floor, x });
+    expect(build({ kind: 'build', room: 'stairs', floor: 2, x: 110 })).toBe(true);
+    expect(build({ kind: 'build', room: 'stairs', floor: 3, x: 110 })).toBe(true);
+    expect(build({ kind: 'build', room: 'escalator', floor: 2, x: 130 })).toBe(true);
+    expect(build({ kind: 'shaft.build', shaft: 'standard', x: 150, floorMin: -1, floorMax: 4 })).toBe(true);
+    build({ kind: 'build', room: 'stairs', floor: -1, x: 120 });
+    const hit = new Set<string>();
+    for (let floor = -3; floor <= 6; floor += 1) {
+      for (let x = 80; x < 180; x += 1) {
+        const at = structureAt(world, floor, x);
+        expect(at).toEqual(pickTargetAt(world, floor, x));
+        if (at?.roomId !== undefined) hit.add(`${world.rooms.get(at.roomId)!.kind}@${floor}`);
+      }
+    }
+    // The scene really has what the rule is about: an escalator picked over the offices, and the
+    // floor both flights share.
+    expect(hit).toContain('escalator@2');
+    expect(hit).toContain('stairs@3');
+  });
 });

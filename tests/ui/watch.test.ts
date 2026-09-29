@@ -615,6 +615,21 @@ describe('turning Watch on closes whatever is open', () => {
     expect(watching(shell)).toBe(false);
     expect(classesOf(card)).not.toContain('is-hidden');
   });
+
+  // Review of 38f23ec, A2: busy() already holds Watch off in the guide, so only this pins the
+  // guard in onEnable: turned on during the guide, Watch closes nothing.
+  it('the guided first tower: a panel open when Watch is turned on stays open', () => {
+    const store = (globalThis as unknown as { window: { localStorage: { setItem(k: string, v: string): void } } }).window.localStorage;
+    store.setItem('hs.guide.done', 'false');
+    const { root, shell } = mount();
+    expect(byClass(shell, 'hs-card').textContent).toContain('First tower');
+    click(menuButton(root));
+    expect(dialogs(shell)).toHaveLength(1);
+    click(watchButton(root));
+    vi.advanceTimersByTime(3 * WATCH_IDLE_MS);
+    expect(dialogs(shell)).toHaveLength(1);
+    expect(watching(shell)).toBe(false);
+  });
 });
 
 describe('watch mode on the page, with ui.css applied', () => {

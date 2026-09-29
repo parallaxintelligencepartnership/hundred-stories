@@ -74,7 +74,8 @@ export class FakeElement {
 
   append(...nodes: FakeElement[]): void {
     for (const node of nodes) {
-      node.remove();
+      // Moved, not removed: as in a browser, a remove() the page overrides on the node is not called.
+      FakeElement.prototype.remove.call(node);
       node.parentNode = this;
       this.children.push(node);
     }
@@ -82,7 +83,7 @@ export class FakeElement {
 
   prepend(...nodes: FakeElement[]): void {
     for (const node of nodes.slice().reverse()) {
-      node.remove();
+      FakeElement.prototype.remove.call(node);
       node.parentNode = this;
       this.children.unshift(node);
     }

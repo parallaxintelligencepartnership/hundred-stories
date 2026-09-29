@@ -234,6 +234,7 @@ export function createFeedbackPanel(ctx: Pick<PanelContext, 'close'>, deps: Feed
   actions.append(send, cancel);
 
   let sending = false;
+  let sent = false;
   const emailLooksWrong = (): boolean => {
     const value = email.value.trim();
     return value !== '' && !/^[^\s@]+@[^\s@]+$/.test(value);
@@ -262,6 +263,7 @@ export function createFeedbackPanel(ctx: Pick<PanelContext, 'close'>, deps: Feed
     sending = false;
     if (closed) return;
     if (outcome === 'sent') {
+      sent = true;
       const done = button('Close', 'hs-btn is-primary', close);
       const doneActions = el('div', 'hs-actions');
       doneActions.append(done);
@@ -280,6 +282,9 @@ export function createFeedbackPanel(ctx: Pick<PanelContext, 'close'>, deps: Feed
   paint();
 
   body.append(intro, textField, emailField, trap, status, actions);
+  // Unsent words (the message or the reply address) are the player's work: Watch leaves the card
+  // open for them. Once sent, the form is gone and nothing is left to lose.
+  panel.holdsWork = () => !sent && (text.value.trim() !== '' || email.value.trim() !== '');
   // The ui focuses this once the card is up (ui.ts refreshPanel).
   panel.initialFocus = text;
   return panel;

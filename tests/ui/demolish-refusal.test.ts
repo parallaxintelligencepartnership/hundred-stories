@@ -79,11 +79,34 @@ describe('a refused demolish', () => {
     const toasts = (): FakeElement[] => root.descendants().filter((n) => has(n, 'hs-news-toast') && n.textContent.includes('People are inside.'));
     pick({ roomId: roomAt.id, floor: 2, x: roomAt.x + 3 });
     expect(notices()).toHaveLength(1);
-    // A second tap straight after: the warning toast's 20 s gap does not swallow it.
+    const first = notices()[0];
+    // A second tap straight after: the warning toast's 20 s gap does not swallow it. The same
+    // notice again replaces the one on screen rather than stacking beside it.
     pick({ simId: 36, floor: 2, x: roomAt.x + 1 });
-    expect(notices()).toHaveLength(2);
+    expect(notices()).toHaveLength(1);
+    expect(notices()[0]).not.toBe(first);
     expect(toasts()).toHaveLength(0);
     // The News panel still keeps the sim's words.
     expect(game.world.log.at(-1)?.text).toBe('People are inside.');
+  });
+
+  // Review of 38f23ec, S1: a reason with no second sentence is the log line word for word, and
+  // the "already said" skip ate every tap after the first.
+  it('a reason with no second sentence (a burning room): three taps, three notices, one on screen at a time', () => {
+    const { game, root, pick, roomAt } = tower();
+    (roomAt as unknown as { onFire: boolean }).onFire = true;
+    game.setTool({ kind: 'demolish' });
+    const words = 'Put the fire out first.';
+    const notices = (): FakeElement[] => root.descendants().filter((n) => has(n, 'is-notice') && n.textContent.includes(words));
+    const toasts = (): FakeElement[] => root.descendants().filter((n) => has(n, 'hs-news-toast') && n.textContent.includes(words));
+    const shown = new Set<FakeElement>();
+    for (let tap = 1; tap <= 3; tap += 1) {
+      pick({ roomId: roomAt.id, floor: 2, x: roomAt.x + 3 });
+      expect(game.world.log.at(-1)?.text).toBe(words);
+      expect(notices()).toHaveLength(1);
+      shown.add(notices()[0]!);
+    }
+    expect(shown.size).toBe(3);
+    expect(toasts()).toHaveLength(0);
   });
 });
