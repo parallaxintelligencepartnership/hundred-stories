@@ -1,6 +1,7 @@
 // Population and the star ladder. See docs/BRIEF-AGENTS.md.
 
 import { assembleChronicle } from './chronicle';
+import { noteStarGained, notePopulation } from './milestones';
 import { ROOMS, STARS, type StarRule } from './rules';
 import { recordBeat } from './story';
 import { log } from './world';
@@ -63,6 +64,7 @@ function meetsRequires(world: World, requires: StarRule['requires']): boolean {
 
 export function recomputeStars(world: World): void {
   const population = populationOf(world);
+  notePopulation(world, world.population, population);
   world.population = population;
   const before = world.stars;
 
@@ -90,5 +92,6 @@ export function recomputeStars(world: World): void {
     });
     // Tower status writes the chronicle: presentation state, outside the hash like every beat.
     if (world.stars === 6) world.story.chronicle = assembleChronicle(world);
+    if (world.stars > before) noteStarGained(world, world.stars);
   }
 }

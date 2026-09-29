@@ -46,6 +46,7 @@ import type {
   Id,
   LogEntry,
   LossKind,
+  Milestone,
   Room,
   RoomKind,
   Shaft,
@@ -69,6 +70,7 @@ import { type IconName } from './icons';
 import { isPhoneWidth } from './build';
 import { createSheet, type Sheet } from './sheet';
 import { vipView, vipViewKey, type VipView } from './vip';
+import { MILESTONES_EMPTY, needsKey, needsYou, NEEDS_EMPTY, newsDays, NEWS_EMPTY, TODAY_EMPTY } from './news';
 import { chevron, controlsDevice, currentDeviceEnv, fillControlsPage } from './controls';
 import { getFlag, PREF_KEYS, setFlag } from './prefs';
 import { setSoundOn } from './sound-toggle';
@@ -126,6 +128,8 @@ export interface PanelContext {
    * the part of the ui that shows it (larger text, the color-blind views) to follow at once.
    */
   setDisplay?: (name: DisplaySwitch, on: boolean) => void;
+  /** Center the tower view on a tile, from a News line with a place. Absent where there is no camera. */
+  centerOn?: (floor: number, x: number) => void;
   /** The web's notifications (src/ui/notify.ts); none in the native shells, so no section there. */
   notifications?: Pick<Notifier, 'isOn' | 'turnOn' | 'turnOff'>;
 }
@@ -1156,7 +1160,7 @@ export function createFinancesPanel(game: GameApi, ctx: PanelContext): PanelElem
 
 // ------------------------------------------------------------- news panel
 
-/** News shows this many of the newest lines at first, newest on top. */
+/** News shows this many of today's newest lines at first, newest on top. */
 export const NEWS_LINES = 10;
 /** Each tap on Show older adds this many more. */
 export const NEWS_OLDER_STEP = 50;
@@ -1176,74 +1180,141 @@ export function newsTime(now: number, minute: number): string {
 }
 
 /**
- * News: what has happened in the tower lately, in plain sentences, newest first, each with when
- * it happened in words. The newest ten at first; Show older adds fifty at a time. The VIP card
- * sits on top while there is a visit to talk about.
+ * News, in three sections. Needs you now: the open matters the player can act on, derived from
+ * the world on every refresh (a fire, a bomb threat, cockroaches, money, a VIP visit under way),
+ * each with a place centering the camera there when tapped. Today: the log lines of the current
+ * game day, newest first, with when each happened in words; Show older adds fifty at a time and
+ * reveals earlier days under Yesterday and Earlier. Milestones: the tower's firsts, saved on the
+ * world (src/sim/milestones.ts), newest first. Each section rebuilds only when its own key moves.
  */
 export function createLogPanel(game: GameApi, ctx: PanelContext): PanelElement {
   const { panel, body } = panelShell('News', 'log', ctx);
   panel.classList.add('hs-news-panel');
-  const list = el('ul', 'hs-log-list');
+
+  const needs = section('Needs you now');
+  needs.classList.add('hs-needs');
+  const needList = el('ul', 'hs-log-list');
+  needs.append(needList);
+
+  const today = section('Today');
+  const todayList = el('ul', 'hs-log-list');
+  const yesterdayTitle = el('h4', 'hs-news-day', 'Yesterday');
+  const yesterdayList = el('ul', 'hs-log-list');
+  const earlierTitle = el('h4', 'hs-news-day', 'Earlier');
+  const earlierList = el('ul', 'hs-log-list');
+  for (const node of [yesterdayTitle, yesterdayList, earlierTitle, earlierList]) node.hidden = true;
   let limit = NEWS_LINES;
+  let olderOpen = false;
   const older = button('Show older', 'hs-news-older', () => {
-    limit += NEWS_OLDER_STEP;
+    limit = olderOpen ? limit + NEWS_OLDER_STEP : NEWS_LINES + NEWS_OLDER_STEP;
+    olderOpen = true;
     refresh();
   });
   older.hidden = true;
-  body.append(list, older);
+  today.append(todayList, yesterdayTitle, yesterdayList, earlierTitle, earlierList, older);
 
-  // The VIP card sits above the news, built only while there is something to say about a visit.
-  let vipNode: HTMLDivElement | null = null;
-  let vipKey = '';
-  const refreshVip = (): void => {
-    const view = vipView(game.world);
-    const key = vipViewKey(view);
-    if (key === vipKey) return;
-    vipKey = key;
-    if (!view) {
-      vipNode?.remove();
-      vipNode = null;
-      return;
-    }
-    vipNode?.remove();
-    vipNode = vipCard(view);
-    body.prepend(vipNode);
-  };
+  const milestones = section('Milestones');
+  const milestoneList = el('ul', 'hs-log-list');
+  milestones.append(milestoneList);
+  body.append(needs, today, milestones);
 
-  /** The time span of each line on show, newest first, with the minute it stands for. */
-  let stamps: { node: HTMLElement; minute: number }[] = [];
-  const item = (entry: LogEntry, now: number): HTMLLIElement => {
-    const node = el('li', `hs-log-item is-${entry.level}`);
-    const time = el('span', 'hs-log-time', newsTime(now, entry.minute));
-    node.append(el('span', 'hs-log-text', entry.text), time);
-    stamps.push({ node: time, minute: entry.minute });
+  /** The time span of each line on show, with the minute it stands for, so the words move with the clock. */
+  let logStamps: { node: HTMLElement; minute: number }[] = [];
+  let milestoneStamps: { node: HTMLElement; minute: number }[] = [];
+  const item = (text: string, minute: number, now: number, level: LogEntry['level'], stamps: typeof logStamps): HTMLLIElement => {
+    const node = el('li', `hs-log-item is-${level}`);
+    const time = el('span', 'hs-log-time', newsTime(now, minute));
+    node.append(el('span', 'hs-log-text', text), time);
+    stamps.push({ node: time, minute });
     return node;
   };
+  const empty = (text: string): HTMLLIElement => el('li', 'hs-log-item is-empty', text);
 
-  /** What the list was built from: the log array, its total and the limit. A load swaps the array. */
+  const goTo = (at: { floor: number; x: number }): void => {
+    ctx.centerOn?.(at.floor, at.x);
+    // On a phone the sheet covers the middle of the view: step aside so the place is in sight.
+    if (isPhoneWidth(typeof window === 'undefined' ? undefined : (window as { innerWidth?: number }).innerWidth)) ctx.close();
+  };
+
+  let vipNode: HTMLDivElement | null = null;
+  let shownNeeds: string | null = null;
+  const refreshNeeds = (world: World): void => {
+    const lines = needsYou(world);
+    // During a visit the VIP card is something to act on; between visits (the last rating and
+    // the next chance) it closes the Milestones section. It shows in one place only.
+    const visiting = (world.events ?? []).some((e) => e.kind === 'vip');
+    const card = vipView(world);
+    const view = visiting ? card : null;
+    const key = `${needsKey(lines)}@${visiting ? 1 : 0}@${vipViewKey(card)}`;
+    if (key === shownNeeds) return;
+    shownNeeds = key;
+    const items = lines.map((line) => {
+      const node = el('li', `hs-log-item hs-need is-${line.kind}`);
+      const at = line.at;
+      if (at) {
+        const go = button(line.text, 'hs-need-go', () => goTo(at));
+        go.title = 'Show on the tower';
+        node.append(go);
+      } else node.append(el('span', 'hs-log-text', line.text));
+      return node;
+    });
+    needList.replaceChildren(...(items.length === 0 && !view ? [empty(NEEDS_EMPTY)] : items));
+    needList.hidden = items.length === 0 && view !== null;
+    // The VIP card, while a visit is on: its checklist is something to act on before the stay.
+    vipNode?.remove();
+    vipNode = card ? vipCard(card) : null;
+    if (vipNode) (visiting ? needs : milestones).append(vipNode);
+  };
+
+  /** What the day lists were built from: the log array, and a key of its total, the limit and the day. */
   let shownLog: readonly LogEntry[] | null = null;
   let shownKey = '';
+  const refreshLog = (world: World, now: number): boolean => {
+    const log = world.log ?? [];
+    const key = `${world.logTotal}:${limit}:${olderOpen ? 1 : 0}:${Math.floor(Math.max(0, now) / 1440)}`;
+    if (shownLog === log && key === shownKey) return false;
+    shownLog = log;
+    shownKey = key;
+    logStamps = [];
+    const days = newsDays(log, now, limit, olderOpen);
+    const lines = (entries: LogEntry[]) => entries.map((e) => item(e.text, e.minute, now, e.level, logStamps));
+    todayList.replaceChildren(...(days.today.length > 0 ? lines(days.today) : [empty(log.length === 0 ? NEWS_EMPTY : TODAY_EMPTY)]));
+    yesterdayList.replaceChildren(...lines(days.yesterday));
+    earlierList.replaceChildren(...lines(days.earlier));
+    yesterdayTitle.hidden = yesterdayList.hidden = days.yesterday.length === 0;
+    earlierTitle.hidden = earlierList.hidden = days.earlier.length === 0;
+    older.hidden = !days.more;
+    return true;
+  };
+
+  let shownMilestones: readonly Milestone[] | null = null;
+  let shownMilestoneCount = -1;
+  const refreshMilestones = (world: World, now: number): boolean => {
+    const list = world.milestones ?? [];
+    if (list === shownMilestones && list.length === shownMilestoneCount) return false;
+    shownMilestones = list;
+    shownMilestoneCount = list.length;
+    milestoneStamps = [];
+    milestoneList.replaceChildren(
+      ...(list.length === 0
+        ? [empty(MILESTONES_EMPTY)]
+        : [...list].reverse().map((m) => item(m.text, m.minute, now, 'info', milestoneStamps))),
+    );
+    return true;
+  };
+
   const refresh = (): void => {
-    refreshVip();
     const world = game.world;
-    const log = world.log;
     const now = world.time?.minute ?? 0;
-    const key = `${world.logTotal}:${limit}`;
-    if (shownLog !== log || key !== shownKey) {
-      shownLog = log;
-      shownKey = key;
-      stamps = [];
-      const lines = log.slice(-limit).reverse();
-      list.replaceChildren(
-        ...(lines.length === 0 ? [el('li', 'hs-log-item', 'Nothing has happened yet.')] : lines.map((entry) => item(entry, now))),
-      );
-      older.hidden = log.length <= limit;
-      return;
-    }
-    // No new line: only the words for when move on with the clock.
-    for (const stamp of stamps) {
-      const words = newsTime(now, stamp.minute);
-      if (stamp.node.textContent !== words) stamp.node.textContent = words;
+    refreshNeeds(world);
+    const logBuilt = refreshLog(world, now);
+    const milestonesBuilt = refreshMilestones(world, now);
+    // Nothing new: only the words for when move on with the clock.
+    for (const stamps of [logBuilt ? [] : logStamps, milestonesBuilt ? [] : milestoneStamps]) {
+      for (const stamp of stamps) {
+        const words = newsTime(now, stamp.minute);
+        if (stamp.node.textContent !== words) stamp.node.textContent = words;
+      }
     }
   };
   refresh();

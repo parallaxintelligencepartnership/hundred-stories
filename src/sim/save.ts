@@ -13,6 +13,7 @@ import { buildLogFromSave, buildLogToSave, setBuildLog, type SavedBuildLog } fro
 import { createRng } from './rng';
 import { EVENTS, RENT, ROOMS, SHAFTS, WASTE } from './rules';
 import { VIP_PREFERENCES, vipPreference } from './identity';
+import { sanitizeMilestones } from './milestones';
 import { createStoryState, sanitizeStory } from './story';
 import { createWorld, rebuildFloorIndex } from './world';
 import { MAX_FLOOR, MIN_FLOOR, TOWER_WIDTH, floorDistance, spanTop } from './types';
@@ -60,6 +61,8 @@ export const SAVE_VERSION = 5;
  * Format 5 with the optional roach timer since 0.5.0: world.roachLastSpread is written as an
  * optional field. A save without it (every build before 0.5.0) loads it as null, which is what
  * those builds rebuilt it as after a load: the timer starts again at the next 06:00 roll.
+ * Format 5 with the optional milestones list (the News panel's Milestones): read by presence
+ * like the roach timer, so no new format number; a save without it loads with an empty list.
  */
 const READABLE_VERSIONS = [1, 2, 3, 4, 5];
 
@@ -130,6 +133,7 @@ interface SaveData {
   dayStartPopulation?: number | null; // absent before v3
   story?: unknown; // absent before v4; checked by sanitizeStory, never a reason to refuse
   buildLog?: SavedBuildLog; // absent before v5; checked by buildLogFromSave, never a reason to refuse
+  milestones?: unknown; // optional in format 5; checked by sanitizeMilestones, never a reason to refuse
 }
 
 function shaftToSave(shaft: Shaft): SaveShaft {
@@ -190,6 +194,7 @@ function buildSaveData(world: World): SaveData {
     dayStartPopulation: world.dayStartPopulation,
     story: world.story,
     buildLog: buildLogToSave(world),
+    milestones: world.milestones,
   };
 }
 
@@ -776,6 +781,8 @@ export function deserialize(text: string): { ok: true; world: World } | { ok: fa
     );
     // Read by presence, not by version: format 5 carries it as an optional field since 0.5.0.
     world.roachLastSpread = parsed.roachLastSpread ?? null;
+    // Read by presence too: a save from before milestones loads with none.
+    world.milestones = sanitizeMilestones(parsed.milestones);
     world.stats = statsWithDefaults(parsed.stats);
     world.gameOver = parsed.gameOver;
     world.log = parsed.log.slice(-LOG_LIMIT);
@@ -926,6 +933,8 @@ function simForHash(sim: Sim) {
 // quarterStartCash and dayStartPopulation are the status bar's display baselines: nothing in
 // the sim reads them, so they are saved but not hashed, and the bench hashes stay put.
 // story is presentation state (src/sim/story.ts): saved from v4, never read by the tick.
+// milestones is a record the tick appends to and reads only to keep each kind once: saved,
+// not hashed, so the pinned scenario and bench hashes stay put.
 // The build log (saved from v5) is not a World key at all: it is held beside the world in
 // src/sim/buildlog.ts, so it cannot reach this projection.
 type UnhashedWorldKey =
@@ -939,7 +948,8 @@ type UnhashedWorldKey =
   | 'time'
   | 'quarterStartCash'
   | 'dayStartPopulation'
-  | 'story';
+  | 'story'
+  | 'milestones';
 type HashedWorldKey = Exclude<keyof World, UnhashedWorldKey> | 'minute' | 'rngState';
 
 function byId<T extends { id: number }>(items: Iterable<T>): T[] {

@@ -1900,6 +1900,53 @@ button.hs-readout:hover {
   color: var(--alert);
 }
 
+/* News sections: a quiet empty line, the day headings under Show older, and the Needs you now
+   lines, which are a whole-line button when they have a place to show on the tower. */
+.hs-log-item.is-empty {
+  color: var(--ink-dim);
+}
+
+.hs-news-day {
+  margin: 12px 0 2px;
+  font-size: var(--size-12);
+  font-weight: 600;
+  color: var(--ink-dim);
+}
+
+.hs-news-day[hidden],
+.hs-needs .hs-log-list[hidden] {
+  display: none;
+}
+
+.hs-need.is-fire,
+.hs-need.is-bomb {
+  color: var(--alert);
+}
+
+.hs-need.is-roaches,
+.hs-need.is-money {
+  color: var(--amber-text);
+}
+
+.hs-need-go {
+  display: block;
+  width: 100%;
+  min-height: var(--touch);
+  padding: 0;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.hs-needs .hs-vip {
+  margin: 8px 0 0;
+}
+
 /* Stories: the person card, room occupants and the stories list ---------- */
 
 .hs-story-line {

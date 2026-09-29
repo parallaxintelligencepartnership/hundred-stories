@@ -4,6 +4,7 @@
 import { spend } from './economy';
 import { stopOffRefusal } from './elevators';
 import { handleEventCommand } from './events';
+import { noteMetroBuilt } from './milestones';
 import { isFollowed, recordBeat } from './story';
 import {
   DEMO_CAP_REASON,
@@ -479,6 +480,7 @@ function doBuild(world: World, kind: RoomKind, floor: number, x: number): Comman
   addRoom(world, room);
   const name = rule.label.toLowerCase();
   log(world, `Built ${article(name)} ${name} on ${floorName(floor)}.`, 'info', { roomId: room.id });
+  if (kind === 'metro') noteMetroBuilt(world);
   return OK;
 }
 

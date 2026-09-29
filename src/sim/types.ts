@@ -449,7 +449,21 @@ export interface World {
    * beats beside what it already does and never reads them back. Saved from v4, never hashed.
    */
   story: StoryState;
+  /**
+   * The tower's firsts, oldest first (src/sim/milestones.ts): each star reached, population
+   * passing each POPULATION_MILESTONES mark, the first metro station. Written by the tick and the
+   * build command, so a replay rebuilds it; read only by milestones.ts to keep each one once.
+   * Saved as an optional field (absent from older saves, which load with an empty list), never hashed.
+   */
+  milestones: Milestone[];
   gameOver: null | { at: number; reason: string };
+}
+
+/** One entry in World.milestones: a stable kind ("star:3", "population:1000", "metro"), when, and the line shown. */
+export interface Milestone {
+  kind: string;
+  minute: number;
+  text: string;
 }
 
 // Derived time helpers (pure functions over minute count)

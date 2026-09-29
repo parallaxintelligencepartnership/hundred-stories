@@ -51,6 +51,7 @@ export function createWorld(seed: number, start: TowerStart = {}): World {
     structureVersion: 0,
     longWaits: emptyLongWaits(),
     story: createStoryState(),
+    milestones: [],
     gameOver: null,
   };
 }

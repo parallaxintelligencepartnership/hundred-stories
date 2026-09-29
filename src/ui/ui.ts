@@ -719,6 +719,10 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
       if (name === 'largeText' || name === 'colorBlind') display.refresh();
     },
     ...(notifier ? { notifications: notifier } : {}),
+    centerOn(floor, x) {
+      // A renderer without a camera (tests) has nowhere to look.
+      renderer.camera?.centerOn(floor, x);
+    },
     select(sel) {
       // A name in a list is a way into that person: the list's panel steps aside for theirs.
       if (panelKind !== 'none') panelKind = 'none';
