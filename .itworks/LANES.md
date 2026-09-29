@@ -96,14 +96,14 @@ Never re-flag:
 Lens id: real-data
 Files in scope:
 - src/ui/alerts.ts, vip.ts, cards.ts, onboarding.ts, daily.ts, demo.ts, explain.ts, hover.ts, minimap.ts, overlays.ts, sound-toggle.ts, quiet-labels.ts
-- src/share/share.ts, src/site/*.ts (hero.ts, hero-ready.ts, hero-trailer.ts, specimens.ts, challenge.ts, stores.ts, theme.ts, theme-init.ts), public/theme.js
+- src/share/share.ts, src/site/*.ts (hero.ts, hero-ready.ts, splash.ts, specimens.ts, challenge.ts, stores.ts, theme.ts, theme-init.ts), public/theme.js
 Invariants to attack:
 - One alert card per fire or bomb; Pay ransom only while the threat stands; a dismissed card never returns for the same event.
 - The VIP card reflects the real visit.
 - A share link round-trips floors, people and stars, and a foreign or malformed link starts a sane tower, never a crash.
 - Onboarding never blocks a returning player and never fires twice.
 - Theme storage that throws falls back to system.
-- The hero trailer never downloads under reduced motion or save data, never throws, and always ends (ended, error, stall, refused play) with the still or the live tower under it; the specimens never delay the hero's first frame.
+- The landing splash (public/splash-init.js gate, src/site/splash.ts) never downloads under reduced motion, save data or a seen session, never throws, is skippable, and always ends (ended, error, stall, refused play, 30 s cap) with the still or the live tower under it; the specimens never delay the hero's first frame.
 - The Sound button and the Settings switch are one setting; the quiet labels always come back on input.
 Probe recipes:
 - npx vitest run tests/ui/alerts.test.ts tests/ui/vip.test.ts tests/ui/onboarding.test.ts tests/ui/first-run.test.ts tests/ui/daily.test.ts tests/ui/hover.test.ts tests/ui/minimap.test.ts tests/ui/overlays.test.ts tests/share tests/site
