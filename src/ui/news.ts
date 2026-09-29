@@ -85,7 +85,7 @@ export function needsYou(world: World): NeedLine[] {
         text: `The bank gives you until ${nextSettleWords(minute)}. Get to ${formatMoney(ECONOMY.bankruptAtCash)} or better, or it takes the tower.`,
       });
     } else if (world.cash < 0) {
-      out.push({ kind: 'money', text: `You are in debt: ${formatMoney(world.cash)}. Nothing can be built until you have its price.` });
+      out.push({ kind: 'money', text: `You owe ${formatMoney(Math.abs(world.cash))}. Nothing can be built until you have its price.` });
     }
   }
   return out;

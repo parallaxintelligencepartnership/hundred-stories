@@ -180,7 +180,8 @@ export function formatDateKey(date: string): string {
  * is only ever today's date, and never replaces a tower dated after today.
  *
  * The record (storage.ts, readDailyRecord) locks a date once played: 'clock-back' when today is
- * earlier than the newest date ever started or finished, 'done' when today's tower was already
+ * earlier than the newest date ever started or finished (one more than two days ahead is a clock
+ * set wrong and counts as today, settleDailyRecord), 'done' when today's tower was already
  * finished and the slot no longer holds it. Neither ever starts a tower.
  */
 export type DailyOpening = 'resume' | 'choose' | 'ahead' | 'fresh' | 'clock-back' | 'done';
@@ -188,8 +189,9 @@ export type DailyOpening = 'resume' | 'choose' | 'ahead' | 'fresh' | 'clock-back
 export function dailyOpening(
   saved: { date: string | null; finished: boolean } | null,
   today: string,
-  record: DailyRecord = emptyDailyRecord(),
+  stored: DailyRecord = emptyDailyRecord(),
 ): DailyOpening {
+  const record = settleDailyRecord(stored, today);
   if (record.latest !== null && today < record.latest) return 'clock-back';
   if (record.finished.includes(today)) return saved?.date === today ? 'resume' : 'done';
   if (!saved || saved.date === null) return 'fresh';
@@ -205,6 +207,34 @@ export const DAILY_RECORD_LIMIT = 60;
 /** A device that never played a daily, or an install from before the record. */
 export function emptyDailyRecord(): DailyRecord {
   return { latest: null, finished: [] };
+}
+
+/**
+ * How far the record's newest date may run ahead of today and still be a real clock: across time
+ * zones a device's date is at most about one day ahead of another's.
+ */
+export const DAILY_AHEAD_DAYS = 2;
+
+/** Whole calendar days from `from` to `to` (both YYYY-MM-DD), or null when either is not a date. */
+function daysBetween(from: string, to: string): number | null {
+  const a = DATE_RE.exec(from);
+  const b = DATE_RE.exec(to);
+  if (!a || !b) return null;
+  const ms = Date.UTC(Number(b[1]), Number(b[2]) - 1, Number(b[3])) - Date.UTC(Number(a[1]), Number(a[2]) - 1, Number(a[3]));
+  return Math.round(ms / 86_400_000);
+}
+
+/**
+ * The record as today should read it. A newest date more than two days after today came from a
+ * clock set far ahead by mistake (or a dead clock), not from travel: it becomes today, so that
+ * date does not lock Today's tower until it comes around. The finished dates are kept; one in
+ * the future only ever locks that date. Returns the same record when nothing changes.
+ */
+export function settleDailyRecord(record: DailyRecord, today: string): DailyRecord {
+  if (record.latest === null) return record;
+  const ahead = daysBetween(today, record.latest);
+  if (ahead === null || ahead <= DAILY_AHEAD_DAYS) return record;
+  return { latest: today, finished: [...record.finished] };
 }
 
 function laterOf(a: string | null, b: string): string {

@@ -38,6 +38,7 @@ import {
   noteDailyStarted,
   previousDateKey,
   seedDailyRecord,
+  settleDailyRecord,
 } from './daily';
 import { createTap, drainTap, isBuildCommand, primeTap, type GameEvent, type GameEventListener } from './events';
 
@@ -442,7 +443,9 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     loop.accumulator = 0;
     cancelScheduledSave();
     const date = dailyDate();
-    if (date !== null) noteDaily(date, true); // this date never opens fresh again
+    // This date never opens fresh again, unless the tower in hand is only a stand-in for a daily
+    // slot that would not read: the slot's own tower decides the record then.
+    if (date !== null && !unread.has('daily')) noteDaily(date, true);
     notify();
     void saveWorld('background');
   }
@@ -1253,7 +1256,8 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
         // before the record has none): a finished date, or one earlier than the newest played,
         // never opens a fresh tower.
         const stored = readDailyRecord();
-        const record = seedDailyRecord(stored, read.failed ? null : savedInfo);
+        // A newest date far ahead of today (a clock set wrong once) comes back to today here.
+        const record = settleDailyRecord(seedDailyRecord(stored, read.failed ? null : savedInfo), today);
         if (JSON.stringify(record) !== JSON.stringify(stored)) writeDailyRecord(record);
         const opening = dailyOpening(read.failed ? null : savedInfo, today, record);
         if (opening === 'clock-back' || opening === 'done') {
@@ -1277,9 +1281,9 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
         }
         takeSlot('daily');
         if (read.failed) {
-          // Today's tower in hand, never saved over the slot that would not read.
+          // Today's tower in hand, never saved over the slot that would not read, and never
+          // written into the record: the slot may still hold the real tower (endDaily skips it too).
           freshTower(dailyStart(today), { start: dailyTwist(today).start, mode: dailyMode(today) });
-          noteDaily(today, false);
           startSpeed();
           readFailed('daily');
           return;

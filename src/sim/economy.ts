@@ -202,7 +202,7 @@ export function onQuarterStart(world: World): void {
   if (world.cash < 0) {
     log(
       world,
-      `You are in debt: ${dollars(world.cash)}. Nothing can be built until you have its price. Removing elevator cars or demolishing costly rooms lowers your running costs.`,
+      `You owe ${dollars(Math.abs(world.cash))}. Nothing can be built until you have its price. Removing elevator cars or demolishing costly rooms lowers your running costs.`,
       'alert',
       { notable: true },
     );

@@ -9,11 +9,47 @@
 import { describe, expect, it } from 'vitest';
 
 import { EVENTS } from '../../src/sim/rules';
-import { BOMB_BURNED_TEXT, startBomb } from '../../src/sim/events';
+import { BOMB_BURNED_TEXT, handleEventCommand, startBomb } from '../../src/sim/events';
 import { createWorld, setOnFire } from '../../src/sim/world';
 import { buildTower, lobbyRun, runMinutes } from './helpers';
 
 const DAY = 1440;
+
+/** A fire in the bomb's own room at 6 AM on day 1, with no security in the tower. */
+function bombRoomOnFire() {
+  const world = createWorld(99);
+  world.cash = 50_000_000;
+  buildTower(world, [...lobbyRun(150, 243), { kind: 'build', room: 'office', floor: 2, x: 187 }]);
+  const bombRoom = [...world.rooms.values()].find((r) => r.kind === 'office')!;
+  runMinutes(world, DAY + 360 - world.time.minute);
+  const m0 = world.time.minute;
+  setOnFire(world, bombRoom, true);
+  world.events.push({ kind: 'fire', roomIds: [bombRoom.id], startedAt: m0, spreadAt: m0 + EVENTS.fire.spreadMinutes });
+  world.events.push({
+    kind: 'bomb', roomId: bombRoom.id, ransom: EVENTS.bomb.ransom, detonateAt: DAY + EVENTS.bomb.detonateAtMinuteOfDay,
+    found: false, floor: bombRoom.floor, x: bombRoom.x,
+  });
+  return { world, bombRoom };
+}
+
+describe('a bomb in a room the fire took: said once, ended at once', () => {
+  it('writes the line and the beat once when the fire burns out in its room during a tick', () => {
+    const { world, bombRoom } = bombRoomOnFire();
+    while (world.rooms.has(bombRoom.id) && world.time.minute < DAY + 13 * 60) runMinutes(world, 1);
+    expect(world.rooms.has(bombRoom.id)).toBe(false);
+    runMinutes(world, 5);
+    expect(world.log.filter((l) => l.text === BOMB_BURNED_TEXT)).toHaveLength(1);
+    expect(world.story.recent.filter((b) => b.code === 'bomb.resolved')).toHaveLength(1);
+  });
+
+  it('ends with the helicopter call itself, before any tick, when the helicopter clears its room', () => {
+    const { world, bombRoom } = bombRoomOnFire();
+    expect(handleEventCommand(world, { kind: 'fire.callHelicopter' })).toEqual({ ok: true });
+    expect(world.rooms.has(bombRoom.id)).toBe(false);
+    expect(world.events.some((e) => e.kind === 'bomb')).toBe(false);
+    expect(world.log.filter((l) => l.text === BOMB_BURNED_TEXT)).toHaveLength(1);
+  });
+});
 
 describe('a bomb in a room the fire took', () => {
   it('ends when the fire takes its room: no blast at 1 PM, no loss, a log line and a beat', () => {

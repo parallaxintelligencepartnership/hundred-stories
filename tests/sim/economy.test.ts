@@ -518,13 +518,13 @@ describe('economy: last quarter counts in the save (review A-2)', () => {
 });
 
 describe('economy: debt warnings (review 2026-09-28 I5)', () => {
-  const DEBT = 'You are in debt: -$100,000. Nothing can be built until you have its price. Removing elevator cars or demolishing costly rooms lowers your running costs.';
+  const DEBT = 'You owe $100,000. Nothing can be built until you have its price. Removing elevator cars or demolishing costly rooms lowers your running costs.';
 
   it('warns about debt as a notable alert when cash is below 0 after the settle', () => {
     const world = createWorld(1);
     world.cash = -100_000;
     onQuarterStart(world);
-    const line = world.log.find((l) => l.text.startsWith('You are in debt'));
+    const line = world.log.find((l) => l.text.startsWith('You owe '));
     expect(line).toMatchObject({ text: DEBT, level: 'alert', notable: true });
     expect(world.log.some((l) => l.text.startsWith('The bank gives you'))).toBe(false);
   });
@@ -533,7 +533,7 @@ describe('economy: debt warnings (review 2026-09-28 I5)', () => {
     const world = createWorld(1);
     world.cash = 0;
     onQuarterStart(world);
-    expect(world.log.some((l) => l.text.startsWith('You are in debt') || l.text.startsWith('The bank'))).toBe(false);
+    expect(world.log.some((l) => l.text.startsWith('You owe ') || l.text.startsWith('The bank'))).toBe(false);
   });
 
   it('gives the bank deadline once, at the first quarter below the line, with the next settle in days, never a day number', () => {
@@ -548,7 +548,7 @@ describe('economy: debt warnings (review 2026-09-28 I5)', () => {
       level: 'alert',
       notable: true,
     });
-    expect(world.log.some((l) => l.text === 'You are in debt: -$500,001. Nothing can be built until you have its price. Removing elevator cars or demolishing costly rooms lowers your running costs.')).toBe(true);
+    expect(world.log.some((l) => l.text === 'You owe $500,001. Nothing can be built until you have its price. Removing elevator cars or demolishing costly rooms lowers your running costs.')).toBe(true);
     world.time.minute += 3 * 1440;
     onQuarterStart(world); // second bad quarter: game over, no second deadline
     expect(world.log.filter((l) => l.text.startsWith('The bank gives you'))).toHaveLength(1);
@@ -638,6 +638,6 @@ describe('economy: guards (audit 2026-09-28 I)', () => {
     const world = createWorld(1);
     world.cash = -1;
     onQuarterStart(world);
-    expect(world.log.some((l) => l.text.startsWith('You are in debt: -$1.'))).toBe(true);
+    expect(world.log.some((l) => l.text.startsWith('You owe $1.'))).toBe(true);
   });
 });

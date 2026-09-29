@@ -7,8 +7,9 @@ import { BUILD_S, BuildCatchOverlay, EveryFloorTitles, SiteIntroScenes, TOWER_W,
 // reframed to 1080x1920. The 1920x1080 scene is scaled uniformly (one factor on both axes) and
 // centred on the tower, which the SiteIntro camera always keeps at the horizontal centre. Filling
 // the height would leave a 607 px slice, narrower than the tower, so the factor is the one that
-// fits the tower (its foundation slab at the Build zoom) into TOWER_SHARE of the width, leaving
-// room for a phone's object-fit: cover to trim the sides. The scene sits on the bottom edge (the
+// fits the tower (its foundation slab at the Build zoom) into TOWER_SHARE of the width. A 19.5:9
+// or 20:9 phone's object-fit: cover trims about 9% of the width from each side, so at 80% the
+// slab keeps a clear margin after the trim (at 92% it was cut). The scene sits on the bottom edge (the
 // ground) and the strip above it carries on the scene's sky colour. The titles are drawn here at
 // a portrait size, on the same clock, because the landscape wordmark is wider than the frame.
 
@@ -18,7 +19,7 @@ export const PORTRAIT_FRAMES = 540;
 const SRC_W = 1920;
 const SRC_H = 1080;
 const START = 300; // SiteIntro frame of this composition's frame 0
-const TOWER_SHARE = 0.92;
+const TOWER_SHARE = 0.8;
 const TOWER_SPAN = (TOWER_W + 20) * BUILD_S; // the foundation slab on screen at the Build zoom
 export const PORTRAIT_SCALE = (PORTRAIT_W * TOWER_SHARE) / TOWER_SPAN;
 const SCENE_H = SRC_H * PORTRAIT_SCALE;

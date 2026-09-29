@@ -115,7 +115,7 @@ describe('news toasts', () => {
     onQuarterStart(world);
     const settle = world.log.find((l: LogEntry) => l.text.startsWith('The quarter is over.'));
     const alerts = world.log.filter((l: LogEntry) => l.level === 'alert');
-    expect(alerts.map((l: LogEntry) => l.text.slice(0, 20))).toEqual(['You are in debt: -$6', 'The bank gives you o']);
+    expect(alerts.map((l: LogEntry) => l.text.slice(0, 20))).toEqual(['You owe $600,000. No', 'The bank gives you o']);
     notify();
     expect(toasts(root)).toEqual([settle?.text]);
     const cards = root

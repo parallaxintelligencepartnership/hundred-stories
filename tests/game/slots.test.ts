@@ -9,6 +9,8 @@ import { buildLogOf } from '../../src/sim/buildlog';
 import { verifySave } from '../../src/sim/replay';
 
 const slots = vi.hoisted(() => new Map<string, string>());
+// Slots whose read fails (the store could not be read, which is not "empty").
+const failing = vi.hoisted(() => new Set<string>());
 vi.mock('../../src/game/storage', () => ({
   writeSave: vi.fn(async (text: string) => {
     slots.set('mine', text);
@@ -17,7 +19,10 @@ vi.mock('../../src/game/storage', () => ({
   writeSlot: vi.fn(async (slot: string, text: string) => {
     slots.set(slot, text);
   }),
-  readSlot: async (slot: string) => slots.get(slot) ?? null,
+  readSlot: async (slot: string) => {
+    if (failing.has(slot)) throw new Error('the store could not be read');
+    return slots.get(slot) ?? null;
+  },
   stashUnreadable: vi.fn(),
   readDailyRecord: () => {
     const text = slots.get('daily-record');
@@ -29,7 +34,10 @@ vi.mock('../../src/game/storage', () => ({
   },
 }));
 
-beforeEach(() => slots.clear());
+beforeEach(() => {
+  slots.clear();
+  failing.clear();
+});
 
 const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -254,6 +262,54 @@ describe("a Today's tower date already played", () => {
     expect(game.getDailyChoice()).toMatchObject({ locked: 'clock-back' });
     expect(slots.get('daily')).toBe(daily);
     expect(JSON.parse(slots.get('daily-record')!)).toEqual({ latest: TIGHT_DAY, finished: [TIGHT_DAY] });
+  });
+
+  it('a stand-in for a daily slot that would not read never writes the record, started or finished', async () => {
+    // An earlier daily, unfinished, sits in the slot.
+    const earlier = gameOn('2026-09-27');
+    await earlier.game.openDaily();
+    earlier.game.apply({ kind: 'build', room: 'lobby', floor: 1, x: 150 });
+    await earlier.game.save();
+    const record = slots.get('daily-record');
+    const daily = slots.get('daily');
+    expect(JSON.parse(record!)).toEqual({ latest: '2026-09-27', finished: [] });
+
+    failing.add('daily');
+    const { game, second } = gameOn(TIGHT_DAY);
+    await game.openDaily();
+    expect(game.getDaily()).toMatchObject({ date: TIGHT_DAY, finished: false }); // the stand-in
+    expect(slots.get('daily-record')).toBe(record);
+    game.world.time.minute = DAILY_END_MINUTE - 1;
+    second();
+    await settle();
+    expect(game.getDaily()?.finished).toBe(true);
+    expect(slots.get('daily-record')).toBe(record);
+    expect(slots.get('daily')).toBe(daily);
+
+    // The slot reads again: the earlier tower is still on offer.
+    failing.clear();
+    const healthy = gameOn(TIGHT_DAY);
+    await healthy.game.openDaily();
+    const choice = healthy.game.getDailyChoice();
+    expect(choice).toMatchObject({ savedDate: '2026-09-27', today: TIGHT_DAY, ahead: false });
+    expect(choice?.locked).toBeUndefined();
+  });
+
+  it('a record dated years ahead (a clock set wrong once) does not lock today: latest comes back, finished dates stay', async () => {
+    slots.set('daily-record', JSON.stringify({ latest: '2031-01-01', finished: ['2026-09-20', '2031-01-01'] }));
+    const { game } = gameOn('2026-09-30');
+    await game.openDaily();
+    expect(game.getDailyChoice()).toBe(null);
+    expect(game.getDaily()).toMatchObject({ date: '2026-09-30', finished: false });
+    expect(JSON.parse(slots.get('daily-record')!)).toEqual({ latest: '2026-09-30', finished: ['2026-09-20', '2031-01-01'] });
+  });
+
+  it('a record one day ahead (another time zone) still waits', async () => {
+    slots.set('daily-record', JSON.stringify({ latest: '2026-10-01', finished: [] }));
+    const { game } = gameOn('2026-09-30');
+    await game.openDaily();
+    expect(game.getDailyChoice()).toMatchObject({ locked: 'clock-back' });
+    expect(JSON.parse(slots.get('daily-record')!)).toEqual({ latest: '2026-10-01', finished: [] });
   });
 
   it('a daily the bank takes back is finished for the record too', async () => {

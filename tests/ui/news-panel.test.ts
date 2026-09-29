@@ -105,6 +105,38 @@ describe('News panel: Needs you now', () => {
     expect(centered).toEqual([{ floor: 12, x: 104 }]);
   });
 
+  it('points at the new room when the fire moves on the same floor (the line text does not change)', () => {
+    const world = createWorld(1);
+    const first = room(world, 'office', 12, 100, { onFire: true });
+    const fire: ActiveEvent = { kind: 'fire', roomIds: [first.id], startedAt: 0, spreadAt: 30 };
+    world.events.push(fire);
+    const { lines, sectionOf, centered, panel } = mount(world);
+    const next = room(world, 'office', 12, 200, { onFire: true });
+    first.onFire = false;
+    fire.roomIds = [next.id];
+    panel.refresh();
+    expect(lines('Needs you now')).toEqual(['Fire on floor 12, no security. Call a helicopter or let it burn out.']);
+    tap(sectionOf('Needs you now').descendants().find((n) => n.className === 'hs-need-go'));
+    expect(centered).toEqual([{ floor: 12, x: 204 }]);
+  });
+
+  it('steps aside on a phone after centering, and stays open on a desk', () => {
+    const world = createWorld(1);
+    const office = room(world, 'office', 12, 100, { onFire: true });
+    world.events.push({ kind: 'fire', roomIds: [office.id], startedAt: 0, spreadAt: 30 });
+    const win = (globalThis as { window: { innerWidth?: number } }).window;
+    win.innerWidth = 390;
+    const phone = mount(world);
+    tap(phone.sectionOf('Needs you now').descendants().find((n) => n.className === 'hs-need-go'));
+    expect(phone.centered).toEqual([{ floor: 12, x: 104 }]);
+    expect(phone.closed()).toBe(1);
+    win.innerWidth = 1440;
+    const desk = mount(world);
+    tap(desk.sectionOf('Needs you now').descendants().find((n) => n.className === 'hs-need-go'));
+    expect(desk.centered).toEqual([{ floor: 12, x: 104 }]);
+    expect(desk.closed()).toBe(0);
+  });
+
   it('says security is on the way when the tower has a security office', () => {
     const world = createWorld(1);
     const office = room(world, 'office', 3, 100, { onFire: true });
@@ -145,7 +177,7 @@ describe('News panel: Needs you now', () => {
     world.stats.badQuarterStreak = 0;
     world.cash = -1_000;
     panel.refresh();
-    expect(lines('Needs you now')).toEqual(['You are in debt: -$1,000. Nothing can be built until you have its price.']);
+    expect(lines('Needs you now')).toEqual(['You owe $1,000. Nothing can be built until you have its price.']);
     expect(EVENTS.bomb.ransom).toBeGreaterThan(0);
   });
 });

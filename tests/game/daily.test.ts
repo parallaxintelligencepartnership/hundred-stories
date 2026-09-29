@@ -12,6 +12,7 @@ import {
   noteDailyFinished,
   noteDailyStarted,
   seedDailyRecord,
+  settleDailyRecord,
   dailyResult,
   dailyShareText,
   dailyShareUrl,
@@ -127,7 +128,24 @@ describe('the daily record locks a date once played', () => {
     // The slot holds the 24th, finished: before the record this was 'ahead', with a fresh start on offer.
     expect(dailyOpening({ date: '2026-09-24', finished: true }, '2026-09-23', record)).toBe('clock-back');
     expect(dailyOpening(null, '2026-09-23', record)).toBe('clock-back');
-    expect(dailyOpening(null, '2026-09-20', record)).toBe('clock-back');
+    expect(dailyOpening(null, '2026-09-22', record)).toBe('clock-back');
+  });
+
+  it('a latest more than two days after today is a clock set wrong: it counts as today, finished dates still lock', () => {
+    const far = { latest: '2031-01-01', finished: ['2031-01-01'] };
+    expect(dailyOpening(null, '2026-09-30', far)).toBe('fresh');
+    expect(settleDailyRecord(far, '2026-09-30')).toEqual({ latest: '2026-09-30', finished: ['2031-01-01'] });
+    // A real clock is at most about a day ahead across time zones: those still wait.
+    expect(dailyOpening(null, '2026-09-30', { latest: '2026-10-01', finished: [] })).toBe('clock-back');
+    expect(dailyOpening(null, '2026-09-30', { latest: '2026-10-02', finished: [] })).toBe('clock-back');
+    expect(dailyOpening(null, '2026-09-30', { latest: '2026-10-03', finished: [] })).toBe('fresh');
+    // Across a month and a year end, by the calendar.
+    expect(dailyOpening(null, '2026-12-31', { latest: '2027-01-02', finished: [] })).toBe('clock-back');
+    expect(dailyOpening(null, '2026-12-31', { latest: '2027-01-03', finished: [] })).toBe('fresh');
+    // The bogus latest resets; the finished list is kept and a finished future date still locks that date.
+    expect(dailyOpening(null, '2031-01-01', settleDailyRecord(far, '2026-09-30'))).toBe('done');
+    const sane = { latest: '2026-10-01', finished: [] };
+    expect(settleDailyRecord(sane, '2026-09-30')).toBe(sane);
   });
 
   it('forward then back: the later date started, the earlier one is locked until the date catches up', () => {

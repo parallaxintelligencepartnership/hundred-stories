@@ -158,6 +158,16 @@ describe('GET /trailers/* byte ranges', () => {
     expect(res.headers.get('content-range')).toBeNull();
   });
 
+  it('HEAD on a 404 from the binding answers 404 with no body and cancels the GET body it was sent', async () => {
+    const cancel = vi.fn();
+    const body = new ReadableStream<Uint8Array>({ pull() {}, cancel });
+    const env = { ASSETS: { fetch: vi.fn(async () => new Response(body, { status: 404 })) }, FEEDBACK: {} } as unknown as Env;
+    const res = await worker.fetch(get('/trailers/missing.mp4', {}, 'HEAD'), env);
+    expect(res.status).toBe(404);
+    expect(res.body).toBeNull();
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
   it('paths outside /trailers/ go straight to the binding with their Range header', async () => {
     const { env, assetsFetch } = makeEnv();
     const req = get('/og.png', { Range: 'bytes=0-9' });
