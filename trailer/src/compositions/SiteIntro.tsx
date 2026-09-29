@@ -16,8 +16,8 @@ loadFonts();
 const W = 1920;
 const H = 1080;
 const GROUND = 900;
-const TOWER_X = 720;
-const TOWER_W = 480;
+export const TOWER_X = 720;
+export const TOWER_W = 480;
 const BASE = 890; // top of the foundation slab: the lobby's floor line
 const floorTop = (i: number) => BASE - (i + 1) * FLOOR_H;
 
@@ -88,18 +88,39 @@ const Spark: React.FC = () => {
 
 // ---------------------------------------------------------------- Scene 2: Build
 const APPEAR = [8, 45, 80, 115, 150]; // lobby, shop, office, condo, cinema
-const BUILD_S = 1.3;
+export const BUILD_S = 1.3;
 const BUILD_FY = 575;
 const CATCH = 212; // local frame of the thief catch (global 512)
 const FREEZE_END = 236;
 
-const Build: React.FC = () => {
+const buildSkyTop = (f: number): string =>
+  interpolateColors(f, [0, 50, 190, 299], [sky.nightHorizon, sky.dayTop, sky.dayTop, sky.nightHorizon]);
+// comic freeze-frame: everything in the scene holds while the flash and burst play
+const buildFrame = (raw: number): number => (raw >= CATCH && raw < FREEZE_END ? CATCH : raw);
+
+/** The colour at the very top of the sky on a SiteIntro frame, for a reframing that extends the
+ *  sky above the scene (SiteSplashPortrait). Spark has no sky of its own (black above the dawn). */
+export const siteIntroSkyTop = (frame: number): string =>
+  frame < 300 ? black : frame < 600 ? buildSkyTop(buildFrame(frame - 300)) : sky.nightTop;
+
+/** The catch's flash and red vignette over the whole frame, on Build's clock (frame 0 is SiteIntro 300). */
+export const BuildCatchOverlay: React.FC = () => {
   const raw = useCurrentFrame();
-  // comic freeze-frame: everything in the scene holds while the flash and burst play
-  const f = raw >= CATCH && raw < FREEZE_END ? CATCH : raw;
+  const flash = raw >= CATCH ? 1 - ramp(raw, CATCH, 10, Easing.out(Easing.quad)) : 0;
+  return (
+    <>
+      {flash > 0 && <AbsoluteFill style={{ background: alert, opacity: flash * 0.45 }} />}
+      {raw >= CATCH && raw < FREEZE_END && <AbsoluteFill style={{ boxShadow: `inset 0 0 160px ${alert}` , opacity: 0.8 }} />}
+    </>
+  );
+};
+
+const Build: React.FC<{ reframed: boolean }> = ({ reframed }) => {
+  const raw = useCurrentFrame();
+  const f = buildFrame(raw);
 
   const bob = APPEAR.reduce((acc, t) => acc + wobble(f, t + 6, 7, 6, 0.8), 0);
-  const skyTop = interpolateColors(f, [0, 50, 190, 299], [sky.nightHorizon, sky.dayTop, sky.dayTop, sky.nightHorizon]);
+  const skyTop = buildSkyTop(f);
   const skyHor = interpolateColors(f, [0, 50, 190, 299], [sky.dawn, sky.dayHorizon, sky.dayHorizon, sky.dusk]);
   const punch = raw >= CATCH && raw < FREEZE_END ? 1 + 0.06 * popIn(raw, CATCH, 6) : 1;
   const fy = BUILD_FY + bob + (punch > 1 ? -120 * (punch - 1) / 0.06 : 0);
@@ -133,7 +154,6 @@ const Build: React.FC = () => {
   const guardX = lerp(1110, 1000, guardIn) + exitP * 150;
   const caught = raw >= CATCH;
   const thiefShownX = caught ? thiefX + exitP * 150 + (raw >= FREEZE_END ? 25 * ramp(raw, FREEZE_END, 6) : 0) : thiefX;
-  const flash = raw >= CATCH ? 1 - ramp(raw, CATCH, 10, Easing.out(Easing.quad)) : 0;
 
   return (
     <AbsoluteFill>
@@ -263,8 +283,7 @@ const Build: React.FC = () => {
           </g>
         )}
       </World>
-      {flash > 0 && <AbsoluteFill style={{ background: alert, opacity: flash * 0.45 }} />}
-      {raw >= CATCH && raw < FREEZE_END && <AbsoluteFill style={{ boxShadow: `inset 0 0 160px ${alert}` , opacity: 0.8 }} />}
+      {!reframed && <BuildCatchOverlay />}
     </AbsoluteFill>
   );
 };
@@ -358,14 +377,31 @@ const CinemaAction: React.FC<{ f: number; top: number }> = ({ f, top }) => {
 const TOTAL_FLOORS = 18;
 const WALLS = [room.lobby, room.shop, room.office, room.condo, room.cinema, room.office, room.condo, room.shop, room.office];
 
-const EveryFloor: React.FC = () => {
+/** Where Every Floor's titles sit: the wordmark centres in its container, captions at their top. */
+export type TitleLayout = { wordmarkSize: number; captionY: number; captionSize: number; playY: number; playSize: number };
+const LANDSCAPE_TITLES: TitleLayout = { wordmarkSize: 140, captionY: 640, captionSize: 48, playY: 722, playSize: 34 };
+
+/** The wordmark, the caption and Play Free, on Every Floor's clock (frame 0 is SiteIntro 600). */
+export const EveryFloorTitles: React.FC<{ layout: TitleLayout }> = ({ layout }) => {
+  const f = useCurrentFrame();
+  const wmIn = fade(f, 150, 28);
+  const wmScale = lerp(0.86, 1, popIn(f, 150, 26));
+  return (
+    <>
+      <Wordmark opacity={wmIn} scale={wmScale} glow={wmIn * (0.8 + 0.2 * Math.sin(f * 0.12))} size={layout.wordmarkSize} />
+      <Caption text="Every floor is a story. Everyone's got one." opacity={fade(f, 200, 24)} rise={(1 - fade(f, 200, 24)) * 10} y={layout.captionY} size={layout.captionSize} color={ink} />
+      <Caption text="Play Free" opacity={fade(f, 250, 20)} rise={(1 - fade(f, 250, 20)) * 8} y={layout.playY} size={layout.playSize} color={mint} weight={400} />
+    </>
+  );
+};
+
+const EveryFloor: React.FC<{ reframed: boolean }> = ({ reframed }) => {
   const f = useCurrentFrame();
   const pull = ramp(f, 0, 150, Easing.inOut(Easing.cubic));
   const s = lerp(BUILD_S, 0.42, pull);
   const fy = lerp(BUILD_FY, -195, pull);
   const comet = ramp(f, 100, 34, Easing.in(Easing.quad));
   const wmIn = fade(f, 150, 28);
-  const wmScale = lerp(0.86, 1, popIn(f, 150, 26));
   const blackout = ramp(f, 280, 19, Easing.in(Easing.quad));
 
   return (
@@ -412,9 +448,7 @@ const EveryFloor: React.FC = () => {
       </World>
       {/* legibility veil for the title */}
       <AbsoluteFill style={{ background: `linear-gradient(180deg, ${steel}00 0%, ${steel}00 30%, ${steel}f2 36%, ${steel}f2 76%, ${steel}00 82%, ${steel}00 100%)`, opacity: wmIn }} />
-      <Wordmark opacity={wmIn} scale={wmScale} glow={wmIn * (0.8 + 0.2 * Math.sin(f * 0.12))} size={140} />
-      <Caption text="Every floor is a story. Everyone's got one." opacity={fade(f, 200, 24)} rise={(1 - fade(f, 200, 24)) * 10} y={640} size={48} color={ink} />
-      <Caption text="Play Free" opacity={fade(f, 250, 20)} rise={(1 - fade(f, 250, 20)) * 8} y={722} size={34} color={mint} weight={400} />
+      {!reframed && <EveryFloorTitles layout={LANDSCAPE_TITLES} />}
       <AbsoluteFill style={{ background: black, opacity: blackout }} />
     </AbsoluteFill>
   );
@@ -460,16 +494,20 @@ const NightFloor: React.FC<{ i: number; f: number; p: number }> = ({ i, f, p }) 
 };
 
 // ---------------------------------------------------------------- composition
-export const SiteIntro: React.FC = () => (
+/** The three scenes. reframed leaves the frame-sized layers (Build's catch flash, Every Floor's
+ *  titles) to a reframing that draws them over its own frame (SiteSplashPortrait). */
+export const SiteIntroScenes: React.FC<{ reframed: boolean }> = ({ reframed }) => (
   <AbsoluteFill style={{ background: black }}>
     <Sequence from={0} durationInFrames={300} name="Spark">
       <Spark />
     </Sequence>
     <Sequence from={300} durationInFrames={300} name="Build">
-      <Build />
+      <Build reframed={reframed} />
     </Sequence>
     <Sequence from={600} durationInFrames={300} name="Every Floor">
-      <EveryFloor />
+      <EveryFloor reframed={reframed} />
     </Sequence>
   </AbsoluteFill>
 );
+
+export const SiteIntro: React.FC = () => <SiteIntroScenes reframed={false} />;

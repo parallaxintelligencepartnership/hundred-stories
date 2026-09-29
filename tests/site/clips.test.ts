@@ -181,6 +181,30 @@ describe('landing splash', () => {
     expect(seconds).toBeLessThan(18.1);
   });
 
+  // The same 18 s reframed upright (trailer/ SiteSplashPortrait) for a portrait viewport: moov
+  // first, near the landscape cut's size, and 720x1280 in its track header, not a stretched 16:9.
+  it('ships an 18 s faststart 720x1280 portrait cut under 1.3 MB, with a small portrait poster', () => {
+    const mp4 = readFileSync(join(ROOT, 'public', 'trailers', 'site-splash-portrait.mp4'));
+    expect(mp4.length).toBeLessThan(1_300_000);
+    const at = mp4.indexOf('mvhd');
+    expect(at).toBeGreaterThan(0);
+    expect(mp4.indexOf('moov')).toBeLessThan(mp4.indexOf('mdat'));
+    const v1 = mp4[at + 4] === 1;
+    const timescale = mp4.readUInt32BE(at + (v1 ? 24 : 16));
+    const duration = v1 ? Number(mp4.readBigUInt64BE(at + 28)) : mp4.readUInt32BE(at + 20);
+    const seconds = duration / timescale;
+    expect(seconds).toBeGreaterThan(17.9);
+    expect(seconds).toBeLessThan(18.1);
+    // tkhd ends with the width and height, 16.16 fixed point, in its last 8 bytes.
+    const tkhd = mp4.indexOf('tkhd');
+    const size = mp4.readUInt32BE(tkhd - 4);
+    const end = tkhd - 4 + size;
+    expect([mp4.readUInt32BE(end - 8) / 65536, mp4.readUInt32BE(end - 4) / 65536]).toEqual([720, 1280]);
+    const poster = readFileSync(join(ROOT, 'public', 'trailers', 'site-splash-portrait.webp'));
+    expect(poster.subarray(8, 12).toString('latin1')).toBe('WEBP');
+    expect(poster.length).toBeLessThan(40_000);
+  });
+
   it('shows only under splash-pending, fixed over everything, fading on is-done', () => {
     expect(css).toMatch(/html\.splash-pending \{\s*overflow: hidden;/);
     expect(css).toMatch(/html\.splash-pending \.splash\[hidden\] \{\s*display: block;/);
@@ -198,6 +222,13 @@ describe('landing splash', () => {
     expect(css).toMatch(/\.splash video \{[^}]*object-fit: contain;[^}]*object-position: center center;/);
     expect(css).toMatch(/@media \(min-width: 720px\) \{\s*\.splash video \{\s*object-fit: cover;/);
     expect(css).toMatch(/\.splash-skip \{[^}]*min-height: 44px;/);
+  });
+
+  // The portrait cut matches a phone held upright: it fills there, and is letterboxed if turned.
+  it('fills the viewport with the portrait cut when portrait, letterboxes it otherwise', () => {
+    expect(css).toMatch(/\.splash video\[data-cut='portrait'\] \{\s*object-fit: contain;/);
+    expect(css).toMatch(/@media \(orientation: portrait\) \{\s*\.splash video\[data-cut='portrait'\] \{\s*object-fit: cover;/);
+    expect(css.indexOf("@media (orientation: portrait)")).toBeGreaterThan(css.indexOf('@media (min-width: 720px) {\n  .splash video'));
   });
 
   it('keeps the trailer videos and posters out of the service worker precache', () => {

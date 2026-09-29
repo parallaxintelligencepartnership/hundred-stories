@@ -66,7 +66,16 @@ class FakeVideo extends FakeNode {
   }
 }
 
-function setup(opts: { pending?: boolean; readyState?: string; video?: FakeVideo | null; overlay?: FakeOverlay | null } = {}) {
+function setup(
+  opts: {
+    pending?: boolean;
+    readyState?: string;
+    video?: FakeVideo | null;
+    overlay?: FakeOverlay | null;
+    /** What matchMedia('(orientation: portrait)') answers; 'absent' leaves matchMedia off the env. */
+    portrait?: boolean | 'throws' | 'absent';
+  } = {},
+) {
   const video = opts.video === undefined ? new FakeVideo() : opts.video;
   const overlay = opts.overlay === undefined ? new FakeOverlay() : opts.overlay;
   const skip = new FakeNode();
@@ -74,6 +83,7 @@ function setup(opts: { pending?: boolean; readyState?: string; video?: FakeVideo
   const storage = new Map<string, string>();
   const timers: Array<{ fn: () => void; ms: number; cleared: boolean }> = [];
   const doc = new FakeNode();
+  const media = { portrait: opts.portrait ?? false, queries: [] as string[] };
   const env: SplashEnv = {
     document: {
       readyState: opts.readyState ?? 'interactive',
@@ -95,6 +105,13 @@ function setup(opts: { pending?: boolean; readyState?: string; video?: FakeVideo
       (handle as { cleared: boolean }).cleared = true;
     },
   };
+  if (media.portrait !== 'absent') {
+    env.matchMedia = (query) => {
+      media.queries.push(query);
+      if (media.portrait === 'throws') throw new Error('no matchMedia');
+      return { matches: query === '(orientation: portrait)' && media.portrait === true };
+    };
+  }
   const runTimers = (ms: number): void => {
     for (const t of timers.filter((x) => !x.cleared && x.ms === ms)) {
       t.cleared = true;
@@ -102,7 +119,7 @@ function setup(opts: { pending?: boolean; readyState?: string; video?: FakeVideo
     }
   };
   const live = (ms: number) => timers.filter((t) => !t.cleared && t.ms === ms);
-  return { env, video, overlay, skip, html, storage, timers, doc, runTimers, live };
+  return { env, video, overlay, skip, html, storage, timers, doc, media, runTimers, live };
 }
 
 /** The overlay faded, left the DOM, and the page scrolls again. */
@@ -151,6 +168,84 @@ describe('splash', () => {
     expect(s.video!.plays).toBe(1);
     expect(s.overlay!.classes.has('is-done')).toBe(false);
     expect(s.overlay!.removed).toBe(0);
+  });
+
+  it('in a portrait viewport, attaches the portrait cut, its poster and its 720x1280 size', () => {
+    const s = setup({ portrait: true });
+    let posterAtAppend: string | undefined;
+    const append = s.video!.appendChild.bind(s.video!);
+    s.video!.appendChild = (child) => {
+      posterAtAppend = s.video!.attrs.poster;
+      return append(child);
+    };
+    playSplash(s.env);
+    expect(s.media.queries).toEqual(['(orientation: portrait)']);
+    expect(s.video!.children.map((c) => [c.attrs.src, c.attrs.type])).toEqual([['/trailers/site-splash-portrait.mp4', 'video/mp4']]);
+    expect(posterAtAppend).toBe('/trailers/site-splash-portrait.webp');
+    expect(s.video!.attrs.poster).toBe('/trailers/site-splash-portrait.webp');
+    expect([s.video!.attrs.width, s.video!.attrs.height, s.video!.attrs['data-cut']]).toEqual(['720', '1280', 'portrait']);
+    expect(s.video!.loads).toBe(1);
+    expect(s.video!.plays).toBe(1);
+  });
+
+  it('in a landscape viewport, attaches the landscape cut and leaves the markup size alone', () => {
+    const s = setup({ portrait: false });
+    playSplash(s.env);
+    expect(s.media.queries).toEqual(['(orientation: portrait)']);
+    expect(s.video!.children.map((c) => c.attrs.src)).toEqual(['/trailers/site-splash.mp4']);
+    expect(s.video!.attrs.poster).toBe('/trailers/site-intro.webp');
+    expect(s.video!.attrs.width).toBeUndefined();
+    expect(s.video!.attrs.height).toBeUndefined();
+    expect(s.video!.attrs['data-cut']).toBeUndefined();
+  });
+
+  it('falls back to the landscape cut when matchMedia is missing or throws', () => {
+    for (const portrait of ['absent', 'throws'] as const) {
+      const s = setup({ portrait });
+      playSplash(s.env);
+      expect(s.video!.children.map((c) => c.attrs.src)).toEqual(['/trailers/site-splash.mp4']);
+      expect(s.video!.attrs.poster).toBe('/trailers/site-intro.webp');
+      expect(s.video!.plays).toBe(1);
+      expect(s.overlay!.classes.has('is-done')).toBe(false);
+    }
+  });
+
+  it('chooses once at attach: turning the phone later changes nothing', () => {
+    const s = setup({ portrait: true });
+    playSplash(s.env);
+    s.media.portrait = false;
+    s.video!.fire('playing');
+    s.video!.fire('waiting');
+    s.video!.fire('playing');
+    expect(s.media.queries).toHaveLength(1);
+    expect(s.video!.children.map((c) => c.attrs.src)).toEqual(['/trailers/site-splash-portrait.mp4']);
+    expect(s.video!.loads).toBe(1);
+  });
+
+  it('never asks the orientation when the gate turned the visitor away', () => {
+    const s = setup({ pending: false, portrait: true });
+    playSplash(s.env);
+    expect(s.media.queries).toHaveLength(0);
+    expect(s.video!.children).toHaveLength(0);
+    expect(s.video!.attrs.poster).toBeUndefined();
+  });
+
+  it('the portrait cut ends the same ways: ended, a failed source, a stall', () => {
+    const ended = setup({ portrait: true });
+    playSplash(ended.env);
+    ended.video!.fire('playing');
+    ended.video!.fire('ended');
+    expectEnded(ended);
+
+    const failed = setup({ portrait: true });
+    playSplash(failed.env);
+    failed.video!.children[0]!.fire('error');
+    expectEnded(failed);
+
+    const stuck = setup({ portrait: true });
+    playSplash(stuck.env);
+    stuck.runTimers(SPLASH_STALL_MS);
+    expectEnded(stuck);
   });
 
   it('ends on ended', () => {

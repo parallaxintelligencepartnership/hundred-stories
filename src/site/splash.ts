@@ -13,6 +13,15 @@ export const SPLASH_SOURCES: ReadonlyArray<{ src: string; type: string }> = [
 
 export const SPLASH_POSTER = '/trailers/site-intro.webp';
 
+/** The same 18 s reframed upright (trailer/ SiteSplashPortrait, 720x1280), for a viewport held
+ *  portrait when the sources are attached. The choice is made once: turning the phone mid-play
+ *  keeps the cut already loading (site.css letterboxes the portrait cut in a landscape viewport). */
+export const SPLASH_PORTRAIT_QUERY = '(orientation: portrait)';
+export const SPLASH_PORTRAIT_SOURCES: ReadonlyArray<{ src: string; type: string }> = [
+  { src: '/trailers/site-splash-portrait.mp4', type: 'video/mp4' },
+];
+export const SPLASH_PORTRAIT_POSTER = '/trailers/site-splash-portrait.webp';
+
 /** The class splash-init.js puts on <html> when the splash is to play. */
 export const SPLASH_PENDING = 'splash-pending';
 /** sessionStorage key and value: set as soon as the splash starts, so it plays once a session. */
@@ -59,6 +68,7 @@ export interface SplashEnv {
     removeEventListener?(type: string, fn: Listener): void;
   };
   sessionStorage?: { setItem(key: string, value: string): void } | undefined;
+  matchMedia?(query: string): { matches: boolean };
   setTimeout(fn: () => void, ms: number): unknown;
   clearTimeout(handle: unknown): void;
 }
@@ -76,6 +86,15 @@ function dropPending(env: SplashEnv): void {
     env.document.documentElement.classList.remove(SPLASH_PENDING);
   } catch {
     // nothing left to do
+  }
+}
+
+/** True when the viewport is portrait now; anything odd means landscape, the original cut. */
+function portraitNow(env: SplashEnv): boolean {
+  try {
+    return env.matchMedia?.(SPLASH_PORTRAIT_QUERY).matches === true;
+  } catch {
+    return false;
   }
 }
 
@@ -197,15 +216,23 @@ export function playSplash(env: SplashEnv): void {
     video.addEventListener('pause', armStall);
 
     // Set here, not in the markup, so a visitor the gate turned away downloads nothing at all.
-    // Until the poster lands, the overlay's own background is the fill.
-    video.setAttribute('poster', SPLASH_POSTER);
-    SPLASH_SOURCES.forEach(({ src, type }, i) => {
+    // Until the poster lands, the overlay's own background is the fill. The overlay is fixed and
+    // site.css sizes the video to it, so the size attributes move nothing; they match the file.
+    const portrait = portraitNow(env);
+    const sources = portrait ? SPLASH_PORTRAIT_SOURCES : SPLASH_SOURCES;
+    if (portrait) {
+      video.setAttribute('width', '720');
+      video.setAttribute('height', '1280');
+      video.setAttribute('data-cut', 'portrait');
+    }
+    video.setAttribute('poster', portrait ? SPLASH_PORTRAIT_POSTER : SPLASH_POSTER);
+    sources.forEach(({ src, type }, i) => {
       const source = env.document.createElement('source');
       source.setAttribute('src', src);
       source.setAttribute('type', type);
       // A source that fails fires error on itself, not on the video: the last one failing means
       // none will play.
-      if (i === SPLASH_SOURCES.length - 1) source.addEventListener?.('error', () => finish());
+      if (i === sources.length - 1) source.addEventListener?.('error', () => finish());
       video!.appendChild(source);
     });
     armStall();
@@ -242,6 +269,7 @@ try {
     bootSplash({
       document: document as unknown as SplashEnv['document'],
       sessionStorage: storage,
+      matchMedia: (query) => window.matchMedia(query),
       setTimeout: (fn, ms) => window.setTimeout(fn, ms),
       clearTimeout: (handle) => window.clearTimeout(handle as number),
     });

@@ -383,6 +383,19 @@ html.splash-pending .splash[hidden] {
   }
 }
 
+/* The portrait cut (splash.ts attaches it when the viewport is portrait) is shaped like a phone
+   held upright and composed around its tower, so there it fills (cover). Turned sideways after
+   it was chosen, it is letterboxed whole. */
+.splash video[data-cut='portrait'] {
+  object-fit: contain;
+}
+
+@media (orientation: portrait) {
+  .splash video[data-cut='portrait'] {
+    object-fit: cover;
+  }
+}
+
 .splash-skip {
   position: absolute;
   right: max(16px, env(safe-area-inset-right));
