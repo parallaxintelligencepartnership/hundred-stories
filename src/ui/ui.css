@@ -731,8 +731,26 @@ button.hs-readout:hover {
   white-space: nowrap;
 }
 
+/* By day the chip is empty and unseen, but it keeps its box: showing, changing or clearing it at
+   nightfall never resizes the controls, so the bar never wraps differently and Views, Share, Menu,
+   the pill and the round buttons under the bar (placed from Views) never move. */
 .hs-speed-mode.is-hidden {
-  display: none;
+  visibility: hidden;
+}
+
+/* On a wide screen its box is one fixed size, sized in its own text's em so it scales with
+   Larger text: the night speed on one line, the paused line on two. (A phone hangs it over the
+   speed pill, out of the row, as it was.) */
+@media (min-width: 721px) {
+  .hs-speed-mode {
+    flex: none;
+    width: 16em;
+    justify-content: center;
+    line-height: 1.2;
+    text-align: center;
+    text-wrap: balance;
+    white-space: normal;
+  }
 }
 
 .hs-icon-sheet {
