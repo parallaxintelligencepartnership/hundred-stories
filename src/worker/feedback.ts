@@ -12,8 +12,9 @@ export interface Env {
   FEEDBACK: KVNamespace;
   // Optional at runtime: if a binding is missing the endpoint fails open rather than 500.
   // FEEDBACK_LIMIT is per client IP; FEEDBACK_GLOBAL is one shared bucket for every sender that
-  // bounds the KV write rate however many IPs post. The per-IP limit sits well below the shared
-  // one, so one address alone can never hold the shared bucket (numbers in wrangler.jsonc).
+  // bounds the KV write rate however many IPs post. The per-IP limit sits below the shared one,
+  // so one address alone can never hold the shared bucket (numbers and the daily cap in
+  // wrangler.jsonc).
   FEEDBACK_LIMIT?: RateLimit;
   FEEDBACK_GLOBAL?: RateLimit;
 }
@@ -22,6 +23,12 @@ export const FEEDBACK_PATH = '/api/feedback';
 export const MAX_BODY_BYTES = 8 * 1024;
 /** The key every request shares on the FEEDBACK_GLOBAL limiter. */
 export const GLOBAL_LIMIT_KEY = 'global';
+/**
+ * The answer when the KV write fails, most likely because the day's write cap is spent. 507
+ * (Insufficient Storage) and nothing else, so the card can tell it apart from a 503 or 500 that
+ * Cloudflare or the runtime might send. src/ui/feedback.ts keeps the same number.
+ */
+export const STORE_FAILED_STATUS = 507;
 
 /**
  * Origins allowed to post from another origin. The app shells serve the game from their own
@@ -236,8 +243,10 @@ export async function handleFeedback(request: Request, env: Env): Promise<Respon
   try {
     await storeFeedback(env.FEEDBACK, parsed.fields, new Date(), crypto.randomUUID());
   } catch (err) {
+    // The expected cause is the KV daily write cap (wrangler.jsonc explains why the limiters
+    // cannot hold it). The card maps this status to "full for today", not "try in a minute".
     console.error('feedback: KV write failed', err);
-    return reply(503, { ok: false, reason: 'unavailable' });
+    return reply(STORE_FAILED_STATUS, { ok: false, reason: 'full for today' });
   }
   return reply(200, { ok: true });
 }

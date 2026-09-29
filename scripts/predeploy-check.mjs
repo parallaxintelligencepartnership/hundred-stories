@@ -6,12 +6,17 @@
 //   (b) dist/play/index.html exists (the app entry point)
 //   (c) the PixiJS "unsafe-eval" shim (imported first in src/render/renderer.ts, required
 //       because our CSP has no 'unsafe-eval') is actually present in the built JS assets
-//   (d) src-tauri/Cargo.lock: no dependency crate carries the app's version unless it is a
-//       known genuine release at that number (a global version replace once rewrote ten)
+//   (d) src-tauri/Cargo.lock: every dependency crate at the app's version has the checksum
+//       crates.io gives that release, read from the local cargo registry cache (a global
+//       version replace once rewrote ten crates' versions and kept their old checksums)
+//   (e) `cargo metadata --locked --offline` resolves the lock, where cargo is installed
 // On failure this prints one line and exits 1. On success it prints "predeploy check: ok"
 // and exits 0.
 
+import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -24,45 +29,156 @@ function fail(reason) {
   process.exit(1);
 }
 
-// (d) Dependency crates that genuinely sit at a version the app has used, keyed name@version,
-// with their crates.io checksum. A version bump that rewrites a dependency's version keeps the
-// dependency's old checksum, so the pair no longer matches and the check fails. Add an entry
-// only after checking the checksum against the registry (sha256 of the .crate file); the
-// entries below were checked on 2026-09-28 and cover the app versions up to 0.7.3.
-export const GENUINE_AT_APP_VERSION = {
-  'zlib-rs@0.6.8': 'b268e58e7c693d7c271f93ffc4ba3b380412554231c85bf61ca7af91042a4112',
-  'serde_spanned@0.6.9': 'bf41e0cfaf7226dca15e8197172c295a782857fcb97fad1808a166870dee75a3',
-  'tower-http@0.6.11': '4cfcf7e2740e6fc6d4d688b4ef00650406bb94adf4731e43c096c3a19fe40840',
-  'keyboard-types@0.7.0': 'b750dcadc39a09dbadd74e118f6dd6598df77fa01df0cfcdc52c28dece74528a',
-  'cfb@0.7.3': 'd38f2da7a0a2c4ccf0065be06397cc26a81f4e528be095826eee9d4adbb8c60f',
-};
+/** $CARGO_HOME/registry, or ~/.cargo/registry. */
+export function defaultRegistryDir() {
+  return join(process.env.CARGO_HOME || join(homedir(), '.cargo'), 'registry');
+}
 
-// Lists every non-app [[package]] in Cargo.lock that carries the app's version from
-// Cargo.toml and is not a known genuine release at that number. Empty means clean.
-export function cargoLockProblems(lockText, tomlText) {
+/** Where the sparse index keeps a crate's entry: 1/a, 2/ab, 3/a/abc, ab/cd/abcd... */
+function indexPath(name) {
+  const n = name.toLowerCase();
+  if (n.length === 1) return join('1', n);
+  if (n.length === 2) return join('2', n);
+  if (n.length === 3) return join('3', n[0], n);
+  return join(n.slice(0, 2), n.slice(2, 4), n);
+}
+
+function sha256File(path) {
+  return createHash('sha256').update(readFileSync(path)).digest('hex');
+}
+
+function subdirs(dir) {
+  try {
+    return readdirSync(dir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => join(dir, d.name));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * What the local registry knows of one crate: version -> checksum, from the downloaded .crate
+ * files (their sha256) and the sparse index cache (its "cksum" field). A .crate file wins over
+ * the index when both are present.
+ */
+function knownReleases(registryDir, name) {
+  const known = new Map();
+  for (const dir of subdirs(join(registryDir, 'index'))) {
+    const file = join(dir, '.cache', indexPath(name));
+    if (!existsSync(file)) continue;
+    // The cache file is a header then NUL-separated pairs of version and JSON line.
+    for (const part of readFileSync(file, 'latin1').split('\0')) {
+      if (!part.startsWith('{')) continue;
+      try {
+        const entry = JSON.parse(Buffer.from(part, 'latin1').toString('utf8'));
+        if (entry.name === name && typeof entry.vers === 'string' && typeof entry.cksum === 'string') {
+          known.set(entry.vers, entry.cksum);
+        }
+      } catch {
+        // A line the parser cannot read tells us nothing; skip it.
+      }
+    }
+  }
+  for (const dir of subdirs(join(registryDir, 'cache'))) {
+    let files = [];
+    try {
+      files = readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const file of files) {
+      if (!file.startsWith(`${name}-`) || !file.endsWith('.crate')) continue;
+      const vers = file.slice(name.length + 1, -'.crate'.length);
+      if (!/^\d/.test(vers)) continue; // another crate whose name starts with this one
+      known.set(vers, sha256File(join(dir, file)));
+    }
+  }
+  return known;
+}
+
+/**
+ * Checks every non-app [[package]] in Cargo.lock that carries the app's version (from
+ * Cargo.toml) against the local registry. A crate whose release is known and whose checksum
+ * differs, or whose checksum belongs to another release of the same crate, is a mismatch. A crate
+ * the registry cache has never seen (a fresh machine) is unverified, which does not fail.
+ */
+export function cargoLockCheck(lockText, tomlText, registryDir = defaultRegistryDir()) {
   const pkg = /^\[package\]\n(?:[^[\n][^\n]*\n|\n)*?name = "([^"]+)"\n(?:[^[\n][^\n]*\n|\n)*?version = "([^"]+)"/m.exec(tomlText);
-  if (!pkg) return ['src-tauri/Cargo.toml has no [package] name and version'];
+  if (!pkg) return { mismatched: ['src-tauri/Cargo.toml has no [package] name and version'], unverified: [] };
   const [, app, version] = pkg;
-  const problems = [];
+  const mismatched = [];
+  const unverified = [];
   for (const block of lockText.split('[[package]]\n').slice(1)) {
     const field = (key) => new RegExp(`^${key} = "([^"]*)"`, 'm').exec(block)?.[1];
     const name = field('name');
-    if (name === app || field('version') !== version) continue;
+    if (!name || name === app || field('version') !== version) continue;
     const checksum = field('checksum');
-    if (!checksum || GENUINE_AT_APP_VERSION[`${name}@${version}`] !== checksum) {
-      problems.push(`${name} ${version} (checksum ${checksum ?? 'none'})`);
+    if (!checksum) {
+      unverified.push(`${name} ${version} (no checksum)`);
+      continue;
     }
+    const known = knownReleases(registryDir, name);
+    const expected = known.get(version);
+    if (expected !== undefined) {
+      if (expected !== checksum) mismatched.push(`${name} ${version} (checksum ${checksum}, the registry has ${expected})`);
+      continue;
+    }
+    const owner = [...known].find(([, sum]) => sum === checksum)?.[0];
+    if (owner !== undefined) mismatched.push(`${name} ${version} (checksum ${checksum} belongs to ${name} ${owner})`);
+    else unverified.push(`${name} ${version}`);
   }
-  return problems;
+  return { mismatched, unverified };
+}
+
+/** The mismatches only: empty means nothing in the lock is known to be wrong. */
+export function cargoLockProblems(lockText, tomlText, registryDir = defaultRegistryDir()) {
+  return cargoLockCheck(lockText, tomlText, registryDir).mismatched;
 }
 
 function checkCargoLock() {
-  const problems = cargoLockProblems(
+  const { mismatched, unverified } = cargoLockCheck(
     readFileSync(join(tauriDir, 'Cargo.lock'), 'utf8'),
     readFileSync(join(tauriDir, 'Cargo.toml'), 'utf8'),
   );
-  if (problems.length > 0) {
-    fail(`predeploy check failed: src-tauri/Cargo.lock has dependencies at the app version: ${problems.join(', ')}`);
+  if (mismatched.length > 0) {
+    fail(`predeploy check failed: src-tauri/Cargo.lock has dependencies at the app version whose checksum is not that release's: ${mismatched.join('; ')}`);
+  }
+  if (unverified.length > 0) {
+    console.warn(
+      `predeploy check: unverified, not in the local cargo registry cache (run cargo fetch in src-tauri to check them): ${unverified.join(', ')}`,
+    );
+  }
+}
+
+/** cargo on PATH, else $CARGO_HOME/bin/cargo, else null. */
+export function findCargo() {
+  const onPath = spawnSync('cargo', ['--version'], { stdio: 'ignore' });
+  if (!onPath.error && onPath.status === 0) return 'cargo';
+  const home = join(process.env.CARGO_HOME || join(homedir(), '.cargo'), 'bin', 'cargo');
+  return existsSync(home) ? home : null;
+}
+
+/**
+ * (e) The lock resolves as written, with no network: `cargo metadata --locked --offline`.
+ * Returns null when it passes, 'skipped' when cargo is absent, or the error text.
+ */
+export function cargoMetadataCheck(manifestDir = tauriDir, cargo = findCargo()) {
+  if (cargo === null) return 'skipped';
+  const run = spawnSync(
+    cargo,
+    ['metadata', '--locked', '--offline', '--format-version', '1', '--manifest-path', join(manifestDir, 'Cargo.toml')],
+    { encoding: 'utf8', stdio: ['ignore', 'ignore', 'pipe'] },
+  );
+  if (run.error) return String(run.error.message);
+  if (run.status !== 0) return (run.stderr || `exit ${run.status}`).trim().split('\n').slice(-3).join(' ');
+  return null;
+}
+
+function checkCargoMetadata() {
+  const result = cargoMetadataCheck();
+  if (result === 'skipped') {
+    console.warn('predeploy check: cargo not found, skipping cargo metadata --locked --offline');
+  } else if (result !== null) {
+    fail(`predeploy check failed: cargo metadata --locked --offline on src-tauri: ${result}`);
   }
 }
 
@@ -123,6 +239,7 @@ function checkDist() {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   checkCargoLock();
+  checkCargoMetadata();
   checkDist();
   console.log('predeploy check: ok');
 }

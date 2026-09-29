@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ALLOWED_ORIGINS, buildRecord, feedbackKey, parseFeedback, type Env } from '../../src/worker/feedback';
+import { ALLOWED_ORIGINS, buildRecord, feedbackKey, parseFeedback, STORE_FAILED_STATUS, type Env } from '../../src/worker/feedback';
 import * as entry from '../../src/worker/index';
 
 const worker = entry.default;
@@ -209,8 +209,8 @@ describe('POST /api/feedback', () => {
   });
 
   // Limiters that count, as the bindings do, with the numbers in wrangler.jsonc (per IP 2, shared
-  // 6 per 60 s; tests/ui/feedback.test.ts checks the file still says so).
-  function countingEnv(perIp = 2, shared = 6) {
+  // 3 per 60 s; tests/ui/feedback.test.ts checks the file still says so).
+  function countingEnv(perIp = 2, shared = 3) {
     const counter = (max: number) => {
       const seen = new Map<string, number>();
       return {
@@ -254,10 +254,11 @@ describe('POST /api/feedback', () => {
     const statuses: number[] = [];
     for (let i = 0; i < 10; i++) statuses.push((await call(post({ text: `spam ${i}` }, { ip: '192.0.2.10' }), env)).res.status);
     expect(statuses).toEqual([200, 200, 429, 429, 429, 429, 429, 429, 429, 429]);
-    for (const ip of ['198.51.100.1', '198.51.100.2', '198.51.100.3']) {
-      expect((await call(post({ text: 'real' }, { ip }), env)).res.status).toBe(200);
-    }
-    expect(put).toHaveBeenCalledTimes(5);
+    // The shared bucket (3 a minute) still has room for another sender; a second address then
+    // fills it, the accepted cost of a shared limit this low.
+    expect((await call(post({ text: 'real' }, { ip: '198.51.100.1' }), env)).res.status).toBe(200);
+    expect((await call(post({ text: 'real' }, { ip: '198.51.100.2' }), env)).res.status).toBe(429);
+    expect(put).toHaveBeenCalledTimes(3);
   });
 
   it('fails open with a warning when the global limit binding is missing', async () => {
@@ -278,12 +279,29 @@ describe('POST /api/feedback', () => {
     expect(warn).toHaveBeenCalled();
   });
 
-  it('503 unavailable when the KV write throws', async () => {
+  it('507 full for today when the KV write throws (the daily write cap), a status nothing else sends', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const { env } = makeEnv({ putThrows: true });
     const { res, body } = await call(post({ text: 'hi' }), env);
-    expect(res.status).toBe(503);
-    expect(body).toEqual({ ok: false, reason: 'unavailable' });
+    expect(STORE_FAILED_STATUS).toBe(507);
+    expect(res.status).toBe(507);
+    expect(body).toEqual({ ok: false, reason: 'full for today' });
+  });
+
+  it('once the KV cap is spent every sender gets 507, and honest senders reach the store before it', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    // A KV that accepts CAP writes and then throws, as the free plan's daily cap does. The shared
+    // limiter is set wide so the minutes of a day can pass in one loop.
+    const CAP = 3;
+    let writes = 0;
+    const { env } = countingEnv(2, 1000);
+    (env as unknown as { FEEDBACK: { put: () => Promise<void> } }).FEEDBACK.put = async () => {
+      if (writes >= CAP) throw new Error('KV put() limit exceeded for the day.');
+      writes++;
+    };
+    const statuses: number[] = [];
+    for (let i = 1; i <= 5; i++) statuses.push((await call(post({ text: 'real' }, { ip: `198.51.100.${i}` }), env)).res.status);
+    expect(statuses).toEqual([200, 200, 200, 507, 507]);
   });
 
   it.each(['GET', 'PUT', 'DELETE'])('405 with Allow: POST for %s', async (method) => {

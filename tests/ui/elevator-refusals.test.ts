@@ -61,13 +61,10 @@ it('Add car at eight cars shows the reason as text', () => {
 });
 
 it('a car that works the whole shaft says so once under its floor buttons', () => {
-  const { game, shaftId } = shaftGame(3, 2);
+  const { game, shaftId } = shaftGame(3, 1);
   const panel = createQueryPanel(game, { shaftId }, ctx) as unknown as FakeElement;
   const lines = refusals(panel).filter((t) => t.startsWith('This car'));
-  expect(lines).toEqual([
-    'This car already reaches the top and bottom of the elevator.',
-    'This car already reaches the top and bottom of the elevator.',
-  ]);
+  expect(lines).toEqual(['This car already reaches the top and bottom of the elevator.']);
 });
 
 it('says nothing when every control works', () => {

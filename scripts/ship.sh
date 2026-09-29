@@ -96,8 +96,12 @@ rm -f "$STATUS_FILE"
 if [ "$DEPLOY_STATUS" != 0 ]; then
   echo >&2
   echo "deploy failed (exit $DEPLOY_STATUS); nothing tagged or pushed, the live site is unchanged." >&2
-  echo "The release commit $COMMIT is local only. Fix the failure, then either run npm run deploy" >&2
-  echo "and tag and push by hand, or drop the commit and ship again." >&2
+  echo "The release commit $COMMIT is local only. Fix the failure, then either drop the commit and" >&2
+  echo "ship again, or deploy, tag and push by hand with exactly these commands:" >&2
+  echo "  npm run deploy" >&2
+  echo "  git tag $TAG" >&2
+  echo "  git push origin main --tags" >&2
+  echo "  git push github main --tags" >&2
   exit 1
 fi
 VERSION_ID=$(grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' /tmp/hundred-stories-deploy.log | tail -1 || true)

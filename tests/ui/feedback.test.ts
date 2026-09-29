@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   FEEDBACK_FAILED,
+  FEEDBACK_FULL,
   FEEDBACK_INTRO,
   FEEDBACK_SENT,
   FEEDBACK_TIMEOUT_MS,
@@ -261,6 +262,18 @@ describe('the Send feedback card', () => {
     expect(buttonNamed(node, 'Send')!.disabled).toBe(false);
   });
 
+  it('a 507 (the store is full for the day) says try again tomorrow, not in a minute', async () => {
+    stubFetch(reply(507, { ok: false, reason: 'full for today' }));
+    const { root, node } = openCard();
+    type(byId(root, 'hs-feedback-text'), 'Bug');
+    click(buttonNamed(node, 'Send')!);
+    await flush();
+    expect(FEEDBACK_FULL).toBe('Feedback is full for today. Try again tomorrow.');
+    expect(node.textContent).toContain(FEEDBACK_FULL);
+    expect(node.textContent).not.toContain(FEEDBACK_FAILED);
+    expect(buttonNamed(node, 'Send')!.disabled).toBe(false);
+  });
+
   it('a 429 still says try again in a minute', async () => {
     stubFetch(reply(429, { ok: false, reason: 'slow down' }));
     const { root, node } = openCard();
@@ -413,11 +426,17 @@ describe("the Worker's feedback limits", () => {
     return { limit: Number(m![1]), period: Number(m![2]) };
   };
 
-  it('per IP 2 and shared 6 per 60 s, so one address can take at most a third of the shared bucket', () => {
+  it('per IP 2 and shared 3 per 60 s, so one address alone never fills the shared bucket', () => {
     const perIp = limitOf('FEEDBACK_LIMIT');
     const shared = limitOf('FEEDBACK_GLOBAL');
     expect(perIp).toEqual({ limit: 2, period: 60 });
-    expect(shared).toEqual({ limit: 6, period: 60 });
-    expect(perIp.limit * 3).toBeLessThanOrEqual(shared.limit);
+    expect(shared).toEqual({ limit: 3, period: 60 });
+    expect(perIp.limit).toBeLessThan(shared.limit);
+  });
+
+  it('says plainly that the limiters cannot hold the daily KV cap, and what the player sees', () => {
+    expect(conf).toContain('3 x 1,440 = 4,320 writes a day, over the cap');
+    expect(conf).toContain('unconfirmed');
+    expect(conf).toContain(FEEDBACK_FULL);
   });
 });

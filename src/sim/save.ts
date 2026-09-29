@@ -535,7 +535,15 @@ function isEvent(value: unknown): boolean {
     case 'fire':
       return Array.isArray(e.roomIds) && e.roomIds.every(isId) && isFiniteNumber(e.startedAt) && isFiniteNumber(e.spreadAt);
     case 'bomb':
-      return isId(e.roomId) && isFiniteNumber(e.ransom) && isFiniteNumber(e.detonateAt) && typeof e.found === 'boolean';
+      // floor and x say where it goes off if its room is gone; older saves lack them.
+      return (
+        isId(e.roomId) &&
+        isFiniteNumber(e.ransom) &&
+        isFiniteNumber(e.detonateAt) &&
+        typeof e.found === 'boolean' &&
+        (e.floor === undefined || (isInteger(e.floor) && e.floor !== 0 && e.floor >= MIN_FLOOR && e.floor <= MAX_FLOOR)) &&
+        (e.x === undefined || (isInteger(e.x) && e.x >= 0 && e.x < TOWER_WIDTH))
+      );
     case 'vip':
       return isId(e.simId);
     case 'theft':

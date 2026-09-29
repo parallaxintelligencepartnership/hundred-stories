@@ -21,13 +21,18 @@
     { "binding": "FEEDBACK", "id": "242d9b50825d4d16988a03b052fedb3a" }
   ],
   // Only a valid message is counted (junk is refused first). 2 feedback posts per 60 seconds per
-  // client IP, then 6 per 60 seconds for everyone together (key "global"): the per-IP limit sits
-  // well below the shared one, so it takes at least three addresses to fill the shared bucket.
-  // The shared bucket holds KV writes to 8,640 a day at most (6 x 1,440).
-  // Unverified: the KV free tier's daily write cap was not checked against this figure.
+  // client IP, then 3 per 60 seconds for everyone together (key "global"): one address alone
+  // always leaves room for another sender; two addresses can fill the shared bucket.
+  //
+  // The daily budget is NOT enforced here. The site is on the Cloudflare free plan, whose KV
+  // write cap is about 1,000 a day (unconfirmed: the figure was not checked against Cloudflare's
+  // docs). A limiter's period is 10 or 60 seconds, so it cannot hold a daily budget: the shared
+  // bucket still allows 3 x 1,440 = 4,320 writes a day, over the cap. When the cap is spent,
+  // every KV put fails; the Worker answers 507 "full for today" and the feedback card says
+  // "Feedback is full for today. Try again tomorrow." until the daily count resets.
   "ratelimits": [
     { "name": "FEEDBACK_LIMIT", "namespace_id": "1001", "simple": { "limit": 2, "period": 60 } },
-    { "name": "FEEDBACK_GLOBAL", "namespace_id": "1002", "simple": { "limit": 6, "period": 60 } }
+    { "name": "FEEDBACK_GLOBAL", "namespace_id": "1002", "simple": { "limit": 3, "period": 60 } }
   ],
   "routes": [
     { "pattern": "hundredstories.xyz", "custom_domain": true },

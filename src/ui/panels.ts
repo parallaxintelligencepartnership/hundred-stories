@@ -715,12 +715,16 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
   // rebuilt whenever the cars change and reread on every refresh.
   const carsSection = section('Cars');
   const carList = el('div', 'hs-cars');
+  // When every car's floor buttons are refused for the same reason (an untouched elevator), the
+  // reason is said once here instead of under each car.
+  const carsWhy = el('p', 'hs-note hs-refused');
   carsSection.append(
     el(
       'p',
       'hs-note',
       'You can give a car its own floors and its own riders. A car kept for some riders still picks up anyone else when its own riders do not need it.',
     ),
+    carsWhy,
     carList,
   );
   body.append(carsSection);
@@ -800,10 +804,14 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
       carSignature = signature;
       buildCarRows(shaft);
     }
+    const reasons: string[] = [];
     for (let i = 0; i < carRows.length; i += 1) {
       const row = carRows[i] as CarRow;
       const car = shaft.cars[i];
-      if (!car) continue;
+      if (!car) {
+        reasons.push('');
+        continue;
+      }
       const span = carRangeOf(shaft, car);
       setText(row.label, `Car ${i + 1} \u00b7 ${floorsLabel(span.lo, span.hi)} \u00b7 ${SERVES_LABEL[car.serves]}`);
       setText(row.serves, `Serves: ${SERVES_LABEL[car.serves]}`);
@@ -831,8 +839,11 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
       row.whole.hidden = car.range === null;
       row.whole.disabled = busy;
       row.whole.title = busy ? 'People are inside.' : 'Stop at every floor of the elevator again';
-      setRefusal(row.why, busy ? ['People are inside.'] : carStepRefusals(row.steps));
+      reasons.push((busy ? ['People are inside.'] : carStepRefusals(row.steps)).join(' '));
     }
+    const shared = sharedCarReason(reasons);
+    setRefusal(carsWhy, shared === null ? [] : [shared]);
+    carRows.forEach((row, i) => setRefusal(row.why, shared === null && reasons[i] ? [reasons[i]] : []));
   };
 
   const refresh = (): void => {
@@ -924,6 +935,17 @@ function carStepRefusals(steps: { node: HTMLButtonElement }[]): string[] {
     seen[seen.indexOf(top)] = 'This car already reaches the top and bottom of the elevator.';
   }
   return seen;
+}
+
+/**
+ * One line for every car when two or more cars are refused for exactly the same reason, as in
+ * "Every car already reaches the top and bottom of the elevator."; null when the cars differ,
+ * when there is one car, or when nothing is refused. Then each car keeps its own line.
+ */
+function sharedCarReason(reasons: string[]): string | null {
+  const first = reasons[0];
+  if (reasons.length < 2 || !first || reasons.some((r) => r !== first)) return null;
+  return first.startsWith('This car ') ? `Every car ${first.slice('This car '.length)}` : `Every car: ${first}`;
 }
 
 /** The refusal line under a row of buttons: the reasons, or hidden when every button works. */

@@ -90,6 +90,14 @@ export function isFormField(target: unknown): boolean {
 /** The speeds in order, slowest first: comma steps left, period steps right. */
 const SPEED_STEPS = [0, 1, 2, 4] as const;
 
+/** A speed step in the speed buttons' own words: "paused", "normal speed", "two times as quick". */
+function speedWords(speed: number): string {
+  if (speed === 0) return 'paused';
+  if (speed === 1) return 'normal speed';
+  const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'];
+  return `${words[speed] ?? String(speed)} times as quick`;
+}
+
 /** One speed step up or down from the current one, held at pause and at 4x. */
 export function stepSpeed(speed: number, step: 1 | -1): 0 | 1 | 2 | 4 {
   const at = SPEED_STEPS.indexOf(speed as 0 | 1 | 2 | 4);
@@ -135,7 +143,7 @@ export function hasTextField(root: unknown): boolean {
 export function keyHelpLines(groupCount: number): string[] {
   return [
     `Tools: 1 to ${Math.min(9, groupCount)} pick a group of build tools and its first tool, then the letter on a tile picks that tool. Point at a tile to see its keys.`,
-    'Speed: comma slows down one step and period speeds up one step (pause, 1x, 2x, 4x). Space pauses and starts again.',
+    `Speed: comma slows down one step and period speeds up one step (${SPEED_STEPS.map(speedWords).join(', ')}). Space pauses and starts again.`,
     'Escape puts down the tool you are holding.',
   ];
 }

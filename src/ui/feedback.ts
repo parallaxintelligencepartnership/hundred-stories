@@ -32,9 +32,13 @@ export const FEEDBACK_SENT = 'Sent. Thank you.';
 export const FEEDBACK_FAILED = 'Could not send. Try again in a minute, or email requests@hundredstories.xyz.';
 /** A 413: the body is over the worker's byte limit, so sending it again can never pass. */
 export const FEEDBACK_TOO_LONG = 'That message is too long. Shorten it and send again.';
+/** The Worker's 507: its storage refused the write, most likely the day's write cap. */
+export const FEEDBACK_FULL = 'Feedback is full for today. Try again tomorrow.';
+/** The status the Worker answers when its KV write fails (src/worker/feedback.ts STORE_FAILED_STATUS). */
+export const FEEDBACK_FULL_STATUS = 507;
 
-/** How a send ended: stored, refused as too large (413), or anything else. */
-export type FeedbackOutcome = 'sent' | 'too-long' | 'failed';
+/** How a send ended: stored, refused as too large (413), storage full for the day (507), or anything else. */
+export type FeedbackOutcome = 'sent' | 'too-long' | 'full' | 'failed';
 
 /** Exactly what goes to the server, and nothing more. */
 export interface FeedbackBody {
@@ -134,8 +138,8 @@ export interface FeedbackDeps {
 }
 
 /**
- * POST the body. 'sent' only for a 200 whose JSON is {"ok":true}; 'too-long' for a 413; anything
- * else, a network error or the timeout is 'failed'.
+ * POST the body. 'sent' only for a 200 whose JSON is {"ok":true}; 'too-long' for a 413; 'full'
+ * for a 507; anything else, a network error or the timeout is 'failed'.
  */
 export async function sendFeedback(body: FeedbackBody, deps: FeedbackDeps = {}): Promise<FeedbackOutcome> {
   const doFetch = deps.fetch ?? (typeof fetch === 'function' ? (fetch as unknown as FetchLike) : null);
@@ -156,6 +160,7 @@ export async function sendFeedback(body: FeedbackBody, deps: FeedbackDeps = {}):
       ...(controller ? { signal: controller.signal } : {}),
     });
     if (response.status === 413) return 'too-long';
+    if (response.status === FEEDBACK_FULL_STATUS) return 'full';
     if (response.status !== 200) return 'failed';
     const data = (await response.json()) as { ok?: unknown } | null;
     return data !== null && typeof data === 'object' && data.ok === true ? 'sent' : 'failed';
@@ -264,7 +269,7 @@ export function createFeedbackPanel(ctx: Pick<PanelContext, 'close'>, deps: Feed
       done.focus();
       return;
     }
-    say(outcome === 'too-long' ? FEEDBACK_TOO_LONG : FEEDBACK_FAILED);
+    say(outcome === 'too-long' ? FEEDBACK_TOO_LONG : outcome === 'full' ? FEEDBACK_FULL : FEEDBACK_FAILED);
     paint();
   }
 
