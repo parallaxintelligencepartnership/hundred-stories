@@ -80,6 +80,7 @@ describe('S5: game-over record and car fields', () => {
     expect(reasonAfter((d) => (d.gameOver = {}))).toBe(damaged('gameOver'));
     expect(reasonAfter((d) => (d.gameOver = { at: 900, reason: '' }))).toBe(damaged('gameOver'));
     expect(reasonAfter((d) => (d.gameOver = { at: 'x', reason: 'Gone.' }))).toBe(damaged('gameOver'));
+    expect(reasonAfter((d) => (d.gameOver = { at: -1, reason: 'Gone.' }))).toBe(damaged('gameOver'));
   });
 
   it('refuses riders and calls that are not lists as damaged, naming the field', () => {
@@ -108,6 +109,8 @@ describe('S6: a room head count that is not a count', () => {
   it('refuses the other room scalars the loader copies as they are', () => {
     expect(reasonAfter((d) => (venue(d).vacant = 'no'))).toBe(damaged('rooms[1].vacant'));
     expect(reasonAfter((d) => (venue(d).onFire = 1))).toBe(damaged('rooms[1].onFire'));
+    expect(reasonAfter((d) => (venue(d).dirty = 'yes'))).toBe(damaged('rooms[1].dirty'));
+    expect(reasonAfter((d) => delete venue(d).infested)).toBe(damaged('rooms[1].infested'));
     expect(reasonAfter((d) => (venue(d).builtAtMinute = null))).toBe(damaged('rooms[1].builtAtMinute'));
     expect(reasonAfter((d) => (venue(d).lowEvalSinceMinute = 'x'))).toBe(damaged('rooms[1].lowEvalSinceMinute'));
   });

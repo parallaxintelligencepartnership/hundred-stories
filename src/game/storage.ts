@@ -121,6 +121,12 @@ function nextStamp(): number {
 // the fallback copy must still count on from the IndexedDB copy it could not replace.
 const lastSeq = new Map<string, number>();
 
+// The slot keys whose IndexedDB number this page has read (at the boot read or before a write).
+// A slot not in here may hold any number in IndexedDB: a boot on a Today's or friend link never
+// reads My tower, and Open a saved file then writes it. When IndexedDB also will not answer, the
+// write cannot learn that number, so it takes one no earlier copy can beat (see nextSeq).
+const learnedSeq = new Set<string>();
+
 function stampOf(raw: unknown): number {
   const n = Number(raw ?? 0);
   return Number.isFinite(n) ? n : 0;
@@ -143,7 +149,13 @@ export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): 
   const idbSeqKey = `${KEY}${SEQ_SUFFIX}`;
   const localSeqKey = `${localKey}${SEQ_SUFFIX}`;
 
-  async function readIndexedDbSeq(factory: IDBFactory): Promise<number> {
+  // The highest number this device gave the slot, in either store. Unlike the copy's own :seq it
+  // stays after a good IndexedDB write, so a write that cannot ask IndexedDB still counts on from
+  // what IndexedDB holds, and a clock-based number never goes back when the clock does.
+  const localHighKey = `${localKey}${SEQ_SUFFIX}-high`;
+
+  /** The slot's number in IndexedDB, or null when IndexedDB would not answer. */
+  async function readIndexedDbSeq(factory: IDBFactory): Promise<number | null> {
     try {
       const db = await openDb(factory);
       return await new Promise<number>((resolve, reject) => {
@@ -152,11 +164,12 @@ export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): 
         req.onerror = () => reject(req.error);
       });
     } catch {
-      return 0;
+      return null;
     }
   }
 
-  function readLocalSeq(): number {
+  /** The number of the localStorage copy itself (0 with no copy or no number). */
+  function readCopySeq(): number {
     try {
       return stampOf(deps.localStorage?.getItem(localSeqKey));
     } catch {
@@ -164,8 +177,37 @@ export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): 
     }
   }
 
+  function readLocalSeq(): number {
+    try {
+      return Math.max(readCopySeq(), stampOf(deps.localStorage?.getItem(localHighKey)));
+    } catch {
+      return 0;
+    }
+  }
+
+  function recordHigh(seq: number): void {
+    try {
+      if (seq > stampOf(deps.localStorage?.getItem(localHighKey))) deps.localStorage?.setItem(localHighKey, String(seq));
+    } catch {
+      // no record: the next unknown-slot write still starts from the clock
+    }
+  }
+
   async function nextSeq(): Promise<number> {
-    const found = deps.indexedDB ? Math.max(await readIndexedDbSeq(deps.indexedDB), readLocalSeq()) : 0;
+    let found = 0;
+    if (deps.indexedDB) {
+      found = readLocalSeq();
+      const fromDb = await readIndexedDbSeq(deps.indexedDB);
+      if (fromDb !== null) {
+        learnedSeq.add(KEY);
+        found = Math.max(found, fromDb);
+      } else if (!learnedSeq.has(KEY)) {
+        // IndexedDB holds a number this page never saw. A save from a build before the device
+        // record counts in ones from 1, so the clock in ms is above it; the device record keeps
+        // the number from going back when the clock is set back.
+        found = Math.max(found, Date.now());
+      }
+    }
     // No await between reading lastSeq and setting it, so two writes at once still get two numbers.
     const seq = Math.max(found, lastSeq.get(KEY) ?? 0) + 1;
     lastSeq.set(KEY, seq);
@@ -228,7 +270,9 @@ export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): 
           tx.onabort = () => reject(tx.error ?? new Error('write aborted'));
         });
         markPresent();
-        dropLocalCopy();
+        recordHigh(seq);
+        // A save that fell back while this one was committing holds a higher number: it stays.
+        if (readCopySeq() <= seq) dropLocalCopy();
         return;
       } catch {
         // fall through to localStorage
@@ -240,6 +284,7 @@ export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): 
       if (deps.indexedDB) {
         deps.localStorage.setItem(localStampKey, String(stamp));
         deps.localStorage.setItem(localSeqKey, String(seq));
+        recordHigh(seq);
       }
       markPresent();
     } catch {
@@ -311,8 +356,15 @@ export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): 
         throw e;
       }
     }
+    if (deps.indexedDB) learnedSeq.add(KEY);
     const fromLocal = readLocal();
     sawSeq(Math.max(fromDb?.seq ?? 0, fromLocal?.seq ?? 0));
+    if (fromDb && fromLocal && fromLocal.seq < fromDb.seq) {
+      // Older than IndexedDB (left by a build before copies were dropped): it would only load on
+      // a later boot where IndexedDB will not open, as a stale tower.
+      dropLocalCopy();
+      return fromDb.text;
+    }
     if (fromDb && fromLocal) {
       // A copy with no number was written by a build before sequence numbers, so any numbered
       // copy is newer. The stamp decides only between equal numbers (two copies without one).
