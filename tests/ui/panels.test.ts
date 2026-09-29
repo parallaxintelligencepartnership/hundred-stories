@@ -27,10 +27,12 @@ const ctx: PanelContext = {
 
 function logGame(): {
   game: never;
-  world: { log: LogEntry[]; logTotal: number; time: { minute: number } };
+  world: World;
   push(n: number, minute?: number, level?: LogEntry['level']): void;
 } {
-  const world = { log: [] as LogEntry[], logTotal: 0, time: { minute: 0 } };
+  // A real world (the panel also reads rooms, events and money for Needs you now), clock at zero.
+  const world = createWorld(1);
+  world.time.minute = 0;
   return {
     game: { world } as never,
     world,
@@ -45,8 +47,15 @@ function logGame(): {
 
 const node = (panel: unknown): FakeElement => panel as FakeElement;
 
+/** The Today section, which holds the log (Needs you now comes before it). */
+const todayOf = (panel: unknown): FakeElement | undefined =>
+  node(panel)
+    .descendants()
+    .find((n) => n.className.split(/\s+/).includes('hs-section') && n.children[0]?.textContent === 'Today');
+
+/** The log's list for the current day: the first list under Today. */
 function listOf(panel: unknown): FakeElement {
-  const list = node(panel).descendants().find((n) => n.className === 'hs-log-list');
+  const list = todayOf(panel)?.descendants().find((n) => n.className === 'hs-log-list');
   if (!list) throw new Error('no log list');
   return list;
 }
@@ -57,6 +66,11 @@ const texts = (list: FakeElement): string[] =>
 /** Each line's time words. */
 const times = (list: FakeElement): string[] =>
   list.children.map((li) => li.children.find((c) => c.className === 'hs-log-time')?.textContent ?? '');
+/** The time words of every log line on show, today's list then Yesterday and Earlier. */
+const allTimes = (panel: unknown): string[] =>
+  (todayOf(panel)?.descendants() ?? [])
+    .filter((n) => n.className === 'hs-log-list' && !n.hidden)
+    .flatMap((list) => times(list));
 const showOlder = (panel: unknown): FakeElement | undefined =>
   node(panel).descendants().find((n) => n.tagName === 'BUTTON' && n.textContent === 'Show older');
 const tap = (target: FakeElement): void => {
@@ -99,7 +113,10 @@ describe('News panel', () => {
     push(1, 3 * 1440 + 11 * 60); // an hour ago
     push(1, 3 * 1440 + 11 * 60 + 50); // ten minutes ago
     const panel = createLogPanel(game, ctx);
-    expect(times(listOf(panel))).toEqual(['just now', 'an hour ago', '5 hours ago', 'yesterday', '2 days ago']);
+    // Earlier days sit under Yesterday and Earlier in the Today section, shown once Show older is tapped.
+    expect(times(listOf(panel))).toEqual(['just now', 'an hour ago', '5 hours ago']);
+    tap(showOlder(panel)!);
+    expect(allTimes(panel)).toEqual(['just now', 'an hour ago', '5 hours ago', 'yesterday', '2 days ago']);
     // The words move on as the clock does, with no new line.
     world.time.minute += 60;
     panel.refresh?.();

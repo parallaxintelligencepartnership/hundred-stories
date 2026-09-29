@@ -236,7 +236,9 @@ describe('C S2: a daily dated after today is never thrown away', () => {
     expect(dailyOpening({ date: '2026-09-23', finished: true }, '2026-09-24')).toBe('fresh');
   });
 
-  it('openDaily on a device whose date moved back leaves the daily slot bytes alone and offers the choice', async () => {
+  // Since the daily lock (86b307f) a date moved back waits: the later run stands behind a locked
+  // card, and no answer starts today's tower or copies the later one aside.
+  it('openDaily on a device whose date moved back leaves the daily slot bytes alone and shows the locked card', async () => {
     const ls = fakeLocalStorage();
     vi.stubGlobal('localStorage', ls.store);
     const later = gameOn('2026-09-25');
@@ -250,13 +252,15 @@ describe('C S2: a daily dated after today is never thrown away', () => {
     await settle();
     expect(ls.data.get('hundred-stories:daily')).toBe(stored);
     expect(game.getDaily()?.date).toBe('2026-09-25');
-    expect(game.getDailyChoice()).toEqual({ savedDate: '2026-09-25', today: '2026-09-24', yesterday: false, ahead: true });
+    expect(game.getDailyChoice()).toEqual({ savedDate: '2026-09-25', today: '2026-09-24', yesterday: false, ahead: false, locked: 'clock-back' });
     expect(game.getSpeed()).toBe(0);
 
-    // "Start today's tower instead" keeps a copy of the later run.
+    // A locked day starts nothing: any answer goes on with the later run, and its bytes stay.
     await game.chooseDaily('today');
-    expect(game.getDaily()?.date).toBe('2026-09-24');
-    expect(ls.data.get('hs.save.daily-kept')).toBe(stored);
+    expect(game.getDailyChoice()).toBe(null);
+    expect(game.getDaily()?.date).toBe('2026-09-25');
+    expect(ls.data.get('hs.save.daily-kept')).toBeUndefined();
+    expect(ls.data.get('hundred-stories:daily')).toBe(stored);
   });
 
   it('keeping the later run goes on with it', async () => {

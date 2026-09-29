@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NEWS_TOAST_MAX, NEWS_TOAST_MS, TOAST_FADE_MS, createToasts, type Toasts } from '../../src/ui/toast';
 import { createLogPanel, createSettingsPanel, type PanelContext } from '../../src/ui/panels';
+import { createWorld } from '../../src/sim/world';
 import { FakeDom, type FakeElement } from './fake-dom';
 
 let dom: FakeDom;
@@ -156,7 +157,8 @@ describe('the look', () => {
 describe('the News sheet and the toasts', () => {
   const css = readFileSync(new URL('../../src/ui/ui.css', import.meta.url), 'utf8');
   const panelCtx: PanelContext = { apply: () => ({ ok: true }) as never, notice: () => {}, close: () => {}, reducedMotion: false, setReducedMotion: () => {} };
-  const game = { world: { seed: 1, log: [], logTotal: 0, time: { minute: 0 } } } as never;
+  // A real world: the News panel reads rooms, events and money for Needs you now.
+  const game = { world: createWorld(1) } as never;
   const classesOf = (n: unknown): string[] => (n as FakeElement).className.split(/\s+/).filter(Boolean);
   const sheetClasses = (): string[] => [
     ...new Set([...classesOf(createLogPanel(game, panelCtx)), ...classesOf(createSettingsPanel(game, panelCtx))]),
