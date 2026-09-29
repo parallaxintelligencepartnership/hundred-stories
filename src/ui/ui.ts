@@ -71,6 +71,7 @@ import { focusablesIn, SHEET_CARD_MIN_WIDTH } from './sheet';
 import { createQuietLabels } from './quiet-labels';
 import { WATCH_CLASS, createWatchMode, createWatchToggle } from './watch';
 import { createSoundToggle } from './sound-toggle';
+import { createSaveButton } from './save-button';
 import { UPDATE_TEXT, type Notifier } from './notify';
 
 export interface Ui {
@@ -339,7 +340,13 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   // Sound's round button, directly left of Watch (placeWatchButton), the same size and hidden
   // with it. It and the Settings switch turn the same setting and follow each other.
   const soundToggle = createSoundToggle(sound);
-  top.append(soundToggle.button, watchToggle.button);
+  // Save's round button, directly left of Sound (placeWatchButton): the same save and the same
+  // notice as Settings, Save now, in every tower that row shows in (all three). Hidden with them.
+  const saveButton = createSaveButton({
+    save: () => game.save(),
+    notice: (text) => notice(text),
+  });
+  top.append(saveButton.button, soundToggle.button, watchToggle.button);
   const stopSoundPref = onPrefChange((key) => {
     if (key === PREF_KEYS.sound) mountedPanel?.refresh?.();
   });
@@ -1310,6 +1317,12 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     const soundPlaced = watch.width > 0;
     soundToggle.button.classList.toggle('is-placed', soundPlaced);
     if (soundPlaced) soundToggle.button.style.setProperty('--sound-x', `${Math.round(watch.left - bar.left)}px`);
+    // Save ends the same gap left of Sound's left edge. Right of Watch is the goals pill's (under
+    // Share and Menu), and a phone keeps Watch at the right edge, so Save takes the left end.
+    const soundBox = soundToggle.button.getBoundingClientRect();
+    const savePlaced = soundPlaced && soundBox.width > 0;
+    saveButton.button.classList.toggle('is-placed', savePlaced);
+    if (savePlaced) saveButton.button.style.setProperty('--save-x', `${Math.round(soundBox.left - bar.left)}px`);
   }
 
   /** The view, a media query or a font changed under the chip and the bar: measure them again. */
@@ -1951,6 +1964,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
       watchToggle.button.removeEventListener('transitionend', onLabelTransitionEnd);
       watchToggle.destroy();
       soundToggle.destroy();
+      saveButton.destroy();
       stopSoundPref();
       display.stop();
       unsubscribeHaptics?.();

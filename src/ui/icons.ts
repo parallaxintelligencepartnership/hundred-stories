@@ -46,7 +46,9 @@ export type IconName =
   | 'watch'
   // The Sound button beside Watch: a speaker with its waves, and the speaker crossed out.
   | 'sound'
-  | 'mute';
+  | 'mute'
+  // The Save button beside them: a floppy disk, its shutter and label.
+  | 'save';
 
 /** A 16 by 16 drawing per icon, 1.5 px lines in the current text color. */
 const LINE = 'fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"';
@@ -100,6 +102,7 @@ const SYMBOLS: Record<IconName, string> = {
   watch: `<path d="M1.5 8c1.6-3 3.8-4.5 6.5-4.5S12.9 5 14.5 8c-1.6 3-3.8 4.5-6.5 4.5S3.1 11 1.5 8z" ${LINE}/><circle cx="8" cy="8" r="2.6" ${LINE}/><circle cx="8" cy="8" r="1.1" fill="currentColor"/><path d="M4.2 4.6l-.7-1.1M11.8 4.6l.7-1.1" ${LINE}/>`,
   sound: `<path d="M2 6v4h2.5L8 13V3L4.5 6z" ${LINE}/><path d="M10.5 5.75a3 3 0 0 1 0 4.5M12.25 4a5.5 5.5 0 0 1 0 8" ${LINE}/>`,
   mute: `<path d="M2 6v4h2.5L8 13V3L4.5 6z" ${LINE}/><path d="M10.5 6l4 4M14.5 6l-4 4" ${LINE}/>`,
+  save: `<path d="M2.25 2.25h9l2.5 2.5v9h-11.5z" ${LINE}/><path d="M5 2.25v3.5h5.5v-3.5M4.75 13.75v-4.5h6.5v4.5" ${LINE}/>`,
 };
 
 export const ICON_NAMES = Object.keys(SYMBOLS) as IconName[];

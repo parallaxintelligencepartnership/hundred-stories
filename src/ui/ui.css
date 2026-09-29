@@ -2962,6 +2962,31 @@ button.hs-news-toast {
   translate: -100% 0;
 }
 
+/* Save: the same round button, directly left of Sound in the same row, one gap between them
+   (ui.ts placeWatchButton measures Sound's left edge into --save-x). Right of Watch is the
+   goals pill's, under Share and Menu, so Save takes the row's left end. Until the first measure
+   it waits hidden, like Sound. An action, not a mode: no amber edge; while its save is being
+   written it is disabled. */
+.hs-save-btn {
+  position: absolute;
+  top: calc(100% + var(--gap-float));
+  right: calc(2 * (var(--touch) + 8px + var(--gap-float)));
+}
+
+.hs-save-btn:not(.is-placed) {
+  visibility: hidden;
+}
+
+.hs-save-btn.is-placed {
+  right: auto;
+  left: calc(var(--save-x) - var(--gap-float));
+  translate: -100% 0;
+}
+
+.hs-save-btn:disabled {
+  cursor: progress;
+}
+
 /* Smart hiding (quiet-labels.ts): after 2 s with no pointer move, press or key the shell takes
    is-quiet-labels and Watch and Sound fold their words away, leaving the icon centered in its
    circle (the -6px takes back the button's gap; .hs-round's min-width keeps the circle). Any
@@ -2969,7 +2994,8 @@ button.hs-news-toast {
    ui.ts moves Sound with Watch's width on every frame of the fold. A phone hides the words
    already (below), so none of this shows there. */
 .hs-watch-btn .hs-btn-label,
-.hs-sound-btn .hs-btn-label {
+.hs-sound-btn .hs-btn-label,
+.hs-save-btn .hs-btn-label {
   display: inline-block;
   max-width: 6em;
   overflow: hidden;
@@ -2982,7 +3008,8 @@ button.hs-news-toast {
 
 /* .hs-icon-btn's press transition, with the padding's fold added. */
 .hs-watch-btn,
-.hs-sound-btn {
+.hs-sound-btn,
+.hs-save-btn {
   transition:
     transform var(--motion-fast) var(--ease-spring),
     border-radius var(--motion-fast) var(--ease-spring),
@@ -2990,11 +3017,11 @@ button.hs-news-toast {
     padding var(--label-fade) var(--ease-standard);
 }
 
-.hs-ui.is-quiet-labels :is(.hs-watch-btn, .hs-sound-btn):not(:hover):not(:focus-visible) {
+.hs-ui.is-quiet-labels :is(.hs-watch-btn, .hs-sound-btn, .hs-save-btn):not(:hover):not(:focus-visible) {
   padding: 0;
 }
 
-.hs-ui.is-quiet-labels :is(.hs-watch-btn, .hs-sound-btn):not(:hover):not(:focus-visible) .hs-btn-label {
+.hs-ui.is-quiet-labels :is(.hs-watch-btn, .hs-sound-btn, .hs-save-btn):not(:hover):not(:focus-visible) .hs-btn-label {
   max-width: 0;
   opacity: 0;
   margin-left: -6px;
@@ -3309,8 +3336,18 @@ button.hs-news-toast {
     translate: none;
   }
 
+  /* Save beside Sound, two icon-only round buttons and two gaps in: Watch holds the right edge,
+     so Save takes the other end of the row. */
+  .hs-save-btn,
+  .hs-save-btn.is-placed {
+    left: auto;
+    right: calc(2 * (var(--touch) + 8px + var(--gap-float)));
+    translate: none;
+  }
+
   /* Watch is icon only here, so the fallback is already right: no wait for the measure. */
-  .hs-sound-btn:not(.is-placed) {
+  .hs-sound-btn:not(.is-placed),
+  .hs-save-btn:not(.is-placed) {
     visibility: visible;
   }
 
@@ -3783,8 +3820,8 @@ button.hs-news-toast {
     left: 0;
     transform: none;
     width: auto;
-    /* Clear of Watch and Sound on the right. */
-    max-width: calc(100% - 80px - var(--touch) - 8px - var(--gap-float));
+    /* Clear of Watch, Sound and Save on the right. */
+    max-width: calc(100% - 80px - 2 * (var(--touch) + 8px + var(--gap-float)));
     padding-left: 12px;
   }
 
@@ -3812,8 +3849,8 @@ button.hs-news-toast {
     bottom: auto;
     left: calc(var(--edge) + var(--safe-left));
     transform: none;
-    /* Clear of the map's column and of Sound beside Watch. */
-    max-width: calc(100% - 64px - 3 * var(--edge) - var(--safe-left) - var(--safe-right) - var(--touch) - 8px - var(--gap-float));
+    /* Clear of the map's column and of Sound and Save beside Watch. */
+    max-width: calc(100% - 64px - 3 * var(--edge) - var(--safe-left) - var(--safe-right) - 2 * (var(--touch) + 8px + var(--gap-float)));
   }
 
   /* The sheet and a panel share the bottom of a phone screen, so only one shows at a time. */
@@ -4005,9 +4042,9 @@ button.hs-news-toast {
     left: calc(var(--pad) + var(--safe-left) - var(--toast-bleed));
     /* The map's corner stays free whether it shows or not: the map comes and goes with every
        pan, and the alerts keep one right edge instead of jumping sideways with it. The band starts
-       on Watch and Sound's row, so it also stops one round button and a gap short of Sound: a tap
-       on Sound never lands on an alert. */
-    right: calc(64px + 2 * var(--edge) + var(--safe-right) + var(--touch) + 8px + var(--gap-float) - var(--toast-bleed));
+       on Watch, Sound and Save's row, so it also stops two round buttons and two gaps short of
+       Sound: a tap on Sound or Save never lands on an alert. */
+    right: calc(64px + 2 * var(--edge) + var(--safe-right) + 2 * (var(--touch) + 8px + var(--gap-float)) - var(--toast-bleed));
     width: auto;
     max-height: calc(25vh + 2 * var(--toast-bleed));
     padding: var(--toast-bleed);
@@ -4018,7 +4055,7 @@ button.hs-news-toast {
 
   /* The same edge with the map up: this outranks the wide screen's step left of a 96 px map. */
   .hs-minimap:not(.is-hidden) ~ .hs-toasts {
-    right: calc(64px + 2 * var(--edge) + var(--safe-right) + var(--touch) + 8px + var(--gap-float) - var(--toast-bleed));
+    right: calc(64px + 2 * var(--edge) + var(--safe-right) + 2 * (var(--touch) + 8px + var(--gap-float)) - var(--toast-bleed));
   }
 
   /* Tight on a phone, except on the left: the words clear the colour edge by 7 px. */
@@ -4078,7 +4115,7 @@ button.hs-news-toast {
 /* Hidden, they take no clicks: the first input only brings them back (src/ui/watch.ts). The
    hover card and the placing chip and bar go with them. News toasts are not raised while
    watching (refreshNews); the alert cards and alert toasts in .hs-toasts stay. */
-.hs-ui.is-watching :is(.hs-status-pill > :not(.hs-status-clock), .hs-top-actions, .hs-watch-btn, .hs-sound-btn, .hs-view-chip, .hs-palette, .hs-build-fab, .hs-card, .hs-minimap, .hs-hover-card, .hs-place-bar, .hs-place-chip) {
+.hs-ui.is-watching :is(.hs-status-pill > :not(.hs-status-clock), .hs-top-actions, .hs-watch-btn, .hs-sound-btn, .hs-save-btn, .hs-view-chip, .hs-palette, .hs-build-fab, .hs-card, .hs-minimap, .hs-hover-card, .hs-place-bar, .hs-place-chip) {
   opacity: 0;
   pointer-events: none;
   animation: hs-watch-hide var(--watch-fade) var(--ease-standard);

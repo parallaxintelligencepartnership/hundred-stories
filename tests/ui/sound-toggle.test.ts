@@ -262,7 +262,7 @@ describe('Sound button styles', () => {
     expect(phone).toMatch(/\.hs-sound-btn,\s*\.hs-sound-btn\.is-placed \{\s*left: auto;\s*right: calc\(var\(--touch\) \+ 8px \+ var\(--gap-float\)\);/);
     // On a wide screen Watch shows its word, so Sound waits hidden for the measure; a phone's fallback is right.
     expect(css).toMatch(/\.hs-sound-btn:not\(\.is-placed\) \{\s*visibility: hidden;/);
-    expect(phone).toMatch(/\.hs-sound-btn:not\(\.is-placed\) \{\s*visibility: visible;/);
+    expect(phone).toMatch(/\.hs-sound-btn:not\(\.is-placed\),\s*\.hs-save-btn:not\(\.is-placed\) \{\s*visibility: visible;/);
     // Its size is .hs-round's, the Watch button's own: no rule of its own sets one. The quiet
     // fold (quiet-labels.ts) takes Watch's and Sound's padding to 0 alike while the words are away.
     const resting = css.replace(/\.hs-ui\.is-quiet-labels[^{]*\{[^}]*\}/g, '');
@@ -270,7 +270,7 @@ describe('Sound button styles', () => {
   });
 });
 
-describe('a phone at 390 px: the alerts band stops short of Sound', () => {
+describe('a phone at 390 px: the alerts band stops short of Sound and Save', () => {
   // The phone's own values (ui.css :root and its 720 px block), no safe area, a 1x ui scale.
   const vars: Record<string, number> = { '--edge': 8, '--touch': 44, '--gap-float': 8, '--safe-right': 0, '--toast-bleed': 24 };
   const px = (expr: string): number => {
@@ -294,7 +294,7 @@ describe('a phone at 390 px: the alerts band stops short of Sound', () => {
     return m[1] as string;
   };
 
-  it('ends every alert card at least a gap left of Sound, map up or not', () => {
+  it('ends every alert card at least a gap left of Save, map up or not', () => {
     const width = 390;
     expect(vars['--edge']).toBe(Number(/--edge: (\d+)px;/.exec(phone)?.[1]));
     // The bar's right edge on a phone, then Sound one round button and a gap in from it.
@@ -302,10 +302,16 @@ describe('a phone at 390 px: the alerts band stops short of Sound', () => {
     const soundRight = barRight - px(declIn(phone, '.hs-sound-btn.is-placed', 'right'));
     const soundLeft = soundRight - px('calc(var(--touch) + 8px)');
     expect(soundLeft).toBe(270);
+    // Save one more round button and gap in, left of Sound.
+    const saveLeft = barRight - px(declIn(phone, '.hs-save-btn.is-placed', 'right')) - px('calc(var(--touch) + 8px)');
+    expect(saveLeft).toBe(soundLeft - 60);
+    // The phone's own alerts rules, in the last phone block: the wide screen's step left of a
+    // 96 px map comes earlier in the file and is outranked there.
+    const alertsBlock = css.slice(css.lastIndexOf('@media (max-width: 720px) {'));
     for (const selector of ['  .hs-toasts', '.hs-minimap:not(.is-hidden) ~ .hs-toasts']) {
       // The cards end --toast-bleed inside the band's right edge.
-      const cardsRight = width - px(declIn(phone, selector, 'right')) - vars['--toast-bleed']!;
-      expect(cardsRight).toBeLessThanOrEqual(soundLeft - vars['--gap-float']!);
+      const cardsRight = width - px(declIn(alertsBlock, selector, 'right')) - vars['--toast-bleed']!;
+      expect(cardsRight).toBeLessThanOrEqual(saveLeft - vars['--gap-float']!);
     }
   });
 });
