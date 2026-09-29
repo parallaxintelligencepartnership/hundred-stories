@@ -202,8 +202,13 @@ export const NOISE = {
 
 // Minute of day schedules. Weekday = dayOfQuarter 0 or 1, weekend = 2.
 export const SCHEDULES = {
-  worker: { arriveStart: 8 * 60, arriveEnd: 9 * 60 + 15, lunchStart: 12 * 60, lunchEnd: 13 * 60, lunchChance: 0.5, leaveStart: 17 * 60, leaveEnd: 18 * 60 + 30, weekendChance: 0.1 },
-  resident: { leaveStart: 7 * 60 + 30, leaveEnd: 9 * 60, returnStart: 17 * 60, returnEnd: 21 * 60, eveningOutChance: 0.3 },
+  /**
+   * Workers leave between leaveStart and leaveEnd. Each office gets one quitting time when it
+   * leases, drawn so that its workers, each within quitJitterMinutes of it, stay inside the
+   * window; the tower's departures come in waves across the evening instead of one spike.
+   */
+  worker: { arriveStart: 7 * 60 + 30, arriveEnd: 9 * 60 + 15, lunchStart: 12 * 60, lunchEnd: 13 * 60, lunchChance: 0.5, leaveStart: 16 * 60 + 30, leaveEnd: 19 * 60 + 30, quitJitterMinutes: 15, weekendChance: 0.1 },
+  resident: { leaveStart: 7 * 60 + 30, leaveEnd: 9 * 60, returnStart: 17 * 60, returnEnd: 21 * 60 + 30, eveningOutChance: 0.3 },
   guest: { checkInStart: 17 * 60, checkInEnd: 22 * 60, checkOutStart: 7 * 60, checkOutEnd: 10 * 60, dinnerChance: 0.6, occupancyWeekday: 0.6, occupancyWeekend: 0.9 },
   shopper: { open: 10 * 60, close: 21 * 60, weekendMultiplier: 2.5, visitMinutes: 40 },
   diner: { lunchStart: 11 * 60 + 30, lunchEnd: 13 * 60 + 30, dinnerStart: 18 * 60, dinnerEnd: 21 * 60, visitMinutes: 50 },

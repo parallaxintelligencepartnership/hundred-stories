@@ -134,9 +134,9 @@ describe('scenario: the first tower', () => {
     expect(world.population).toBe(48);
   });
 
-  it('sends most of the workers home by 19:00', () => {
+  it('sends most of the workers home by 19:45 (they leave 16:30 to 19:30)', () => {
     const world = firstTower();
-    at(world, 19, 0);
+    at(world, 19, 45);
 
     const workers = simsOfKind(world, 'worker');
     const outside = workers.filter((w) => w.state === 'outside').length;

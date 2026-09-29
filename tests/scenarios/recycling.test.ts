@@ -408,6 +408,8 @@ describe('a tower without a center', () => {
     runDays(world, 3);
     // Re-recorded 2026-09-28: the stats gained loss and by-kind tables and hotel income changed.
     // Re-recorded again the same day: last quarter records its billed units (upkeepCountByKind); without it, 36d95265.
-    expect(hashWorld(world)).toBe('9650a815');
+    // Re-recorded a third time 2026-09-28 (was 9650a815): the evening rush spread (company quitting
+    // times, new worker and resident windows) and stats.avgWaitMinutes written at boarding.
+    expect(hashWorld(world)).toBe('a7613ca2');
   });
 });

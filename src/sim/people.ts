@@ -147,12 +147,17 @@ function fillVacantOffices(world: World, clock: Clock): void {
   const rule = SCHEDULES.worker;
   if (clock.isWeekend) return;
   if (clock.minuteOfDay < rule.arriveStart || clock.minuteOfDay > rule.arriveEnd) return;
-  for (const room of roomsOfKind(world, 'office')) {
+  // By id, so the draws below never depend on the order the rooms map was filled in.
+  const offices = roomsOfKind(world, 'office').sort((a, b) => a.id - b.id);
+  for (const room of offices) {
     if (!room.vacant || room.tenants.length > 0 || room.onFire) continue;
     if (!reachableFor(world, room, 'office')) continue;
     room.vacant = false;
+    // The company's quitting time, drawn once at the lease. It lives on in its workers'
+    // saved schedules, so a loaded tower needs no field for it.
+    const quit = world.rng.int(rule.leaveStart + rule.quitJitterMinutes, rule.leaveEnd - rule.quitJitterMinutes);
     for (let i = 0; i < ROOMS.office.capacity; i++) {
-      const sim = spawnWorker(world, room, clock);
+      const sim = spawnWorker(world, room, clock, quit);
       room.tenants.push(sim.id);
     }
     log(world, `An office on ${floorLabel(room.floor)} was rented to a new tenant.`, 'info', { roomId: room.id });
@@ -1073,11 +1078,11 @@ function newSim(world: World, kind: SimKind, pos: { floor: number; x: number }, 
   return sim;
 }
 
-function spawnWorker(world: World, office: Room, clock: Clock): Sim {
+function spawnWorker(world: World, office: Room, clock: Clock, quit: number): Sim {
   const rule = SCHEDULES.worker;
   const arriveFrom = Math.max(rule.arriveStart, clock.minuteOfDay);
   const arrive = world.rng.int(arriveFrom, rule.arriveEnd);
-  const leave = world.rng.int(rule.leaveStart, rule.leaveEnd);
+  const leave = world.rng.int(quit - rule.quitJitterMinutes, quit + rule.quitJitterMinutes);
   const days: ScheduleEntry['days'] = world.rng.next() < rule.weekendChance ? ['weekday', 'weekend'] : ['weekday'];
   const schedule: ScheduleEntry[] = [
     { minuteOfDay: arrive, days, goal: { kind: 'room', roomId: office.id }, stayMinutes: 0 },

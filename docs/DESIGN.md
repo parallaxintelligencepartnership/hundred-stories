@@ -67,6 +67,15 @@ Every module is built against this document and `src/sim/types.ts`. If reality d
 6. `recomputeStars` every 60 minutes
 7. `world.time.minute += 1`
 
+### Daily schedules (SCHEDULES in sim/rules.ts)
+
+| Who | Morning | Evening |
+|---|---|---|
+| Workers | arrive 7:30 to 9:15 AM (offices lease in this window, weekdays only) | leave 4:30 to 7:30 PM: each office draws one quitting time at the lease, its workers leave within `quitJitterMinutes` (15) of it, so the tower empties in waves; the times live on in the workers' saved schedules |
+| Residents | leave 7:30 to 9:00 AM on weekdays | come home 5:00 to 9:30 PM |
+
+`stats.avgWaitMinutes` is the mean hall wait of riders who boarded a car this quarter (`stats.waitsCounted` boardings behind it); both reset at the quarter settle.
+
 ## 6. Elevator algorithm (sim/elevators.ts)
 
 - Rider class: `riderClassOf(kind)` sorts every sim into `hotel` (guest, vip), `office` (worker) or `other` (everyone else). A car's `serves` is `any`, `hotel` or `office`; its `range` is `{lo, hi}` inside the shaft span, or null for the whole shaft, which grows with the shaft. `carCovers(shaft, car, floor)` answers both.

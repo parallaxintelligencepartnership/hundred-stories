@@ -537,6 +537,7 @@ describe('hashWorld covers every field in types.ts', () => {
       vipRating: (s: World['stats']) => (s.vipRating = 'fair'),
       weddingsHeld: (s: World['stats']) => (s.weddingsHeld = 1),
       avgWaitMinutes: (s: World['stats']) => (s.avgWaitMinutes = 1),
+      waitsCounted: (s: World['stats']) => (s.waitsCounted = 7),
       tenantsLeftReasons: (s: World['stats']) => (s.tenantsLeftReasons['Too noisy.'] = 1),
       badQuarterStreak: (s: World['stats']) => (s.badQuarterStreak = 1),
       lastVip: (s: World['stats']) => (s.lastVip = { simId: 1, minute: 2 } as NonNullable<World['stats']['lastVip']>),
@@ -758,20 +759,44 @@ describe('room order, guards, collectors and fire events (audit I S6)', () => {
     expect(hashWorld(loaded.world)).toBe(hashWorld(world));
   }, 60_000);
 
-  // Audit 2026-09-28 I, note N1: stats.avgWaitMinutes is created at 0, saved, validated and
-  // hashed, but nothing writes it. Writing it where a rider boards moves the pinned hashes in
-  // tests/scenarios/security.test.ts and recycling.test.ts, so that is left for the owner. Until
-  // then this pins what the field is: always 0, however many people have waited for a car.
-  it('N1: stats.avgWaitMinutes stays 0 through a morning of elevator rides (never written)', () => {
+  // Audit 2026-09-28 I, note N1: stats.avgWaitMinutes was saved, validated and hashed but never
+  // written. It is now the running mean of the hall waits of riders who boarded this quarter,
+  // with stats.waitsCounted behind it; both reset at the quarter settle and ride in the save.
+  it('N1: stats.avgWaitMinutes averages boarded waits, survives a save, and resets at the settle', () => {
     const world = officeTower();
-    let rode = 0;
-    while (world.time.minute < 1440 + 8 * 60 + 40) {
-      tick(world);
-      for (const sim of world.sims.values()) if (sim.state === 'riding') rode++;
-    }
-    expect(rode).toBeGreaterThan(0);
+    while (world.time.minute < 1440 + 8 * 60 + 40) tick(world);
+    expect(world.stats.waitsCounted ?? 0).toBeGreaterThan(0);
+    expect(world.stats.avgWaitMinutes).toBeGreaterThan(0);
+
+    const loaded = deserialize(serialize(world));
+    if (!loaded.ok) throw new Error(loaded.reason);
+    expect(loaded.world.stats.avgWaitMinutes).toBe(world.stats.avgWaitMinutes);
+    expect(loaded.world.stats.waitsCounted).toBe(world.stats.waitsCounted);
+
+    // The next quarter settles at 5 AM on the fourth day: the average starts again from 0.
+    while (world.time.minute <= 3 * 1440 + 5 * 60) tick(world);
     expect(world.stats.avgWaitMinutes).toBe(0);
+    expect(world.stats.waitsCounted).toBe(0);
   }, 60_000);
+
+  it('N1: stats.avgWaitMinutes stays 0 in a tower where nobody rides', () => {
+    const world = createWorld(12345);
+    world.cash = 50_000_000;
+    for (let x = 0; x <= 20; x++) applyCommand(world, { kind: 'build', room: 'lobby', floor: 1, x });
+    while (world.time.minute < 1440 + 12 * 60) tick(world);
+    expect(world.stats.avgWaitMinutes).toBe(0);
+    expect(world.stats.waitsCounted).toBe(0);
+  });
+
+  // An older save carries no waitsCounted: it loads as 0 and the next boarding starts the count.
+  it('N1: loads a save without stats.waitsCounted as 0', () => {
+    const world = officeTower();
+    const data = JSON.parse(serialize(world)) as Record<string, any>;
+    delete data.stats.waitsCounted;
+    const loaded = deserialize(JSON.stringify(data));
+    if (!loaded.ok) throw new Error(loaded.reason);
+    expect(loaded.world.stats.waitsCounted).toBe(0);
+  });
 
   it("keeps a guard's state and a collector's round across serialize and deserialize", () => {
     const world = richWorld();

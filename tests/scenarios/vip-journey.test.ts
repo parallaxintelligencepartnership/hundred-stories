@@ -176,11 +176,14 @@ describe('the VIP journey', () => {
   it('a suite rated below the fair band keeps its booking and caps the rating at fair', () => {
     // Offices under and over the suite: two noisy neighbors each way, a suite rating of 0.2.
     const world = tower({ cars: 2, top: 6, officeFloors: [2, 4], suiteX: 100 });
-    // Book it on day 1, so the suite has been in the red zone a full day during the notice:
-    // evaluation must not move the booked VIP out as if they were a tenant.
+    // Book it at 4 PM on day 0, before any guest can check in (a guest night would leave it
+    // booked or dirty), so the notice runs to an arrival of 8 AM or later on day 1: by then the
+    // suite has been in the red zone a full day, and evaluation must not move the booked VIP out
+    // as if they were a tenant.
     EVENT_TEST_HOOKS.chance.vip = 0;
-    atOnDay(world, 1, 0, 0);
+    atOnDay(world, 0, 16, 0);
     startVip(world);
+    expect(visitOf(world)).toBeDefined();
     runVisit(world);
     expect(suiteOf(world).eval).toBeLessThan(0.34);
     expect(world.stats.lastVip?.reason).toBeNull();

@@ -372,6 +372,8 @@ describe('below three stars', () => {
     runDays(world, 4);
     // Re-recorded for the audit fix wave (2026-09-28, lane B S3): boarding now ends the wait, so
     // a transfer's second wait places its own hall call; with that line reverted it hashes eeb027e5.
-    expect(hashWorld(world)).toBe('42ecfb60');
+    // Re-recorded again 2026-09-28 (was 42ecfb60): the evening rush spread (company quitting times,
+    // new worker and resident windows) and stats.avgWaitMinutes written at boarding.
+    expect(hashWorld(world)).toBe('5bb82411');
   });
 });

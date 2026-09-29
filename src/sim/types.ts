@@ -376,7 +376,8 @@ export interface Stats {
   lastQuarter: QuarterSummary;
   vipRating: 'none' | 'poor' | 'fair' | 'good';
   weddingsHeld: number;
-  avgWaitMinutes: number;
+  avgWaitMinutes: number; // mean hall wait of the riders who boarded a car this quarter, 0 until one has
+  waitsCounted?: number; // boardings behind avgWaitMinutes; absent from older saves and loaded as 0
   tenantsLeftReasons: Record<string, number>;
   badQuarterStreak?: number; // consecutive quarters below the bankruptcy line; saved with the world
   lastVip?: VipVisitRecord; // absent until the first visit ends; saved with the world

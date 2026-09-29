@@ -188,6 +188,8 @@ export function onQuarterStart(world: World): void {
   world.stats.incomeByKind = {};
   world.stats.upkeepByKind = {};
   world.stats.lossesByKind = {};
+  world.stats.avgWaitMinutes = 0;
+  world.stats.waitsCounted = 0;
 
   const lost = losses > 0 ? ` lost ${dollars(losses)} to trouble,` : '';
   log(

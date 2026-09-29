@@ -6,6 +6,7 @@ import { SHAFTS } from './rules';
 import type { ShaftRule } from './rules';
 import { carCovers, carRangeOf, riderClassOf } from './types';
 import type { Car, Id, RiderClass, Shaft, Sim, World } from './types';
+import { recordBoardedWait } from './world';
 
 /** Minutes a car may stand idle away from its home floor before it goes back. */
 export const IDLE_RETURN_MINUTES = 10;
@@ -377,6 +378,7 @@ function serveFloor(world: World, shaft: Shaft, car: Car, waiting: WaitIndex): v
     sim.state = 'riding';
     // Boarding ends the wait: the next wait (a transfer, the ride out) starts its own
     // clock and places its own hall call.
+    if (sim.waitStart !== null) recordBoardedWait(world, world.time.minute - sim.waitStart);
     sim.waitStart = null;
     car.passengers.push(sim.id);
     const leg = sim.route[0];

@@ -591,6 +591,7 @@ function firstInvalidStat(stats: unknown): string | null {
   if (typeof stats.vipRating !== 'string' || !Object.hasOwn(VIP_RATINGS, stats.vipRating)) return 'stats.vipRating';
   if (!isFiniteNumber(stats.weddingsHeld)) return 'stats.weddingsHeld';
   if (!isFiniteNumber(stats.avgWaitMinutes)) return 'stats.avgWaitMinutes';
+  if (stats.waitsCounted !== undefined && (!isInteger(stats.waitsCounted) || stats.waitsCounted < 0)) return 'stats.waitsCounted';
   if (!isNumberTable(stats.tenantsLeftReasons)) return 'stats.tenantsLeftReasons';
   if (stats.badQuarterStreak !== undefined && (!isInteger(stats.badQuarterStreak) || stats.badQuarterStreak < 0)) return 'stats.badQuarterStreak';
   if (stats.lastVip !== undefined && !isPlainObject(stats.lastVip)) return 'stats.lastVip';
@@ -604,6 +605,7 @@ function statsWithDefaults(stats: Stats): Stats {
   return {
     ...stats,
     lossesByKind: stats.lossesByKind ?? {},
+    waitsCounted: stats.waitsCounted ?? 0,
     lastQuarter: {
       income: last.income,
       upkeep: last.upkeep,

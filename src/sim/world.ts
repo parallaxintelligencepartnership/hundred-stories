@@ -42,6 +42,7 @@ export function createWorld(seed: number, start: TowerStart = {}): World {
       vipRating: 'none',
       weddingsHeld: 0,
       avgWaitMinutes: 0,
+      waitsCounted: 0,
       tenantsLeftReasons: {},
       badQuarterStreak: 0,
     },
@@ -88,6 +89,13 @@ export function recordLongWait(world: World): void {
 export function longWaitsInHour(world: Pick<World, 'longWaits'>, hour: number): number {
   const slot = ((hour % LONG_WAIT_SLOTS) + LONG_WAIT_SLOTS) % LONG_WAIT_SLOTS;
   return world.longWaits.hour[slot] === hour ? (world.longWaits.count[slot] ?? 0) : 0;
+}
+
+/** Fold one boarding's hall wait into this quarter's running average (stats.avgWaitMinutes). */
+export function recordBoardedWait(world: World, waited: number): void {
+  const n = (world.stats.waitsCounted ?? 0) + 1;
+  world.stats.waitsCounted = n;
+  world.stats.avgWaitMinutes += (waited - world.stats.avgWaitMinutes) / n;
 }
 
 /** Tell the renderer the static tower changed. See World.structureVersion. */
