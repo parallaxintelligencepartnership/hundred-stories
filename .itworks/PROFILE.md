@@ -3,7 +3,7 @@
 format_version: 3
 profile: expert
 opted_out: []
-last_checkpoint: 2026-09-29 @6d87309
+last_checkpoint: 2026-09-29 @996b4da
 last_audit: 2026-09-28 @0f05723
 lens_debt:
   security-auth: 11
