@@ -255,6 +255,14 @@ describe('video byte ranges', () => {
   // Production answered bytes=0-99 with the whole 2.5 MB file and 200 before this.
   it('routes /trailers/* to the Worker first in wrangler.jsonc', () => {
     const config = readFileSync(join(ROOT, 'wrangler.jsonc'), 'utf8');
-    expect(config).toMatch(/"run_worker_first":\s*\[\s*"\/trailers\/\*"\s*\]/);
+    expect(config).toMatch(/"run_worker_first":\s*\[\s*"\/trailers\/\*",\s*"\/api\/\*"\s*\]/);
+  });
+
+  // With the list form and not_found_handling "404-page", a path not listed never reaches the
+  // Worker: POST /api/feedback got an empty 405 from the assets layer live (0.6.8 to 0.6.11).
+  it('routes /api/* to the Worker first so the feedback card reaches it', () => {
+    const config = readFileSync(join(ROOT, 'wrangler.jsonc'), 'utf8');
+    const list = /"run_worker_first":\s*(\[[^\]]*\])/.exec(config)![1]!;
+    expect(JSON.parse(list)).toContain('/api/*');
   });
 });

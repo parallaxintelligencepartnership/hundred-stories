@@ -1,8 +1,9 @@
 // The site's Worker. Static assets are served by Cloudflare before this code runs, except
-// /trailers/* (wrangler.jsonc run_worker_first), so the Worker sees only requests no file in dist/
-// matches plus the videos. It answers POST /api/feedback, the in-game feedback card, answers
-// Range requests for /trailers/ (range.ts; Safari and iOS need 206 to play mp4), and hands every
-// other path back to the assets binding, which serves the 404 page exactly as before.
+// /trailers/* and /api/* (wrangler.jsonc run_worker_first): with the list form, every other path,
+// even one no file matches, stays with the assets layer and never reaches this code. It answers
+// POST /api/feedback, the in-game feedback card, answers Range requests for /trailers/ (range.ts;
+// Safari and iOS need 206 to play mp4), and hands any other /api/ path back to the assets binding,
+// which serves the 404 page.
 //
 // Privacy: a stored message holds the player's text, the optional reply address, the game
 // version, platform and screen, and the time. Never the IP, country or user agent; the IP is used
