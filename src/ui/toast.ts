@@ -6,7 +6,15 @@
 // listening when a toast lands: news is polite, alerts are assertive. The event log keeps the
 // full history, so a toast that went by too fast is never lost.
 
-import { icon } from './icons';
+import { icon, type IconName } from './icons';
+
+/**
+ * The icon at the left of a text card (an alert card, a tip, the star card, a notice, the update
+ * toast). It carries the card's colour, where a stripe used to: amber for news, red for trouble.
+ */
+export function toastIcon(name: IconName, tone: 'amber' | 'alert'): HTMLElement {
+  return icon(name, `hs-icon hs-toast-icon is-${tone}`) as unknown as HTMLElement;
+}
 
 /** Real milliseconds a news toast stays up before it fades. */
 export const NEWS_TOAST_MS = 4000;
@@ -138,6 +146,9 @@ export function createToasts(): Toasts {
     const node = el('button', 'hs-alert-toast');
     node.type = 'button';
     if (options.className) for (const c of options.className.split(/\s+/).filter(Boolean)) node.classList.add(c);
+    // The new version notice is news (amber, a reload arrow); any other alert toast is trouble.
+    const update = node.classList.contains('is-update');
+    node.append(update ? toastIcon('reload', 'amber') : toastIcon('alert', 'alert'));
     body(node, text, options);
     if (options.action) node.append(el('span', 'hs-toast-action', options.action));
     else node.append(icon('close', 'hs-icon hs-alert-toast-x') as unknown as HTMLElement);

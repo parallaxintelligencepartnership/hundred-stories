@@ -2,6 +2,9 @@
 // up must close again. The open notifies (and mounts the card) before the tower switch finishes;
 // the switch used to forget that sheet was mounted, so Close, Escape, the backdrop and the swipe
 // all did nothing and the modal sheet trapped the game.
+//
+// Since 2026-09-30 the card is a page inside the pause card, said before the switch; the day
+// chosen there switches towers and closes the menu, and no card comes up again on its own.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createUi } from '../../src/ui/ui';
 import { FakeDom, type FakeElement } from './fake-dom';
@@ -91,6 +94,7 @@ async function openToday(root: FakeElement): Promise<FakeElement> {
   await settle();
   const open = dialogs(root);
   expect(open).toHaveLength(1);
+  expect(open[0]!.className.split(/\s+/)).toContain('hs-pause-card');
   const heading = open[0]!.descendants().find((n) => /^H[1-6]$/.test(n.tagName));
   expect(heading?.textContent).toBe("Today's tower");
   return open[0]!;
@@ -103,10 +107,10 @@ function expectNothingOpen(root: FakeElement, shell: FakeElement): void {
 }
 
 describe("Menu > Today's tower", () => {
-  it('opens the daily card, and its Close takes it down', async () => {
+  it('opens the daily card as a page; choosing the day switches towers and leaves nothing open', async () => {
     const { root, shell } = mount();
     const card = await openToday(root);
-    click(button(card, (n) => n.textContent === 'Close', 'Close'));
+    click(button(card, (n) => n.textContent === 'Start building', 'Start building'));
     await settle();
     expectNothingOpen(root, shell);
   });
@@ -114,7 +118,7 @@ describe("Menu > Today's tower", () => {
   it("then Menu > My tower leaves nothing open", async () => {
     const { root, shell } = mount();
     const card = await openToday(root);
-    click(button(card, (n) => n.textContent === 'Close', 'Close'));
+    click(button(card, (n) => n.textContent === 'Start building', 'Start building'));
     await settle();
     menuRow(root, 'My tower');
     await settle();

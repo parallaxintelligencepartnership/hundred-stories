@@ -1,6 +1,7 @@
 // The surface the UI talks to. Implemented by game/game.ts; the UI never touches the sim modules directly.
 import type { Command, CommandResult, Id, RoomKind, ShaftKind, World } from '../sim/types';
 import type { GameEvent, GameEventListener } from './events';
+import type { DailyOpening, DailyResult } from './daily';
 import type { SlotName } from './storage';
 
 export type { GameEvent, GameEventListener, SlotName };
@@ -37,6 +38,26 @@ export interface DailyChoice {
    * tower dated after today, when one is saved, stands behind it to keep playing.
    */
   locked?: 'clock-back' | 'done';
+}
+
+/**
+ * What opening Today's tower would find, read without switching towers: the pause menu's Today's
+ * tower page shows it, and the player's answer there makes the switch (openDaily, then
+ * chooseDaily when there is a choice).
+ */
+export interface DailyPeek {
+  /** The player's local date, YYYY-MM-DD. */
+  today: string;
+  /** How openDaily would open (game/daily.ts dailyOpening). */
+  opening: DailyOpening;
+  /** The date of the tower saved in the daily slot, or null. */
+  savedDate: string | null;
+  /** That tower is not finished yet. */
+  savedUnfinished: boolean;
+  /** The saved one is yesterday's and waits for the choice. */
+  yesterday: boolean;
+  /** The saved tower is today's and finished: its score. */
+  result: DailyResult | null;
 }
 
 export type Tool =
@@ -154,6 +175,8 @@ export interface GameApi {
    * The slot being left is saved only if it moved; My tower is never rewritten by the daily.
    */
   openDaily(): Promise<void>;
+  /** What openDaily would find, read without switching. Optional: a stand-in game has none. */
+  peekDaily?(): Promise<DailyPeek>;
   /** Answer the choice: finish the older daily, or start today's fresh. */
   chooseDaily(which: 'finish' | 'today'): Promise<void>;
   /** A friend's link: the same tower they started, in the Friend's tower slot. */

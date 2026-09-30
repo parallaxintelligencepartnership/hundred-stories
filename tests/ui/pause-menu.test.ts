@@ -1,7 +1,8 @@
 // The pause menu (Matt, 2026-09-29: the menu was "not very game menu like, still very techy/web
 // browser look"): Menu, or Escape with nothing open, puts a card over the dimmed tower with
 // Resume, Save, My tower (or New tower), Today's tower, Stories, Settings and How to play. It
-// pauses the game and gives back the speed it had; Settings opens over it and closes back to it.
+// pauses the game and gives back the speed it had; Settings opens as a page inside it and Back
+// comes back to it (pause-menu-pages.test.ts has the pages).
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSound, type AudioContextLike, type SoundStore } from '../../src/audio/audio';
@@ -339,18 +340,17 @@ describe('the entries', () => {
     expect(pauseEntry(ui.root, 'save')!.textContent).toBe('Save');
   });
 
-  it('Settings opens over it, still paused, and closing Settings comes back to the menu, not the game', () => {
+  it('Settings opens as a page in the card, still paused, and Back comes back to the menu, not the game', () => {
     const ui = mount({ speed: 2 });
     ui.open();
     choosePauseEntry(ui.root, 'settings');
-    expect(ui.card()).toBeUndefined();
     const settings = ui.root.descendants().find((n) => has(n, 'hs-settings'))!;
-    expect(settings).toBeDefined();
+    expect(ui.card()!.contains(settings)).toBe(true);
     expect(ui.state.speed).toBe(0);
     // The Game group is gone from Settings: its rows are the menu's.
     const titles = settings.descendants().filter((n) => has(n, 'hs-section-title')).map((n) => n.textContent);
     expect(titles).not.toContain('Game');
-    click(settings.descendants().find((n) => has(n, 'hs-panel-close'))!);
+    click(ui.card()!.descendants().find((n) => n.getAttribute('aria-label') === 'Back')!);
     expect(ui.root.descendants().some((n) => has(n, 'hs-settings'))).toBe(false);
     expect(ui.card()).toBeDefined();
     expect(ui.selected()).toBe('Settings');
@@ -376,10 +376,13 @@ describe('the entries', () => {
     expect(ui.root.descendants().some((n) => n.children.length === 0 && n.textContent === 'New game started.')).toBe(true);
   });
 
-  it("Today's tower and My tower switch towers as the Settings rows did; Stories opens its panel", async () => {
+  it("Today's tower switches once a day is chosen on its page, My tower switches at once; Stories opens its page", async () => {
     const mine = mount();
     mine.open();
     choosePauseEntry(mine.root, 'daily');
+    await settle();
+    expect(mine.calls).toEqual([]);
+    click(mine.card()!.descendants().find((n) => n.tagName === 'BUTTON' && n.textContent === 'Start building')!);
     await settle();
     expect(mine.calls).toEqual(['openDaily']);
     expect(mine.card()).toBeUndefined();
@@ -393,10 +396,8 @@ describe('the entries', () => {
     const stories = mount();
     stories.open();
     choosePauseEntry(stories.root, 'stories');
-    expect(stories.card()).toBeUndefined();
-    const sheet = stories.root.descendants().find((n) => has(n, 'hs-sheet'))!;
-    const heading = sheet.descendants().find((n) => has(n, 'hs-panel-title-text'));
-    expect(heading?.textContent).toBe('Stories');
+    expect(stories.root.descendants().some((n) => has(n, 'hs-sheet'))).toBe(false);
+    expect(stories.card()!.descendants().find((n) => has(n, 'hs-plate-title'))?.textContent).toBe('Stories');
   });
 
   // No player reaches this path: the scrim covers the round Watch button while the menu is shown
@@ -411,7 +412,7 @@ describe('the entries', () => {
     expect(ui.state.speed).toBe(4);
   });
 
-  it('turning Watch on while Settings is over it closes both', () => {
+  it('turning Watch on while the Settings page is open closes the menu, page and all', () => {
     const ui = mount({ speed: 4 });
     ui.open();
     choosePauseEntry(ui.root, 'settings');

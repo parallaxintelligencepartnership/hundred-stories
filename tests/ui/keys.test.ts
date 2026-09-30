@@ -228,6 +228,9 @@ describe('tiles and help', () => {
     const menu = root.descendants().find((n) => n.tagName === 'BUTTON' && n.textContent === 'Menu') as FakeElement;
     for (const fn of menu.listeners.get('click') ?? []) fn({});
     choosePauseEntry(root, 'settings');
+    // Controls is a page under the Settings page (2026-09-30).
+    const row = root.descendants().find((n) => n.tagName === 'BUTTON' && n.textContent === 'Controls')!;
+    for (const fn of row.listeners.get('click') ?? []) fn({});
     const controls = root.descendants().find((n) => n.className === 'hs-help-controls');
     for (const line of lines) expect(controls?.textContent).toContain(line);
     expect(controls?.textContent).not.toContain('1, 2, 3 set the clock speed');

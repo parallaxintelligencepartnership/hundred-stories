@@ -1,5 +1,5 @@
 // The pause menu's P4 review fixes (2026-09-29, decided by the PM on Matt's delegation):
-// - I1: while the menu is open, with Settings over it too, speed keys, the speed pill and the
+// - I1: while the menu is open, with Settings as its page too, speed keys, the speed pill and the
 //   controller's shoulders change nothing, and Resume gives back the speed from before it opened.
 // - I2: on a phone held sideways (844 by 390) the entry column scrolls, and moving the selection
 //   by key or controller brings the entry into the column's view; the plate stays put.
@@ -141,17 +141,18 @@ function mount(opts: Parameters<typeof mkGame>[0] = {}) {
   return { ...made, root, shell, menuButton, card, items, words, selected, open, notices };
 }
 
+/** Settings, a page inside the pause card since 2026-09-30 (no sheet over the menu). */
 function openSettingsOverMenu(ui: ReturnType<typeof mount>): FakeElement {
   ui.open();
   choosePauseEntry(ui.root, 'settings');
   const settings = ui.root.descendants().find((n) => has(n, 'hs-settings'))!;
   expect(settings).toBeDefined();
-  expect(ui.card()).toBeUndefined();
+  expect(ui.card()!.contains(settings)).toBe(true);
   return settings;
 }
 
 describe('I1: the menu holds the speed', () => {
-  it('with Settings over the menu, speed keys, Space and the speed pill change nothing, and Resume gives back the speed from before', () => {
+  it('with the Settings page open, speed keys, Space and the speed pill change nothing, and Resume gives back the speed from before', () => {
     const ui = mount({ speed: 2 });
     const settings = openSettingsOverMenu(ui);
     expect(ui.state.speed).toBe(0);
@@ -162,7 +163,8 @@ describe('I1: the menu holds the speed', () => {
     const fast = ui.root.descendants().find((n) => has(n, 'hs-speed-btn') && n.getAttribute('aria-label') === 'Faster')!;
     click(fast);
     expect(ui.state.speed).toBe(0);
-    click(settings.descendants().find((n) => has(n, 'hs-panel-close'))!);
+    click(ui.card()!.descendants().find((n) => n.getAttribute('aria-label') === 'Back')!);
+    expect(ui.root.descendants().some((n) => has(n, 'hs-settings'))).toBe(false);
     expect(ui.card()).toBeDefined();
     expect(ui.card()!.descendants().find((n) => has(n, 'hs-pause-state'))?.textContent).toBe('Paused');
     choosePauseEntry(ui.root, 'resume');

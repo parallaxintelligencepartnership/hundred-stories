@@ -5,8 +5,15 @@
 //
 // Opening it pauses the game and closing it puts back the speed the game had, so a game that was
 // already paused stays paused. Should the game refuse the pause, the menu still opens and the
-// plate reads "Menu" instead of "Paused". Settings is the one entry that keeps the menu: the menu
-// steps out of sight (hide) while the Settings sheet is up and comes back when it closes (show).
+// plate reads "Menu" instead of "Paused".
+//
+// Pages (Matt, 2026-09-30: the screens the menu opened were "still disjointed and pull up from the
+// bottom"): Settings, Stories, Share and Today's tower open as a page inside the card, never a
+// sheet. The plate names the page, a round Back sits at its left, and the page's body takes the
+// column's place with the column's scroll and fades. Back or Escape goes back one page, and at the
+// root focus returns to the entry that opened it. The scrim, the pause and the speed given back on
+// close are the menu's, the same on a page as at the root. On a page the arrows (and Tab) move
+// through its controls in order, Back first, and Enter or Space presses the one with focus.
 //
 // Keys come through ui.ts's keydown and keys.ts (menuKeyAction): Up and Down move and wrap, Home
 // and End jump, Enter or Space chooses, Escape resumes, and focus never leaves the card. The
@@ -25,6 +32,7 @@ import type { Speed } from '../game/api';
 import type { MenuCue } from '../audio/cues';
 import { icon, type IconName } from './icons';
 import { menuIndex, menuKeyAction } from './keys';
+import { focusablesIn } from './sheet';
 
 export const PAUSE_TITLE = 'Hundred Stories';
 /** The line under the title while the game is held still. */
@@ -40,11 +48,26 @@ export const NEW_TOWER_NO = 'Keep my tower';
  * What choosing an entry does to the menu:
  * - resume: close it, the speed put back.
  * - stay: run with the menu open (Save).
- * - leave: close it, the speed put back, then run (My tower, Stories, ...).
- * - over: hide the menu, still paused, then run; the owner calls show() when that closes (Settings).
+ * - leave: close it, the speed put back, then run (My tower, Views).
+ * - page: run with the menu open; the run pushes a page into the card (pushPage), now or once
+ *   what it shows has been read (Settings, Stories, Share, Today's tower).
  * - link: a link (How to play); the browser follows it and the menu stays.
  */
-export type PauseEntryKind = 'resume' | 'stay' | 'leave' | 'over' | 'link';
+export type PauseEntryKind = 'resume' | 'stay' | 'leave' | 'page' | 'link';
+
+/** A page in the card: its name on the plate, and its body, built when it is shown. */
+export interface PausePage {
+  /** For the tests and the page: data-page on the card while it is shown. */
+  id: string;
+  title: string;
+  build(): HTMLElement;
+  /** Back (the button, Escape or B) left this page. */
+  onBack?(): void;
+  /** The owner redrew: rewrite the live parts. */
+  refresh?(): void;
+  /** The page is gone for good (popped, or the menu closed): let go of what it holds. */
+  dispose?(): void;
+}
 
 export interface PauseEntry {
   id: string;
@@ -110,10 +133,10 @@ export interface PauseKeyLike {
 }
 
 export interface PauseMenu {
-  /** The scrim, with the card inside it. Mounted only while on screen: not while closed or under Settings. */
+  /** The scrim, with the card inside it. Mounted only while on screen: not while closed or stepped aside. */
   readonly node: HTMLDivElement;
   readonly card: HTMLDivElement;
-  /** Open, including while Settings is over it. */
+  /** Open, including while stepped aside for a card a page opened. */
   isOpen(): boolean;
   /** Open and on screen. */
   isShown(): boolean;
@@ -122,7 +145,25 @@ export interface PauseMenu {
   open(): void;
   /** Close, and put back the speed the game had before it opened. */
   close(options?: { restoreFocus?: boolean }): void;
-  /** Back on screen after Settings closes, the selection where it was. */
+  /**
+   * Show a page in the card, over the root or over another page. The menu must be open. `from`:
+   * the control that opened it, where Back puts focus (the root's selected entry when left out
+   * at the root, else the control with focus).
+   */
+  pushPage(page: PausePage, from?: HTMLElement): void;
+  /** Back one page; false at the root. */
+  popPage(): boolean;
+  /** The page on show, or null at the root. */
+  page(): PausePage | null;
+  /** The owner redrew: the page on show rewrites its live parts. */
+  refresh(): void;
+  /**
+   * Step out of sight, still open and still paused, and run what a page opens over the game (the
+   * Settings page's Send feedback and Intro); then the owner redraws. The owner calls show() when
+   * that closes, and the menu is back on the page it left, focus where it was.
+   */
+  stepAside(run: () => void): void;
+  /** Back on screen after stepping aside. */
   show(): void;
   /** The entries' words in order, for the tests and the gamepad. */
   items(): HTMLElement[];
@@ -143,6 +184,43 @@ function activeElement(): unknown {
   return typeof document === 'undefined' ? null : ((document as { activeElement?: unknown }).activeElement ?? null);
 }
 
+/** The controls a page's body brings from the panels (panels.ts, daily.ts) that wear the card's faces there. */
+const FACE_CLASSES = ['hs-set-row', 'hs-seg-btn', 'hs-btn', 'hs-occupant'];
+/** Rows that hold faces (the theme choice) or only words (the Controls lines): they sit on the surface. */
+const NOT_FACES = ['hs-set-choice', 'hs-controls-row'];
+
+interface ClassTree {
+  children?: ArrayLike<ClassTree>;
+  classList?: { contains(name: string): boolean; add(name: string): void };
+}
+
+/**
+ * A page wears the card's vocabulary: its rows and buttons become raised faces (hs-face), the same
+ * as the entries. The theme choice's row holds three faces and is not one itself. Run again
+ * after a page rewrites its rows, so a new row is a face too.
+ */
+export function wearFaces(root: unknown): void {
+  const walk = (node: ClassTree): void => {
+    const kids = node.children;
+    if (!kids) return;
+    for (let i = 0; i < kids.length; i += 1) {
+      const child = kids[i];
+      if (!child) continue;
+      const list = child.classList;
+      if (list && FACE_CLASSES.some((name) => list.contains(name)) && !NOT_FACES.some((name) => list.contains(name))) list.add('hs-face');
+      walk(child);
+    }
+  };
+  walk(root as ClassTree);
+}
+
+/** A page on the stack: its body in the card, and the control that opened it (focus goes back there). */
+interface ShownPage {
+  page: PausePage;
+  body: HTMLDivElement;
+  from: HTMLElement | null;
+}
+
 export function createPauseMenu(options: PauseMenuOptions): PauseMenu {
   const titleId = `hs-pause-title-${++menuIds}`;
   const node = document.createElement('div') as HTMLDivElement;
@@ -156,6 +234,17 @@ export function createPauseMenu(options: PauseMenuOptions): PauseMenu {
 
   const plate = document.createElement('div');
   plate.className = 'hs-pause-plate hs-plate';
+  // Back: round, at the plate's left, out of the flow so the title stays centered. Only on a page.
+  const back = document.createElement('button') as HTMLButtonElement;
+  back.type = 'button';
+  back.className = 'hs-pause-back';
+  back.setAttribute('aria-label', 'Back');
+  back.append(icon('chevron', 'hs-icon hs-pause-back-icon') as unknown as HTMLElement);
+  back.hidden = true;
+  back.addEventListener('click', () => {
+    options.cue?.('menu.select');
+    popPage();
+  });
   const title = document.createElement('h2');
   title.className = 'hs-pause-title hs-plate-title';
   title.id = titleId;
@@ -163,7 +252,7 @@ export function createPauseMenu(options: PauseMenuOptions): PauseMenu {
   const state = document.createElement('p');
   state.className = 'hs-pause-state hs-plate-state';
   state.textContent = PAUSED_WORD;
-  plate.append(title, state);
+  plate.append(back, title, state);
 
   const list = document.createElement('div') as HTMLDivElement;
   list.className = 'hs-pause-list';
@@ -171,45 +260,63 @@ export function createPauseMenu(options: PauseMenuOptions): PauseMenu {
   node.append(card);
 
   let open = false;
+  /** On screen: open and not stepped aside. */
   let shown = false;
+  /** Where focus was when it stepped aside. */
+  let asideFrom: HTMLElement | null = null;
   let prior: Speed = 0;
   let wePaused = false;
   let selected = -1;
   let entries: PauseEntry[] = [];
   let buttons: HTMLElement[] = [];
   let question: PauseQuestion | null = null;
+  /** The pages over the root, the one on show last. */
+  let stack: ShownPage[] = [];
   /**
    * The entries as they were when the question was asked, and the one it was asked from: put back
    * as they were (not built again, so Save's action and word carry on) when an answer keeps the menu.
    */
   let asked: { entries: PauseEntry[]; buttons: HTMLElement[]; from: number } | null = null;
 
+  /** The page on show, or null at the root. */
+  function top(): ShownPage | null {
+    return stack[stack.length - 1] ?? null;
+  }
+
+  /** What scrolls now: the entry column at the root, the page's body on a page. */
+  function scroller(): HTMLDivElement {
+    return top()?.body ?? list;
+  }
+
   /**
-   * Scroll the entry column so this entry is inside it: the least scroll that shows it whole. The
-   * column scrolls only where the card does not fit; anywhere else nothing moves.
+   * Scroll the column (or the page) so this control is inside it: the least scroll that shows it
+   * whole. It scrolls only where the card does not fit; anywhere else nothing moves.
    */
   function reveal(item: HTMLElement | undefined): void {
-    if (!item || typeof list.getBoundingClientRect !== 'function' || typeof item.getBoundingClientRect !== 'function') return;
-    const box = list.getBoundingClientRect();
+    const box0 = scroller();
+    if (!item || typeof box0.getBoundingClientRect !== 'function' || typeof item.getBoundingClientRect !== 'function') return;
+    const box = box0.getBoundingClientRect();
     const at = item.getBoundingClientRect();
     if (!(box.height > 0)) return;
-    const top = Number(list.scrollTop) || 0;
-    if (at.top < box.top) list.scrollTop = Math.max(0, top - (box.top - at.top));
-    else if (at.bottom > box.bottom) list.scrollTop = top + (at.bottom - box.bottom);
+    const scrolled = Number(box0.scrollTop) || 0;
+    if (at.top < box.top) box0.scrollTop = Math.max(0, scrolled - (box.top - at.top));
+    else if (at.bottom > box.bottom) box0.scrollTop = scrolled + (at.bottom - box.bottom);
     syncMore();
   }
 
   /**
    * The column draws no scroll bar, so where entries sit past its edge the card fades that edge
    * (ui.css has-more, has-above): the one cue that Settings and How to play are further down on a
-   * short screen (P6 review A7). Read from the column's own scroll numbers, after every move.
+   * short screen (P6 review A7). Read from the column's own scroll numbers, after every move. A
+   * page's body is read the same way.
    */
   function syncMore(): void {
-    const top = Number(list.scrollTop) || 0;
-    const seen = Number(list.clientHeight) || 0;
-    const whole = Number(list.scrollHeight) || 0;
-    card.classList.toggle('has-more', seen > 0 && top + seen < whole - 1);
-    card.classList.toggle('has-above', seen > 0 && top > 1);
+    const box = scroller();
+    const scrolled = Number(box.scrollTop) || 0;
+    const seen = Number(box.clientHeight) || 0;
+    const whole = Number(box.scrollHeight) || 0;
+    card.classList.toggle('has-more', seen > 0 && scrolled + seen < whole - 1);
+    card.classList.toggle('has-above', seen > 0 && scrolled > 1);
   }
   list.addEventListener('scroll', syncMore);
 
@@ -232,15 +339,15 @@ export function createPauseMenu(options: PauseMenuOptions): PauseMenu {
 
   /** Out of the question, back to the entries it was asked over, that entry selected. */
   function unask(): void {
-    const back = asked;
+    const back0 = asked;
     question = null;
     asked = null;
     card.removeAttribute('data-question');
-    if (!back) return;
-    entries = back.entries;
-    buttons = back.buttons;
+    if (!back0) return;
+    entries = back0.entries;
+    buttons = back0.buttons;
     list.replaceChildren(...buttons);
-    select(back.from >= 0 && back.from < buttons.length ? back.from : 0, shown);
+    select(back0.from >= 0 && back0.from < buttons.length ? back0.from : 0, shown);
   }
 
   /** Put these entries in the column, with a question's line over them when there is one. */
@@ -311,6 +418,11 @@ export function createPauseMenu(options: PauseMenuOptions): PauseMenu {
 
   function ask(next: PauseQuestion): void {
     if (!open) return;
+    // A question is asked over the entries: any page goes first.
+    if (stack.length > 0) {
+      dropPages();
+      paintPlace();
+    }
     if (!asked) asked = { entries, buttons, from: selected };
     question = next;
     const line = document.createElement('p');
@@ -348,19 +460,90 @@ export function createPauseMenu(options: PauseMenuOptions): PauseMenu {
         close();
         entry.run?.();
         return;
-      case 'over':
-        // Out of sight first, then what goes over it opens, then the owner redraws: in that order
-        // the owner never sees the menu hidden with nothing over it.
-        shown = false;
-        node.remove();
+      case 'page':
+        // The run pushes the page (pushPage), at once or once what it shows has been read.
         entry.run?.();
-        options.changed?.();
         return;
       case 'link':
         // The link itself does the going, as it always has; the menu stays, the game still paused.
         entry.run?.();
         return;
     }
+  }
+
+  /** The plate and the body for where the card is: the root's name and column, or the page's. */
+  function paintPlace(): void {
+    const current = top();
+    card.replaceChildren(plate, current ? current.body : list);
+    title.textContent = current ? current.page.title : PAUSE_TITLE;
+    back.hidden = current === null;
+    card.classList.toggle('is-page', current !== null);
+    if (current) card.setAttribute('data-page', current.page.id);
+    else card.removeAttribute('data-page');
+    syncMore();
+  }
+
+  /** The page's controls in order, Back first: what the arrows, Tab and the d-pad move through. */
+  function pageItems(onShow: ShownPage): HTMLElement[] {
+    return [back, ...focusablesIn(onShow.body)];
+  }
+
+  /** Focus the page's first control, or Back when it has none. */
+  function focusPage(onShow: ShownPage): void {
+    const first = focusablesIn(onShow.body)[0] ?? back;
+    first.focus?.({ preventScroll: true });
+  }
+
+  function pushPage(page: PausePage, opener?: HTMLElement): void {
+    if (!open) return;
+    if (question) unask();
+    const from = opener ?? (stack.length === 0 ? (buttons[selected] ?? null) : ((activeElement() as HTMLElement | null) ?? null));
+    const body = document.createElement('div') as HTMLDivElement;
+    body.className = 'hs-pause-list hs-pause-page';
+    body.addEventListener('scroll', syncMore);
+    body.append(page.build());
+    wearFaces(body);
+    const entry: ShownPage = { page, body, from };
+    stack.push(entry);
+    paintPlace();
+    body.scrollTop = 0;
+    focusPage(entry);
+    options.changed?.();
+  }
+
+  function popPage(): boolean {
+    const gone = stack.pop();
+    if (!gone) return false;
+    gone.page.onBack?.();
+    gone.page.dispose?.();
+    paintPlace();
+    const now = top();
+    if (now) {
+      // Back on the page before, on the control that opened the one just left.
+      const target = gone.from && now.body.contains?.(gone.from) ? gone.from : null;
+      if (target) target.focus?.({ preventScroll: true });
+      else focusPage(now);
+    } else {
+      const at = gone.from ? buttons.indexOf(gone.from) : -1;
+      select(at >= 0 ? at : Math.max(0, selected), true);
+    }
+    options.changed?.();
+    return true;
+  }
+
+  /** Every page goes, each let go of; the card is left at the root. */
+  function dropPages(): void {
+    const gone = stack;
+    stack = [];
+    for (const item of gone.reverse()) item.page.dispose?.();
+  }
+
+  function refresh(): void {
+    const current = top();
+    if (!open || !current) return;
+    current.page.refresh?.();
+    wearFaces(current.body);
+    syncMore();
   }
 
   function paint(): void {
@@ -376,6 +559,7 @@ export function createPauseMenu(options: PauseMenuOptions): PauseMenu {
     open = true;
     shown = true;
     build();
+    paintPlace();
     paint();
     options.host.append(node);
     select(0, true);
@@ -388,9 +572,12 @@ export function createPauseMenu(options: PauseMenuOptions): PauseMenu {
     if (!open) return;
     open = false;
     shown = false;
+    asideFrom = null;
     question = null;
     asked = null;
     card.removeAttribute('data-question');
+    dropPages();
+    paintPlace();
     node.remove();
     // Put back what the game had, only if the menu paused it and it is still paused.
     if (wePaused && options.getSpeed() === 0) options.setSpeed(prior);
@@ -399,14 +586,53 @@ export function createPauseMenu(options: PauseMenuOptions): PauseMenu {
     options.changed?.();
   }
 
+  function stepAside(run: () => void): void {
+    if (!shown) {
+      run();
+      return;
+    }
+    // Out of sight first, then what goes over it opens, then the owner redraws: in that order the
+    // owner never sees the menu out of sight with nothing over it.
+    asideFrom = (activeElement() as HTMLElement | null) ?? null;
+    shown = false;
+    node.remove();
+    run();
+    options.changed?.();
+  }
+
   function show(): void {
     if (!open || shown) return;
     shown = true;
     options.host.append(node);
     paint();
-    select(selected < 0 ? 0 : selected, true);
     syncMore();
+    const was = asideFrom;
+    asideFrom = null;
+    const shownPage = top();
+    if (shownPage) {
+      if (was && shownPage.body.contains?.(was)) was.focus?.({ preventScroll: true });
+      else focusPage(shownPage);
+    } else {
+      select(selected < 0 ? 0 : selected, true);
+    }
     options.changed?.();
+  }
+
+  /** A key on a page: Escape goes back one page; the arrows and Tab move; Enter or Space presses. */
+  function pageKey(current: ShownPage, action: NonNullable<ReturnType<typeof menuKeyAction>>): void {
+    if (action.kind === 'resume') {
+      popPage();
+      return;
+    }
+    const items = pageItems(current);
+    const at = items.indexOf(activeElement() as HTMLElement);
+    if (action.kind === 'activate') {
+      items[at]?.click?.();
+      return;
+    }
+    const next = items[menuIndex(at, items.length, action)];
+    next?.focus?.({ preventScroll: true });
+    if (next !== back) reveal(next);
   }
 
   function handleKey(event: PauseKeyLike): boolean {
@@ -414,6 +640,11 @@ export function createPauseMenu(options: PauseMenuOptions): PauseMenu {
     const action = menuKeyAction(event);
     if (!action) return false;
     event.preventDefault();
+    const current = top();
+    if (current) {
+      pageKey(current, action);
+      return true;
+    }
     if (action.kind === 'resume') {
       // Escape backs out of a question with its safe answer; with none, it resumes.
       if (!cancel()) close();
@@ -433,7 +664,8 @@ export function createPauseMenu(options: PauseMenuOptions): PauseMenu {
     return true;
   }
 
-  // A tap on the dimmed tower around the card resumes, as Escape does.
+  // A tap on the dimmed tower around the card resumes, as Escape does at the root; from a page
+  // too, everything closes at once.
   node.addEventListener('click', (event: Event) => {
     if ((event as { target?: unknown }).target === node) close();
   });
@@ -446,6 +678,11 @@ export function createPauseMenu(options: PauseMenuOptions): PauseMenu {
     paused: () => state.textContent === PAUSED_WORD,
     open: openMenu,
     close,
+    pushPage,
+    popPage,
+    page: () => top()?.page ?? null,
+    refresh,
+    stepAside,
     show,
     items: () => buttons,
     handleKey,
@@ -455,6 +692,7 @@ export function createPauseMenu(options: PauseMenuOptions): PauseMenu {
     destroy() {
       open = false;
       shown = false;
+      dropPages();
       node.remove();
     },
   };

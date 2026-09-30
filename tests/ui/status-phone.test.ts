@@ -484,12 +484,16 @@ describe('top bar at phone width', () => {
     expect(has(shell, 'is-building')).toBe(true);
     click(find(root, 'hs-build-close'));
     expect(has(shell, 'is-building')).toBe(false);
+    // A panel: the intro, from the menu's Settings page (Settings itself is a page in the pause
+    // card since 2026-09-30, not a panel); the menu steps aside for it.
     click(named(root, 'Menu'));
     choosePauseEntry(root, 'settings');
+    expect(has(shell, 'is-panel-open')).toBe(false);
+    click(root.descendants().find((n) => n.tagName === 'BUTTON' && n.textContent === 'Intro')!);
     expect(has(shell, 'is-panel-open')).toBe(true);
   });
 
-  it('gives focus back to Menu when the menu closes after Settings, once the controls are back', () => {
+  it('gives focus back to Menu when the menu closes after its Settings page, the controls never hidden', () => {
     returning();
     setWidth(390);
     const root = mount(9 * 60);
@@ -504,16 +508,17 @@ describe('top bar at phone width', () => {
     focus(); // the player is on Menu
     click(menu);
     choosePauseEntry(root, 'settings');
-    expect(has(shell, 'is-panel-open')).toBe(true);
-    click(find(find(root, 'hs-settings'), 'hs-panel-close'));
-    // Settings closes back to the pause menu, then Resume gives focus back to Menu.
+    // A page in the pause card, not a panel: nothing is hidden for it.
+    expect(has(shell, 'is-panel-open')).toBe(false);
+    click(root.descendants().find((n) => n.getAttribute('aria-label') === 'Back')!);
+    // Back to the menu's entries, then Resume gives focus back to Menu.
     expect(dom.activeElement).toBe(pauseEntry(root, 'settings'));
     choosePauseEntry(root, 'resume');
     expect(dom.activeElement).toBe(menu);
     expect(hiddenWhenFocused).toBe(false);
   });
 
-  it('moves Views and Share into the pause menu on a phone, after Stories: Views opens the list, Share the share card', () => {
+  it('moves Views and Share into the pause menu on a phone, after Stories: Views opens the list, Share its page', () => {
     returning();
     setWidth(390);
     const root = mount(9 * 60);
@@ -521,8 +526,10 @@ describe('top bar at phone width', () => {
     const words = root.descendants().filter((n) => has(n, 'hs-pause-item')).map((n) => n.textContent);
     expect(words.slice(words.indexOf('Stories'), words.indexOf('Stories') + 3)).toEqual(['Stories', 'Views', 'Share']);
     choosePauseEntry(root, 'share');
-    expect(sheetTitle(root)).toBe('Share');
+    expect(find(find(root, 'hs-pause-card'), 'hs-plate-title').textContent).toBe('Share');
+    expect(root.descendants().some((n) => has(n, 'hs-sheet'))).toBe(false);
 
+    click(named(root, 'Menu')); // Menu again closes it, page and all
     click(named(root, 'Menu'));
     choosePauseEntry(root, 'views');
     // The menu steps aside so the view picked is not behind it, and the list is open.

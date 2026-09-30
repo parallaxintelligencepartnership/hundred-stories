@@ -1,9 +1,22 @@
 // Today's tower cards: the start card with the day's twist, the choice between an older
 // unfinished daily and today's, and the result card when the daily ends. One panel, whose
 // content follows the game's state. Plain markup and the panels' shared classes only.
+//
+// The pause menu's Today's tower page (dailyPeekBody) says the same, read before any switch
+// (GameApi.peekDaily): the player's answer there is what switches towers.
 
-import type { GameApi } from '../game/api';
-import { dailyResult, dailyShareText, dailyShareUrl, dailyTwistLine, formatDateKey, localDateKey, DAILY_DAYS } from '../game/daily';
+import type { DailyPeek, GameApi } from '../game/api';
+import {
+  dailyResult,
+  dailyShareText,
+  dailyShareUrl,
+  dailyTwist,
+  dailyTwistLine,
+  formatDateKey,
+  localDateKey,
+  DAILY_DAYS,
+  type DailyResult,
+} from '../game/daily';
 import { DAILY_CLOCK_BACK, DAILY_COPY_FAILED, DAILY_DONE } from '../game/game';
 import { formatCount, formatMoney, starsGlyphs } from './format';
 import { button, el, exportSave, panelShell, row, tile, type PanelContext, type PanelElement } from './panels';
@@ -107,22 +120,8 @@ export function createDailyPanel(
 
   if (card === 'result') {
     const result = dailyResult(game.world, daily.date);
-    body.append(row('Date', formatDateKey(result.date)), row('Twist', result.twist.name));
-    // The score as a bento grid: the people big across the top, then floors, stars and money.
-    const bento = el('div', 'hs-bento');
-    const people = el('div', 'hs-tile is-wide hs-daily-people');
-    people.append(
-      el('span', 'hs-tile-label', result.people === 1 ? 'Person in the tower' : 'People in the tower'),
-      el('span', 'hs-daily-people-count', formatCount(result.people)),
-    );
-    bento.append(
-      people,
-      tile('Floors', formatCount(result.floors)),
-      tile('Stars', starsGlyphs(result.stars)),
-      tile('Money', formatMoney(result.money), { wide: true, money: true }),
-    );
     body.append(
-      bento,
+      ...resultNodes(result),
       el(
         'p',
         'hs-note',
@@ -152,11 +151,7 @@ export function createDailyPanel(
   body.append(
     row('Twist', daily.twist.name),
     el('p', 'hs-note', older ? dailyTwistLine(daily.date, today) : daily.twist.line),
-    el(
-      'p',
-      'hs-note',
-      `${older ? `Everyone who plays the tower from ${formatDateKey(daily.date)} gets the same start.` : 'Everyone gets the same start today.'} You have ${DAILY_DAYS} days in the game to fit in as many people as you can.`,
-    ),
+    el('p', 'hs-note', startNote(older ? daily.date : null)),
   );
   const buttons = el('div', 'hs-actions');
   buttons.append(button('Start building', 'hs-btn is-primary', () => ctx.close()), button('My tower', 'hs-btn', () => actions.myTower()));
@@ -164,4 +159,78 @@ export function createDailyPanel(
   if (keptStart) buttons.append(keptStart);
   body.append(buttons);
   return panel;
+}
+
+/** How long the day lasts, and that everyone starts the same: `olderDate` for a daily from before today. */
+function startNote(olderDate: string | null): string {
+  const same = olderDate ? `Everyone who plays the tower from ${formatDateKey(olderDate)} gets the same start.` : 'Everyone gets the same start today.';
+  return `${same} You have ${DAILY_DAYS} days in the game to fit in as many people as you can.`;
+}
+
+/** The result: its date and twist, then the score as a bento grid (the people big across the top, then floors, stars and money). */
+function resultNodes(result: DailyResult): HTMLElement[] {
+  const bento = el('div', 'hs-bento');
+  const people = el('div', 'hs-tile is-wide hs-daily-people');
+  people.append(
+    el('span', 'hs-tile-label', result.people === 1 ? 'Person in the tower' : 'People in the tower'),
+    el('span', 'hs-daily-people-count', formatCount(result.people)),
+  );
+  bento.append(
+    people,
+    tile('Floors', formatCount(result.floors)),
+    tile('Stars', starsGlyphs(result.stars)),
+    tile('Money', formatMoney(result.money), { wide: true, money: true }),
+  );
+  return [row('Date', formatDateKey(result.date)), row('Twist', result.twist.name), bento];
+}
+
+/** What the player can answer on the Today's tower page: each switches towers and closes the menu. */
+export type DailyGo = 'open' | 'finish' | 'today';
+
+/** The start card's words when nothing was read (a stand-in game with no peekDaily): today's, fresh. */
+export function freshPeek(today: string = localDateKey()): DailyPeek {
+  return { today, opening: 'fresh', savedDate: null, savedUnfinished: false, yesterday: false, result: null };
+}
+
+/**
+ * The pause menu's Today's tower page: the card openDaily would put up, said before the switch.
+ * Every answer is `go`, which switches and closes the menu; a locked day with nothing to go on
+ * with has no answer but Back.
+ */
+export function dailyPeekBody(peek: DailyPeek, go: (which: DailyGo) => void): HTMLDivElement {
+  const body = el('div', 'hs-daily');
+  body.dataset['card'] = peek.opening;
+  const actions = el('div', 'hs-actions');
+  const answer = (words: string, which: DailyGo, primary = false): void => {
+    actions.append(button(words, primary ? 'hs-btn is-primary' : 'hs-btn', () => go(which)));
+  };
+  const later = peek.savedDate !== null && peek.savedDate > peek.today;
+  const laterLine = (): HTMLElement =>
+    el('p', 'hs-note', `The tower saved here is from ${formatDateKey(peek.savedDate ?? '')}, which is later than today.`);
+
+  if (peek.opening === 'clock-back' || peek.opening === 'done') {
+    // A day already played: nothing starts. An unfinished tower saved here may stand behind it.
+    const behind = peek.opening === 'clock-back' && peek.savedUnfinished;
+    if (behind && later) body.append(laterLine());
+    body.append(el('p', 'hs-note', peek.opening === 'clock-back' ? DAILY_CLOCK_BACK : DAILY_DONE));
+    if (behind) answer('Keep playing that tower', 'finish', true);
+  } else if (peek.opening === 'ahead') {
+    body.append(laterLine(), el('p', 'hs-note', "You can keep playing it, or start today's tower. We keep a copy of it first."));
+    answer('Keep playing that tower', 'finish');
+    answer("Start today's tower instead", 'today');
+  } else if (peek.opening === 'choose') {
+    const older = peek.yesterday ? "yesterday's tower" : `the tower from ${formatDateKey(peek.savedDate ?? '')}`;
+    body.append(el('p', 'hs-note', `You did not finish ${older} yet. You can finish it, or start today's.`));
+    answer(peek.yesterday ? "Finish yesterday's" : 'Finish the old one', 'finish');
+    answer("Start today's", 'today');
+  } else if (peek.result) {
+    body.append(...resultNodes(peek.result), el('p', 'hs-note', 'Come back tomorrow for a new tower.'));
+    answer("Open today's tower", 'open', true);
+  } else {
+    const twist = dailyTwist(peek.today);
+    body.append(row('Twist', twist.name), el('p', 'hs-note', twist.line), el('p', 'hs-note', startNote(null)));
+    answer(peek.opening === 'resume' ? 'Keep building' : 'Start building', 'open', true);
+  }
+  if (actions.children.length > 0) body.append(actions);
+  return body;
 }

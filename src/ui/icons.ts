@@ -48,7 +48,13 @@ export type IconName =
   | 'sound'
   | 'mute'
   // The Save button beside them: a floppy disk, its shutter and label.
-  | 'save';
+  | 'save'
+  // The text cards in the toast slot (alerts.ts, cards.ts, toast.ts): a flame, a warning
+  // triangle, an info circle and a reload arrow.
+  | 'fire'
+  | 'alert'
+  | 'info'
+  | 'reload';
 
 /** A 16 by 16 drawing per icon, 1.5 px lines in the current text color. */
 const LINE = 'fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"';
@@ -103,6 +109,10 @@ const SYMBOLS: Record<IconName, string> = {
   sound: `<path d="M2 6v4h2.5L8 13V3L4.5 6z" ${LINE}/><path d="M10.5 5.75a3 3 0 0 1 0 4.5M12.25 4a5.5 5.5 0 0 1 0 8" ${LINE}/>`,
   mute: `<path d="M2 6v4h2.5L8 13V3L4.5 6z" ${LINE}/><path d="M10.5 6l4 4M14.5 6l-4 4" ${LINE}/>`,
   save: `<path d="M2.25 2.25h9l2.5 2.5v9h-11.5z" ${LINE}/><path d="M5 2.25v3.5h5.5v-3.5M4.75 13.75v-4.5h6.5v4.5" ${LINE}/>`,
+  fire: `<path d="M8 14.25c-2.75 0-4.5-1.9-4.5-4.4 0-2.35 1.6-3.6 2.4-5.6.35 1.2 1 1.9 1.6 2.2.4-2.05 1.3-3.85 2.75-4.7-.2 2 2.25 3.6 2.25 7.1 0 3-1.75 5.4-4.5 5.4z" ${LINE}/><path d="M8 14.25c-1.1 0-1.9-.8-1.9-1.9 0-1.2 1-1.8 1.9-3 .9 1.2 1.9 1.8 1.9 3 0 1.1-.8 1.9-1.9 1.9z" ${LINE}/>`,
+  alert: `<path d="M8 1.75l6.75 12H1.25z" ${LINE}/><path d="M8 6.25v3.25M8 11.75v.25" ${LINE}/>`,
+  info: `<circle cx="8" cy="8" r="6.25" ${LINE}/><path d="M8 7.25v4.25M8 4.75v.25" ${LINE}/>`,
+  reload: `<path d="M13.25 8a5.25 5.25 0 1 1-1.55-3.7" ${LINE}/><path d="M12.25 1.5v3h-3" ${LINE}/>`,
 };
 
 export const ICON_NAMES = Object.keys(SYMBOLS) as IconName[];

@@ -1419,6 +1419,15 @@ function towerBeatText(game: GameApi, beat: StoryBeat): string {
  */
 export function createStoriesPanel(game: GameApi, ctx: PanelContext): PanelElement {
   const { panel, body } = panelShell('Stories', 'population', ctx);
+  const stories = storiesBody(game, ctx);
+  body.append(stories.node);
+  if (stories.refresh) panel.refresh = stories.refresh;
+  return panel;
+}
+
+/** The Stories body, for the sheet (a person, a news toast, the star card) or the pause menu's page. */
+export function storiesBody(game: GameApi, ctx: PanelContext): PanelBody {
+  const node = el('div', 'hs-stories');
   const following = section('Following');
   const followList = el('div', 'hs-occupants');
   following.append(followList);
@@ -1428,7 +1437,7 @@ export function createStoriesPanel(game: GameApi, ctx: PanelContext): PanelEleme
   const milestones = section('Milestones');
   const milestoneActions = el('div', 'hs-actions');
   milestones.append(milestoneActions);
-  body.append(following, tower, milestones);
+  node.append(following, tower, milestones);
 
   let followKey = '';
   const refresh = (): void => {
@@ -1485,8 +1494,7 @@ export function createStoriesPanel(game: GameApi, ctx: PanelContext): PanelEleme
     }
   };
   refresh();
-  panel.refresh = refresh;
-  return panel;
+  return { node, refresh };
 }
 
 // ------------------------------------------------ milestone recap and chronicle
@@ -1642,8 +1650,10 @@ function askInRow(row: HTMLElement, box: HTMLElement, question: SaveQuestion): v
     row.focus?.();
     question.answer(save);
   };
-  const yes = button(question.yes, 'hs-set-row hs-set-action', () => answer(true));
-  const no = button(question.no, 'hs-set-row hs-set-action', () => answer(false));
+  // On a page of the pause menu the row is a face (pause-menu.ts wearFaces): so are its answers.
+  const kind = row.classList.contains('hs-face') ? 'hs-set-row hs-set-action hs-face' : 'hs-set-row hs-set-action';
+  const yes = button(question.yes, kind, () => answer(true));
+  const no = button(question.no, kind, () => answer(false));
   box.replaceChildren(line, yes, no);
   row.hidden = true;
   box.hidden = false;
@@ -1729,10 +1739,75 @@ function titleText(panel: PanelElement): HTMLElement | null {
   return (heading?.lastElementChild as HTMLElement | null | undefined) ?? null;
 }
 
+/**
+ * What a panel's body is, wherever it is shown: the element, and what its host calls on it. The
+ * in-game sheet (panelShell) mounts it; so does a page of the pause menu (pause-menu.ts pushPage).
+ */
+export interface PanelBody {
+  node: HTMLDivElement;
+  /** Rewrite the live parts without rebuilding. */
+  refresh?: () => void;
+  /** Taken down for good: let go of what it holds. */
+  dispose?: () => void;
+  /** True while closing would throw away the player's work. */
+  holdsWork?: () => boolean;
+}
+
 export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElement {
   const { panel, body } = panelShell('Settings', 'settings', ctx);
   panel.classList.add('hs-settings');
+  // The Controls page: its own page inside the sheet, with a way back. Built now for the device
+  // in hand, and again each time it opens, in case a controller was plugged in since.
+  const controlsPage = el('div', 'hs-set-page');
+  controlsPage.hidden = true;
+  const back = button('Back', 'hs-set-back', () => showControls(false));
+  back.setAttribute('aria-label', 'Back to settings');
+  const controls = el('div', 'hs-help-controls');
+  fillControlsPage(controls, controlsDevice(currentDeviceEnv()));
+  controlsPage.append(back, controls);
+  controlsPage.addEventListener('keydown', (event: Event) => {
+    const key = event as KeyboardEvent;
+    if (key.key !== 'Escape' || key.defaultPrevented) return;
+    key.preventDefault();
+    showControls(false);
+  });
+
+  const settings = settingsBody(game, ctx, { openControls: () => showControls(true) });
+  const main = settings.node;
+  if (settings.refresh) panel.refresh = settings.refresh;
+
+  function showControls(on: boolean): void {
+    if (on) fillControlsPage(controls, controlsDevice(currentDeviceEnv()));
+    main.hidden = on;
+    controlsPage.hidden = !on;
+    const title = titleText(panel);
+    if (title) title.textContent = on ? 'Controls' : 'Settings';
+    (on ? back : settings.controlsRow).focus?.({ preventScroll: true });
+  }
+
+  body.append(main, controlsPage);
+  return panel;
+}
+
+/** The Controls page's body: the lines for the device in the player's hands, asked now. */
+export function controlsBody(): HTMLDivElement {
+  const controls = el('div', 'hs-help-controls');
+  fillControlsPage(controls, controlsDevice(currentDeviceEnv()));
+  return controls;
+}
+
+/**
+ * Settings' groups (Saving, Sound, Display, Notifications, Help), for the sheet or a page of the
+ * pause menu. The Controls row calls openControls: the sheet swaps in its own page, the menu
+ * pushes one.
+ */
+export function settingsBody(
+  game: GameApi,
+  ctx: PanelContext,
+  options: { openControls: () => void },
+): PanelBody & { controlsRow: HTMLButtonElement } {
   const main = el('div', 'hs-set-main');
+  let refresh: (() => void) | undefined;
 
   // The game's own actions (New game or My tower, Today's tower, Stories, and on a phone Views
   // and Share) live in the pause menu (src/ui/pause-menu.ts), which opens this sheet as one of its
@@ -1817,7 +1892,7 @@ export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElem
     const soundGroup = soundSection(ctx.sound);
     main.append(soundGroup.node);
     // The Sound button beside Watch can turn it while this is open: the switch follows (ui.ts).
-    panel.refresh = soundGroup.sync;
+    refresh = soundGroup.sync;
   }
 
   // Display: the theme, then the switches. Larger text and Color-blind friendly views are read
@@ -1867,7 +1942,7 @@ export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElem
     guide.title = 'The full guide, in a new tab';
   }
   help.list.append(guide);
-  const controlsRow = actionRow('Controls', () => showControls(true));
+  const controlsRow = actionRow('Controls', () => options.openControls());
   controlsRow.append(chevron() as unknown as HTMLElement);
   controlsRow.title = 'The controls for what you are playing with';
   help.list.append(controlsRow);
@@ -1875,33 +1950,7 @@ export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElem
   if (openFeedback) help.list.append(actionRow('Send feedback', () => openFeedback(), 'Tell us what broke or what you would like'));
   main.append(help.node);
 
-  // The Controls page: its own page inside the sheet, with a way back. Built now for the device
-  // in hand, and again each time it opens, in case a controller was plugged in since.
-  const controlsPage = el('div', 'hs-set-page');
-  controlsPage.hidden = true;
-  const back = button('Back', 'hs-set-back', () => showControls(false));
-  back.setAttribute('aria-label', 'Back to settings');
-  const controls = el('div', 'hs-help-controls');
-  fillControlsPage(controls, controlsDevice(currentDeviceEnv()));
-  controlsPage.append(back, controls);
-  controlsPage.addEventListener('keydown', (event: Event) => {
-    const key = event as KeyboardEvent;
-    if (key.key !== 'Escape' || key.defaultPrevented) return;
-    key.preventDefault();
-    showControls(false);
-  });
-
-  function showControls(on: boolean): void {
-    if (on) fillControlsPage(controls, controlsDevice(currentDeviceEnv()));
-    main.hidden = on;
-    controlsPage.hidden = !on;
-    const title = titleText(panel);
-    if (title) title.textContent = on ? 'Controls' : 'Settings';
-    (on ? back : controlsRow).focus?.({ preventScroll: true });
-  }
-
-  body.append(main, controlsPage);
-  return panel;
+  return { node: main, controlsRow, ...(refresh ? { refresh } : {}) };
 }
 
 /** Sound on or off, and its three levels. Off by default; nothing plays until it is on. */
@@ -2002,6 +2051,20 @@ export function createSharePanel(
   words?: { text: string; url: string },
 ): PanelElement {
   const { panel, body } = panelShell('Share', 'share', ctx);
+  const share = shareBody(game, renderer, ctx, words);
+  body.append(share.node);
+  const removeSelf = panel.remove.bind(panel);
+  panel.remove = () => {
+    share.dispose?.();
+    removeSelf();
+  };
+  if (share.holdsWork) panel.holdsWork = share.holdsWork;
+  return panel;
+}
+
+/** The Share body (the picture, the message, the buttons), for the sheet or the pause menu's page. */
+export function shareBody(game: GameApi, renderer: Renderer, ctx: PanelContext, words?: { text: string; url: string }): PanelBody {
+  const body = el('div', 'hs-share');
 
   const stats = shareStats(game.world);
   const text = words ? words.text : shareText(stats);
@@ -2102,16 +2165,15 @@ export function createSharePanel(
     ctx.notice('Could not take a picture of the tower.');
   }
 
-  const removeSelf = panel.remove.bind(panel);
-  panel.remove = () => {
-    gone = true;
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    previewUrl = null;
-    removeSelf();
+  return {
+    node: body,
+    dispose() {
+      gone = true;
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      previewUrl = null;
+    },
+    holdsWork: () => capturing && !gone,
   };
-  panel.holdsWork = () => capturing && !gone;
-
-  return panel;
 }
 
 /**

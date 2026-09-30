@@ -256,7 +256,9 @@ describe('panels on the sheet', () => {
     expect(closed).toBe(1);
   });
 
-  it('opens Settings from the menu as a dialog over a backdrop, closes it on Escape back to the menu, and a second Escape puts focus back on Menu', () => {
+  // Since 2026-09-30 the menu's Settings is a page inside the pause card, not a sheet: nothing
+  // goes into the panel slot, Escape goes back to the menu, and a second Escape closes it.
+  it('opens Settings from the menu as a page in the card, no sheet; Escape goes back to the menu, and a second Escape puts focus back on Menu', () => {
     const world = { cash: 1, population: 0, stars: 1, seed: 1, time: { minute: 600 }, log: [], logTotal: 0, rooms: new Map(), shafts: new Map(), sims: new Map(), events: [] };
     const api = {
       world,
@@ -281,10 +283,12 @@ describe('panels on the sheet', () => {
     click(menu);
     choosePauseEntry(root, 'settings');
     const slot = byClass(root, 'hs-panel-slot')[0] as FakeElement;
-    const dialog = slot.children.find((n) => n.getAttribute('role') === 'dialog') as FakeElement;
-    expect(dialog.textContent).toContain('Settings');
-    expect(has(slot.children[0] as FakeElement, 'hs-sheet-backdrop')).toBe(true);
-    expect(dom.activeElement).toBe(dialog);
+    expect(slot.children).toHaveLength(0);
+    const dialog = byClass(root, 'hs-pause-card')[0] as FakeElement;
+    expect(byClass(dialog, 'hs-plate-title')[0]?.textContent).toBe('Settings');
+    expect(byClass(root, 'hs-sheet')).toHaveLength(0);
+    expect(byClass(root, 'hs-sheet-backdrop')).toHaveLength(0);
+    expect(dialog.contains(dom.activeElement)).toBe(true);
     let prevented = false;
     const escape = (target: unknown): void => {
       prevented = false;

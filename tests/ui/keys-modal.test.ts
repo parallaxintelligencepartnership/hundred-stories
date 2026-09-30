@@ -33,7 +33,9 @@ function mkGame(calls: string[]): never {
   return {
     world: {
       seed: 1, cash: 1e6, population: 0, stars: 1, time: { minute: 0 }, log: [], logTotal: 0, rooms: new Map(), shafts: new Map(),
-      sims: new Map(), events: [], stats: { lastQuarter: null }, story: { followed: [], threads: {}, recent: [], seq: 0 },
+      sims: new Map(), events: [], story: { followed: [], threads: {}, recent: [], seq: 0 },
+      // Enough of a quarter for the Finances card (the modal sheet in the S5 test below).
+      stats: { lastQuarter: { income: 0, upkeep: 0, net: 0 }, incomeByKind: {} },
     },
     subscribe: () => () => {},
     getHover: () => null,
@@ -77,29 +79,31 @@ it('S5: Space on a focused button does not pause, and is left to the button', ()
   expect(calls).toEqual(['togglePause']);
 });
 
-it('S5: with the Settings sheet open, a tool key picks nothing and Space does not pause', () => {
+it('S5: with the Settings page open in the pause card, a tool key picks nothing and Space does not pause', () => {
   const calls: string[] = [];
   const root = dom.createElement('div');
   createUi(root as never, mkGame(calls), {} as never);
   // Menu opens the pause card since 2026-09-29; Settings is its entry (P4 review A1: the test
-  // stopped at the card and never reached Settings).
+  // stopped at the card and never reached Settings), a page inside the card since 2026-09-30.
   (menuButton(root).listeners.get('click') ?? []).forEach((f) => f({} as never));
   choosePauseEntry(root, 'settings');
-  expect(root.descendants().some((n) => n.className.split(/\s+/).includes('hs-pause-card'))).toBe(false);
+  const card = root.descendants().find((n) => n.className.split(/\s+/).includes('hs-pause-card'));
   const settings = root.descendants().find((n) => n.className.split(/\s+/).includes('hs-settings'));
-  expect(settings).toBeDefined();
+  expect(card?.contains(settings)).toBe(true);
   calls.length = 0;
   key(dom.activeElement ?? dom.body, '1', 'Digit1');
   key(dom.body, ' ', 'Space');
   expect(calls).toEqual([]);
 });
 
-it('S5: with a modal sheet open and the menu closed (Stories), a tool key picks nothing and Space does not pause', () => {
+it('S5: with a modal sheet open and the menu closed (Finances), a tool key picks nothing and Space does not pause', () => {
   const calls: string[] = [];
   const root = dom.createElement('div');
   createUi(root as never, mkGame(calls), {} as never);
-  (menuButton(root).listeners.get('click') ?? []).forEach((f) => f({} as never));
-  choosePauseEntry(root, 'stories'); // the menu closes and Stories opens: only the sheet guards the keys
+  // The cash readout's Finances: the menu is closed, only the sheet guards the keys. (Stories,
+  // which this used, is a page in the pause card since 2026-09-30.)
+  const cash = root.descendants().find((n) => n.className.split(/\s+/).includes('hs-status-cash'))!;
+  (cash.listeners.get('click') ?? []).forEach((f) => f({} as never));
   expect(root.descendants().some((n) => n.className.split(/\s+/).includes('hs-pause-card'))).toBe(false);
   const modal = root.descendants().find((n) => n.getAttribute('aria-modal') === 'true');
   expect(modal).toBeDefined();

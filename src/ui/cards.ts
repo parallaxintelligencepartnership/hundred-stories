@@ -6,6 +6,7 @@ import { GUIDE_STEP_COUNT, INTRO_SCREENS } from './onboarding';
 import { button, el, panelShell } from './panels';
 import type { PanelElement } from './panels';
 import { icon } from './icons';
+import { toastIcon } from './toast';
 
 /**
  * The intro: three screens in the panel pattern, with Next and Skip on every one. Skip, Close
@@ -193,10 +194,12 @@ function itemKey(item: GoalItem): string {
 export function createTipToast(tip: Tip, onGotIt: () => void): HTMLDivElement {
   const toast = el('div', 'hs-toast is-notice is-tip');
   toast.dataset['tip'] = tip.id;
-  toast.append(el('p', 'hs-toast-text', tip.text));
+  const body = el('div', 'hs-toast-body');
+  body.append(el('p', 'hs-toast-text', tip.text));
   const row = el('div', 'hs-actions');
   row.append(button('Got it', 'hs-btn', onGotIt));
-  toast.append(row);
+  body.append(row);
+  toast.append(toastIcon('info', 'amber'), body);
   return toast;
 }
 
@@ -206,10 +209,12 @@ export function createTipToast(tip: Tip, onGotIt: () => void): HTMLDivElement {
  */
 export function createStarToast(title: string, unlocks: string, onStories: () => void, onClose: () => void): HTMLDivElement {
   const toast = el('div', 'hs-toast is-notice is-star');
-  toast.append(el('p', 'hs-toast-text', title), el('p', 'hs-toast-text', unlocks));
+  const body = el('div', 'hs-toast-body');
+  body.append(el('p', 'hs-toast-text', title), el('p', 'hs-toast-text', unlocks));
   const row = el('div', 'hs-actions');
   row.append(button('Stories so far', 'hs-btn', onStories), button('Close', 'hs-btn', onClose));
-  toast.append(row);
+  body.append(row);
+  toast.append(toastIcon('star', 'amber'), body);
   return toast;
 }
 

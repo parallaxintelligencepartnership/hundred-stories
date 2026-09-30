@@ -1,5 +1,12 @@
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { CommandResult, LogEntry } from '../../src/sim/types';
+import { createWorld } from '../../src/sim/world';
+import { createAlertStack } from '../../src/ui/alerts';
+import { createStarToast, createTipToast } from '../../src/ui/cards';
+import { SAVED_NOTICE } from '../../src/ui/save-button';
+import { createToasts } from '../../src/ui/toast';
+import { FakeDom, type FakeElement } from './fake-dom';
 
 const css = readFileSync(new URL('../../src/ui/ui.css', import.meta.url), 'utf8');
 
@@ -48,5 +55,143 @@ describe('the phone alert band', () => {
   it('keeps the news toast on its own layer so Safari does not square its corners', () => {
     const news = blockOf('.hs-news-toast {');
     expect(news).toContain('isolation: isolate;');
+  });
+});
+
+// The text cards carry an icon at their left in place of the old colour stripe: amber for news
+// (tips, the star card, notices, Game saved, the update notice), red for trouble (fire, bomb,
+// theft, cockroaches, any other alert line, game over). The headline is the first line of words.
+
+/** The Toasts block of ui.css, from its header to the Views header. */
+function toastsBlock(): string {
+  const start = css.indexOf('/* Toasts ---');
+  const end = css.indexOf('/* Views: the information layers');
+  return start >= 0 && end > start ? css.slice(start, end) : '';
+}
+
+/** One declaration's value in the first rule whose selector is exactly `selector`. */
+function declOf(selector: string, prop: string): string {
+  const at = css.indexOf(`\n${selector} {`);
+  if (at < 0) return '';
+  const body = css.slice(at, css.indexOf('}', at));
+  return new RegExp(`[;{\\s]${prop}:\\s*([^;]+);`).exec(body)?.[1]?.trim() ?? '';
+}
+
+describe('the text cards: an icon, no stripe', () => {
+  it('draws no stripe: no ::before bar in the Toasts block and no --toast-edge anywhere', () => {
+    const block = toastsBlock();
+    expect(block).not.toBe('');
+    expect(block).not.toMatch(/::before/);
+    expect(css).not.toMatch(/--toast-edge/);
+  });
+
+  it('sizes the icon at 20 px, amber by default and red for trouble', () => {
+    expect(declOf('.hs-toast-icon', 'width')).toBe('20px');
+    expect(declOf('.hs-toast-icon', 'height')).toBe('20px');
+    expect(declOf('.hs-toast-icon', 'color')).toBe('var(--amber-text)');
+    expect(declOf('.hs-toast-icon.is-alert', 'color')).toBe('var(--alert)');
+    expect(declOf('.hs-toast', 'display')).toBe('flex');
+    expect(declOf('.hs-toast', 'align-items')).toBe('flex-start');
+  });
+
+  it('sets the headline in 600 weight at 14 px and the notes at 12 px in the dim ink', () => {
+    expect(declOf('.hs-toast-body > .hs-toast-text:first-child', 'font-weight')).toBe('600');
+    expect(declOf('.hs-toast-text', 'font-size')).toBe('var(--size-14)');
+    expect(declOf('.hs-toast-note', 'font-size')).toBe('var(--size-12)');
+    expect(declOf('.hs-toast-note', 'color')).toBe('var(--ink-dim)');
+    expect(declOf('.hs-toast.is-star .hs-toast-body > .hs-toast-text:first-child', 'font-size')).toBe('var(--size-20)');
+  });
+});
+
+describe('every text card leads with one icon in its colour', () => {
+  let dom: FakeDom;
+  let uninstall: () => void;
+  beforeEach(() => {
+    dom = new FakeDom();
+    uninstall = dom.install();
+  });
+  afterEach(() => uninstall());
+
+  // An svg icon's class is its class attribute (icons.ts sets it so; className is not a string there).
+  const has = (n: FakeElement, c: string): boolean => `${n.className} ${n.getAttribute('class') ?? ''}`.split(/\s+/).includes(c);
+  const line = (text: string): LogEntry => ({ minute: 400, level: 'alert', text }) as LogEntry;
+
+  /** The card's first child is its one icon: the symbol and the tone. */
+  function iconOf(card: FakeElement): [string | null | undefined, string] {
+    const icons = card.descendants().filter((n) => has(n, 'hs-toast-icon'));
+    expect(icons).toHaveLength(1);
+    const first = card.children[0]!;
+    expect(first).toBe(icons[0]);
+    return [first.children[0]?.getAttribute('href'), has(first, 'is-alert') ? 'alert' : has(first, 'is-amber') ? 'amber' : '?'];
+  }
+
+  /** The first line of words in the card's body. */
+  const headline = (card: FakeElement): string | undefined =>
+    card.children.find((n) => has(n, 'hs-toast-body'))?.children[0]?.textContent;
+
+  function stack() {
+    const world = createWorld(1);
+    const host = dom.createElement('div');
+    const alerts = createAlertStack({
+      host: host as never,
+      getWorld: () => world,
+      apply: () => ({ ok: true }) as CommandResult,
+      later: () => {},
+    });
+    const card = (cls: string): FakeElement => host.children.find((n) => has(n, 'hs-toast') && has(n, cls))!;
+    return { world, host, alerts, card };
+  }
+
+  it('fire, bomb, theft, cockroaches, other alerts and game over are red', () => {
+    const { world, host, alerts, card } = stack();
+    alerts.onAlert(line('Fire broke out in the office on floor 3.'));
+    alerts.onAlert(line('A caller planted a bomb in the tower. Pay the ransom.'));
+    alerts.onAlert(line('Theft on floor 7, a guard is on the way. Watch the shop.'));
+    alerts.onAlert(line('The water main burst.'));
+    expect(iconOf(card('is-fire'))).toEqual(['#hs-icon-fire', 'alert']);
+    expect(iconOf(card('is-bomb'))).toEqual(['#hs-icon-alert', 'alert']);
+    expect(iconOf(card('is-theft'))).toEqual(['#hs-icon-alert', 'alert']);
+    expect(headline(card('is-theft'))).toBe('Theft on floor 7, a guard is on the way');
+    const other = host.children.find((n) => n.className === 'hs-toast')!;
+    expect(iconOf(other)).toEqual(['#hs-icon-alert', 'alert']);
+    expect(headline(other)).toBe('The water main burst.');
+
+    world.rooms.set(99, { id: 99, kind: 'office', floor: 5, height: 1, infested: true } as never);
+    alerts.onAlert(line('Cockroaches moved into the office on floor 5.'));
+    alerts.sync();
+    expect(iconOf(card('is-roaches'))).toEqual(['#hs-icon-alert', 'alert']);
+
+    world.gameOver = { at: 500, reason: 'The bank took the tower.' };
+    alerts.sync();
+    expect(iconOf(card('is-over'))).toEqual(['#hs-icon-finance', 'alert']);
+    expect(headline(card('is-over'))).toBe('The bank took the tower.');
+  });
+
+  it('a notice is amber, and Game saved shows the save icon', () => {
+    const { host, alerts } = stack();
+    alerts.notice('Not enough cash.');
+    alerts.notice(SAVED_NOTICE);
+    const [refusal, saved] = host.children.filter((n) => has(n, 'is-notice'));
+    expect(iconOf(refusal!)).toEqual(['#hs-icon-info', 'amber']);
+    expect(headline(refusal!)).toBe('Not enough cash.');
+    expect(iconOf(saved!)).toEqual(['#hs-icon-save', 'amber']);
+  });
+
+  it('the tip and the star card are amber, the star card with a star', () => {
+    const tip = createTipToast({ id: 't', text: 'Lobbies go on floor 1.' } as never, () => {}) as unknown as FakeElement;
+    expect(iconOf(tip)).toEqual(['#hs-icon-info', 'amber']);
+    expect(headline(tip)).toBe('Lobbies go on floor 1.');
+    const star = createStarToast('The tower reached 2 stars.', 'Hotels open.', () => {}, () => {}) as unknown as FakeElement;
+    expect(iconOf(star)).toEqual(['#hs-icon-star', 'amber']);
+    expect(headline(star)).toBe('The tower reached 2 stars.');
+  });
+
+  it('the alert toast leads with its icon: amber reload for the update notice, red otherwise', () => {
+    const toasts = createToasts();
+    const update = toasts.alert('A new version is ready.', { className: 'is-update', action: 'Reload' }) as unknown as FakeElement;
+    expect(iconOf(update)).toEqual(['#hs-icon-reload', 'amber']);
+    const plain = toasts.alert('The bank took the tower.') as unknown as FakeElement;
+    expect(iconOf(plain)).toEqual(['#hs-icon-alert', 'alert']);
+    toasts.destroy();
   });
 });

@@ -76,6 +76,12 @@ const pauseItems = (root: FakeElement): string[] =>
   root.descendants().filter((n) => n.className.split(/\s+/).includes('hs-pause-item')).map((n) => n.textContent);
 const card = (root: FakeElement): FakeElement | undefined =>
   root.descendants().find((n) => n.className.split(/\s+/).includes('hs-feedback'));
+/** The page the pause card is on (Settings, a page inside it since 2026-09-30), or null at the root or closed. */
+const pausePage = (root: FakeElement): string | null =>
+  root.descendants().find((n) => n.className.split(/\s+/).includes('hs-pause-card'))?.getAttribute('data-page') ?? null;
+/** Back to the menu's entries from its page. */
+const backToEntries = (root: FakeElement): void =>
+  click(root.descendants().find((n) => n.tagName === 'BUTTON' && n.getAttribute('aria-label') === 'Back')!);
 const flush = async (): Promise<void> => {
   for (let i = 0; i < 20; i += 1) await Promise.resolve();
 };
@@ -230,7 +236,9 @@ describe('the Send feedback card', () => {
     expect(dom.activeElement).toBe(close);
     click(close);
     expect(card(root)).toBeUndefined();
-    // Back in the pause menu it was opened from; Resume puts focus back on Menu.
+    // Back in the pause menu it was opened from, on its Settings page; Resume puts focus back on Menu.
+    expect(pausePage(root)).toBe('settings');
+    backToEntries(root);
     choosePauseEntry(root, 'resume');
     expect(dom.activeElement).toBe(menu);
   });
@@ -315,6 +323,10 @@ describe('the Send feedback card', () => {
     const first = openCard();
     escape(byId(first.root, 'hs-feedback-text'));
     expect(card(first.root)).toBeUndefined();
+    // Back on the Settings page, focus where it was on the page.
+    expect(pausePage(first.root)).toBe('settings');
+    expect(first.root.descendants().find((n) => n.className.split(/\s+/).includes('hs-pause-card'))?.contains(dom.activeElement)).toBe(true);
+    escape(dom.activeElement);
     expect(pauseItems(first.root)).toContain('Settings');
     escape(dom.activeElement);
     expect(pauseItems(first.root)).toEqual([]);
@@ -323,7 +335,8 @@ describe('the Send feedback card', () => {
     const second = openCard();
     click(buttonNamed(second.node, 'Cancel')!);
     expect(card(second.root)).toBeUndefined();
-    expect(pauseItems(second.root)).toContain('Settings');
+    expect(pausePage(second.root)).toBe('settings');
+    backToEntries(second.root);
     choosePauseEntry(second.root, 'resume');
     expect(dom.activeElement).toBe(second.menu);
   });
@@ -335,7 +348,8 @@ describe('the Send feedback card', () => {
     expect(shell.classList.contains(WATCH_CLASS)).toBe(false);
     click(buttonNamed(node, 'Cancel')!);
     expect(card(root)).toBeUndefined();
-    choosePauseEntry(root, 'resume'); // back in the pause menu, which counts as open too
+    backToEntries(root); // back in the pause menu on its Settings page, which counts as open too
+    choosePauseEntry(root, 'resume');
     vi.advanceTimersByTime(2 * WATCH_IDLE_MS);
     expect(shell.classList.contains(WATCH_CLASS)).toBe(true);
   });

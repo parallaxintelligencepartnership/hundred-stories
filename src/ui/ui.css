@@ -1550,6 +1550,8 @@ button.hs-readout:hover {
    ui font everywhere; only money (.hs-money) and the clock take the readout face, always with
    tabular figures (the one readout face rule, under the top bar). Raised fills are a little of the ink over the surface, so both themes work
    from the same two names. */
+/* The pause menu's scrim too, so a page's content in its card finds them. */
+.hs-pause,
 .hs-sheet,
 .hs-card {
   --raise: rgba(232, 236, 242, 0.06);
@@ -1558,6 +1560,7 @@ button.hs-readout:hover {
 }
 
 @supports (color: color-mix(in srgb, red 10%, transparent)) {
+  .hs-pause,
   .hs-sheet,
   .hs-card {
     --raise: color-mix(in srgb, var(--ink) 6%, transparent);
@@ -2769,13 +2772,14 @@ a.hs-btn {
   gap: var(--pad);
 }
 
-/* A card that holds text: the solid surface, a soft shadow, and an alert colour edge. The edge
-   is a bar inside the rounded corner (::before), not an inset shadow: a shadow edge follows the
-   16 px curve and thins to a hairline at the top and bottom, and on a short phone card that
-   crescent is the whole left side and smears into the drop shadow as a grey bleed. */
+/* A card that holds text, like a face of the pause menu: the solid surface, a soft shadow, an
+   icon at the left and the words beside it. The icon carries the card's colour (amber for news,
+   red for trouble); there is no colour stripe. */
 .hs-toast {
-  --toast-edge: var(--alert);
   position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
   padding: 12px 14px;
   overflow-wrap: anywhere;
   background: var(--surface);
@@ -2784,25 +2788,27 @@ a.hs-btn {
   pointer-events: auto;
 }
 
-/* The bar starts 8 px down, where the corner's curve is only 2 px in, so all of it sits on the
-   card; the words start 7 px past it. */
-.hs-toast::before,
-.hs-alert-toast::before {
-  content: '';
-  position: absolute;
-  top: 8px;
-  bottom: 8px;
-  left: 4px;
-  width: 3px;
-  border-radius: 2px;
-  background: var(--toast-edge);
-  pointer-events: none;
+/* The card's icon: 20 px, top-aligned with the headline, in the card's colour. The star's fill
+   comes from its host, so the star card's star is filled. */
+.hs-toast-icon {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  color: var(--amber-text);
+}
+
+.hs-toast-icon.is-alert {
+  color: var(--alert);
+}
+
+.hs-toast.is-star .hs-toast-icon {
+  margin-top: 3px;
+  fill: currentColor;
 }
 
 /* An alert toast (toast.ts): stays until tapped. */
 .hs-alert-toast {
   --r: var(--radius-16);
-  --toast-edge: var(--alert);
   position: relative;
   display: flex;
   align-items: flex-start;
@@ -2827,6 +2833,7 @@ a.hs-btn {
 
 .hs-alert-toast .hs-toast-words {
   flex: 1 1 auto;
+  font-weight: 600;
 }
 
 /* The words take what is left of the row and wrap in it, never pushing the x or the time out. */
@@ -2834,12 +2841,8 @@ a.hs-btn {
   min-width: 0;
 }
 
-/* The new version notice (ui.ts updateReady): news, not trouble, so no red edge; its tap
-   reloads, and the word says so where an alert's x would be. */
-.hs-alert-toast.is-update {
-  --toast-edge: var(--amber-text);
-}
-
+/* The new version notice (ui.ts updateReady) is news, not trouble, so its icon is amber
+   (toast.ts); its tap reloads, and the word says so where an alert's x would be. */
 .hs-toast-action {
   flex: none;
   font-weight: 600;
@@ -2927,8 +2930,14 @@ button.hs-news-toast {
 /* Every alert closes: the control sits in the top right corner, inside the rounded edge and
    clear of the text (6 + 28 px, and 4 px to spare at the phone's 6 px padding). */
 .hs-toast-body {
+  flex: 1 1 auto;
   min-width: 0;
   padding-right: 32px;
+}
+
+/* A card with no close (a tip, the star card, game over) keeps no room for one. */
+.hs-toast:not(:has(> .hs-toast-close)) > .hs-toast-body {
+  padding-right: 0;
 }
 
 .hs-toast-close {
@@ -2953,6 +2962,7 @@ button.hs-news-toast {
 .hs-toast-note {
   margin: 6px 0 0;
   font-size: var(--size-12);
+  color: var(--ink-dim);
 }
 
 /* Three cards at most; the older ones fold into the one line above them. */
@@ -2975,8 +2985,17 @@ button.hs-news-toast {
   font-size: var(--size-14);
 }
 
-.hs-toast.is-notice {
-  --toast-edge: var(--ink-dim);
+/* The headline: the first line of the words, in the pause menu's 600 weight. */
+.hs-toast-body > .hs-toast-text:first-child {
+  font-weight: 600;
+}
+
+/* The star card is the celebration: its first line is amber display type, one step down from
+   the plate title's 28 px so it fits the 340 px column. */
+.hs-toast.is-star .hs-toast-body > .hs-toast-text:first-child {
+  font-size: var(--size-20);
+  line-height: 1.25;
+  color: var(--amber-text);
 }
 
 /* Views: the information layers ----------------------------------------- */
@@ -4066,10 +4085,12 @@ button.hs-news-toast {
   color: var(--ink);
   font-family: var(--font-ui);
   animation: hs-pause-in var(--motion-fast) var(--ease-spring);
+  transition: width var(--motion-fast) var(--ease-standard);
 }
 
-/* The plate keeps its height; the column gives up the room. */
+/* The plate keeps its height; the column gives up the room. Back sits inside it, on a page. */
 .hs-pause-plate {
+  position: relative;
   flex: none;
 }
 
@@ -4100,10 +4121,18 @@ button.hs-news-toast {
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
+  animation: hs-pause-swap var(--motion-fast) var(--ease-standard);
 }
 
 .hs-pause-list::-webkit-scrollbar {
   display: none;
+}
+
+/* The column and each page fade in as they take the card's body: a page opened, or Back. */
+@keyframes hs-pause-swap {
+  from {
+    opacity: 0;
+  }
 }
 
 /* With no bar drawn, an edge of the column with entries past it fades into the card (pause-menu.ts
@@ -4157,14 +4186,197 @@ button.hs-news-toast {
   padding-bottom: 4px;
 }
 
-/* No entrance under reduced motion: the card is simply there. */
+/* Pages (pause-menu.ts pushPage): Settings, Stories, Share and Today's tower open inside the card,
+   never as a sheet. The card widens a little for them, the plate names the page, and a round Back
+   sits at the plate's left, out of the flow so the title stays centered. */
+.hs-pause-card.is-page {
+  width: min(440px, 100%);
+}
+
+.hs-pause-card.is-page .hs-pause-plate {
+  padding-right: calc(var(--touch) + 8px);
+  padding-left: calc(var(--touch) + 8px);
+}
+
+.hs-pause-back {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  display: grid;
+  place-items: center;
+  width: var(--touch);
+  height: var(--touch);
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--steel-2);
+  box-shadow: var(--shadow-1), inset 0 1px 0 var(--hairline);
+  color: var(--amber-text);
+  cursor: pointer;
+  translate: 0 -50%;
+  transition: transform 80ms var(--ease-standard);
+}
+
+.hs-pause-back[hidden] {
+  display: none;
+}
+
+.hs-pause-back:active {
+  transform: translateY(var(--press-sink)) scale(var(--press-scale));
+}
+
+/* The shared chevron points down; turned a quarter it points back. */
+.hs-pause-back-icon {
+  width: 20px;
+  height: 20px;
+  rotate: 90deg;
+}
+
+/* A page's body: the panels' content in the card's words. Groups sit on the surface, their rows
+   raised faces 8 px apart (pause-menu.ts wearFaces), with no hairlines between them. */
+.hs-pause-page > * {
+  flex: none;
+}
+
+.hs-pause-page .hs-section {
+  margin: 0 0 12px;
+}
+
+.hs-pause-page .hs-section-title,
+.hs-pause-page .hs-section > .hs-note {
+  padding: 0 4px;
+}
+
+.hs-pause-page :is(.hs-set-list, .hs-occupants) {
+  gap: 8px;
+  border-radius: 0;
+  background: none;
+  overflow: visible;
+}
+
+.hs-ui .hs-pause-page .hs-face {
+  width: 100%;
+  text-align: left;
+}
+
+.hs-pause-page :is(.hs-set-row, .hs-occupant-gone, .hs-row, .hs-story-item) {
+  border-top: 0;
+  border-bottom: 0;
+}
+
+/* A switch row is one face and one target: the words fill it up to the switch. */
+.hs-pause-page .hs-set-switch .hs-set-label {
+  display: flex;
+  align-items: center;
+  align-self: stretch;
+}
+
+/* A sound level: the slider with its amber track, on a face of its own. */
+.hs-ui .hs-pause-page .hs-level.hs-face {
+  cursor: default;
+}
+
+/* Theme: Auto, Light and Dark as three faces side by side, the choice amber. */
+.hs-pause-page .hs-set-choice {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  min-height: 0;
+  padding: 0;
+}
+
+.hs-pause-page .hs-set-choice > .hs-set-label {
+  padding: 0 4px;
+  font-size: var(--size-12);
+  font-weight: 600;
+  color: var(--ink-dim);
+}
+
+.hs-pause-page .hs-segmented {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+}
+
+.hs-ui .hs-pause-page .hs-seg-btn.hs-face {
+  justify-content: center;
+  min-width: 0;
+  padding: 0 8px;
+  text-align: center;
+}
+
+/* Why a Notifications switch stayed off, and Save now's question: lines on the surface. */
+.hs-pause-page .hs-set-why,
+.hs-pause-page .hs-set-ask-text {
+  padding: 0 4px;
+}
+
+.hs-pause-page .hs-set-ask {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* The Controls lines: words with their picture, on the surface. */
+.hs-pause-page .hs-controls-row {
+  padding: 8px 4px;
+}
+
+/* Stories: each person a face, their latest line under their name. */
+.hs-ui .hs-pause-page .hs-occupant.hs-face {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  padding: 8px 16px;
+}
+
+.hs-pause-page .hs-occupant-gone {
+  gap: 8px;
+  padding-right: 0;
+}
+
+.hs-ui .hs-pause-page .hs-occupant-gone .hs-btn.hs-face {
+  flex: none;
+  width: auto;
+}
+
+/* The buttons of Share and Today's tower: one full-width column of faces. */
+.hs-pause-page .hs-actions {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  margin: 8px 0 0;
+}
+
+/* No entrance under reduced motion: the card is simply there, a page simply swapped in. */
 .hs-ui.is-reduced .hs-pause-card {
   animation: none;
+  transition: none;
+}
+
+.hs-ui.is-reduced .hs-pause-list {
+  animation: none;
+}
+
+.hs-ui.is-reduced .hs-pause-back {
+  transition: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .hs-pause-card {
     animation: none;
+    transition: none;
+  }
+
+  .hs-pause-list {
+    animation: none;
+  }
+
+  .hs-pause-back {
+    transition: none;
   }
 }
 
@@ -4591,14 +4803,19 @@ button.hs-news-toast {
     right: calc(64px + 2 * var(--edge) + var(--safe-right) - var(--toast-bleed));
   }
 
-  /* Tight on a phone, except on the left: the words clear the colour edge by 7 px. */
+  /* Tight on a phone: the icon sits 10 px in from the left, the words 8 px past it. */
   .hs-toast {
-    padding: 6px 6px 6px 14px;
+    gap: 8px;
+    padding: 6px 6px 6px 10px;
   }
 
   .hs-toast-text {
     margin-bottom: 4px;
     font-size: var(--size-12);
+  }
+
+  .hs-toast.is-star .hs-toast-body > .hs-toast-text:first-child {
+    font-size: var(--size-16);
   }
 }
 

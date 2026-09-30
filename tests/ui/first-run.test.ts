@@ -363,8 +363,12 @@ describe('tips', () => {
   it('the first panel tip comes with the first panel', () => {
     const game = readyGame();
     const { root } = mount(game);
+    // A panel: Send feedback, from the menu's Settings page (Settings itself is a page in the pause
+    // card since 2026-09-30, not a panel).
     click(buttonNamed(root, 'Menu'));
     choosePauseEntry(root, 'settings');
+    expect(tipsOf(root)).toHaveLength(0);
+    click(buttonNamed(root, 'Send feedback'));
     expect(tipsOf(root)[0]?.textContent).toContain('Panels show the details');
   });
 

@@ -46,8 +46,8 @@ import {
   createFinancesPanel,
   createLogPanel,
   createQueryPanel,
+  controlsBody,
   createRecapPanel,
-  createSettingsPanel,
   createSharePanel,
   createStoriesPanel,
   el,
@@ -56,8 +56,11 @@ import {
   guideOpensOutside,
   openGuideOutside,
   readGlassClear,
+  settingsBody,
+  shareBody,
+  storiesBody,
 } from './panels';
-import type { PanelContext, PanelElement } from './panels';
+import type { PanelBody, PanelContext, PanelElement } from './panels';
 import { GROUPS, applyRowState, buildPalette, paintThumbnail, sameTool, toolRowState } from './palette';
 import { hasTextField, isFormField, keyAction, stepSpeed } from './keys';
 import { createMinimap, type Minimap } from './minimap';
@@ -66,7 +69,7 @@ import { createStatusBar, speedModeText } from './status';
 import { demolishNotice, placementNote } from './explain';
 import { createHoverCard } from './hover';
 import { createViewControl } from './overlays';
-import { createDailyPanel, dailyCard } from './daily';
+import { createDailyPanel, dailyCard, dailyPeekBody, DAILY_TITLE, freshPeek, type DailyGo } from './daily';
 import { createBuildDock, isPhoneWidth } from './build';
 import { pageRoot, watchDisplayPrefs } from './display';
 import { createPageHaptics, hapticsEnabled } from './haptics';
@@ -76,7 +79,7 @@ import { createQuietLabels } from './quiet-labels';
 import { WATCH_CLASS, createWatchMode, createWatchToggle } from './watch';
 import { createSoundToggle } from './sound-toggle';
 import { createSaveAction, createSaveButton, SAVE_TIP, SAVE_WORD, type SaveAction, type SaveQuestion } from './save-button';
-import { createPauseMenu, NEW_TOWER_NO, NEW_TOWER_QUESTION, NEW_TOWER_YES, type PauseEntry } from './pause-menu';
+import { createPauseMenu, NEW_TOWER_NO, NEW_TOWER_QUESTION, NEW_TOWER_YES, type PauseEntry, type PausePage } from './pause-menu';
 import { UPDATE_TEXT, type Notifier } from './notify';
 
 export interface Ui {
@@ -93,7 +96,7 @@ export interface UiOptions {
   reload?: () => void;
 }
 
-type PanelKind = 'none' | 'finances' | 'log' | 'settings' | 'share' | 'intro' | 'stories' | 'recap' | 'chronicle' | 'daily' | 'feedback';
+type PanelKind = 'none' | 'finances' | 'log' | 'share' | 'intro' | 'stories' | 'recap' | 'chronicle' | 'daily' | 'feedback';
 
 /** Real milliseconds the star card stays up unless closed first. */
 export const STAR_CARD_LINGER_MS = 20_000;
@@ -289,6 +292,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   let shareWords: { text: string; url: string } | null = null;
   /** The daily card last put up by itself, so each one opens once and Close keeps it closed. */
   let dailyShownKey = '';
+  /** A switch to Today's tower answered on the menu's page is under way: its card waits (switchTower decides). */
+  let dailyQuiet = false;
 
   const shell = el('div', 'hs-ui');
   // First in the tab order: a link past the chrome to the tower, visible when it has focus.
@@ -363,7 +368,9 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   });
   top.append(saveButton.button, soundToggle.button, watchToggle.button);
   const stopSoundPref = onPrefChange((key) => {
-    if (key === PREF_KEYS.sound) mountedPanel?.refresh?.();
+    if (key !== PREF_KEYS.sound) return;
+    mountedPanel?.refresh?.();
+    pauseMenu.refresh(); // the Settings page's switch too
   });
 
   // Speed: one segmented pill of icons. The keys stay: space pauses, comma and period step.
@@ -945,6 +952,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
    * the player finds the card in the menu (Today's tower).
    */
   function watchDaily(): void {
+    if (dailyQuiet) return;
     const key = dailyKey();
     if (key === dailyShownKey) return;
     if (key === '') {
@@ -978,11 +986,14 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
    * tower or a friend's). The open may already have notified and mounted that card; mountedKey
    * is left truthful, so it is kept as it is and closes normally later.
    */
-  async function switchTower(open: () => Promise<void>): Promise<void> {
+  async function switchTower(open: () => Promise<void>, quiet = false): Promise<void> {
     await open();
     syncAddress();
     panelKind = 'none';
-    dailyShownKey = '';
+    // Quiet: the menu's Today's tower page already said what the card would, and the player
+    // answered it there, so the card does not come up again by itself. A choice still waiting
+    // (a copy that could not be kept, a slot that changed since the page read it) still shows.
+    dailyShownKey = quiet && !game.getDailyChoice?.() ? dailyKey() : '';
     update();
   }
 
@@ -1466,9 +1477,11 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   }
 
   function refreshPanel(): void {
-    // Whatever the pause menu opened over itself (Settings, and anything Settings opened) has
-    // closed: the menu comes back, not the game.
+    // What the Settings page opened over the game (Send feedback, the intro) has closed: the menu
+    // comes back on that page, not the game.
     if (panelKind === 'none' && pauseMenu.isOpen() && !pauseMenu.isShown()) pauseMenu.show();
+    // A page in the pause menu (Settings, Stories) keeps its live parts current, as a panel does.
+    pauseMenu.refresh();
     const selection = game.getSelection();
     // While the menu is on screen no card stands beside it; the one it covered comes back after.
     const key = pauseMenu.isShown()
@@ -1511,9 +1524,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
         ? createFinancesPanel(game, ctx)
         : panelKind === 'log'
           ? createLogPanel(game, ctx)
-          : panelKind === 'settings'
-            ? createSettingsPanel(game, ctx)
-            : panelKind === 'share'
+          : panelKind === 'share'
               ? createSharePanel(game, renderer, ctx, shareWords ?? undefined)
               : panelKind === 'daily'
                 ? createDailyPanel(game, ctx, {
@@ -1854,24 +1865,24 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
         ? { id: 'newTower', label: 'New tower', icon: 'structure', kind: 'stay', run: () => askNewTower() }
         : { id: 'myTower', label: 'My tower', icon: 'home', kind: 'leave', run: () => openMyTower() },
     ];
-    if (slot !== 'daily') entries.push({ id: 'daily', label: "Today's tower", icon: 'star', kind: 'leave', run: () => ctx.openDaily?.() });
+    if (slot !== 'daily') entries.push({ id: 'daily', label: "Today's tower", icon: 'star', kind: 'page', run: () => openDailyPage() });
     entries.push({
       id: 'stories',
       label: 'Stories',
       icon: 'population',
-      kind: 'leave',
+      kind: 'page',
       title: 'The people you follow and the latest from around the tower',
-      run: () => setPanel('stories'),
+      run: () => pauseMenu.pushPage(storiesPage()),
     });
     // A phone's top bar is the pill alone (ui.css), so Views and Share live here instead.
     if (inSheetLayout()) {
       entries.push(
         { id: 'views', label: 'Views', icon: 'views', kind: 'leave', title: 'Stress, noise, vacancy and elevator wait', run: () => ctx.openViews?.() },
-        { id: 'share', label: 'Share', icon: 'share', kind: 'leave', title: 'Share your tower', run: () => setPanel('share') },
+        { id: 'share', label: 'Share', icon: 'share', kind: 'page', title: 'Share your tower', run: () => pauseMenu.pushPage(sharePage()) },
       );
     }
     entries.push(
-      { id: 'settings', label: 'Settings', icon: 'settings', kind: 'over', run: () => setPanel('settings') },
+      { id: 'settings', label: 'Settings', icon: 'settings', kind: 'page', run: () => pauseMenu.pushPage(settingsPage()) },
       // The guide, linked the way Settings links it: on the web the page, in a new tab; in the app
       // shells, which carry no copy of it, the site's page in the system browser.
       guideOpensOutside()
@@ -1888,6 +1899,108 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
           },
     );
     return entries;
+  }
+
+  // ------------------------------------------------ the pause menu's pages
+
+  /** Out of the menu (the speed given back, focus on Menu), then on to what a page opened. */
+  function leaveMenu(run: () => void): void {
+    pauseMenu.close();
+    run();
+  }
+
+  /**
+   * The context a page's body gets: the panels' own, and Close is Back. What it opens over the
+   * game goes as it did when these were sheets: Settings' Send feedback and Intro open with the
+   * menu stepped aside, still paused, and close back to it; Stories' person, milestone and
+   * chronicle leave the menu, as its Stories entry used to before the card opened.
+   */
+  const pageCtx: PanelContext = Object.assign(Object.create(ctx) as PanelContext, {
+    close: () => void pauseMenu.popPage(),
+    select: (sel: Parameters<NonNullable<PanelContext['select']>>[0]) => leaveMenu(() => ctx.select?.(sel)),
+    openIntro: () => pauseMenu.stepAside(() => ctx.openIntro?.()),
+    openFeedback: () => pauseMenu.stepAside(() => ctx.openFeedback?.()),
+    openRecap: () => leaveMenu(() => ctx.openRecap?.()),
+    openChronicle: () => leaveMenu(() => ctx.openChronicle?.()),
+  });
+
+  function settingsPage(): PausePage {
+    let body: PanelBody | null = null;
+    return {
+      id: 'settings',
+      title: 'Settings',
+      build() {
+        const made = settingsBody(game, pageCtx, { openControls: () => pauseMenu.pushPage(controlsPage(), made.controlsRow) });
+        body = made;
+        const root = el('div', 'hs-settings');
+        root.append(made.node);
+        return root;
+      },
+      refresh: () => body?.refresh?.(),
+    };
+  }
+
+  /** Controls, a page under Settings: built for the device in hand each time it opens. */
+  function controlsPage(): PausePage {
+    return { id: 'controls', title: 'Controls', build: () => controlsBody() };
+  }
+
+  function storiesPage(): PausePage {
+    let body: PanelBody | null = null;
+    return {
+      id: 'stories',
+      title: 'Stories',
+      build() {
+        body = storiesBody(game, pageCtx);
+        return body.node;
+      },
+      refresh: () => body?.refresh?.(),
+    };
+  }
+
+  function sharePage(): PausePage {
+    let body: PanelBody | null = null;
+    return {
+      id: 'share',
+      title: 'Share',
+      build() {
+        body = shareBody(game, renderer, pageCtx);
+        return body.node;
+      },
+      dispose: () => body?.dispose?.(),
+    };
+  }
+
+  /**
+   * Today's tower: a page with the card opening it would put up (the twist, the older tower's
+   * choice, the result), read before any switch. A game that cannot read ahead shows today's
+   * start card at once.
+   */
+  function openDailyPage(): void {
+    const push = (peek: ReturnType<typeof freshPeek>): void => {
+      // Closed, or on another page, while the slot was being read: nothing to show it on.
+      if (!pauseMenu.isOpen() || pauseMenu.page()) return;
+      pauseMenu.pushPage({ id: 'daily', title: DAILY_TITLE, build: () => dailyPeekBody(peek, playDaily) });
+    };
+    if (!game.peekDaily) {
+      push(freshPeek());
+      return;
+    }
+    void game.peekDaily().then(push, () => push(freshPeek()));
+  }
+
+  /** An answer on the Today's tower page: the menu closes, the speed given back, and the switch runs. */
+  function playDaily(which: DailyGo): void {
+    pauseMenu.close();
+    dailyQuiet = true;
+    void switchTower(async () => {
+      try {
+        await game.openDaily();
+        if (which !== 'open' && game.getDailyChoice?.()) await game.chooseDaily(which);
+      } finally {
+        dailyQuiet = false;
+      }
+    }, true);
   }
 
   /**
@@ -2063,8 +2176,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   /** B: close the nearest thing open, else put the tool down. */
   function padBack(): void {
     if (pauseMenu.isShown()) {
-      // A question backs out with its safe answer, as Escape does; else B resumes.
-      if (!pauseMenu.cancel()) closePauseMenu();
+      // A question backs out with its safe answer and a page goes back one, as Escape does; else B resumes.
+      if (!pauseMenu.cancel() && !pauseMenu.popPage()) closePauseMenu();
       return;
     }
     if (view.isOpen()) {
@@ -2160,7 +2273,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     if (action.kind === 'pause' && isPressable(event.target)) return;
     // Behind an open modal sheet the tower is out of reach: no tool, group or pause keys.
     if ((action.kind === 'pause' || action.kind === 'tool' || action.kind === 'group') && modalSheetOpen()) return;
-    // With Settings or a card opened from the pause menu over it, the menu still holds the speed.
+    // With a card the Settings page opened over the game (Send feedback), the menu still holds the speed.
     if ((action.kind === 'pause' || action.kind === 'speed') && pauseMenu.isOpen()) {
       event.preventDefault();
       return;

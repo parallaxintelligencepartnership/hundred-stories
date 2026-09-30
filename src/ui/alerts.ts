@@ -14,7 +14,10 @@ import { FIRE_BURN_OUT_TEXT, FIRE_OUT_EMPTY_TEXT, helicopterCost } from '../sim/
 import { EVENTS } from '../sim/rules';
 import type { Command, CommandResult, Id, LogEntry, World } from '../sim/types';
 import { formatMoney } from './format';
+import type { IconName } from './icons';
 import { button, el } from './panels';
+import { SAVED_NOTICE } from './save-button';
+import { toastIcon } from './toast';
 
 /** Cards shown at once; older ones fold into the "and N more" line. */
 export const ALERT_STACK_MAX = 3;
@@ -256,15 +259,18 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
     layout();
   }
 
-  /** A card with its close control; `body` is where the content goes. */
-  function open(className: string): { card: Card; body: HTMLElement } {
+  /**
+   * A card with its icon (red for trouble, amber for a notice) and its close control; `body` is
+   * where the content goes.
+   */
+  function open(className: string, glyph: IconName, tone: 'amber' | 'alert' = 'alert'): { card: Card; body: HTMLElement } {
     const node = el('div', className);
     const body = el('div', 'hs-toast-body');
     const card: Card = { node, gone: false };
     const shut = button('×', 'hs-toast-close', () => close(card));
     shut.setAttribute('aria-label', 'Close this alert');
     shut.title = 'Dismiss (Escape)';
-    node.append(shut, body);
+    node.append(toastIcon(glyph, tone), shut, body);
     host.append(node);
     cards.push(card);
     layout();
@@ -291,7 +297,7 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
 
   function startIncident(key: string): FireIncident {
     if (incident && !incident.closed) closeIncident(incident);
-    const { card, body } = open('hs-toast is-fire');
+    const { card, body } = open('hs-toast is-fire', 'fire');
     incident = { key, rooms: new Set(), floors: new Set(), damaged: null, cost: null, closed: false, card, body, shown: '' };
     return incident;
   }
@@ -408,7 +414,8 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
       for (const action of actions) row.append(button(GAME_OVER_LABELS[action.kind], 'hs-btn', () => action.run()));
       body.append(row);
     }
-    node.append(body);
+    // The bank took it: the money icon, in the alert red.
+    node.append(toastIcon('finance', 'alert'), body);
     host.prepend(node);
     ending = { node, key };
   }
@@ -419,7 +426,7 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
 
   function startBomb(text: string): void {
     if (bomb && !bomb.closed) endBomb(null);
-    const { card, body } = open('hs-toast is-bomb');
+    const { card, body } = open('hs-toast is-bomb', 'alert');
     const pay = button('Pay ransom', 'hs-btn', () => {
       deps.apply({ kind: 'bomb.pay' });
     });
@@ -473,7 +480,7 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
 
   function startTheftCard(headline: string): void {
     if (theft && !theft.closed) endTheftCard(null);
-    const { card, body } = open('hs-toast is-theft');
+    const { card, body } = open('hs-toast is-theft', 'alert');
     theft = { card, body, closed: false };
     body.append(el('p', 'hs-toast-text', headline));
   }
@@ -507,7 +514,7 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
     if (count > 0 && (!roaches || roaches.closed)) {
       // A new infestation opens a card; one already on screen when a save loads is not news.
       if (!heard) return;
-      const { card, body } = open('hs-toast is-roaches');
+      const { card, body } = open('hs-toast is-roaches', 'alert');
       roaches = { card, body, closed: false, shown: '' };
     }
     if (!roaches) return;
@@ -558,13 +565,13 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
     const over = deps.getWorld().gameOver ?? null;
     if (over && entry.minute >= over.at) return;
     // Any other alert line stays until the player closes it.
-    const { body } = open('hs-toast');
+    const { body } = open('hs-toast', 'alert');
     body.append(el('p', 'hs-toast-text', entry.text));
   }
 
   function notice(text: string, options: { replace?: boolean } = {}): void {
     if (options.replace) for (const held of [...cards]) if (!held.gone && held.notice === text) close(held);
-    const { card, body } = open('hs-toast is-notice');
+    const { card, body } = open('hs-toast is-notice', text === SAVED_NOTICE ? 'save' : 'info', 'amber');
     card.notice = text;
     body.append(el('p', 'hs-toast-text', text));
     deps.later(() => close(card), NOTICE_LINGER_MS);

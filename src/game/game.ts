@@ -10,7 +10,7 @@ import { createWorld, log as logEvent, roomsOnFloor, shaftAt, type TowerStart } 
 import { SCHEDULES } from '../sim/rules';
 import { classifyPress, isTap, PRESS_SLOP_PX, TOUCH_SLOP_PX } from '../render/input';
 import type { Renderer } from '../render/renderer';
-import { NIGHT_MULTIPLIER, type DailyChoice, type DailyInfo, type GameApi, type Placement, type PlacementRect, type Speed, type Tool } from './api';
+import { NIGHT_MULTIPLIER, type DailyChoice, type DailyInfo, type DailyPeek, type GameApi, type Placement, type PlacementRect, type Speed, type Tool } from './api';
 import {
   keepDailyCopy,
   readDailyCopy,
@@ -29,6 +29,7 @@ import {
   dailyFinished,
   dailyMode,
   dailyOpening,
+  dailyResult,
   dailyStart,
   dailyTwist,
   dateOfMode,
@@ -1340,6 +1341,25 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
         else startSpeed();
         notify();
       }),
+    async peekDaily(): Promise<DailyPeek> {
+      // What openDaily would find, read the same way and decided by the same rule, with nothing
+      // taken: no slot, no world, no record written. The daily in hand, if any, is the newest copy.
+      const today = time.today();
+      const read = slot === 'daily' ? { world, failed: false } : await readWorld('daily');
+      const saved = read.world;
+      const savedDate = saved ? dateOfMode(buildLogOf(saved).mode) : null;
+      const known = !read.failed && saved && savedDate !== null ? { date: savedDate, finished: dailyFinished(saved) } : null;
+      const record = settleDailyRecord(seedDailyRecord(readDailyRecord(), known), today);
+      const opening = read.failed ? 'fresh' : dailyOpening(known, today, record);
+      return {
+        today,
+        opening,
+        savedDate: known?.date ?? null,
+        savedUnfinished: known !== null && !known.finished,
+        yesterday: opening === 'choose' && known?.date === previousDateKey(today),
+        result: saved && known?.date === today && known.finished ? dailyResult(saved, today) : null,
+      };
+    },
     async chooseDaily(which) {
       const choice = dailyChoice;
       if (!choice) return;
