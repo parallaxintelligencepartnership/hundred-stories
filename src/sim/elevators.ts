@@ -270,7 +270,66 @@ function bestCarFor(
       bestDist = dist;
     }
   }
+  // The rider's own car cannot take them now (full, or not going where they are going), and
+  // a kept car that is free works this floor: the kept car gets the call. Without a kept car
+  // in the shaft nothing here runs, so plain towers dispatch exactly as before.
+  if (
+    best !== null &&
+    bestTier < LEFTOVER_TIER &&
+    shaft.cars.some((car) => car.serves !== 'any') &&
+    !ownCarCanTakeNow(shaft, best, capacity, floor, dir, cls, waiting)
+  ) {
+    const free = nearestFreeKeptCar(shaft, floor, dir, cls, waiting);
+    if (free) return free;
+  }
   return best;
+}
+
+/** Could this car of the class's own carry at least one of the riders under this light now? */
+function ownCarCanTakeNow(
+  shaft: Shaft,
+  car: Car,
+  capacity: number,
+  floor: number,
+  dir: 1 | -1,
+  cls: RiderClass,
+  waiting: WaitIndex,
+): boolean {
+  if (car.passengers.length >= capacity) return false;
+  const under = callersOf(shaft, floor, dir, cls, waiting);
+  // A light nobody stands under keeps the old pick.
+  if (under.length === 0) return true;
+  return under.some((sim) => carTakes(shaft, car, sim, false));
+}
+
+/** The nearest kept car of another group that is free (a leftover) and would carry one of these riders. */
+function nearestFreeKeptCar(
+  shaft: Shaft,
+  floor: number,
+  dir: 1 | -1,
+  cls: RiderClass,
+  waiting: WaitIndex,
+): Car | null {
+  const under = callersOf(shaft, floor, dir, cls, waiting);
+  let free: Car | null = null;
+  let freeDist = Number.POSITIVE_INFINITY;
+  for (const car of shaft.cars) {
+    if (car.serves === 'any' || car.serves === cls || !carCovers(shaft, car, floor)) continue;
+    if (!under.some((sim) => carTakes(shaft, car, sim, true))) continue;
+    if (!leftoverFor(shaft, car, waiting)) continue; // a leftover car is empty, so it has room
+    const dist = Math.abs(floor - car.y);
+    if (free === null || dist < freeDist || (dist === freeDist && car.id < free.id)) {
+      free = car;
+      freeDist = dist;
+    }
+  }
+  return free;
+}
+
+/** Riders whose light of this class is on this floor for this shaft in this direction. */
+function callersOf(shaft: Shaft, floor: number, dir: 1 | -1, cls: RiderClass, waiting: WaitIndex): Sim[] {
+  const list = waiting.get(shaft.id)?.get(floor) ?? [];
+  return list.filter((sim) => waitsFor(sim, shaft, floor, dir) && callClassesFor(shaft, sim.kind).includes(cls));
 }
 
 /** Run one car for one minute. Returns where it would like to be, before car spacing. */
@@ -293,7 +352,7 @@ function stepCar(
     } else {
       // Keep serving the floor for the whole door cycle, so a sim that starts waiting
       // while the doors are open still gets on.
-      serveFloor(world, shaft, car, waiting);
+      serveFloor(world, shaft, car, waiting, assigned);
       car.doorTimer -= 1;
       if (car.doorTimer > 0) return car.y;
       car.state = 'idle';
@@ -321,8 +380,8 @@ function stepCar(
     dir = car.dir;
   }
 
-  if (atFloor !== null && shouldStop(shaft, car, atFloor, dir, hasRoom, halls)) {
-    return openDoors(world, shaft, car, dir, rule, waiting);
+  if (atFloor !== null && shouldStop(shaft, car, atFloor, dir, hasRoom, halls, waiting)) {
+    return openDoors(world, shaft, car, dir, rule, waiting, halls);
   }
 
   const ahead = nearestAhead(y, dir, carFloors, halls);
@@ -330,8 +389,8 @@ function stepCar(
 
   // Nothing left this way: reverse.
   const back: 1 | -1 = dir === 1 ? -1 : 1;
-  if (atFloor !== null && shouldStop(shaft, car, atFloor, back, hasRoom, halls)) {
-    return openDoors(world, shaft, car, back, rule, waiting);
+  if (atFloor !== null && shouldStop(shaft, car, atFloor, back, hasRoom, halls, waiting)) {
+    return openDoors(world, shaft, car, back, rule, waiting, halls);
   }
   const behind = nearestAhead(y, back, carFloors, halls);
   if (behind !== null) return driveTo(car, back, behind, rule);
@@ -353,11 +412,54 @@ function shouldStop(
   dir: 1 | -1,
   hasRoom: boolean,
   halls: HallEntry[],
+  waiting: WaitIndex,
 ): boolean {
   if (!shaft.stops.has(floor)) return false;
   if (car.calls.has(floor)) return true;
   if (!hasRoom) return false;
-  return halls.some((e) => e.floor === floor && e.dir === dir);
+  if (halls.some((e) => e.floor === floor && e.dir === dir)) return true;
+  return passingPickup(shaft, car, floor, dir, halls, waiting);
+}
+
+/**
+ * A kept car with room that is going past this floor this way anyway stops for someone else
+ * waiting here to go the same way, when their floor comes before the last one this sweep
+ * already has to reach. Its own riders are still dispatched first (it gets no call for the
+ * others), and it never turns round or goes further for them. An Everyone car never needs this.
+ */
+function passingPickup(
+  shaft: Shaft,
+  car: Car,
+  floor: number,
+  dir: 1 | -1,
+  halls: HallEntry[],
+  waiting: WaitIndex,
+): boolean {
+  if (car.serves === 'any') return false;
+  const reach = sweepReach(shaft, car, floor, dir, halls);
+  if (reach === null) return false;
+  const queue = waiting.get(shaft.id)?.get(floor) ?? [];
+  return queue.some((sim) => boardable(sim, shaft, floor, dir) && ridesPassing(shaft, car, sim, dir, reach));
+}
+
+/** The farthest floor past `floor` in `dir` that this car must reach anyway: a rider's floor or a call it has. */
+function sweepReach(shaft: Shaft, car: Car, floor: number, dir: 1 | -1, halls: HallEntry[]): number | null {
+  let reach: number | null = null;
+  const consider = (f: number): void => {
+    if (dir === 1 ? f <= floor : f >= floor) return;
+    if (reach === null || (dir === 1 ? f > reach : f < reach)) reach = f;
+  };
+  for (const f of car.calls) if (shaft.stops.has(f) && carCovers(shaft, car, f)) consider(f);
+  for (const e of halls) consider(e.floor);
+  return reach;
+}
+
+/** Someone else's rider this kept car takes on its way: bound for a floor it works, no farther than `reach`. */
+function ridesPassing(shaft: Shaft, car: Car, sim: Sim, dir: 1 | -1, reach: number): boolean {
+  if (carCarriesAsOwn(car, sim.kind)) return false;
+  const leg = sim.route[0];
+  if (!leg || leg.kind !== 'ride' || !carCovers(shaft, car, leg.toFloor)) return false;
+  return dir === 1 ? leg.toFloor <= reach : leg.toFloor >= reach;
 }
 
 function openDoors(
@@ -367,17 +469,18 @@ function openDoors(
   dir: 1 | -1,
   rule: ShaftRule,
   waiting: WaitIndex,
+  halls: HallEntry[],
 ): number {
   car.dir = dir;
   car.state = 'doorsOpen';
   car.doorTimer = rule.doorOpenMinutes;
   car.idleSince = null;
-  serveFloor(world, shaft, car, waiting);
+  serveFloor(world, shaft, car, waiting, halls);
   return car.y;
 }
 
 /** Alight, then board, then clear the hall call in the direction this car is serving. */
-function serveFloor(world: World, shaft: Shaft, car: Car, waiting: WaitIndex): void {
+function serveFloor(world: World, shaft: Shaft, car: Car, waiting: WaitIndex, assigned: HallEntry[]): void {
   const floor = Math.round(car.y);
   const rule = SHAFTS[shaft.kind];
   const dir: 1 | -1 = car.dir === 0 ? 1 : car.dir;
@@ -408,24 +511,25 @@ function serveFloor(world: World, shaft: Shaft, car: Car, waiting: WaitIndex): v
     if (car.passengers.length >= rule.capacity) break;
     if (!boardable(sim, shaft, floor, dir)) continue;
     if (!carTakes(shaft, car, sim, leftover)) continue; // wrong car for this rider
-    sim.inCarId = car.id;
-    sim.state = 'riding';
-    // Boarding ends the wait: the next wait (a transfer, the ride out) starts its own
-    // clock and places its own hall call. The average takes the whole wait, from the
-    // first call, across any reroute (people.ts keeps firstWaitStart for that).
-    const since = sim.firstWaitStart ?? sim.waitStart;
-    if (since !== null) recordBoardedWait(world, world.time.minute - since);
-    sim.waitStart = null;
-    delete sim.firstWaitStart;
-    car.passengers.push(sim.id);
-    const leg = sim.route[0];
-    if (leg && leg.kind === 'ride') car.calls.add(leg.toFloor);
+    board(world, car, sim);
+  }
+  // A kept car that is not free still takes others going its way, after its own riders and
+  // only as far as this sweep goes already (passingPickup).
+  const passing = new Set<RiderClass>();
+  if (!leftover && car.serves !== 'any') {
+    const reach = sweepReach(shaft, car, floor, dir, assigned.filter((e) => stillCalled(shaft, e)));
+    for (const sim of reach === null ? [] : queue) {
+      if (car.passengers.length >= rule.capacity) break;
+      if (!boardable(sim, shaft, floor, dir) || !ridesPassing(shaft, car, sim, dir, reach as number)) continue;
+      board(world, car, sim);
+      for (const cls of callClassesFor(shaft, sim.kind)) passing.add(cls);
+    }
   }
 
   // The light goes out only for the classes this car just served in this direction.
   if (hadRoom && carCovers(shaft, car, floor)) {
     for (const cls of RIDER_CLASSES) {
-      if (carServesClass(car, cls, leftover)) clearHallCall(shaft, floor, dir, cls);
+      if (carServesClass(car, cls, leftover) || passing.has(cls)) clearHallCall(shaft, floor, dir, cls);
     }
   }
   // Anyone this car could not take keeps the floor lit, so another trip comes back.
@@ -433,6 +537,21 @@ function serveFloor(world: World, shaft: Shaft, car: Car, waiting: WaitIndex): v
     if (!boardable(sim, shaft, floor, dir)) continue; // boarded sims are riding now
     requestHallCallFor(world, shaft, floor, dir, sim.kind);
   }
+}
+
+function board(world: World, car: Car, sim: Sim): void {
+  sim.inCarId = car.id;
+  sim.state = 'riding';
+  // Boarding ends the wait: the next wait (a transfer, the ride out) starts its own
+  // clock and places its own hall call. The average takes the whole wait, from the
+  // first call, across any reroute (people.ts keeps firstWaitStart for that).
+  const since = sim.firstWaitStart ?? sim.waitStart;
+  if (since !== null) recordBoardedWait(world, world.time.minute - since);
+  sim.waitStart = null;
+  delete sim.firstWaitStart;
+  car.passengers.push(sim.id);
+  const leg = sim.route[0];
+  if (leg && leg.kind === 'ride') car.calls.add(leg.toFloor);
 }
 
 /** Would this car carry this sim: its own rider (class or service group) or a leftover, and the destination inside its range. */

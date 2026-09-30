@@ -24,7 +24,8 @@ const EPSILON = 1e-9;
  * when its own riders leave it free. Our call: as much as walking the whole tower width at
  * both ends of the ride plus one more transfer, so a car that carries this rider as its own
  * wins wherever it stands, even one transfer further on. It is 20, the cost of five stair
- * floors, so a climb of four floors or fewer is also preferred to it.
+ * floors, so with the ride's own transfer a leftover ride costs 25 and every climb the
+ * planner allows (five floors or fewer, LIMITS.stairsMaxClimbFloors) is preferred to it.
  */
 const LEFTOVER_RIDE_COST = (2 * TOWER_WIDTH) / WALK_TILES_PER_COST + TRANSFER_COST;
 

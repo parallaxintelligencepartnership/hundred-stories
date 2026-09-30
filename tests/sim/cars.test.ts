@@ -242,15 +242,17 @@ describe('boarding', () => {
     expect(shaft.hallCalls.get(3)?.up.has('office')).toBe(true);
   });
 
-  it('refuses a rider of the wrong class while the car has its own call pending', () => {
+  it('takes a rider of the other class along its own trip, and refuses one bound farther', () => {
     const world = createWorld(5);
     const shaft = buildShaft(world, { cars: [{ serves: 'hotel', y: 1 }] });
     const guest = addWaiter(world, shaft, 'guest', 1, 6);
-    const worker = addWaiter(world, shaft, 'worker', 1, 6);
+    const along = addWaiter(world, shaft, 'worker', 1, 6);
+    const farther = addWaiter(world, shaft, 'worker', 1, 8);
 
     run(world, 1);
     expect(guest.inCarId).not.toBeNull();
-    expect(worker.inCarId).toBeNull();
+    expect(along.inCarId).toBe(guest.inCarId);
+    expect(farther.inCarId).toBeNull();
     expect(shaft.hallCalls.get(1)?.up.has('office')).toBe(true);
   });
 });
@@ -337,12 +339,12 @@ describe('those riders first', () => {
 });
 
 describe('F5: a call the kept car cannot carry does not hold it', () => {
-  function rangedWorld(guestTo: number): { world: World; shaft: Shaft; worker: Sim; guest: Sim } {
+  function rangedWorld(guestTo: number, workerFrom = 1, workerTo = 4): { world: World; shaft: Shaft; worker: Sim; guest: Sim } {
     const world = createWorld(8);
     // The hotel car works 1 to 5; the Everyone car works 5 to 10, far up at 10.
     const shaft = buildShaft(world, { cars: [{ serves: 'hotel', y: 1, range: { lo: 1, hi: 5 } }, { serves: 'any', y: 10, range: { lo: 5, hi: 10 } }] });
     const guest = addWaiter(world, shaft, 'guest', 5, guestTo);
-    const worker = addWaiter(world, shaft, 'worker', 1, 4);
+    const worker = addWaiter(world, shaft, 'worker', workerFrom, workerTo);
     return { world, shaft, worker, guest };
   }
 
@@ -354,7 +356,8 @@ describe('F5: a call the kept car cannot carry does not hold it', () => {
   });
 
   it('still holds the hotel car for a guest it can carry', () => {
-    const { world, shaft, worker, guest } = rangedWorld(3);
+    // The worker goes down, against the car's way up to the guest, so it is not taken along.
+    const { world, shaft, worker, guest } = rangedWorld(3, 3, 1);
     expect(isLeftoverCar(world, shaft, carAt(shaft, 0))).toBe(false);
     run(world, 2);
     expect(worker.inCarId).toBeNull();
@@ -630,5 +633,105 @@ describe('saves', () => {
     const before = hashWorld(world);
     applyCommand(world, { kind: 'shaft.setCarServes', shaftId, carId, serves: 'office' });
     expect(hashWorld(world)).not.toBe(before);
+  });
+});
+
+describe('a kept car when the rider\'s own car cannot take them (P7-I1)', () => {
+  it('sends a free hotel car to a worker whose Everyone car is full', () => {
+    const world = createWorld(9);
+    const shaft = buildShaft(world, { floorMax: 20, cars: [{ serves: 'any', y: 2 }, { serves: 'hotel', y: 1 }] });
+    const full = carAt(shaft, 0);
+    const hotelCar = carAt(shaft, 1);
+    for (let i = 0; i < SHAFTS.standard.capacity; i++) {
+      const id = allocId(world);
+      full.passengers.push(id);
+    }
+    full.calls.add(20);
+    const worker = addWaiter(world, shaft, 'worker', 5, 1);
+
+    let boarded = -1;
+    for (let t = 0; t < 60 && boarded < 0; t++) {
+      run(world, 1);
+      if (worker.inCarId !== null) boarded = t + 1;
+    }
+    expect(worker.inCarId).toBe(hotelCar.id);
+    expect(boarded).toBeLessThanOrEqual(8);
+  });
+
+  it('sends a free hotel car when the Everyone car does not work the worker\'s floor', () => {
+    const world = createWorld(9);
+    const shaft = buildShaft(world, { cars: [{ serves: 'any', y: 5, range: { lo: 3, hi: 6 } }, { serves: 'hotel', y: 1 }] });
+    const hotelCar = carAt(shaft, 1);
+    const worker = addWaiter(world, shaft, 'worker', 5, 8);
+
+    run(world, 20);
+    expect(worker.inCarId === hotelCar.id || worker.pos.floor === 8).toBe(true);
+  });
+
+  it('leaves the call with an Everyone car that has room', () => {
+    const world = createWorld(9);
+    const shaft = buildShaft(world, { cars: [{ serves: 'any', y: 8 }, { serves: 'hotel', y: 5 }] });
+    const worker = addWaiter(world, shaft, 'worker', 5, 1);
+
+    let rode: Id | null = null;
+    for (let t = 0; t < 30 && rode === null; t++) {
+      run(world, 1);
+      rode = worker.inCarId;
+    }
+    expect(rode).toBe(carAt(shaft, 0).id);
+  });
+});
+
+describe('a kept car passing a floor stops for others going its way (owner question 1)', () => {
+  it('picks up a worker on its way down to its own guest and carries both', () => {
+    const world = createWorld(10);
+    const shaft = buildShaft(world, { cars: [{ serves: 'hotel', y: 10 }] });
+    const car = carAt(shaft, 0);
+    const guest = addWaiter(world, shaft, 'guest', 1, 9);
+    const worker = addWaiter(world, shaft, 'worker', 5, 1);
+
+    expect(isLeftoverCar(world, shaft, car)).toBe(false);
+    let workerBoarded = -1;
+    let guestBoarded = -1;
+    for (let t = 0; t < 30 && guestBoarded < 0; t++) {
+      run(world, 1);
+      if (workerBoarded < 0 && worker.inCarId === car.id) workerBoarded = t;
+      if (guestBoarded < 0 && guest.inCarId === car.id) guestBoarded = t;
+    }
+    expect(workerBoarded).toBeGreaterThanOrEqual(0);
+    expect(guestBoarded).toBeGreaterThan(workerBoarded);
+    expect(worker.inCarId).toBeNull(); // off at 1 as the guest got on
+    expect(worker.pos.floor).toBe(1);
+  });
+
+  it('never goes past its own call for them: a worker bound beyond it is left for later', () => {
+    const world = createWorld(10);
+    const shaft = buildShaft(world, { cars: [{ serves: 'hotel', y: 10 }] });
+    const car = carAt(shaft, 0);
+    const guest = addWaiter(world, shaft, 'guest', 3, 9);
+    const worker = addWaiter(world, shaft, 'worker', 5, 1);
+
+    let lowest = car.y;
+    for (let t = 0; t < 30 && guest.inCarId === null; t++) {
+      run(world, 1);
+      lowest = Math.min(lowest, car.y);
+      expect(worker.inCarId).toBeNull();
+    }
+    expect(guest.inCarId).toBe(car.id);
+    expect(lowest).toBe(3); // turned at the guest's floor, never lower
+  });
+
+  it('does not stop for a worker going the other way', () => {
+    const world = createWorld(10);
+    const shaft = buildShaft(world, { cars: [{ serves: 'hotel', y: 10 }] });
+    const car = carAt(shaft, 0);
+    const guest = addWaiter(world, shaft, 'guest', 1, 9);
+    const worker = addWaiter(world, shaft, 'worker', 5, 8);
+
+    for (let t = 0; t < 30 && guest.inCarId === null; t++) {
+      run(world, 1);
+      expect(worker.inCarId).toBeNull();
+    }
+    expect(guest.inCarId).toBe(car.id);
   });
 });

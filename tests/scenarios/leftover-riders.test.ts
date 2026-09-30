@@ -6,9 +6,12 @@
 import { describe, expect, it } from 'vitest';
 
 import { applyCommand } from '../../src/sim/build';
+import { requestHallCall } from '../../src/sim/elevators';
+import { SHAFTS } from '../../src/sim/rules';
 import { tick } from '../../src/sim/tick';
-import type { Car, Room, Sim, World } from '../../src/sim/types';
-import { createWorld } from '../../src/sim/world';
+import { riderClassOf } from '../../src/sim/types';
+import type { Car, Room, Shaft, Sim, SimKind, World } from '../../src/sim/types';
+import { addShaft, addSim, allocId, createWorld } from '../../src/sim/world';
 import { buildRow, buildTower, lobbyRun, onlyShaft, roomsMatching, simsOfKind } from './helpers';
 
 function setServes(world: World, serves: Car['serves']): void {
@@ -143,5 +146,82 @@ describe('a guard on a dedicated car', () => {
     for (const set of rides.values()) for (const f of set) floors.add(f);
     expect(rides.size).toBeGreaterThan(0);
     expect(floors.size).toBeGreaterThan(1);
+  });
+});
+
+/** A waiting rider at the doors of this shaft, hall call lit, walking off at the far end. */
+function waiter(world: World, shaft: Shaft, kind: SimKind, from: number, to: number): Sim {
+  const sim: Sim = {
+    id: allocId(world),
+    kind,
+    homeRoomId: null,
+    pos: { floor: from, x: shaft.x },
+    inCarId: null,
+    inRoomId: null,
+    route: [
+      { kind: 'ride', shaftId: shaft.id, fromFloor: from, toFloor: to },
+      { kind: 'walk', toX: shaft.x },
+    ],
+    state: 'waiting',
+    stress: 0,
+    waitStart: world.time.minute,
+    schedule: [],
+    nextScheduleIndex: 0,
+    stayUntil: null,
+    wallet: 0,
+    leaveReason: null,
+  };
+  addSim(world, sim);
+  requestHallCall(world, shaft.id, from, to > from ? 1 : -1, riderClassOf(kind));
+  return sim;
+}
+
+describe('a kept car that always has its own riders coming (owner question 1)', () => {
+  it('still carries a worker waiting on its way, instead of leaving them to give up', () => {
+    const world = createWorld(5);
+    world.time.minute = 17 * 60; // a weekday evening
+    const stops = new Set<number>();
+    for (let f = 1; f <= 10; f++) stops.add(f);
+    const shaft: Shaft = {
+      id: allocId(world),
+      kind: 'standard',
+      x: 150,
+      width: SHAFTS.standard.width,
+      floorMin: 1,
+      floorMax: 10,
+      stops,
+      homeFloor: 1,
+      cars: [],
+      hallCalls: new Map(),
+    };
+    shaft.cars.push({
+      id: allocId(world),
+      shaftId: shaft.id,
+      y: 1,
+      dir: 0,
+      state: 'idle',
+      doorTimer: 0,
+      idleSince: null,
+      passengers: [],
+      calls: new Set(),
+      serves: 'hotel',
+      range: null,
+    });
+    addShaft(world, shaft);
+    world.routingDirty = true;
+
+    // A guest arrives at the lobby for the top floor every 20 minutes, so the car always has
+    // a call of its own; half an hour in, a worker on floor 5 wants the lobby.
+    let worker: Sim | null = null;
+    let boardedAfter = -1;
+    for (let t = 0; t < 120; t++) {
+      if (t % 20 === 0) waiter(world, shaft, 'guest', 1, 10);
+      if (t === 30) worker = waiter(world, shaft, 'worker', 5, 1);
+      tick(world);
+      if (worker && boardedAfter < 0 && worker.inCarId !== null) boardedAfter = t - 30;
+    }
+    expect(worker?.leaveReason ?? null).toBeNull();
+    expect(boardedAfter).toBeGreaterThanOrEqual(0);
+    expect(boardedAfter).toBeLessThanOrEqual(25);
   });
 });
