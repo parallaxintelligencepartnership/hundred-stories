@@ -33,7 +33,11 @@ export const RIDER_ICON: Record<RiderSetting, IconName> = {
 /** Under a car's choices while it serves some riders first. */
 export const RIDER_NOTE = 'These riders go first. Others ride when the car is free, so they may wait longer.';
 
-/** On the card when the shaft has no Everyone car and other tenants depend on it. */
+/**
+ * On the card when other tenants' routed trips ride this elevator as leftovers: a trip leg on it
+ * that no car carrying them as its own (an Everyone car or their group's) covers end to end
+ * (othersWaitLonger). A shaft with an Everyone car can still warn, for floors past that car's range.
+ */
 export const RIDER_WARNING = 'Other tenants on these floors will wait longer for this elevator.';
 
 type Group = Exclude<RiderSetting, 'any'>;

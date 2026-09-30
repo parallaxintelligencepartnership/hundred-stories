@@ -4,8 +4,8 @@
 //   group named for that car; a tap sends one shaft.setCarServes straight to that choice, never
 //   through the one between, and the stored choice shows when the card opens again;
 // - while a car serves some riders first, one line under its choices says what that means;
-// - when the shaft has no Everyone car and other tenants on its floors depend on it, one line
-//   warns that they will wait longer;
+// - when other tenants' routed trips ride this elevator on a kept car as leftovers (no Everyone
+//   car or car of their own covers the ride), one line warns that they will wait longer;
 // - the card neither pauses the game, nor dims the tower, nor holds focus.
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -190,6 +190,30 @@ describe('the note and the warning', () => {
     // Turned back to Everyone, the other elevator carries the home, so the hotel card is quiet.
     serve(office, 'any');
     expect(othersWaitLonger(world, hotel)).toBe(false);
+  });
+
+  it('never warns for a trip an Everyone car of the shaft covers; warns for floors past its range (closeout 0.6.11)', () => {
+    // The sweep's probe: car A Everyone on floors 1-3, car B Hotel guests first on the whole
+    // shaft 1-6. The warning it saw came from offices on 4-6, which only the hotel car reaches.
+    const world = createWorld(7);
+    world.cash = 50_000_000;
+    world.stars = 3;
+    for (let x = 0; x < 40; x += 1) applyCommand(world, { kind: 'build', room: 'lobby', floor: 1, x });
+    for (const floor of [2, 3]) expect(applyCommand(world, { kind: 'build', room: 'office', floor, x: 0 }).ok).toBe(true);
+    expect(applyCommand(world, { kind: 'shaft.build', shaft: 'standard', x: 20, floorMin: 1, floorMax: 6 }).ok).toBe(true);
+    const shaft = [...world.shafts.values()][0]!;
+    expect(applyCommand(world, { kind: 'shaft.addCar', shaftId: shaft.id }).ok).toBe(true);
+    const [a, b] = shaft.cars;
+    expect(applyCommand(world, { kind: 'shaft.setCarRange', shaftId: shaft.id, carId: a!.id, range: { lo: 1, hi: 3 } }).ok).toBe(true);
+    expect(applyCommand(world, { kind: 'shaft.setCarServes', shaftId: shaft.id, carId: b!.id, serves: 'hotel' }).ok).toBe(true);
+    // Every office trip ends on 2 or 3, inside the Everyone car's floors: quiet.
+    expect(othersWaitLonger(world, shaft)).toBe(false);
+    // Offices on 4-6 are past car A, so their staff ride the hotel car as leftovers: it warns.
+    for (const floor of [4, 5, 6]) expect(applyCommand(world, { kind: 'build', room: 'office', floor, x: 0 }).ok).toBe(true);
+    expect(othersWaitLonger(world, shaft)).toBe(true);
+    // Car A stretched to the whole shaft covers every trip again: quiet.
+    expect(applyCommand(world, { kind: 'shaft.setCarRange', shaftId: shaft.id, carId: a!.id, range: { lo: 1, hi: 6 } }).ok).toBe(true);
+    expect(othersWaitLonger(world, shaft)).toBe(false);
   });
 
   it('warns on an express kept for hotel guests that is the only way up to a sky lobby, whose floors hold no office (P6 review A1)', () => {
