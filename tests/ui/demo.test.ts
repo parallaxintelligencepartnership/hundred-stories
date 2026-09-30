@@ -90,7 +90,8 @@ describe('the demo cap card', () => {
     const nodes = host.descendants();
     expect(nodes.some((n) => n.className.split(' ').includes('hs-demo-stores'))).toBe(true);
     const styled = nodes.filter(
-      (n) => n.attributes.has('style') || Object.keys(n.style).some((key) => key !== 'setProperty'),
+      // The fake style's own methods (setProperty, removeProperty) are functions, not styles.
+      (n) => n.attributes.has('style') || Object.values(n.style).some((value) => typeof value !== 'function'),
     );
     expect(styled.map((n) => n.className)).toEqual([]);
 
