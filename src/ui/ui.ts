@@ -476,7 +476,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   hint.append(el('span', 'hs-hint-text', hintText(coarsePointer())));
   const hintClose = button('Close', 'hs-hint-close', () => {
     hint.classList.add('is-hidden');
-    syncHintStep();
+    syncHintStep(true);
     writeHintSeen(HINT_LOADS); // closing it means read, not just shown
   });
   hintClose.title = 'Hide the controls hint';
@@ -1377,7 +1377,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     saveButton.button.classList.toggle('is-placed', savePlaced);
     if (savePlaced) saveButton.button.style.setProperty('--save-x', `${Math.round(soundBox.left - bar.left)}px`);
     placeViewChip(bar);
-    syncHintStep();
+    syncHintStep(true);
   }
 
   /**
@@ -1410,10 +1410,15 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
    * The hint is centered in the round buttons' row too: where it would meet Save, Sound or Watch
    * (measured, as the view chip is) it takes the row under theirs (ui.css is-hint-under), so no
    * tap aimed at Save lands on the hint for its first three loads (P1 review A-2).
+   *
+   * That measure runs only with `measure` set: when the bar re-measures (placeWatchButton, on a
+   * resize or the chrome moving) and when the hint is shown or closed. updateNow runs every step
+   * and keeps is-hint-low only, so the hint and the round buttons are not read every frame.
    */
-  function syncHintStep(): void {
+  function syncHintStep(measure = false): void {
     const up = !hint.classList.contains('is-hidden');
     shell.classList.toggle('is-hint-low', up && !status.mode.classList.contains('is-hidden'));
+    if (!measure && up) return;
     let under = false;
     if (up && !inSheetLayout()) {
       const box = hint.getBoundingClientRect();
