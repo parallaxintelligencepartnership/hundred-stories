@@ -26,12 +26,21 @@ vi.mock('../../src/sim/routing', () => ({
   entrances: mocks.entrances,
 }));
 
-vi.mock('../../src/sim/elevators', () => ({
-  IDLE_RETURN_MINUTES: 10,
-  requestHallCall: mocks.requestHallCall,
-  tickElevators: mocks.tickElevators,
-  hallCallPending: mocks.hallCallPending,
-}));
+vi.mock('../../src/sim/elevators', async (importOriginal) => {
+  // A rider lights one call through requestHallCallFor, which picks the class with the real
+  // callClassFor; the mock records that one call as requestHallCall, so the counts stay honest.
+  const actual = await importOriginal<typeof import('../../src/sim/elevators')>();
+  return {
+    IDLE_RETURN_MINUTES: 10,
+    requestHallCall: mocks.requestHallCall,
+    requestHallCallFor: (world: World, shaft: Shaft, floor: number, to: number, kind: Sim['kind']): void => {
+      mocks.requestHallCall(world, shaft.id, floor, to > floor ? 1 : -1, actual.callClassFor(shaft, kind, floor, to));
+    },
+    callClassFor: actual.callClassFor,
+    tickElevators: mocks.tickElevators,
+    hallCallPending: mocks.hallCallPending,
+  };
+});
 
 vi.mock('../../src/sim/economy', () => ({
   spend: mocks.spend,
@@ -344,7 +353,7 @@ describe('housekeeping', () => {
     expect(office.tenants).toHaveLength(ROOMS.housekeeping.capacity);
     expect(mocks.findRoute).toHaveBeenCalledWith(world, expect.anything(), expect.anything(), {
       staff: true,
-      riderClass: 'other',
+      riderClass: 'hotel', // a housekeeper plans on the cars hotel guests may use (eb71c55)
     });
 
     run(world, walkMinutes(KEEPER_WALK) + SCHEDULES.housekeeping.minutesPerRoom + 5);
