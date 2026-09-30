@@ -1,6 +1,6 @@
-// Elevator toggle diagnosis F3: a housekeeper cleaning when the car's rider setting takes its
-// way home away must never be parked in the hotel room for good. It keeps trying; once a
-// route exists again it goes back to work, and if none comes back it leaves the tower.
+// Elevator toggle diagnosis F3: a housekeeper cleaning when its way home goes must never be
+// parked in the hotel room for good. It keeps trying; once a route exists again it goes back
+// to work, and if none comes back (the only shaft demolished) it leaves the tower.
 
 import { describe, expect, it } from 'vitest';
 
@@ -55,7 +55,8 @@ describe('F3: a housekeeper whose way home is switched off', () => {
   it('leaves the tower within a day when no route ever comes back', () => {
     const { world, office } = hotelTower();
     const { keeper, roomId } = keeperMidClean(world, office);
-    setServes(world, 'office');
+    // The only shaft goes: a car kept for somebody else still carries the keeper when free.
+    expect(applyCommand(world, { kind: 'shaft.demolish', shaftId: onlyShaft(world).id }).ok).toBe(true);
     for (let i = 0; i < 1440; i++) tick(world);
     const after = world.sims.get(keeper.id);
     expect(after?.inRoomId ?? null).not.toBe(roomId);

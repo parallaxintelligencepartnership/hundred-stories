@@ -6,7 +6,7 @@
 // Nothing here mutates the world except clearing that flag, and no number is
 // invented: costs come from the module constants below and the stair limit from LIMITS.
 
-import { LIMITS } from './rules';
+import { LIMITS, TOWER_WIDTH } from './rules';
 import { carRangeOf, floorDistance, spanTop } from './types';
 import type { Id, Leg, RiderClass, Room, World } from './types';
 import { roomsOfKind, roomsOnFloor } from './world';
@@ -19,6 +19,14 @@ const STAIR_FLOOR_COST = 4;
 const WALK_TILES_PER_COST = 50;
 /** Floating point slack when two route costs are compared. */
 const EPSILON = 1e-9;
+/**
+ * Extra cost of one ride on a car kept for somebody else, which carries this rider only
+ * when its own riders leave it free. Our call: as much as walking the whole tower width at
+ * both ends of the ride plus one more transfer, so a car that carries this rider as its own
+ * wins wherever it stands, even one transfer further on. It is 20, the cost of five stair
+ * floors, so a climb of four floors or fewer is also preferred to it.
+ */
+const LEFTOVER_RIDE_COST = (2 * TOWER_WIDTH) / WALK_TILES_PER_COST + TRANSFER_COST;
 
 /** One way to move between floors: an elevator shaft or a stairs/escalator room. */
 interface Connector {
@@ -30,6 +38,8 @@ interface Connector {
   floors: number[];
   /** Service shafts are only offered to staff routes. */
   staffOnly: boolean;
+  /** Every car working these floors is kept for somebody else: a leftover ride, priced up. */
+  leftover: boolean;
 }
 
 interface RoutingGraph {
@@ -55,9 +65,11 @@ interface Node {
 }
 
 /**
- * One graph per rider class, because a shaft only connects the floors some car will
- * carry that rider between. The key `all` is the class blind graph: every car counts,
- * which is what a structural question like isReachableFromLobby wants.
+ * One graph per rider class, because a ride is priced by whether a car carries that rider
+ * as its own. Every car connects floors for every rider; a car kept for somebody else
+ * carries the rider only as a leftover and costs LEFTOVER_RIDE_COST more. The key `all` is
+ * the class blind graph: every car counts as the rider's own, which is what a structural
+ * question like isReachableFromLobby wants. Same floors joined in every graph.
  */
 type GraphKey = RiderClass | 'all';
 
@@ -126,24 +138,32 @@ function buildGraph(world: World, key: GraphKey): RoutingGraph {
       .filter((f) => f >= shaft.floorMin && f <= shaft.floorMax)
       .sort((a, b) => a - b);
     if (stops.length < 2) continue; // a shaft with one stop connects nothing
-    // One connector per distinct range among the cars that would carry this rider.
-    // A dedicated car counts for its own class only: the leftover rule is a courtesy
-    // the dispatcher pays at the door, never a connection a trip may be planned on.
+    // One connector per distinct range among the cars that carry this rider as their own,
+    // then one per further range among the cars kept for somebody else: those carry the
+    // rider as a leftover (elevators.ts isLeftoverCar), so a trip may be planned on them,
+    // but at a price, and never where a car of its own works the same floors.
     const ranges = new Set<string>();
-    for (const car of shaft.cars) {
-      if (key !== 'all' && car.serves !== 'any' && car.serves !== key) continue;
-      const { lo, hi } = carRangeOf(shaft, car);
-      if (ranges.has(`${lo}:${hi}`)) continue;
-      ranges.add(`${lo}:${hi}`);
-      const floors = stops.filter((f) => f >= lo && f <= hi);
-      if (floors.length < 2) continue; // this car connects nothing
-      add({
-        kind: 'shaft',
-        id: shaft.id,
-        x: shaft.x,
-        floors,
-        staffOnly: shaft.kind === 'service',
-      });
+    const ownRanges: { lo: number; hi: number }[] = [];
+    for (const leftover of [false, true]) {
+      for (const car of shaft.cars) {
+        const own = key === 'all' || car.serves === 'any' || car.serves === key;
+        if (own === leftover) continue;
+        const { lo, hi } = carRangeOf(shaft, car);
+        if (ranges.has(`${lo}:${hi}`)) continue;
+        if (leftover && ownRanges.some((r) => r.lo <= lo && r.hi >= hi)) continue; // an own car works all of it
+        ranges.add(`${lo}:${hi}`);
+        if (!leftover) ownRanges.push({ lo, hi });
+        const floors = stops.filter((f) => f >= lo && f <= hi);
+        if (floors.length < 2) continue; // this car connects nothing
+        add({
+          kind: 'shaft',
+          id: shaft.id,
+          x: shaft.x,
+          floors,
+          staffOnly: shaft.kind === 'service',
+          leftover,
+        });
+      }
     }
   }
 
@@ -155,6 +175,7 @@ function buildGraph(world: World, key: GraphKey): RoutingGraph {
       x: stairAccessX(room),
       floors: [room.floor, spanTop(room.floor, 2)], // B1 to the ground skips floor 0
       staffOnly: false,
+      leftover: false,
     });
   }
 
@@ -520,7 +541,8 @@ function runSearch(
       if (first !== undefined && node === start && via !== first) continue;
       if (via.kind === 'shaft' && via.id === node.via?.id) continue; // no point reboarding
       const isStairs = via.kind === 'stairs';
-      const stepCost = node.cost + walkCost(via.x - node.x) + (isStairs ? 0 : TRANSFER_COST);
+      const stepCost =
+        node.cost + walkCost(via.x - node.x) + (isStairs ? 0 : TRANSFER_COST) + (via.leftover ? LEFTOVER_RIDE_COST : 0);
       const firstDist = firstDistOfNext === -1 ? Math.abs(via.x - from.x) : firstDistOfNext;
       for (const floor of via.floors) {
         if (floor === node.floor) continue;

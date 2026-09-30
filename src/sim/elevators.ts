@@ -83,15 +83,29 @@ function clearHallCall(shaft: Shaft, floor: number, dir: 1 | -1, cls: RiderClass
 
 /**
  * A dedicated car with nothing of its own to do takes anyone: no passengers aboard and
- * no call from its own class anywhere inside its range. This is the leftover rule, and
- * it is re-read every tick, so the moment its own people call, the car is theirs again.
+ * no call from its own riders anywhere inside its range that it could answer. This is the
+ * leftover rule, and it is re-read every tick, so the moment its own people call, the car
+ * is theirs again. A call holds the car only while one of its own riders waits there
+ * whom this car would carry (carTakes): a guest bound for a floor only another car works,
+ * or a light nobody stands under any more, never keeps the car from everyone else.
  */
-export function isLeftoverCar(shaft: Shaft, car: Car): boolean {
+export function isLeftoverCar(world: World, shaft: Shaft, car: Car): boolean {
+  return leftoverFor(shaft, car, indexWaitingSims(world));
+}
+
+function leftoverFor(shaft: Shaft, car: Car, waiting: WaitIndex): boolean {
   if (car.serves === 'any') return false; // a general car is never a leftover
   if (car.passengers.length > 0) return false;
+  const byFloor = waiting.get(shaft.id);
   for (const [floor, call] of shaft.hallCalls) {
     if (!shaft.stops.has(floor) || !carCovers(shaft, car, floor)) continue;
-    if (call.up.has(car.serves) || call.down.has(car.serves)) return false;
+    for (const dir of [1, -1] as const) {
+      if (!(dir === 1 ? call.up : call.down).has(car.serves)) continue;
+      for (const sim of byFloor?.get(floor) ?? []) {
+        if (!waitsFor(sim, shaft, floor, dir)) continue;
+        if (carCarriesAsOwn(car, sim.kind) && carTakes(shaft, car, sim, false)) return false;
+      }
+    }
   }
   return true;
 }
@@ -161,7 +175,7 @@ export function tickElevators(world: World): void {
   const shafts = [...world.shafts.values()].sort((a, b) => a.id - b.id);
   for (const shaft of shafts) {
     if (shaft.cars.length === 0) continue;
-    const assignment = assignHallCalls(shaft);
+    const assignment = assignHallCalls(shaft, waiting);
     const desired: number[] = [];
     for (const car of shaft.cars) {
       desired.push(stepCar(world, shaft, car, assignment.get(car.id) ?? [], waiting));
@@ -197,7 +211,7 @@ function indexWaitingSims(world: World): WaitIndex {
  * else the nearest idle car, else the nearest car at all. Recomputed every tick from
  * world state alone, so nothing extra has to be saved or restored.
  */
-function assignHallCalls(shaft: Shaft): Map<Id, HallEntry[]> {
+function assignHallCalls(shaft: Shaft, waiting: WaitIndex): Map<Id, HallEntry[]> {
   const out = new Map<Id, HallEntry[]>();
   const capacity = SHAFTS[shaft.kind].capacity;
   const floors = [...shaft.hallCalls.keys()].sort((a, b) => a - b);
@@ -208,7 +222,7 @@ function assignHallCalls(shaft: Shaft): Map<Id, HallEntry[]> {
       const classes = dir === 1 ? call.up : call.down;
       for (const cls of RIDER_CLASSES) {
         if (!classes.has(cls)) continue;
-        const car = bestCarFor(shaft, capacity, floor, dir, cls);
+        const car = bestCarFor(shaft, capacity, floor, dir, cls, waiting);
         if (!car) continue;
         const list = out.get(car.id);
         if (list) list.push({ floor, dir, cls });
@@ -228,6 +242,7 @@ function bestCarFor(
   floor: number,
   dir: 1 | -1,
   cls: RiderClass,
+  waiting: WaitIndex,
 ): Car | null {
   let best: Car | null = null;
   let bestTier = Number.MAX_SAFE_INTEGER;
@@ -235,7 +250,7 @@ function bestCarFor(
   for (const car of shaft.cars) {
     if (!carCovers(shaft, car, floor)) continue; // that floor is not this car's work
     const dedicated = car.serves === 'any' || car.serves === cls;
-    if (!dedicated && !isLeftoverCar(shaft, car)) continue;
+    if (!dedicated && !leftoverFor(shaft, car, waiting)) continue;
     const room = car.passengers.length < capacity;
     const ahead = dir === 1 ? floor >= car.y : floor <= car.y;
     let tier = LEFTOVER_TIER;
@@ -387,7 +402,7 @@ function serveFloor(world: World, shaft: Shaft, car: Car, waiting: WaitIndex): v
   const hadRoom = car.passengers.length < rule.capacity;
   // Read the leftover state once, after alighting and before anyone gets on: boarding
   // would otherwise change the answer halfway down the queue.
-  const leftover = isLeftoverCar(shaft, car);
+  const leftover = leftoverFor(shaft, car, waiting);
   const queue = waiting.get(shaft.id)?.get(floor) ?? [];
   for (const sim of queue) {
     if (car.passengers.length >= rule.capacity) break;
@@ -429,9 +444,14 @@ function carTakes(shaft: Shaft, car: Car, sim: Sim, leftover: boolean): boolean 
 }
 
 function boardable(sim: Sim, shaft: Shaft, floor: number, dir: 1 | -1): boolean {
+  if (Math.abs(sim.pos.x - shaft.x) > shaft.width + 1) return false;
+  return waitsFor(sim, shaft, floor, dir);
+}
+
+/** Waiting on this floor for a ride on this shaft in this direction, near the doors or not. */
+function waitsFor(sim: Sim, shaft: Shaft, floor: number, dir: 1 | -1): boolean {
   if (sim.state !== 'waiting' || sim.inCarId !== null) return false;
   if (sim.pos.floor !== floor) return false;
-  if (Math.abs(sim.pos.x - shaft.x) > shaft.width + 1) return false;
   const leg = sim.route[0];
   if (!leg || leg.kind !== 'ride' || leg.shaftId !== shaft.id) return false;
   if (leg.toFloor === floor || !shaft.stops.has(leg.toFloor)) return false;

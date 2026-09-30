@@ -18,7 +18,6 @@ import type {
   Clock,
   Id,
   Leg,
-  RiderClass,
   Room,
   Shaft,
   RoomKind,
@@ -34,8 +33,9 @@ import { addSim, allocId, LONG_WAIT_MINUTES, log, recordLongWait, removeSim, roo
 export const WALK_TILES_PER_MINUTE = 5;
 
 /**
- * How this sim asks routing for a way: service shafts for staff, and the rider class,
- * so a trip is never planned on a car dedicated to somebody else.
+ * How this sim asks routing for a way: service shafts for staff, and the rider class, so a
+ * trip prefers the cars that carry this rider as their own and plans on a car kept for
+ * somebody else only when that is the best or only way (routing.ts LEFTOVER_RIDE_COST).
  */
 function routeOpts(sim: Sim): { staff: boolean; riderClass: ReturnType<typeof riderClassOf> } {
   return routeOptsFor(sim.kind);
@@ -154,7 +154,7 @@ function fillVacantOffices(world: World, clock: Clock): void {
   const offices = roomsOfKind(world, 'office').sort((a, b) => a.id - b.id);
   for (const room of offices) {
     if (!room.vacant || room.tenants.length > 0 || room.onFire) continue;
-    if (!reachableFor(world, room, 'office')) continue;
+    if (!reachableFor(world, room)) continue;
     room.vacant = false;
     // The company's quitting time, drawn once at the lease. It lives on in its workers'
     // saved schedules, so a loaded tower needs no field for it.
@@ -175,7 +175,7 @@ function sellVacantCondos(world: World, clock: Clock): void {
   for (const room of roomsOfKind(world, 'condo')) {
     if (!room.vacant || room.tenants.length > 0 || room.onFire) continue;
     if (room.eval < ECONOMY.condoSaleEvalMin) continue;
-    if (!reachableFor(world, room, 'other')) continue;
+    if (!reachableFor(world, room)) continue;
     recordCondoSale(world, room);
     room.vacant = false;
     for (let i = 0; i < ROOMS.condo.capacity; i++) {
@@ -194,7 +194,7 @@ function spawnHotelGuests(world: World, clock: Clock): void {
   for (const room of world.rooms.values()) {
     if (!HOTEL_KINDS.has(room.kind)) continue;
     if (room.dirty || room.infested || room.onFire || room.tenants.length > 0) continue;
-    if (!reachableFor(world, room, 'hotel')) continue;
+    if (!reachableFor(world, room)) continue;
     if (world.rng.next() >= chance) continue;
     const checkIn = world.rng.int(rule.checkInStart, rule.checkInEnd);
     const checkOut = world.rng.int(rule.checkOutStart, rule.checkOutEnd);
@@ -212,7 +212,7 @@ function spawnCommerceVisitors(world: World, clock: Clock): void {
     if (rate <= 0) continue;
     const rule = ROOMS[room.kind];
     if (room.onFire || room.occupancy >= rule.capacity) continue;
-    if (!reachableFor(world, room, 'other')) continue;
+    if (!reachableFor(world, room)) continue;
     let count = Math.floor(rate);
     if (world.rng.next() < rate - count) count += 1;
     const stay = DINING_KINDS.has(room.kind) ? SCHEDULES.diner.visitMinutes : SCHEDULES.shopper.visitMinutes;
@@ -233,7 +233,7 @@ function spawnShowAudiences(world: World, clock: Clock): void {
       stay = SCHEDULES.partyHall.durationMinutes;
     }
     if (stay === 0) continue;
-    if (room.onFire || !reachableFor(world, room, 'other')) continue;
+    if (room.onFire || !reachableFor(world, room)) continue;
     const seats = ROOMS[room.kind].capacity;
     const weekend = clock.isWeekend ? SCHEDULES.shopper.weekendMultiplier : 1;
     const fill = Math.min(1, (SHOW_FILL_MIN + world.rng.next() * (1 - SHOW_FILL_MIN)) * weekend);
@@ -261,39 +261,12 @@ function visitorRatePerMinute(room: Room, clock: Clock): number {
 }
 
 /**
- * Can the people this room is for get to it from the ground lobby: the class blind answer,
- * then the same question asked with their rider class, so a floor served only by cars given
- * to somebody else never leases, sells, books or draws a crowd. A tower whose cars all carry
- * everyone has one graph for every class, so the second question is skipped there.
+ * Can the people this room is for get to it from the ground lobby. A car's rider setting
+ * gives its own riders priority but still carries everyone else when it is free, so every
+ * car joins the same floors for every rider class and the class blind answer is the answer.
  */
-function reachableFor(world: World, room: Room, cls: RiderClass): boolean {
-  if (!isReachableFromLobby(world, room.floor, room.x)) return false;
-  if (everyCarCarriesEveryone(world)) return true;
-  let cache = classReach.get(world);
-  if (!cache || cache.minute !== world.time.minute) {
-    cache = { minute: world.time.minute, answers: new Map() };
-    classReach.set(world, cache);
-  }
-  const key = `${cls}:${room.floor}`;
-  const known = cache.answers.get(key);
-  if (known !== undefined) return known;
-  const door = entrances(world).find((p) => p.floor === 1);
-  const answer = door !== undefined && findRoute(world, door, { floor: room.floor, x: roomCenter(room) }, { riderClass: cls }) !== null;
-  cache.answers.set(key, answer);
-  return answer;
-}
-
-/**
- * Class answers for one minute: the tower cannot change shape inside a tick, and a player
- * command lands between ticks, so a fresh minute always asks again. Not saved, not hashed.
- */
-const classReach = new WeakMap<World, { minute: number; answers: Map<string, boolean> }>();
-
-function everyCarCarriesEveryone(world: World): boolean {
-  for (const shaft of world.shafts.values()) {
-    for (const car of shaft.cars) if (car.serves !== 'any') return false;
-  }
-  return true;
+function reachableFor(world: World, room: Room): boolean {
+  return isReachableFromLobby(world, room.floor, room.x);
 }
 
 // ---------------------------------------------------------------------------
@@ -531,6 +504,7 @@ function stepAlongRoute(world: World, sim: Sim): void {
       sim.route.shift();
       const room = world.rooms.get(leg.roomId);
       if (room) enterRoom(world, sim, room);
+      else if (sim.kind === 'staff' && !sim.exiting) keeperLostWay(world, sim); // the room it was to clean is gone
       else leaveTower(world, sim);
       return;
     }
@@ -546,14 +520,44 @@ function stepAlongRoute(world: World, sim: Sim): void {
 
 /**
  * The shaft or stairs the next leg needs is gone: guards and collectors on duty ask their
- * own planners again; anyone else heads for the street. A wait on the lost shaft ends here.
+ * own planners again, a housekeeper heads back to work or out (keeperLostWay); anyone else
+ * heads for the street. A wait on the lost shaft ends here.
  */
 function routeLost(world: World, sim: Sim): void {
   sim.waitStart = null;
   delete sim.firstWaitStart;
   if (sim.kind === 'guard' && !sim.exiting) guardLostRoute(sim);
   else if (sim.kind === 'collector' && !sim.exiting) collectorLostRoute(sim);
+  else if (sim.kind === 'staff' && !sim.exiting) keeperLostWay(world, sim);
   else leaveTower(world, sim);
+}
+
+/**
+ * A housekeeper whose way was demolished under it never waits outside for good: the street
+ * is no place to work from and the office would count it forever. It walks back to the
+ * housekeeping office when a way there exists (runHousekeeping sends it out again, and the
+ * room it was heading for is free for any keeper), else it leaves the tower by the normal
+ * leaving path, which takes it off the office roll so the office hires a replacement.
+ */
+function keeperLostWay(world: World, keeper: Sim): void {
+  const office = keeper.homeRoomId !== null ? world.rooms.get(keeper.homeRoomId) : undefined;
+  const legs = office ? findRoute(world, keeper.pos, { floor: office.floor, x: roomCenter(office) }, routeOpts(keeper)) : null;
+  if (office && legs) {
+    keeper.route = [...withoutStandingRides(legs), { kind: 'enter', roomId: office.id }];
+    keeper.state = 'walking';
+    return;
+  }
+  keeperLeaves(world, keeper);
+}
+
+/** A housekeeper with no way back to work leaves by the normal leaving path (runLeaving). */
+function keeperLeaves(world: World, keeper: Sim): void {
+  log(world, `A housekeeper on ${floorLabel(keeper.pos.floor)} had no way back to housekeeping and left the tower.`, 'warn', {
+    simId: keeper.id,
+  });
+  keeper.exiting = true;
+  keeper.state = 'leaving';
+  keeper.route = [];
 }
 
 function beginWait(world: World, sim: Sim, leg: Extract<Leg, { kind: 'ride' }>, shaft: Shaft): void {
@@ -1018,12 +1022,7 @@ function returnToHousekeeping(world: World, keeper: Sim): void {
       keeper.stayUntil = world.time.minute + HALL_CALL_RETRY_MINUTES;
       return;
     }
-    log(world, `A housekeeper on ${floorLabel(keeper.pos.floor)} had no way back to housekeeping and left the tower.`, 'warn', {
-      simId: keeper.id,
-    });
-    keeper.exiting = true;
-    keeper.state = 'leaving';
-    keeper.route = [];
+    keeperLeaves(world, keeper);
     return;
   }
   departRoom(world, keeper);

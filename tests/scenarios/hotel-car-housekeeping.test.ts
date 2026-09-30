@@ -49,7 +49,7 @@ describe('F1: a Hotel guests car carries the hotel staff', () => {
     expect(guestsLateOn.size).toBeGreaterThan(0); // the hotel still books on days three and four
   });
 
-  it('plans service staff onto the cars of the groups they work for, and nobody else', () => {
+  it('plans service staff onto the cars of the groups they work for, and everyone else as riders it takes when free', () => {
     const world = hotelTower();
     setServes(world, 'hotel');
     const from = { floor: 1, x: 150 };
@@ -57,11 +57,12 @@ describe('F1: a Hotel guests car carries the hotel staff', () => {
     // Housekeepers plan as hotel riders; guards and collectors (work in every room) plan on every car.
     expect(findRoute(world, from, to, { staff: true, riderClass: 'hotel' })).not.toBeNull();
     expect(findRoute(world, from, to, { staff: true, riderClass: 'other' })).not.toBeNull();
-    // A shopper or resident is still not planned onto a dedicated car, and a worker not onto a hotel car.
-    expect(findRoute(world, from, to, { riderClass: 'other' })).toBeNull();
-    expect(findRoute(world, from, to, { riderClass: 'office' })).toBeNull();
+    // Everyone else plans on the car too, as a rider it carries when it is free (those riders first).
+    expect(findRoute(world, from, to, { riderClass: 'other' })).not.toBeNull();
+    expect(findRoute(world, from, to, { riderClass: 'office' })).not.toBeNull();
     setServes(world, 'office');
-    expect(findRoute(world, from, to, { staff: true, riderClass: 'hotel' })).toBeNull(); // housekeepers do not work in offices
+    // Housekeepers do not work in offices: an office car carries them only when it is free.
+    expect(findRoute(world, from, to, { staff: true, riderClass: 'hotel' })).not.toBeNull();
     expect(findRoute(world, from, to, { staff: true, riderClass: 'other' })).not.toBeNull();
   });
 });

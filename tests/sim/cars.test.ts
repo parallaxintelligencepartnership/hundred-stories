@@ -144,10 +144,10 @@ describe('dispatch by rider class', () => {
     const hotelCar = carAt(shaft, 0);
     const generalCar = carAt(shaft, 1);
     // A hotel guest waiting somewhere in the shaft keeps the hotel car dedicated.
-    requestHallCall(world, shaft.id, 2, 1, 'hotel');
+    addWaiter(world, shaft, 'guest', 2, 6);
     const worker = addWaiter(world, shaft, 'worker', 5, 8);
 
-    expect(isLeftoverCar(shaft, hotelCar)).toBe(false);
+    expect(isLeftoverCar(world, shaft, hotelCar)).toBe(false);
     run(world, 6);
     expect(worker.inCarId).toBe(generalCar.id);
     expect(hotelCar.passengers).toEqual([]);
@@ -159,7 +159,7 @@ describe('dispatch by rider class', () => {
     const car = carAt(shaft, 0);
     const worker = addWaiter(world, shaft, 'worker', 5, 8);
 
-    expect(isLeftoverCar(shaft, car)).toBe(true);
+    expect(isLeftoverCar(world, shaft, car)).toBe(true);
     run(world, 2);
     expect(worker.inCarId).toBe(car.id);
   });
@@ -168,10 +168,10 @@ describe('dispatch by rider class', () => {
     const world = createWorld(3);
     const shaft = buildShaft(world, { cars: [{ serves: 'hotel', y: 5 }] });
     const car = carAt(shaft, 0);
-    requestHallCall(world, shaft.id, 3, 1, 'hotel');
+    addWaiter(world, shaft, 'guest', 3, 6);
     const worker = addWaiter(world, shaft, 'worker', 5, 8);
 
-    expect(isLeftoverCar(shaft, car)).toBe(false);
+    expect(isLeftoverCar(world, shaft, car)).toBe(false);
     run(world, 1);
     expect(worker.inCarId).toBeNull();
     expect(worker.state).toBe('waiting');
@@ -186,7 +186,7 @@ describe('dispatch by rider class', () => {
     car.passengers.push(allocId(world)); // a hotel guest already riding, no hall call needed
     const worker = addWaiter(world, shaft, 'worker', 5, 8);
 
-    expect(isLeftoverCar(shaft, car)).toBe(false);
+    expect(isLeftoverCar(world, shaft, car)).toBe(false);
     run(world, 2);
     expect(worker.inCarId).toBeNull();
     expect(worker.state).toBe('waiting');
@@ -263,18 +263,11 @@ describe('routing', () => {
     return { world, shaft };
   }
 
-  it('is no route for an office worker when every car is dedicated to hotel guests', () => {
+  it('plans an office worker on a car kept for hotel guests when that is the only way', () => {
     const { world } = shaftWorld([{ serves: 'hotel' }]);
-    expect(findRoute(world, { floor: 1, x: 150 }, { floor: 6, x: 150 }, { riderClass: 'office' })).toBeNull();
+    const leg = findRoute(world, { floor: 1, x: 150 }, { floor: 6, x: 150 }, { riderClass: 'office' })?.find((l) => l.kind === 'ride');
+    expect(leg).toMatchObject({ kind: 'ride', fromFloor: 1, toFloor: 6 });
     expect(findRoute(world, { floor: 1, x: 150 }, { floor: 6, x: 150 }, { riderClass: 'hotel' })).not.toBeNull();
-  });
-
-  it('becomes a route once one car carries everyone', () => {
-    const { world, shaft } = shaftWorld([{ serves: 'hotel' }]);
-    expect(findRoute(world, { floor: 1, x: 150 }, { floor: 6, x: 150 }, { riderClass: 'office' })).toBeNull();
-    const added = applyCommand(world, { kind: 'shaft.addCar', shaftId: shaft.id });
-    expect(added).toEqual({ ok: true });
-    expect(findRoute(world, { floor: 1, x: 150 }, { floor: 6, x: 150 }, { riderClass: 'office' })).not.toBeNull();
   });
 
   it('only joins two floors that one car works', () => {
@@ -288,11 +281,84 @@ describe('routing', () => {
     expect(findRoute(world, { floor: 1, x: 150 }, { floor: 10, x: 150 }, { riderClass: 'office' })).toBeNull();
   });
 
-  it('never plans a trip on the leftover rule', () => {
-    const { world } = shaftWorld([{ serves: 'office' }]);
-    // The car would pick a shopper up at the door when it is idle, but a route may
-    // not be planned on that, so routing says no.
-    expect(findRoute(world, { floor: 1, x: 150 }, { floor: 6, x: 150 }, { riderClass: 'other' })).toBeNull();
+  it('plans a shopper on a car kept for office staff when it is the only car', () => {
+    const { world, shaft } = shaftWorld([{ serves: 'office' }]);
+    const route = findRoute(world, { floor: 1, x: 150 }, { floor: 6, x: 150 }, { riderClass: 'other' });
+    expect(route?.find((l) => l.kind === 'ride')).toMatchObject({ shaftId: shaft.id, fromFloor: 1, toFloor: 6 });
+  });
+
+  it('prefers an Everyone car in another shaft, even across the tower, to a car kept for somebody else', () => {
+    const world = createWorld(6);
+    const kept = buildShaft(world, { x: 150, cars: [{ serves: 'office' }] });
+    const general = buildShaft(world, { x: 350, cars: [{ serves: 'any' }] });
+    world.routingDirty = true;
+    const ride = (cls: 'office' | 'other') =>
+      findRoute(world, { floor: 1, x: 150 }, { floor: 6, x: 150 }, { riderClass: cls })?.find((l) => l.kind === 'ride');
+    // A shopper walks the width of the tower to the Everyone car; a worker takes its own car.
+    expect(ride('other')).toMatchObject({ shaftId: general.id });
+    expect(ride('office')).toMatchObject({ shaftId: kept.id });
+    // With the Everyone shaft gone, the kept car is the only way, and the shopper plans on it.
+    expect(applyCommand(world, { kind: 'shaft.demolish', shaftId: general.id })).toEqual({ ok: true });
+    expect(ride('other')).toMatchObject({ shaftId: kept.id });
+  });
+
+  it('prefers an Everyone car of the same shaft to its kept car when both work the trip', () => {
+    const { world } = shaftWorld([{ serves: 'office', range: { lo: 1, hi: 10 } }, { serves: 'any', range: { lo: 1, hi: 6 } }]);
+    // Both cars work 1 to 6: the shopper plans on the shaft and the Everyone car is its own.
+    expect(findRoute(world, { floor: 1, x: 150 }, { floor: 6, x: 150 }, { riderClass: 'other' })).not.toBeNull();
+    // Only the kept car works 1 to 9: still a route, as a leftover rider.
+    expect(findRoute(world, { floor: 1, x: 150 }, { floor: 9, x: 150 }, { riderClass: 'other' })).not.toBeNull();
+  });
+});
+
+describe('those riders first', () => {
+  it('serves its chosen riders first and carries the other rider once it is free', () => {
+    const world = createWorld(7);
+    const shaft = buildShaft(world, { cars: [{ serves: 'office', y: 1 }] });
+    world.routingDirty = true;
+    const car = carAt(shaft, 0);
+    // The resident's trip is planned on the office car; it has no other way.
+    const planned = findRoute(world, { floor: 3, x: 150 }, { floor: 1, x: 150 }, { riderClass: 'other' });
+    expect(planned?.find((l) => l.kind === 'ride')).toMatchObject({ shaftId: shaft.id, fromFloor: 3, toFloor: 1 });
+    const worker = addWaiter(world, shaft, 'worker', 8, 1);
+    const resident = addWaiter(world, shaft, 'resident', 3, 1);
+
+    // Going up past the resident's floor to its own rider, and down with the worker aboard.
+    let workerBoarded = -1;
+    let residentBoarded = -1;
+    for (let t = 0; t < 60 && residentBoarded < 0; t++) {
+      run(world, 1);
+      if (workerBoarded < 0 && worker.inCarId === car.id) workerBoarded = t;
+      if (residentBoarded < 0 && resident.inCarId === car.id) residentBoarded = t;
+    }
+    expect(workerBoarded).toBeGreaterThanOrEqual(0);
+    expect(residentBoarded).toBeGreaterThan(workerBoarded);
+  });
+});
+
+describe('F5: a call the kept car cannot carry does not hold it', () => {
+  function rangedWorld(guestTo: number): { world: World; shaft: Shaft; worker: Sim; guest: Sim } {
+    const world = createWorld(8);
+    // The hotel car works 1 to 5; the Everyone car works 5 to 10, far up at 10.
+    const shaft = buildShaft(world, { cars: [{ serves: 'hotel', y: 1, range: { lo: 1, hi: 5 } }, { serves: 'any', y: 10, range: { lo: 5, hi: 10 } }] });
+    const guest = addWaiter(world, shaft, 'guest', 5, guestTo);
+    const worker = addWaiter(world, shaft, 'worker', 1, 4);
+    return { world, shaft, worker, guest };
+  }
+
+  it('lets the hotel car carry a worker while a guest waits for a floor only the other car reaches', () => {
+    const { world, shaft, worker } = rangedWorld(9);
+    expect(isLeftoverCar(world, shaft, carAt(shaft, 0))).toBe(true);
+    run(world, 2);
+    expect(worker.inCarId).toBe(carAt(shaft, 0).id);
+  });
+
+  it('still holds the hotel car for a guest it can carry', () => {
+    const { world, shaft, worker, guest } = rangedWorld(3);
+    expect(isLeftoverCar(world, shaft, carAt(shaft, 0))).toBe(false);
+    run(world, 2);
+    expect(worker.inCarId).toBeNull();
+    expect(guest.state).toBe('waiting');
   });
 });
 

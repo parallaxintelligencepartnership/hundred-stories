@@ -1,6 +1,7 @@
-// Audit 2026-09-25 B S1: an office only its workers' cars can reach is an office nobody
-// rents. Leasing asks the rider-class question, and a lease whose only car is later given
-// to hotel guests ends, because its workers can no longer get in.
+// Audit 2026-09-25 B S1, revised by the owner's rule of 2026-09-29: a car's rider setting
+// means "those riders first", so an office whose only car is kept for hotel guests still
+// leases, its workers riding when the car is free. An office nobody can reach at all (its
+// only shaft demolished) is still an office nobody rents, and a lease that loses its way in ends.
 
 import { describe, expect, it } from 'vitest';
 
@@ -31,35 +32,40 @@ function carriesOnly(world: World, serves: 'hotel' | 'office' | 'any'): void {
   expect(result.ok).toBe(true);
 }
 
-describe('B S1: an office its workers cannot reach', () => {
-  it('stays vacant and adds no population when the only car carries hotel guests', () => {
+describe('B S1: an office and the car that reaches it', () => {
+  it('leases, and its workers ride, when the only car carries hotel guests first', () => {
     const { world, office } = officeTower();
     carriesOnly(world, 'hotel');
-    // A whole weekday morning, arrivals included, one minute at a time: the office must never be
-    // leased, not merely be empty at the end. A lease that the move-out rule later undoes still
-    // counts as a lease, so every tick is checked (fix review 2026-09-25).
-    const earlier = new Set(world.log);
+    const car = onlyShaft(world).cars[0];
+    let workerRides = 0;
     const end = 12 * 60;
     while (world.time.minute < end) {
       runMinutes(world, 1);
-      expect(office.vacant, `leased at minute ${world.time.minute}`).toBe(true);
-      expect(office.tenants, `tenants at minute ${world.time.minute}`).toHaveLength(0);
+      for (const id of car?.passengers ?? []) if (world.sims.get(id)?.kind === 'worker') workerRides++;
     }
-    const aboutOffice = world.log.filter(
-      (e) => !earlier.has(e) && (e.roomId === office.id || /rent|no way in/.test(e.text)),
-    );
-    expect(aboutOffice.map((e) => e.text)).toEqual([]);
-    expect(office.vacant).toBe(true);
-    expect(office.tenants).toHaveLength(0);
-    expect(populationOf(world)).toBe(0);
+    expect(office.vacant).toBe(false);
+    expect(office.occupancy).toBeGreaterThan(0);
+    expect(workerRides).toBeGreaterThan(0);
+    expect(populationOf(world)).toBeGreaterThan(0);
   });
 
-  it('is vacated once its only car is given to hotel guests after the lease', () => {
+  it('stays leased over a day once its only car is given to hotel guests after the lease', () => {
     const { world, office } = officeTower();
     atOnDay(world, 0, 12);
     expect(office.vacant).toBe(false);
-    expect(office.occupancy).toBeGreaterThan(0);
     carriesOnly(world, 'hotel');
+    runMinutes(world, EVAL.leaveAfterMinutes + 1440);
+    expect(office.vacant).toBe(false);
+    expect(office.tenants.length).toBeGreaterThan(0);
+    expect(world.log.some((e) => /no way in/.test(e.text))).toBe(false);
+  });
+
+  it('is vacated once its only shaft is demolished after the lease', () => {
+    const { world, office } = officeTower();
+    atOnDay(world, 0, 12);
+    expect(office.vacant).toBe(false);
+    const result = applyCommand(world, { kind: 'shaft.demolish', shaftId: onlyShaft(world).id });
+    expect(result.ok).toBe(true);
     runMinutes(world, EVAL.leaveAfterMinutes + 1440);
     expect(office.vacant).toBe(true);
     expect(office.tenants).toHaveLength(0);
