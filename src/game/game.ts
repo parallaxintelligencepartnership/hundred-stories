@@ -95,8 +95,8 @@ export function unreadableMessage(reason: string, copied: boolean): string {
 /** The largest interpolation alpha while the clock runs: the frame never reaches the next tick's position early. */
 const ALPHA_MAX = 1 - 1e-9;
 const MAX_TICKS_PER_FRAME = 240;
-// A step drains missed ticks until this much wall time has passed, then drops the rest, so a
-// slow tick becomes slow motion instead of a freeze.
+// A step drains missed ticks until this much wall time has passed; the rest wait for the next
+// step, up to MAX_TICKS_PER_FRAME of them, so a slow tick costs a frame's time, not a freeze.
 const MAX_STEP_MS = 8;
 
 // Clock constants for the autosave schedule. rules.ts holds no clock lengths, so these live
@@ -213,10 +213,13 @@ export interface DrainLimits {
   maxTicks: number;
   maxMs: number;
   /**
-   * Called at most once per drain, immediately before the tick that will leave the accumulator
-   * under one, or before the last tick maxTicks allows. The renderer snapshots positions here so
-   * it can lerp across that last tick. The time box is still checked after a tick, so a batch
-   * the box cuts short may end without this having been called.
+   * Called once per drain that runs a tick, immediately before its last tick: the one that will
+   * leave the accumulator under one, the last maxTicks allows, or the one the time box expects to
+   * be its last (the time spent so far plus the slowest tick of the batch reaches maxMs). The
+   * renderer snapshots positions here so it can lerp across that last tick. When a tick runs so
+   * long that the box cuts the batch after a tick it did not expect to be the last, this is called
+   * right after that tick instead, so the snapshot is never older than the batch's last tick (the
+   * frame then stands on the targets rather than lerping from a stale point).
    */
   beforeLastTick?: () => void;
 }
@@ -224,9 +227,10 @@ export interface DrainLimits {
 /**
  * Drain the whole ticks the accumulator has earned, and say how many ran.
  *
- * Stops at maxTicks, and at maxMs of wall time: past the box the whole missed ticks are dropped
- * and only the fraction is kept, so a slow tick turns into slow motion instead of a freeze. An
- * accumulator that outran the tick cap entirely (a tab asleep for minutes) is reset.
+ * Stops at maxTicks, and at maxMs of wall time: past the box the ticks not run wait in the
+ * accumulator for the next drain (package P3 F4), so a slow tick is caught up on the next frames,
+ * and a run of them turns into slow motion: an accumulator that outran the tick cap entirely (a
+ * tab asleep for minutes, or a box that cannot keep up) is reset.
  */
 export function drainTicks(
   loop: { accumulator: number },
@@ -236,17 +240,20 @@ export function drainTicks(
 ): number {
   const start = now();
   let n = 0;
-  let hooked = false;
+  let slowest = 0;
   while (loop.accumulator >= 1 && n < limits.maxTicks) {
-    if (!hooked && limits.beforeLastTick && (loop.accumulator < 2 || n + 1 === limits.maxTicks)) {
-      hooked = true;
-      limits.beforeLastTick();
-    }
+    const before = now();
+    // The last tick of the batch: the accumulator's, the cap's, or the box's by the slowest tick so far.
+    const last = loop.accumulator < 2 || n + 1 === limits.maxTicks || (n > 0 && before - start + slowest >= limits.maxMs);
+    if (last) limits.beforeLastTick?.();
     runTick();
     loop.accumulator -= 1;
     n++;
-    if (now() - start >= limits.maxMs) {
-      loop.accumulator -= Math.floor(loop.accumulator); // drop the whole missed ticks, keep the fraction
+    const after = now();
+    slowest = Math.max(slowest, after - before);
+    if (last) break;
+    if (after - start >= limits.maxMs) {
+      limits.beforeLastTick?.(); // a tick ran past the box unforeseen: snapshot where it ended
       break;
     }
   }

@@ -26,7 +26,7 @@ beforeEach(() => {
 const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe('drainTicks', () => {
-  it('drops the whole missed ticks and keeps the fraction when a tick is slow', () => {
+  it('stops at the box when a tick is slow, and carries the ticks it could not run to the next drain', () => {
     // 10 ms a tick against an 8 ms box: the first tick spends the whole budget.
     let ms = 0;
     const loop = { accumulator: 16.5 };
@@ -38,8 +38,7 @@ describe('drainTicks', () => {
 
     expect(n).toBe(1);
     expect(ticks).toBe(1);
-    expect(loop.accumulator).toBeLessThan(1);
-    expect(loop.accumulator).toBeCloseTo(0.5, 10); // the fraction survives, so the clock keeps its place
+    expect(loop.accumulator).toBeCloseTo(15.5, 10); // package P3 F4: carried, not dropped
   });
 
   it('runs every earned tick when the ticks are fast', () => {
@@ -325,6 +324,79 @@ function stubBrowserLoop() {
   vi.stubGlobal('cancelAnimationFrame', (id: number) => cancelled.push(id));
   return { listeners, removed, cleared, cancelled, intervals };
 }
+
+// Package P3 F4: the 8 ms time box used to cut a batch after the tick that crossed it, before the
+// hook that snapshots motion had run, and drop the missed ticks. At 3 ms a tick at 4x night every
+// frame ended with no snapshot, so walkers lerped from a stale point or snapped. Here the tick's
+// cost is on the injected clock: each game minute the frame runs moves it TICK_MS on.
+describe('a batch the time box cuts', () => {
+  function slowTicks(tickMs: number) {
+    const clock = { ms: 0, base: 0 };
+    const holder: { game: ReturnType<typeof createGame> | null } = { game: null };
+    const game = createGame(11, {
+      now: () => clock.ms + tickMs * (holder.game ? holder.game.world.time.minute - clock.base : 0),
+      scheduleIdle: () => () => {},
+      hidden: () => false,
+    });
+    holder.game = game;
+    const commits: number[] = [];
+    const renderer = {
+      render: () => {},
+      commitMotion: () => commits.push(game.world.time.minute),
+      resetMotion: () => {},
+      camera: { reset: () => {}, ensureFloorVisible: () => {} },
+      setGhost: () => {},
+      setSelection: () => {},
+      onPick: () => {},
+      setToolOwnsDrag: () => {},
+      setReducedMotion: () => {},
+      setChrome: () => {},
+    } as unknown as Renderer;
+    game.attach(renderer, { addEventListener: () => {} } as unknown as HTMLElement);
+    /** One frame: the ticks it ran, and the minute of the last snapshot it took (null for none). */
+    const frame = (): { ran: number; final: number; snapshot: number | null } => {
+      clock.base = game.world.time.minute;
+      clock.ms += FRAME_MS;
+      const before = commits.length;
+      game.frameOnce();
+      const final = game.world.time.minute;
+      return { ran: final - clock.base, final, snapshot: commits.length > before ? commits[commits.length - 1]! : null };
+    };
+    return { game, frame };
+  }
+
+  it('leaves a consistent motion snapshot on every frame at 3 ms a tick at 4x night, and carries the leftover ticks', () => {
+    const { game, frame } = slowTicks(3);
+    game.world.time.minute = 23 * 60 + 5; // 5.33 ticks earned a frame
+    game.setSpeed(4);
+    let ran = 0;
+    for (let i = 0; i < 60; i++) {
+      const f = frame();
+      ran += f.ran;
+      expect(f.ran, `frame ${i}`).toBeGreaterThan(0);
+      // The pair the renderer lerps across is at most the frame's last tick: taken before it, or,
+      // when a tick ran long past the box, right after it (no lerp, and never a stale point).
+      expect(f.snapshot, `frame ${i}`).not.toBeNull();
+      expect(f.final - f.snapshot!, `frame ${i}`).toBeLessThanOrEqual(1);
+    }
+    // The box still holds each frame to about 8 ms (three 3 ms ticks), and what it could not run
+    // waits for the next frame instead of being dropped.
+    expect(ran).toBe(180);
+    expect(game.accumulator()).toBeGreaterThan(100);
+  });
+
+  it('still snapshots when a single tick runs past the box', () => {
+    const { game, frame } = slowTicks(12);
+    game.world.time.minute = 23 * 60 + 5;
+    game.setSpeed(4);
+    for (let i = 0; i < 10; i++) {
+      const f = frame();
+      expect(f.ran).toBe(1);
+      expect(f.snapshot).not.toBeNull();
+      expect(f.final - f.snapshot!).toBeLessThanOrEqual(1);
+    }
+  });
+});
 
 describe('start and stop', () => {
   afterEach(() => {
