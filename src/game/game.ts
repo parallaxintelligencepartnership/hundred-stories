@@ -1203,6 +1203,9 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
       cancelScheduledSave();
       await saveWorld('background');
     },
+    saveHeld() {
+      return slot === 'mine' && mineHeld;
+    },
     save() {
       // The player pressed Save, so this one logs; in a held My tower it is also the player
       // choosing the new tower over the save that would not open.

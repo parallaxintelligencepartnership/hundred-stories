@@ -12,6 +12,13 @@
 // and End jump, Enter or Space chooses, Escape resumes, and focus never leaves the card. The
 // selection follows the pointer too. It is a dialog, modal, named by its title.
 //
+// The entry column scrolls when the card does not fit (a phone on its side): the plate stays put,
+// and a selection moved by key or controller is scrolled into the column's view.
+//
+// A question (ask): the column trades its entries for one line and two answers, the safe answer
+// selected, for an entry that cannot be undone (New tower) or a Save that would replace a saved
+// tower that could not be opened. Escape, or B on a controller, answers with the safe one.
+//
 // The DOM work is plain enough for tests/ui/fake-dom.ts: children, attributes, listeners, focus.
 
 import type { Speed } from '../game/api';
@@ -24,6 +31,10 @@ export const PAUSE_TITLE = 'Hundred Stories';
 export const PAUSED_WORD = 'Paused';
 /** The line under the title when the game would not pause. */
 export const MENU_WORD = 'Menu';
+/** New tower (the third entry in My tower) asks this first: nothing brings the old tower back. */
+export const NEW_TOWER_QUESTION = 'Start over? This replaces My tower.';
+export const NEW_TOWER_YES = 'Start over';
+export const NEW_TOWER_NO = 'Keep my tower';
 
 /**
  * What choosing an entry does to the menu:
@@ -49,6 +60,26 @@ export interface PauseEntry {
   title?: string;
   /** For Save: paint its word ("Saved") as the save goes. */
   bind?: (item: { setWord(word: string): void; setBusy(busy: boolean): void }) => void;
+}
+
+/** One answer to a question the card asks. `close` closes the menu after it runs, the speed put back. */
+export interface PauseAnswer {
+  label: string;
+  icon: IconName;
+  run?: () => void;
+  close: boolean;
+}
+
+/**
+ * A question in the card: the line, then the answer that goes ahead and the answer that keeps
+ * things as they are. The safe answer (`no`) is selected, and Escape chooses it.
+ */
+export interface PauseQuestion {
+  /** For the tests and the page: data-question on the card while it asks. */
+  id: string;
+  text: string;
+  yes: PauseAnswer;
+  no: PauseAnswer;
 }
 
 export interface PauseMenuOptions {
@@ -97,6 +128,12 @@ export interface PauseMenu {
   items(): HTMLElement[];
   /** A key press while the menu is on screen. True when it was the menu's. */
   handleKey(event: PauseKeyLike): boolean;
+  /** Ask a question in the card, in place of the entries. The menu must be open. */
+  ask(question: PauseQuestion): void;
+  /** The question being asked, or null. */
+  asking(): PauseQuestion | null;
+  /** Back out of a question with its safe answer, as Escape does. False when there was none. */
+  cancel(): boolean;
   destroy(): void;
 }
 
@@ -128,7 +165,7 @@ export function createPauseMenu(options: PauseMenuOptions): PauseMenu {
   state.textContent = PAUSED_WORD;
   plate.append(title, state);
 
-  const list = document.createElement('div');
+  const list = document.createElement('div') as HTMLDivElement;
   list.className = 'hs-pause-list';
   card.append(plate, list);
   node.append(card);
@@ -140,16 +177,60 @@ export function createPauseMenu(options: PauseMenuOptions): PauseMenu {
   let selected = -1;
   let entries: PauseEntry[] = [];
   let buttons: HTMLElement[] = [];
+  let question: PauseQuestion | null = null;
+  /**
+   * The entries as they were when the question was asked, and the one it was asked from: put back
+   * as they were (not built again, so Save's action and word carry on) when an answer keeps the menu.
+   */
+  let asked: { entries: PauseEntry[]; buttons: HTMLElement[]; from: number } | null = null;
 
-  function select(index: number, focus: boolean): void {
+  /**
+   * Scroll the entry column so this entry is inside it: the least scroll that shows it whole. The
+   * column scrolls only where the card does not fit; anywhere else nothing moves.
+   */
+  function reveal(item: HTMLElement | undefined): void {
+    if (!item || typeof list.getBoundingClientRect !== 'function' || typeof item.getBoundingClientRect !== 'function') return;
+    const box = list.getBoundingClientRect();
+    const at = item.getBoundingClientRect();
+    if (!(box.height > 0)) return;
+    const top = Number(list.scrollTop) || 0;
+    if (at.top < box.top) list.scrollTop = Math.max(0, top - (box.top - at.top));
+    else if (at.bottom > box.bottom) list.scrollTop = top + (at.bottom - box.bottom);
+  }
+
+  /** `scroll`: bring it into the column's view (keys, the controller, a Tab), not for a pointer on it. */
+  function select(index: number, focus: boolean, scroll = focus): void {
     if (index < 0 || index >= buttons.length) return;
     selected = index;
     buttons.forEach((item, i) => item.classList.toggle('is-selected', i === index));
+    // The column is scrolled by reveal, the least that shows the entry, never by the browser.
     if (focus) buttons[index]?.focus?.({ preventScroll: true });
+    if (scroll) reveal(buttons[index]);
   }
 
   function build(): void {
-    entries = options.entries();
+    question = null;
+    asked = null;
+    card.removeAttribute('data-question');
+    fill(options.entries(), null);
+  }
+
+  /** Out of the question, back to the entries it was asked over, that entry selected. */
+  function unask(): void {
+    const back = asked;
+    question = null;
+    asked = null;
+    card.removeAttribute('data-question');
+    if (!back) return;
+    entries = back.entries;
+    buttons = back.buttons;
+    list.replaceChildren(...buttons);
+    select(back.from >= 0 && back.from < buttons.length ? back.from : 0, shown);
+  }
+
+  /** Put these entries in the column, with a question's line over them when there is one. */
+  function fill(next: PauseEntry[], line: HTMLElement | null): void {
+    entries = next;
     buttons = entries.map((entry, index) => {
       const item = document.createElement(entry.kind === 'link' ? 'a' : 'button') as HTMLElement;
       item.className = 'hs-pause-item hs-face';
@@ -177,15 +258,61 @@ export function createPauseMenu(options: PauseMenuOptions): PauseMenu {
       });
       // The highlight follows the pointer as it follows the keys: one selection, never two.
       item.addEventListener('pointermove', () => {
-        if (selected !== index) select(index, true);
+        if (selected !== index) select(index, true, false);
       });
+      // Focus from elsewhere (the controller's d-pad, a Tab): the entry scrolls into view.
       item.addEventListener('focus', () => {
-        if (selected !== index) select(index, false);
+        if (selected !== index) select(index, false, true);
       });
       item.addEventListener('click', () => choose(index));
+      if (line) item.setAttribute('aria-describedby', line.id);
       return item;
     });
-    list.replaceChildren(...buttons);
+    list.replaceChildren(...(line ? [line, ...buttons] : buttons));
+    list.scrollTop = 0;
+  }
+
+  function answerEntry(answer: PauseAnswer, id: string): PauseEntry {
+    return {
+      id,
+      label: answer.label,
+      icon: answer.icon,
+      kind: 'stay',
+      run() {
+        if (answer.close) {
+          close();
+          answer.run?.();
+          return;
+        }
+        // Back to the entries, the one the question came from selected, then the answer runs
+        // (Save anyway paints its word on the Save entry, which is back on the card by then).
+        unask();
+        answer.run?.();
+        options.changed?.();
+      },
+    };
+  }
+
+  function ask(next: PauseQuestion): void {
+    if (!open) return;
+    if (!asked) asked = { entries, buttons, from: selected };
+    question = next;
+    const line = document.createElement('p');
+    line.className = 'hs-pause-question';
+    line.id = `${titleId}-question`;
+    line.textContent = next.text;
+    card.setAttribute('data-question', next.id);
+    fill([answerEntry(next.yes, 'yes'), answerEntry(next.no, 'no')], line);
+    // The safe answer is selected: a press of Enter or A that was meant for the list keeps things.
+    if (shown) select(1, true);
+    else selected = 1;
+    options.changed?.();
+  }
+
+  function cancel(): boolean {
+    if (!question) return false;
+    choose(1);
+    return true;
   }
 
   function choose(index: number): void {
@@ -244,6 +371,9 @@ export function createPauseMenu(options: PauseMenuOptions): PauseMenu {
     if (!open) return;
     open = false;
     shown = false;
+    question = null;
+    asked = null;
+    card.removeAttribute('data-question');
     node.remove();
     // Put back what the game had, only if the menu paused it and it is still paused.
     if (wePaused && options.getSpeed() === 0) options.setSpeed(prior);
@@ -267,7 +397,8 @@ export function createPauseMenu(options: PauseMenuOptions): PauseMenu {
     if (!action) return false;
     event.preventDefault();
     if (action.kind === 'resume') {
-      close();
+      // Escape backs out of a question with its safe answer; with none, it resumes.
+      if (!cancel()) close();
       return true;
     }
     if (action.kind === 'activate') {
@@ -300,6 +431,9 @@ export function createPauseMenu(options: PauseMenuOptions): PauseMenu {
     show,
     items: () => buttons,
     handleKey,
+    ask,
+    asking: () => question,
+    cancel,
     destroy() {
       open = false;
       shown = false;

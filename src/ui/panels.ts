@@ -75,6 +75,7 @@ import { MILESTONES_EMPTY, needsKey, needsYou, NEEDS_EMPTY, newsDays, NEWS_EMPTY
 import { chevron, controlsDevice, currentDeviceEnv, fillControlsPage } from './controls';
 import { getFlag, PREF_KEYS, setFlag } from './prefs';
 import { setSoundOn } from './sound-toggle';
+import { createSaveAction, type SaveQuestion } from './save-button';
 
 /**
  * A panel element may expose a cheap refresh that rewrites live numbers without rebuilding, and
@@ -153,6 +154,25 @@ export const STORIES_TOWER_LINES = 12;
 
 /** The long form of the rules, one page away. */
 export const HOW_TO_PLAY_HREF = '/how-to-play/';
+/**
+ * The guide on the site. The app shells (Capacitor, Tauri) carry no copy of the page, so there
+ * it opens from here in the system browser.
+ */
+export const HOW_TO_PLAY_URL = 'https://hundredstories.xyz/how-to-play/';
+
+/** In an app shell the guide opens outside the game, in the system browser. */
+export function guideOpensOutside(platform = savePlatform()): boolean {
+  return platform !== 'web';
+}
+
+/**
+ * Open the guide in the system browser, from an app shell. Neither shell has a plugin for outside
+ * links, so this is a new window at the full address, which the shells hand to the system browser.
+ */
+export function openGuideOutside(): void {
+  const win = (globalThis as { window?: { open?: (url: string, target: string) => unknown } }).window;
+  win?.open?.(HOW_TO_PLAY_URL, '_blank');
+}
 
 export type Selection = { roomId?: Id; simId?: Id; shaftId?: Id };
 
@@ -1589,6 +1609,32 @@ function settingsGroup(title: string, note?: string): { node: HTMLDivElement; li
 }
 
 /** A row that does one thing when tapped. Its words are the whole of its name. */
+/**
+ * Ask a save's question in place of its row (`box` sits right after it, empty and hidden): the
+ * line and the two answers, the safe one focused. Either answer puts the row back, focus on it,
+ * and answers.
+ */
+function askInRow(row: HTMLElement, box: HTMLElement, question: SaveQuestion): void {
+  box.setAttribute('role', 'group');
+  const line = el('p', 'hs-set-ask-text', question.text);
+  line.id = `hs-set-ask-${++askIds}`;
+  box.setAttribute('aria-labelledby', line.id);
+  const answer = (save: boolean): void => {
+    box.replaceChildren();
+    box.hidden = true;
+    row.hidden = false;
+    row.focus?.();
+    question.answer(save);
+  };
+  const yes = button(question.yes, 'hs-set-row hs-set-action', () => answer(true));
+  const no = button(question.no, 'hs-set-row hs-set-action', () => answer(false));
+  box.replaceChildren(line, yes, no);
+  row.hidden = true;
+  box.hidden = false;
+  no.focus?.();
+}
+let askIds = 0;
+
 function actionRow(label: string, onClick: () => void, title?: string): HTMLButtonElement {
   const node = button(label, 'hs-set-row hs-set-action', onClick);
   if (title) node.title = title;
@@ -1682,13 +1728,27 @@ export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElem
   // to last save and no Open a saved file. Saving a copy to a file is still fine.
   const oneTry = slot === 'daily';
   const saving = settingsGroup('Saving', 'Your tower saves by itself.');
-  saving.list.append(
-    actionRow('Save now', () => {
-      void game.save().then((result) => {
-        ctx.notice(result.ok ? 'Game saved.' : result.reason);
-      });
-    }),
+  // Save now runs the same save action as the round Save button and the pause menu's Save, so a
+  // Save that would replace a saved tower that could not be opened asks first here too, in place.
+  let saveAction: ReturnType<typeof createSaveAction> | null = null;
+  const saveRow = actionRow('Save now', () => saveAction?.run());
+  const saveAsk = el('div', 'hs-set-ask');
+  saveAsk.hidden = true;
+  saveAction = createSaveAction(
+    {
+      save: () => game.save(),
+      notice: (text) => ctx.notice(text),
+      heldSave: { held: () => game.saveHeld?.() ?? false, ask: (question) => askInRow(saveRow, saveAsk, question) },
+    },
+    {
+      setWord() {}, // the row keeps its words; the notice says the result
+      setBusy(busy) {
+        if (busy) saveRow.setAttribute('aria-disabled', 'true');
+        else saveRow.removeAttribute('aria-disabled');
+      },
+    },
   );
+  saving.list.append(saveRow, saveAsk);
   if (!oneTry) {
     saving.list.append(
       actionRow('Go back to last save', () => {
@@ -1776,10 +1836,20 @@ export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElem
   const openIntro = ctx.openIntro;
   if (openIntro) help.list.append(actionRow('Intro', () => openIntro(), 'Show the three intro screens again'));
   const guide = el('a', 'hs-set-row hs-set-action hs-link', 'How to play');
-  guide.href = HOW_TO_PLAY_HREF;
   guide.target = '_blank';
   guide.rel = 'noopener';
-  guide.title = 'The full guide, in a new tab';
+  if (guideOpensOutside()) {
+    // The app has no guide page of its own: the site's, in the system browser.
+    guide.href = HOW_TO_PLAY_URL;
+    guide.title = 'The full guide, in your browser';
+    guide.addEventListener('click', (event) => {
+      event.preventDefault();
+      openGuideOutside();
+    });
+  } else {
+    guide.href = HOW_TO_PLAY_HREF;
+    guide.title = 'The full guide, in a new tab';
+  }
   help.list.append(guide);
   const controlsRow = actionRow('Controls', () => showControls(true));
   controlsRow.append(chevron() as unknown as HTMLElement);

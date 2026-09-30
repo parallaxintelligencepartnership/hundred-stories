@@ -2192,6 +2192,25 @@ button.hs-readout:hover {
   border-top: 1px solid var(--hairline);
 }
 
+/* Save now asks first when it would replace a saved tower that could not be opened: the row
+   steps aside for the question's line and its two answers. */
+.hs-set-row[hidden],
+.hs-set-ask[hidden] {
+  display: none;
+}
+
+.hs-set-ask-text {
+  margin: 0;
+  padding: 10px 14px 8px;
+  font-size: var(--size-14);
+  line-height: 1.4;
+  color: var(--ink);
+}
+
+.hs-set-ask-text + .hs-set-row {
+  border-top: 1px solid var(--hairline);
+}
+
 /* Why a Notifications switch stayed off: one short line under it, inside the list. */
 .hs-set-why {
   margin: 0;
@@ -2458,6 +2477,20 @@ button.hs-readout:hover {
 
 .hs-hint.is-hidden {
   display: none;
+}
+
+/* Where the night speed chip hangs under the bar (1040 px and wider, 1300 px with Larger text) it
+   sits in the hint's row: while both are up the hint takes the row under, as the view chip does. */
+@media (min-width: 1040px) {
+  :root:not(.hs-large-text) .hs-ui.is-hint-low .hs-hint {
+    top: calc(var(--top-actual, calc(var(--top-h) + var(--safe-top))) + 2 * var(--gap-float) + var(--chip-h, 0px) + var(--touch));
+  }
+}
+
+@media (min-width: 1300px) {
+  :root.hs-large-text .hs-ui.is-hint-low .hs-hint {
+    top: calc(var(--top-actual, calc(var(--top-h) + var(--safe-top))) + 2 * var(--gap-float) + var(--chip-h, 0px) + var(--touch));
+  }
 }
 
 .hs-hint-close {
@@ -3973,7 +4006,9 @@ button.hs-news-toast {
   pointer-events: auto;
 }
 
-/* The card: the nearly solid surface, a title plate, then the column of buttons. */
+/* The card: the nearly solid surface, a title plate, then the column of buttons. Where the card
+   does not fit (a phone on its side, a short window) only the column scrolls, by touch, wheel or
+   the keys, and the plate stays put. */
 .hs-pause-card {
   display: flex;
   flex-direction: column;
@@ -3982,10 +4017,7 @@ button.hs-news-toast {
   width: min(360px, 100%);
   max-height: 100%;
   padding: 20px 16px 16px;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: none;
+  overflow: hidden;
   border-radius: var(--radius-20);
   background: var(--surface);
   box-shadow: var(--shadow-2);
@@ -3994,8 +4026,9 @@ button.hs-news-toast {
   animation: hs-pause-in var(--motion-fast) var(--ease-spring);
 }
 
-.hs-pause-card::-webkit-scrollbar {
-  display: none;
+/* The plate keeps its height; the column gives up the room. */
+.hs-pause-plate {
+  flex: none;
 }
 
 @keyframes hs-pause-in {
@@ -4009,11 +4042,36 @@ button.hs-news-toast {
   }
 }
 
-/* The pause menu's entries: one full-width column, each face's icon on the left. */
+/* The pause menu's entries: one full-width column, each face's icon on the left. It scrolls
+   when the card does not fit, with no bar drawn: a game menu, not a web page. The faces' shadows
+   get a few px of room so the scroll box does not cut them. */
 .hs-pause-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  flex: 0 1 auto;
+  min-height: 0;
+  margin: -4px;
+  padding: 4px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.hs-pause-list::-webkit-scrollbar {
+  display: none;
+}
+
+/* A question in the card (New tower, a Save that would replace a save that did not open): one
+   line over its two answers. */
+.hs-pause-question {
+  margin: 0 4px 4px;
+  font-size: var(--size-16);
+  line-height: 1.4;
+  text-align: center;
+  color: var(--ink);
 }
 
 .hs-ui .hs-pause-item {

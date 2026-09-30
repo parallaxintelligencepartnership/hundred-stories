@@ -114,6 +114,11 @@ export interface GameApi {
   cancelPending(): void;
   save(): Promise<CommandResult>;
   /**
+   * True while My tower's save could not be opened and a stand-in tower is running in its place:
+   * save() now would write the stand-in over the held save, so the ui asks first.
+   */
+  saveHeld(): boolean;
+  /**
    * Save what moved since the last save, quietly (no log line), and resolve once it is written:
    * before the page reloads itself. Nothing to save resolves at once.
    */

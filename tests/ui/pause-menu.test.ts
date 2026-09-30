@@ -1,6 +1,6 @@
 // The pause menu (Matt, 2026-09-29: the menu was "not very game menu like, still very techy/web
 // browser look"): Menu, or Escape with nothing open, puts a card over the dimmed tower with
-// Resume, Save, My tower (or New game), Today's tower, Stories, Settings and How to play. It
+// Resume, Save, My tower (or New tower), Today's tower, Stories, Settings and How to play. It
 // pauses the game and gives back the speed it had; Settings opens over it and closes back to it.
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -141,10 +141,10 @@ describe('the pause menu card', () => {
     expect(has(card.parentNode!, 'hs-pause')).toBe(true);
   });
 
-  it('lists Resume, Save, New game, Today\'s tower, Stories, Settings, How to play in My tower, each with an icon', () => {
+  it('lists Resume, Save, New tower, Today\'s tower, Stories, Settings, How to play in My tower, each with an icon', () => {
     const ui = mount();
     ui.open();
-    expect(ui.words()).toEqual(['Resume', 'Save', 'New game', "Today's tower", 'Stories', 'Settings', 'How to play']);
+    expect(ui.words()).toEqual(['Resume', 'Save', 'New tower', "Today's tower", 'Stories', 'Settings', 'How to play']);
     for (const item of ui.items()) expect(item.descendants().some((n) => n.tagName === 'USE')).toBe(true);
   });
 
@@ -161,7 +161,7 @@ describe('the pause menu card', () => {
     (globalThis as unknown as { window: Record<string, unknown> }).window['innerWidth'] = 390;
     const ui = mount();
     ui.open();
-    expect(ui.words()).toEqual(['Resume', 'Save', 'New game', "Today's tower", 'Stories', 'Views', 'Share', 'Settings', 'How to play']);
+    expect(ui.words()).toEqual(['Resume', 'Save', 'New tower', "Today's tower", 'Stories', 'Views', 'Share', 'Settings', 'How to play']);
   });
 
   it('links How to play the way Settings always did: the guide page, in a new tab', () => {
@@ -359,13 +359,14 @@ describe('the entries', () => {
     expect(ui.state.speed).toBe(2);
   });
 
-  it('New game gives back the speed, closes, and starts a fresh random tower with the same notice', () => {
+  it('New tower, once Start over is chosen, gives back the speed, closes, and starts a fresh random tower with the same notice', () => {
     const ui = mount({ speed: 2 });
     ui.open();
     const realNow = Date.now;
     Date.now = () => 1_758_700_000_123;
     try {
-      choosePauseEntry(ui.root, 'newGame');
+      choosePauseEntry(ui.root, 'newTower');
+      choosePauseEntry(ui.root, 'yes'); // Start over (it asks first: pause-menu-fixes.test.ts)
     } finally {
       Date.now = realNow;
     }

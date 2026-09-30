@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommandResult } from '../../src/sim/types';
 import { ICON_NAMES } from '../../src/ui/icons';
-import { SAVED_MS, SAVED_NOTICE, SAVE_TIP, createSaveButton } from '../../src/ui/save-button';
+import { HELD_SAVE_NO, HELD_SAVE_QUESTION, HELD_SAVE_YES, SAVED_MS, SAVED_NOTICE, SAVE_TIP, createSaveAction, createSaveButton, type SaveQuestion } from '../../src/ui/save-button';
 import { createUi } from '../../src/ui/ui';
 import { WATCH_CLASS } from '../../src/ui/watch';
 import { FakeDom, type FakeElement, choosePauseEntry } from './fake-dom';
@@ -144,6 +144,36 @@ function mount(extra: Record<string, unknown> = {}) {
     root.descendants().find((n) => n.tagName === 'BUTTON' && n.getAttribute('aria-label') === label)!;
   return { root, save, byLabel, top: root.descendants().find((n) => n.className === 'hs-top')! };
 }
+
+describe('createSaveAction: a save that would replace a saved tower that could not be opened', () => {
+  it('asks first while held, saves only on Save anyway, and is one press again once not held', async () => {
+    let held = true;
+    const asked: SaveQuestion[] = [];
+    const save = vi.fn(async (): Promise<CommandResult> => ({ ok: true }));
+    const notices: string[] = [];
+    const words: string[] = [];
+    const action = createSaveAction(
+      { save, notice: (t) => notices.push(t), heldSave: { held: () => held, ask: (q) => asked.push(q) } },
+      { setWord: (w) => words.push(w), setBusy() {} },
+    );
+    action.run();
+    expect(save).not.toHaveBeenCalled();
+    expect(asked).toHaveLength(1);
+    expect([asked[0]!.text, asked[0]!.yes, asked[0]!.no]).toEqual([HELD_SAVE_QUESTION, HELD_SAVE_YES, HELD_SAVE_NO]);
+    asked[0]!.answer(false);
+    await Promise.resolve();
+    expect(save).not.toHaveBeenCalled();
+    action.run();
+    asked[1]!.answer(true);
+    for (let i = 0; i < 4; i += 1) await Promise.resolve();
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(notices).toEqual([SAVED_NOTICE]);
+    held = false;
+    action.run();
+    expect(asked).toHaveLength(2);
+    expect(save).toHaveBeenCalledTimes(2);
+  });
+});
 
 describe('the Save button in the ui', () => {
   it('sits in the top bar before Sound and Watch, placed one gap left of Sound by the measure', () => {

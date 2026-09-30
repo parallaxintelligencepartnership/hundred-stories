@@ -53,6 +53,8 @@ import {
   el,
   freshStart,
   HOW_TO_PLAY_HREF,
+  guideOpensOutside,
+  openGuideOutside,
   readGlassClear,
 } from './panels';
 import type { PanelContext, PanelElement } from './panels';
@@ -73,8 +75,8 @@ import { focusablesIn, SHEET_CARD_MIN_WIDTH } from './sheet';
 import { createQuietLabels } from './quiet-labels';
 import { WATCH_CLASS, createWatchMode, createWatchToggle } from './watch';
 import { createSoundToggle } from './sound-toggle';
-import { createSaveAction, createSaveButton, SAVE_TIP, SAVE_WORD, type SaveAction } from './save-button';
-import { createPauseMenu, type PauseEntry } from './pause-menu';
+import { createSaveAction, createSaveButton, SAVE_TIP, SAVE_WORD, type SaveAction, type SaveQuestion } from './save-button';
+import { createPauseMenu, NEW_TOWER_NO, NEW_TOWER_QUESTION, NEW_TOWER_YES, type PauseEntry } from './pause-menu';
 import { UPDATE_TEXT, type Notifier } from './notify';
 
 export interface Ui {
@@ -350,9 +352,12 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   const soundToggle = createSoundToggle(sound);
   // Save's round button, directly left of Sound (placeWatchButton): the same save and the same
   // notice as Settings, Save now, in every tower that row shows in (all three). Hidden with them.
+  // In the one state where a save replaces something (My tower's save did not open and a stand-in
+  // runs) it asks first, in the pause card, opened for the question and closed by its answer.
   const saveButton = createSaveButton({
     save: () => game.save(),
     notice: (text) => notice(text),
+    heldSave: { held: () => game.saveHeld?.() ?? false, ask: (question) => askSaveInMenu(question, true) },
   });
   top.append(saveButton.button, soundToggle.button, watchToggle.button);
   const stopSoundPref = onPrefChange((key) => {
@@ -372,6 +377,9 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     ] as [IconName, string, string, Speed][]
   ).map(([glyph, label, tip, speed]) => {
     const node = iconButton(glyph, label, tip, 'hs-speed-btn', () => {
+      // The pause menu holds the speed (Settings over it leaves this pill in reach): only Resume
+      // sets it again, so the card never reads "Paused" over a running game.
+      if (pauseMenu.isOpen()) return;
       game.setSpeed(speed);
       update();
     });
@@ -466,6 +474,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   hint.append(el('span', 'hs-hint-text', hintText(coarsePointer())));
   const hintClose = button('Close', 'hs-hint-close', () => {
     hint.classList.add('is-hidden');
+    syncHintStep();
     writeHintSeen(HINT_LOADS); // closing it means read, not just shown
   });
   hintClose.title = 'Hide the controls hint';
@@ -840,6 +849,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     watchDaily();
 
     status.update(world, speed);
+    syncHintStep();
 
     refreshHoverReadout();
 
@@ -1383,6 +1393,14 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     shell.classList.toggle('is-view-low', viewChipRow(`${Math.round(chip.width)}|${Math.round(bar.width)}`, meets));
   }
 
+  /**
+   * On a wide screen the night speed chip hangs under the bar in the first-run hint's row: while
+   * both are up the hint takes the row under (ui.css is-hint-low), so neither covers the other.
+   */
+  function syncHintStep(): void {
+    shell.classList.toggle('is-hint-low', !hint.classList.contains('is-hidden') && !status.mode.classList.contains('is-hidden'));
+  }
+
   /** The view, a media query or a font changed under the chip and the bar: measure them again. */
   function onPlacementResize(): void {
     cardEdge = null;
@@ -1738,11 +1756,42 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     else openPauseMenu();
   }
 
+  /** The save question (save-button.ts) in the pause card; `close`: the menu closes on the answer. */
+  function askSaveInMenu(question: SaveQuestion, close: boolean): void {
+    if (close) openPauseMenu();
+    if (!pauseMenu.isOpen()) return;
+    pauseMenu.ask({
+      id: 'heldSave',
+      text: question.text,
+      yes: { label: question.yes, icon: 'save', close, run: () => question.answer(true) },
+      no: { label: question.no, icon: 'close', close, run: () => question.answer(false) },
+    });
+  }
+
+  /** New tower replaces My tower and cannot be undone, so it asks first, in the card. */
+  function askNewTower(): void {
+    pauseMenu.ask({
+      id: 'newTower',
+      text: NEW_TOWER_QUESTION,
+      yes: {
+        label: NEW_TOWER_YES,
+        icon: 'structure',
+        close: true,
+        run() {
+          game.newGame(freshStart());
+          notice('New game started.');
+        },
+      },
+      no: { label: NEW_TOWER_NO, icon: 'home', close: false },
+    });
+  }
+
   /**
-   * The menu's entries, in order: Resume, Save, New game in My tower or My tower anywhere else
-   * (a new game only ever replaces My tower), Today's tower outside it, Stories, on a phone Views
-   * and Share, Settings, How to play. A new tower always gets a fresh random start; the starting
-   * number is only in the page address (?seed=, read in main.ts) for testing, never here.
+   * The menu's entries, in order: Resume, Save, New tower in My tower (it asks first: it replaces
+   * My tower) or My tower anywhere else (a new game only ever replaces My tower), Today's tower
+   * outside it, Stories, on a phone Views and Share, Settings, How to play. A new tower always gets
+   * a fresh random start; the starting number is only in the page address (?seed=, read in
+   * main.ts) for testing, never here.
    */
   function pauseEntries(): PauseEntry[] {
     const slot = game.getSlot?.() ?? 'mine';
@@ -1756,21 +1805,19 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
         title: SAVE_TIP,
         bind(item) {
           menuSave?.destroy();
-          menuSave = createSaveAction({ save: () => game.save(), notice: (text) => notice(text) }, item);
+          menuSave = createSaveAction(
+            {
+              save: () => game.save(),
+              notice: (text) => notice(text),
+              heldSave: { held: () => game.saveHeld?.() ?? false, ask: (question) => askSaveInMenu(question, false) },
+            },
+            item,
+          );
         },
         run: () => menuSave?.run(),
       },
       slot === 'mine'
-        ? {
-            id: 'newGame',
-            label: 'New game',
-            icon: 'structure',
-            kind: 'leave',
-            run() {
-              game.newGame(freshStart());
-              notice('New game started.');
-            },
-          }
+        ? { id: 'newTower', label: 'New tower', icon: 'structure', kind: 'stay', run: () => askNewTower() }
         : { id: 'myTower', label: 'My tower', icon: 'home', kind: 'leave', run: () => openMyTower() },
     ];
     if (slot !== 'daily') entries.push({ id: 'daily', label: "Today's tower", icon: 'star', kind: 'leave', run: () => ctx.openDaily?.() });
@@ -1791,17 +1838,20 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     }
     entries.push(
       { id: 'settings', label: 'Settings', icon: 'settings', kind: 'over', run: () => setPanel('settings') },
-      // The guide, linked the way Settings always linked it: the page, in a new tab.
-      {
-        id: 'guide',
-        label: 'How to play',
-        icon: 'help',
-        kind: 'link',
-        href: HOW_TO_PLAY_HREF,
-        target: '_blank',
-        rel: 'noopener',
-        title: 'The full guide, in a new tab',
-      },
+      // The guide, linked the way Settings links it: on the web the page, in a new tab; in the app
+      // shells, which carry no copy of it, the site's page in the system browser.
+      guideOpensOutside()
+        ? { id: 'guide', label: 'How to play', icon: 'help', kind: 'stay', title: 'The full guide, in your browser', run: () => openGuideOutside() }
+        : {
+            id: 'guide',
+            label: 'How to play',
+            icon: 'help',
+            kind: 'link',
+            href: HOW_TO_PLAY_HREF,
+            target: '_blank',
+            rel: 'noopener',
+            title: 'The full guide, in a new tab',
+          },
     );
     return entries;
   }
@@ -1902,6 +1952,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
         update();
       },
       speed(step) {
+        if (pauseMenu.isOpen()) return; // the menu holds the speed; Resume puts it back
         game.setSpeed(stepSpeed(game.getSpeed(), step));
         update();
       },
@@ -1967,7 +2018,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   /** B: close the nearest thing open, else put the tool down. */
   function padBack(): void {
     if (pauseMenu.isShown()) {
-      closePauseMenu();
+      // A question backs out with its safe answer, as Escape does; else B resumes.
+      if (!pauseMenu.cancel()) closePauseMenu();
       return;
     }
     if (view.isOpen()) {
@@ -2063,6 +2115,11 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     if (action.kind === 'pause' && isPressable(event.target)) return;
     // Behind an open modal sheet the tower is out of reach: no tool, group or pause keys.
     if ((action.kind === 'pause' || action.kind === 'tool' || action.kind === 'group') && modalSheetOpen()) return;
+    // With Settings or a card opened from the pause menu over it, the menu still holds the speed.
+    if ((action.kind === 'pause' || action.kind === 'speed') && pauseMenu.isOpen()) {
+      event.preventDefault();
+      return;
+    }
     switch (action.kind) {
       case 'pause':
         event.preventDefault();

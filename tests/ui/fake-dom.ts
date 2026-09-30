@@ -248,7 +248,7 @@ export class FakeDom {
 }
 
 /**
- * An entry of the pause menu by its id (src/ui/pause-menu.ts): 'resume', 'save', 'newGame',
+ * An entry of the pause menu by its id (src/ui/pause-menu.ts): 'resume', 'save', 'newTower',
  * 'myTower', 'daily', 'stories', 'views', 'share', 'settings', 'guide'. Menu opens the pause menu
  * since 2026-09-29, and Settings is one entry inside it.
  */

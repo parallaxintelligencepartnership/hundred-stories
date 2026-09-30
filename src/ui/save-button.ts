@@ -5,6 +5,11 @@
 // written the word reads "Saved" for SAVED_MS, then "Save" again. Autosave is not its business.
 // Watch mode hides it with the rest of the chrome, and the quiet labels fold its word away like
 // Watch's and Sound's (ui.css).
+//
+// One state asks first: My tower's save could not be opened and a stand-in tower is running
+// (GameApi.saveHeld). Saving then writes the stand-in over the held save, so the save action
+// asks HELD_SAVE_QUESTION, and only "Save anyway" saves. The rule lives here, in createSaveAction,
+// for all three Saves (this button, the pause menu's, Settings, Save now); each asks in its place.
 
 import type { CommandResult } from '../sim/types';
 import { icon } from './icons';
@@ -21,11 +26,32 @@ export const SAVED_NOTICE = 'Game saved.';
 /** The words when the save itself threw, which game.ts's own save never does (it says why). */
 export const SAVE_FAILED_NOTICE = 'Could not save.';
 
+/** Asked before a save that would replace a My tower save that could not be opened. */
+export const HELD_SAVE_QUESTION = 'Your saved tower could not be opened. Saving now replaces it.';
+export const HELD_SAVE_YES = 'Save anyway';
+export const HELD_SAVE_NO = 'Keep the old one';
+
+/** The question a save asks first; the place that shows it calls answer with the player's choice. */
+export interface SaveQuestion {
+  text: string;
+  yes: string;
+  no: string;
+  answer(save: boolean): void;
+}
+
 export interface SaveButtonOptions {
   /** GameApi.save: the same save Settings, Save now runs. */
   save(): Promise<CommandResult>;
   /** The ui's notice, the same place Save now's result is said. */
   notice(text: string): void;
+  /**
+   * GameApi.saveHeld and the place's way of asking: while held() is true a press asks first
+   * (HELD_SAVE_QUESTION) and saves only on "Save anyway". Without it every press saves at once.
+   */
+  heldSave?: {
+    held(): boolean;
+    ask(question: SaveQuestion): void;
+  };
 }
 
 export interface SaveButton {
@@ -79,18 +105,35 @@ export function createSaveAction(options: SaveButtonOptions, view: SaveActionVie
     }
   };
 
+  const write = (): void => {
+    if (saving || destroyed) return;
+    saving = true;
+    view.setBusy(true);
+    let pending: Promise<CommandResult>;
+    try {
+      pending = options.save();
+    } catch {
+      pending = Promise.resolve({ ok: false, reason: SAVE_FAILED_NOTICE });
+    }
+    void pending.then(done, () => done({ ok: false, reason: SAVE_FAILED_NOTICE }));
+  };
+
   return {
     run() {
       if (saving || destroyed) return;
-      saving = true;
-      view.setBusy(true);
-      let pending: Promise<CommandResult>;
-      try {
-        pending = options.save();
-      } catch {
-        pending = Promise.resolve({ ok: false, reason: SAVE_FAILED_NOTICE });
+      const held = options.heldSave;
+      if (held?.held()) {
+        held.ask({
+          text: HELD_SAVE_QUESTION,
+          yes: HELD_SAVE_YES,
+          no: HELD_SAVE_NO,
+          answer(save) {
+            if (save) write();
+          },
+        });
+        return;
       }
-      void pending.then(done, () => done({ ok: false, reason: SAVE_FAILED_NOTICE }));
+      write();
     },
     destroy() {
       destroyed = true;
