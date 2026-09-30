@@ -66,7 +66,8 @@ import {
   stressBandLabel,
   stressBandOf,
 } from './format';
-import { type IconName } from './icons';
+import { icon, type IconName } from './icons';
+import { othersWaitLonger, RIDER_CHOICES, RIDER_ICON, RIDER_LABEL, RIDER_WARNING, RIDER_NOTE, type RiderSetting } from './riders';
 import { isPhoneWidth } from './build';
 import { createSheet, type Sheet } from './sheet';
 import { vipView, vipViewKey, type VipView } from './vip';
@@ -239,10 +240,21 @@ function flag(label: string, alert = false): HTMLSpanElement {
  * The icon is drawn from the shared symbol sheet (icons.ts) and is decorative: the title
  * beside it is the label. Close stays a word, not a cross, so it needs no explaining.
  */
-export function panelShell(title: string, section: IconName, ctx: Pick<PanelContext, 'close'>): { panel: PanelElement; body: HTMLDivElement } {
+export function panelShell(
+  title: string,
+  section: IconName,
+  ctx: Pick<PanelContext, 'close'>,
+  options: { className?: string; watchable?: boolean } = {},
+): { panel: PanelElement; body: HTMLDivElement } {
   // The shared sheet (sheet.ts): a floating card on a wide screen, a bottom sheet on a phone.
   // The owner mounts it with panel.sheet.mount(host) and takes it down with panel.sheet.unmount().
-  const sheet = createSheet({ title, icon: section, className: 'hs-panel', onClose: () => ctx.close() });
+  const sheet = createSheet({
+    title,
+    icon: section,
+    className: options.className ? `hs-panel ${options.className}` : 'hs-panel',
+    onClose: () => ctx.close(),
+    ...(options.watchable ? { watchable: true } : {}),
+  });
   const panel = sheet.node as PanelElement;
   panel.sheet = sheet;
   return { panel, body: sheet.body };
@@ -651,25 +663,24 @@ function simPanel(simId: Id, game: GameApi, ctx: PanelContext): PanelElement {
 function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement {
   const shaft = game.world.shafts.get(shaftId) as Shaft;
   const rule = SHAFTS[shaft.kind];
-  const { panel, body } = panelShell(rule.label, 'elevator', ctx);
-  body.append(el('p', 'hs-note', formatFloorRange(shaft.floorMin, shaft.floorMax)));
+  // The pause menu's look (a title plate, raised faces, the amber choice), in the card or sheet it
+  // always opened in: the tower stays in view, undimmed and running, while the player uses it.
+  const { panel, body } = panelShell(rule.label, 'elevator', ctx, { className: 'hs-elevator-card', watchable: true });
 
-  const cars = row('Cars', `${formatCount(shaft.cars.length)} of ${formatCount(rule.maxCars)}`);
-  const riders = row('Riders', formatCount(shaft.cars.reduce((n, c) => n + c.passengers.length, 0)));
-  body.append(cars, riders);
-  body.append(
-    el(
-      'p',
-      'hs-note',
-      `A new elevator costs ${formatMoney(rule.shaftCost)} with its first car. More cars cost ${formatMoney(rule.carCost)} each, up to ${rule.maxCars}. Each car costs ${formatMoney(rule.upkeepPerQuarterPerCar)} a quarter to run.`,
-    ),
-  );
+  // The plate names the elevator; the heading above it (out of sight here) already names the
+  // dialog for a screen reader, so the plate's title is not read twice.
+  const plate = el('div', 'hs-plate hs-elevator-plate');
+  const plateTitle = el('p', 'hs-plate-title', rule.label);
+  plateTitle.setAttribute('aria-hidden', 'true');
+  const plateState = el('p', 'hs-plate-state');
+  plate.append(plateTitle, plateState);
+  body.append(plate);
 
-  const actions = el('div', 'hs-actions');
-  const add = button(`Add car ${formatMoney(rule.carCost)}`, 'hs-btn', () => {
+  const actions = el('div', 'hs-face-row');
+  const add = face(`Add car ${formatMoney(rule.carCost)}`, 'elevator', 'is-compact', () => {
     ctx.apply({ kind: 'shaft.addCar', shaftId: shaft.id });
   });
-  const remove = button('Remove car', 'hs-btn', () => {
+  const remove = face('Remove car', 'demolish', 'is-compact', () => {
     ctx.apply({ kind: 'shaft.removeCar', shaftId: shaft.id });
   });
   actions.append(add, remove);
@@ -680,13 +691,13 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
 
   // Stretching a standing elevator, the way the original let you drag one taller or deeper.
   // It costs nothing, so the only question the buttons ask is whether the floor is free.
-  const reach = el('div', 'hs-actions');
-  const extendUp = button('Extend up', 'hs-btn', () => {
+  const reach = el('div', 'hs-face-row');
+  const extendUp = face('Extend up', 'chevron', 'is-compact is-up', () => {
     const now = game.world.shafts.get(shaftId);
     if (!now) return;
     ctx.apply({ kind: 'shaft.extend', shaftId, floorMin: now.floorMin, floorMax: stepFloor(now.floorMax, 1) });
   });
-  const extendDown = button('Extend down', 'hs-btn', () => {
+  const extendDown = face('Extend down', 'chevron', 'is-compact', () => {
     const now = game.world.shafts.get(shaftId);
     if (!now) return;
     ctx.apply({ kind: 'shaft.extend', shaftId, floorMin: stepFloor(now.floorMin, -1), floorMax: now.floorMax });
@@ -698,13 +709,11 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
   const stopButtons: { floor: number; node: HTMLButtonElement }[] = [];
   if (shaft.kind === 'express') {
     const stops = section('Stops');
-    stops.append(
-      el('p', 'hs-note', 'Express elevators stop only at lobbies and underground floors.'),
-    );
     const list = el('div', 'hs-stops');
+    list.title = 'Express elevators stop only at lobbies and underground floors.';
     for (const floor of expressStopFloors(shaft)) {
       const label = floor < 0 ? `B${Math.abs(floor)}` : String(floor);
-      const node = button(label, 'hs-stop', () => {
+      const node = button(label, 'hs-face hs-stop', () => {
         ctx.apply({
           kind: 'shaft.setStop',
           shaftId: shaft.id,
@@ -720,29 +729,24 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
     body.append(stops);
   }
 
-  // Each car can take its own slice of the shaft and its own riders. A dedicated car
-  // still carries everyone else while its own people have nothing on, so the list is
+  // Each car can take its own slice of the shaft and serve some riders first. The list is
   // rebuilt whenever the cars change and reread on every refresh.
   const carsSection = section('Cars');
   const carList = el('div', 'hs-cars');
   // When every car's floor buttons are refused for the same reason (an untouched elevator), the
   // reason is said once here instead of under each car.
   const carsWhy = el('p', 'hs-note hs-refused');
-  carsSection.append(
-    el(
-      'p',
-      'hs-note',
-      'You can give a car its own floors and its own riders. A car kept for some riders still picks up anyone else when its own riders do not need it.',
-    ),
-    carsWhy,
-    carList,
-  );
+  // No car here carries everyone, and other tenants on its floors depend on it.
+  const warning = el('p', 'hs-elevator-warning', RIDER_WARNING);
+  warning.setAttribute('role', 'status');
+  carsSection.append(warning, carsWhy, carList);
   body.append(carsSection);
 
   interface CarRow {
     carId: Id;
     label: HTMLParagraphElement;
-    serves: HTMLButtonElement;
+    riders: { serves: RiderSetting; node: HTMLButtonElement }[];
+    note: HTMLParagraphElement;
     steps: { node: HTMLButtonElement; edge: 'lo' | 'hi'; step: -1 | 1 }[];
     whole: HTMLButtonElement;
     why: HTMLParagraphElement;
@@ -759,23 +763,40 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
     carRows = shaft.cars.map((car, index) => {
       const node = el('div', 'hs-car');
       const label = el('p', 'hs-car-label');
-      const actions = el('div', 'hs-actions hs-car-actions');
+      label.id = `hs-car-label-${shaftId}-${car.id}`;
 
-      const serves = button('Serves', 'hs-btn', () => {
-        const now = carOf(game, shaftId, car.id);
-        if (!now) return;
-        ctx.apply({
-          kind: 'shaft.setCarServes',
-          shaftId,
-          carId: car.id,
-          serves: nextServes(now.serves),
+      // Who this car serves first: three faces, one command each, straight to the choice.
+      const group = el('div', 'hs-riders');
+      group.setAttribute('role', 'radiogroup');
+      group.setAttribute('aria-label', `Who car ${index + 1} serves first`);
+      const riders = RIDER_CHOICES.map((serves) => {
+        const option = face(RIDER_LABEL[serves], RIDER_ICON[serves], 'hs-rider', () => {
+          const now = carOf(game, shaftId, car.id);
+          if (!now || now.serves === serves) return;
+          ctx.apply({ kind: 'shaft.setCarServes', shaftId, carId: car.id, serves });
         });
+        option.setAttribute('role', 'radio');
+        option.dataset['serves'] = serves;
+        group.append(option);
+        return { serves, node: option };
       });
-      serves.setAttribute('aria-label', `Riders for car ${index + 1}`);
+      // The arrow keys move between the three without choosing (a choice is Enter, Space or a
+      // tap), so walking past a setting never applies it.
+      group.addEventListener('keydown', (event: Event) => {
+        const key = (event as KeyboardEvent).key;
+        const step = key === 'ArrowRight' || key === 'ArrowDown' ? 1 : key === 'ArrowLeft' || key === 'ArrowUp' ? -1 : 0;
+        if (step === 0) return;
+        const at = riders.findIndex((option) => option.node === (document as { activeElement?: unknown }).activeElement);
+        const next = riders[((at < 0 ? 0 : at) + step + riders.length) % riders.length];
+        event.preventDefault();
+        next?.node.focus?.();
+      });
+      const note = el('p', 'hs-rider-note', RIDER_NOTE);
 
+      const actions = el('div', 'hs-face-row hs-car-actions');
       const steps: CarRow['steps'] = [];
       const stepper = (text: string, edge: 'lo' | 'hi', step: -1 | 1): HTMLButtonElement => {
-        const btn = button(text, 'hs-btn', () => {
+        const btn = face(text, null, 'is-compact', () => {
           const shaftNow = game.world.shafts.get(shaftId);
           const now = shaftNow?.cars.find((c) => c.id === car.id);
           if (!shaftNow || !now) return;
@@ -789,12 +810,11 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
         return btn;
       };
 
-      const whole = button('Every floor', 'hs-btn', () => {
+      const whole = face('Every floor', null, 'is-compact', () => {
         ctx.apply({ kind: 'shaft.setCarRange', shaftId, carId: car.id, range: null });
       });
 
       actions.append(
-        serves,
         stepper('Bottom \u2212', 'lo', -1),
         stepper('Bottom +', 'lo', 1),
         stepper('Top \u2212', 'hi', -1),
@@ -802,9 +822,9 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
         whole,
       );
       const why = el('p', 'hs-note hs-refused');
-      node.append(label, actions, why);
+      node.append(label, group, note, actions, why);
       carList.append(node);
-      return { carId: car.id, label, serves, steps, whole, why };
+      return { carId: car.id, label, riders, note, steps, whole, why };
     });
   };
 
@@ -823,8 +843,15 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
         continue;
       }
       const span = carRangeOf(shaft, car);
-      setText(row.label, `Car ${i + 1} \u00b7 ${floorsLabel(span.lo, span.hi)} \u00b7 ${SERVES_LABEL[car.serves]}`);
-      setText(row.serves, `Serves: ${SERVES_LABEL[car.serves]}`);
+      setText(row.label, `Car ${i + 1} \u00b7 ${floorsLabel(span.lo, span.hi)}`);
+      for (const option of row.riders) {
+        const on = option.serves === car.serves;
+        option.node.setAttribute('aria-checked', on ? 'true' : 'false');
+        // One stop in the tab order, on the choice made; the arrow keys reach the other two.
+        option.node.tabIndex = on ? 0 : -1;
+        option.node.title = `Car ${i + 1}: ${RIDER_LABEL[option.serves]}`;
+      }
+      row.note.hidden = car.serves === 'any';
       const busy = car.passengers.length > 0;
       for (const step of row.steps) {
         const at = step.edge === 'lo' ? span.lo : span.hi;
@@ -854,14 +881,16 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
     const shared = sharedCarReason(reasons);
     setRefusal(carsWhy, shared === null ? [] : [shared]);
     carRows.forEach((row, i) => setRefusal(row.why, shared === null && reasons[i] ? [reasons[i]] : []));
+    warning.hidden = !othersWaitLonger(game.world, shaft);
   };
 
   const refresh = (): void => {
     const shaft = game.world.shafts.get(shaftId);
     if (!shaft) return;
     refreshCars(shaft);
-    setRowValue(cars, `${formatCount(shaft.cars.length)} of ${formatCount(rule.maxCars)}`);
-    setRowValue(riders, formatCount(shaft.cars.reduce((n, c) => n + c.passengers.length, 0)));
+    const riding = shaft.cars.reduce((n, c) => n + c.passengers.length, 0);
+    const state = `${formatFloorRange(shaft.floorMin, shaft.floorMax)} \u00b7 ${formatCount(shaft.cars.length)} of ${formatCount(rule.maxCars)} cars \u00b7 ${riding === 0 ? 'nobody riding' : `${formatCount(riding)} riding`}`;
+    setText(plateState, state);
     add.disabled = shaft.cars.length >= rule.maxCars;
     add.title = add.disabled
       ? `This elevator already has ${shaft.cars.length} cars.`
@@ -881,18 +910,14 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
   return panel;
 }
 
-/** What the panel calls each setting, in the label and on the button. */
-const SERVES_LABEL: Record<Car['serves'], string> = {
-  any: 'Everyone',
-  hotel: 'Hotel guests',
-  office: 'Office staff',
-};
-
-/** Everyone, then hotel guests, then office staff, then round again. */
-function nextServes(serves: Car['serves']): Car['serves'] {
-  if (serves === 'any') return 'hotel';
-  if (serves === 'hotel') return 'office';
-  return 'any';
+/** A raised face (the pause menu's buttons): its icon, when it has one, and its word. */
+function face(label: string, glyph: IconName | null, className: string, onClick: () => void): HTMLButtonElement {
+  const node = el('button', `hs-face ${className}`.trim());
+  node.type = 'button';
+  if (glyph) node.append(icon(glyph, 'hs-icon hs-face-icon') as unknown as HTMLElement);
+  node.append(el('span', 'hs-face-word', label));
+  node.addEventListener('click', onClick);
+  return node;
 }
 
 function carOf(game: GameApi, shaftId: Id, carId: Id): Car | undefined {

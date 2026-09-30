@@ -540,17 +540,36 @@ describe('the look', () => {
     expect(rule('.hs-pause')).toMatch(/z-index: 25;/);
     expect(rule('.hs-pause')).toMatch(/pointer-events: auto;/);
     expect(rule('.hs-pause-card')).toMatch(/background: var\(--surface\);/);
-    expect(rule('.hs-pause-title')).toMatch(/font-size: var\(--size-28\);[\s\S]*font-weight: 600;/);
+    // The plate is the shared one (the elevator card wears it too).
+    expect(rule('.hs-plate-title')).toMatch(/font-size: var\(--size-28\);[\s\S]*font-weight: 600;/);
   });
 
   it('gives each entry a raised face at least 48 px tall and full width, a pressed and a selected state, and no dividers', () => {
-    const item = rule('.hs-ui .hs-pause-item');
-    expect(item).toMatch(/width: 100%;/);
-    expect(item).toMatch(/min-height: calc\(48px \* var\(--ui-scale\)\);/);
-    expect(item).toMatch(/box-shadow: var\(--shadow-1\)/);
-    expect(item).not.toMatch(/border-(top|bottom):/);
-    expect(rule('.hs-ui .hs-pause-item.is-selected')).toMatch(/background: var\(--amber\);/);
-    expect(rule('.hs-ui .hs-pause-item:active')).toMatch(/transform: translateY\(1px\) scale\(var\(--press-scale\)\);/);
+    // The face is the shared hs-face; the pause menu adds only its full width.
+    expect(rule('.hs-ui .hs-pause-item')).toMatch(/width: 100%;/);
+    const face = rule('.hs-ui .hs-face');
+    expect(face).toMatch(/min-height: calc\(48px \* var\(--ui-scale\)\);/);
+    expect(face).toMatch(/box-shadow: var\(--shadow-1\)/);
+    expect(face).not.toMatch(/border-(top|bottom):/);
+    expect(rule(".hs-ui .hs-face:is(.is-selected, [aria-checked='true'], [aria-pressed='true'])")).toMatch(/background: var\(--amber\);/);
+    expect(rule('.hs-ui .hs-face:active:not(:disabled)')).toMatch(/transform: translateY\(1px\) scale\(var\(--press-scale\)\);/);
+  });
+
+  it('wears the shared classes on its plate, its entries and their icons', () => {
+    const root = dom.createElement('div');
+    const menu = createPauseMenu({
+      host: root as never, getSpeed: () => 1, setSpeed: () => {}, returnFocus: () => null,
+      entries: () => [{ id: 'resume', label: 'Resume', icon: 'play', kind: 'resume' }],
+    });
+    menu.open();
+    const card = menu.card as unknown as FakeElement;
+    // An icon is svg: its class is an attribute.
+    const classes = (c: string): boolean =>
+      card.descendants().some((n) => has(n, c) || (n.getAttribute('class') ?? '').split(/\s+/).includes(c));
+    expect(['hs-plate', 'hs-plate-title', 'hs-plate-state', 'hs-face', 'hs-face-icon', 'hs-face-word'].filter((c) => !classes(c))).toEqual([]);
+    const item = card.descendants().find((n) => has(n, 'hs-pause-item'))!;
+    expect(has(item, 'hs-face')).toBe(true);
+    menu.destroy();
   });
 
   it('enters with a short scale and fade, and not at all under reduced motion', () => {

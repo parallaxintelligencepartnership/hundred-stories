@@ -1672,26 +1672,14 @@ button.hs-readout:hover {
   gap: 6px;
 }
 
-.hs-stop {
+/* An express stop: a face a touch target square, amber while the car stops there. */
+.hs-ui .hs-face.hs-stop {
+  justify-content: center;
   min-width: var(--touch);
   min-height: var(--touch);
   padding: 0 12px;
   font-variant-numeric: tabular-nums;
   font-size: var(--size-14);
-  font-weight: 600;
-  background: var(--raise-strong);
-  border: 0;
-  border-radius: var(--radius-pill);
-  cursor: pointer;
-}
-
-.hs-stop:hover {
-  background: var(--raise-hover);
-}
-
-.hs-stop[aria-pressed='true'] {
-  background: var(--amber);
-  color: var(--on-amber);
 }
 
 .hs-actions {
@@ -1731,7 +1719,7 @@ button.hs-readout:hover {
   align-items: center;
 }
 
-/* One block per elevator car: what it works, and who it carries. */
+/* One block per elevator car: its name and floors, who it serves first, and its floors. */
 .hs-cars {
   display: flex;
   flex-direction: column;
@@ -1739,26 +1727,20 @@ button.hs-readout:hover {
 }
 
 .hs-car {
-  padding: 10px 12px;
+  padding: 10px 12px 2px;
   border-radius: var(--radius-16);
   background: var(--raise);
 }
 
 .hs-car-label {
-  margin: 0 0 6px;
+  margin: 0 0 8px;
   font-variant-numeric: tabular-nums;
-  font-size: var(--size-14);
+  font-size: var(--size-16);
   font-weight: 600;
 }
 
-/* Thumb sized, the same reach as the stop buttons, and wrapping on a phone. */
 .hs-car-actions {
-  margin: 0;
-}
-
-.hs-car-actions .hs-btn {
-  min-height: var(--touch);
-  min-width: var(--touch);
+  margin: 0 0 8px;
 }
 
 .hs-field {
@@ -4027,13 +4009,38 @@ button.hs-news-toast {
   }
 }
 
+/* The pause menu's entries: one full-width column, each face's icon on the left. */
+.hs-pause-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.hs-ui .hs-pause-item {
+  width: 100%;
+  text-align: left;
+}
+
+/* No entrance under reduced motion: the card is simply there. */
+.hs-ui.is-reduced .hs-pause-card {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hs-pause-card {
+    animation: none;
+  }
+}
+
+/* The plate and the faces: the pause menu's look, shared by the elevator card ---------- */
+
 /* The title plate: the name in the display type, the state under it. */
-.hs-pause-plate {
+.hs-plate {
   padding: 4px 8px 8px;
   text-align: center;
 }
 
-.hs-pause-title {
+.hs-plate-title {
   margin: 0;
   font-size: var(--size-28);
   font-weight: 600;
@@ -4041,27 +4048,20 @@ button.hs-news-toast {
   color: var(--amber-text);
 }
 
-.hs-pause-state {
+.hs-plate-state {
   margin: 4px 0 0;
   font-size: var(--size-16);
   color: var(--ink-dim);
 }
 
-.hs-pause-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-/* Each entry: a raised face, full width, at least 48 px, its icon on the left. Pressed, it sinks
-   and loses its lift; selected (by the keys or the pointer), it turns amber. The focus ring stays,
-   as on every control. */
-.hs-ui .hs-pause-item {
+/* A raised face, at least 48 px, its icon first. Pressed, it sinks and loses its lift; selected
+   (the pause menu's keys or pointer) or chosen (a radio's aria-checked, a toggle's aria-pressed),
+   it turns amber. The focus ring stays, as on every control. No dividers. */
+.hs-ui .hs-face {
   display: flex;
   align-items: center;
   gap: 12px;
   box-sizing: border-box;
-  width: 100%;
   min-height: calc(48px * var(--ui-scale));
   padding: 0 16px;
   border: 0;
@@ -4072,7 +4072,6 @@ button.hs-news-toast {
   font-family: var(--font-ui);
   font-size: var(--size-16);
   font-weight: 600;
-  text-align: left;
   text-decoration: none;
   cursor: pointer;
   transition:
@@ -4081,49 +4080,149 @@ button.hs-news-toast {
     background-color 80ms var(--ease-standard);
 }
 
-.hs-ui .hs-pause-item.is-selected {
+.hs-ui .hs-face:is(.is-selected, [aria-checked='true'], [aria-pressed='true']) {
   background: var(--amber);
   color: var(--on-amber);
 }
 
-.hs-ui .hs-pause-item:active {
+.hs-ui .hs-face:active:not(:disabled) {
   transform: translateY(1px) scale(var(--press-scale));
   box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
 }
 
-.hs-pause-icon {
+.hs-ui .hs-face:disabled {
+  box-shadow: none;
+  color: var(--ink-dim);
+  cursor: default;
+}
+
+.hs-face-icon {
   flex: none;
   width: 20px;
   height: 20px;
   color: var(--amber-text);
 }
 
-.hs-pause-item.is-selected .hs-pause-icon {
+.hs-face:is(.is-selected, [aria-checked='true'], [aria-pressed='true']) .hs-face-icon {
   color: inherit;
 }
 
-.hs-pause-word {
+.hs-face:disabled .hs-face-icon {
+  color: inherit;
+}
+
+.hs-face-word {
   flex: 1 1 auto;
   min-width: 0;
 }
 
-/* No entrance under reduced motion: the card is simply there. */
-.hs-ui.is-reduced .hs-pause-card {
-  animation: none;
-}
-
-.hs-ui.is-reduced .hs-pause-item {
+.hs-ui.is-reduced .hs-face {
   transition: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .hs-pause-card {
-    animation: none;
-  }
-
-  .hs-pause-item {
+  .hs-face {
     transition: none;
   }
+}
+
+/* The elevator card (panels.ts shaftPanel) ------------------------------------------------
+   The pause menu's plate and faces, in the side card or bottom sheet it always opened in. It
+   is not the pause menu: no scrim, the game runs on, focus is free to leave (sheet.ts
+   watchable), because the player watches the car while setting it up. */
+
+/* The plate is the title: the head keeps Close, and its heading only names the dialog. */
+.hs-elevator-card .hs-panel-title {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.hs-elevator-card .hs-panel-close {
+  margin-left: auto;
+}
+
+.hs-elevator-plate {
+  margin: 0 0 12px;
+}
+
+/* A row of smaller faces (Add car, Extend up, a car's floors), wrapping on a narrow card. */
+.hs-face-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.hs-ui .hs-face.is-compact {
+  flex: 1 1 auto;
+  justify-content: center;
+  gap: 8px;
+  min-height: var(--touch);
+  padding: 0 14px;
+  font-size: var(--size-14);
+}
+
+.hs-face.is-compact .hs-face-word {
+  flex: 0 1 auto;
+}
+
+.hs-face.is-compact .hs-face-icon {
+  width: 18px;
+  height: 18px;
+}
+
+/* Extend up points its chevron up. */
+.hs-face.is-up .hs-face-icon {
+  rotate: 180deg;
+}
+
+/* Who a car serves first: three faces side by side, the word under the icon, the choice amber. */
+.hs-riders {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0 0 8px;
+}
+
+.hs-ui .hs-face.hs-rider {
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 6px;
+  font-size: var(--size-14);
+  line-height: 1.2;
+  text-align: center;
+}
+
+.hs-rider .hs-face-word {
+  flex: none;
+  text-wrap: balance;
+}
+
+/* The one line under the choices while a car serves some riders first. */
+.hs-rider-note {
+  margin: 0 0 10px;
+  font-size: var(--size-14);
+  color: var(--ink-dim);
+}
+
+.hs-rider-note[hidden],
+.hs-elevator-warning[hidden] {
+  display: none;
+}
+
+/* The shaft has no Everyone car and other tenants depend on it: one plain line, amber edged. */
+.hs-elevator-warning {
+  margin: 0 0 12px;
+  padding: 6px 10px;
+  border-left: 2px solid var(--amber-text);
+  font-size: var(--size-14);
+  font-weight: 600;
+  color: var(--ink);
 }
 
 /* Reduced motion ------------------------------------------------------- */

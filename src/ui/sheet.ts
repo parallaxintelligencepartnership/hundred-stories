@@ -56,6 +56,12 @@ export interface SheetOptions {
   closeLabel?: string;
   /** Extra classes on the dialog, e.g. hs-panel. */
   className?: string;
+  /**
+   * A sheet the player uses while watching the tower (the elevator card): never modal. No backdrop
+   * dims the tower on a phone, focus is not held inside, and its keys answer only while focus is
+   * in it, as a card's do.
+   */
+  watchable?: boolean;
 }
 
 export interface SheetMountOptions {
@@ -246,13 +252,14 @@ export function createSheet(options: SheetOptions): Sheet {
     const inside = hasFocus();
     // A bottom sheet is modal: its keys are its own wherever focus is. A card only answers
     // while focus is in it, so the tower's own Escape (drop the tool) still works beside it.
-    if (!inside && mode === 'card') return false;
+    if (!inside && (mode === 'card' || options.watchable)) return false;
     if (event.key === 'Escape') {
       event.preventDefault();
       requestClose();
       return true;
     }
-    if (event.key !== 'Tab') return false;
+    // A watchable sheet lets Tab go on out of it, to the tower and the chrome.
+    if (event.key !== 'Tab' || options.watchable) return false;
     const items = focusablesIn(node);
     event.preventDefault();
     if (items.length === 0) {
@@ -328,10 +335,11 @@ export function createSheet(options: SheetOptions): Sheet {
     open = true;
     returnTo = mountOptions.returnFocus !== undefined ? mountOptions.returnFocus : (activeElement() as FocusTarget | null);
     node.setAttribute('data-mode', mode);
-    if (mode === 'sheet') node.setAttribute('aria-modal', 'true');
+    const modal = mode === 'sheet' && !options.watchable;
+    if (modal) node.setAttribute('aria-modal', 'true');
     else node.removeAttribute('aria-modal');
     setSnap('half');
-    if (mode === 'sheet') host.append(backdrop);
+    if (modal) host.append(backdrop);
     host.append(node);
     node.addEventListener('keydown', onKeyDown);
     backdrop.addEventListener('click', onBackdrop);

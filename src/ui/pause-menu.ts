@@ -1,6 +1,7 @@
 // The pause menu: a card in the middle of the screen over the dimmed tower, opened by the Menu
 // button and by Escape with nothing else open (ui.ts). A title plate ("Hundred Stories", with
-// "Paused" under it), then one column of large buttons, each an icon and a word.
+// "Paused" under it), then one column of large buttons, each an icon and a word. The plate and
+// the raised faces are shared classes (hs-plate, hs-face in ui.css): the elevator card wears them too.
 //
 // Opening it pauses the game and closing it puts back the speed the game had, so a game that was
 // already paused stays paused. Should the game refuse the pause, the menu still opens and the
@@ -117,13 +118,13 @@ export function createPauseMenu(options: PauseMenuOptions): PauseMenu {
   card.setAttribute('aria-labelledby', titleId);
 
   const plate = document.createElement('div');
-  plate.className = 'hs-pause-plate';
+  plate.className = 'hs-pause-plate hs-plate';
   const title = document.createElement('h2');
-  title.className = 'hs-pause-title';
+  title.className = 'hs-pause-title hs-plate-title';
   title.id = titleId;
   title.textContent = PAUSE_TITLE;
   const state = document.createElement('p');
-  state.className = 'hs-pause-state';
+  state.className = 'hs-pause-state hs-plate-state';
   state.textContent = PAUSED_WORD;
   plate.append(title, state);
 
@@ -151,7 +152,7 @@ export function createPauseMenu(options: PauseMenuOptions): PauseMenu {
     entries = options.entries();
     buttons = entries.map((entry, index) => {
       const item = document.createElement(entry.kind === 'link' ? 'a' : 'button') as HTMLElement;
-      item.className = 'hs-pause-item';
+      item.className = 'hs-pause-item hs-face';
       if (entry.kind === 'link') {
         const link = item as HTMLAnchorElement;
         link.href = entry.href ?? '';
@@ -163,9 +164,9 @@ export function createPauseMenu(options: PauseMenuOptions): PauseMenu {
       item.dataset['entry'] = entry.id;
       if (entry.title) item.title = entry.title;
       const word = document.createElement('span');
-      word.className = 'hs-pause-word';
+      word.className = 'hs-pause-word hs-face-word';
       word.textContent = entry.label;
-      item.append(icon(entry.icon, 'hs-icon hs-pause-icon') as unknown as HTMLElement, word);
+      item.append(icon(entry.icon, 'hs-icon hs-pause-icon hs-face-icon') as unknown as HTMLElement, word);
       entry.bind?.({
         setWord(text) {
           word.textContent = text;

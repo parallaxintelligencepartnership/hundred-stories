@@ -121,7 +121,7 @@ describe('hover card content', () => {
       ['Waiting, floor 9', '1, 2 min'],
       ['Waiting, floor 3', '2, 10 min'],
       ['Car 1', 'Everyone, all floors'],
-      ['Car 2', 'Hotel guests, 5 to 12'],
+      ['Car 2', 'Hotel guests first, 5 to 12'],
     ]);
   });
 

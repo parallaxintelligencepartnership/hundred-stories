@@ -10,10 +10,11 @@
 import type { GameApi } from '../game/api';
 import { hallQueues, type HallQueue } from '../render/overlays';
 import { ROOMS, SHAFTS, takesRent } from '../sim/rules';
-import { carRangeOf, spanTop, type Car, type Id, type Room, type Shaft, type World } from '../sim/types';
+import { carRangeOf, spanTop, type Id, type Room, type Shaft, type World } from '../sim/types';
 import { roomsOnFloor, shaftAt } from '../sim/world';
 import { formatCount, formatEval, formatFloor, formatFloorRange } from './format';
 import { clampSpan, PLACE_GUTTER, type Box } from './layout';
+import { RIDER_LABEL } from './riders';
 
 export type HoverTarget = { kind: 'shaft'; shaft: Shaft } | { kind: 'room'; room: Room };
 
@@ -43,7 +44,6 @@ export interface CardContent {
 /** At most this many floors of queue in the card; the query panel has the rest. */
 export const CARD_WAIT_ROWS = 5;
 
-const SERVES: Record<Car['serves'], string> = { any: 'Everyone', hotel: 'Hotel guests', office: 'Office staff' };
 
 function shortFloor(floor: number): string {
   return floor < 0 ? `B${Math.abs(floor)}` : String(floor);
@@ -71,7 +71,7 @@ export function shaftCard(world: World, shaft: Shaft, queues: ReadonlyMap<number
   shaft.cars.forEach((car, i) => {
     const range = carRangeOf(shaft, car);
     const floors = car.range ? `${shortFloor(range.lo)} to ${shortFloor(range.hi)}` : 'all floors';
-    rows.push([`Car ${i + 1}`, `${SERVES[car.serves]}, ${floors}`]);
+    rows.push([`Car ${i + 1}`, `${RIDER_LABEL[car.serves]}, ${floors}`]);
   });
   return { title: rule.label, rows };
 }
