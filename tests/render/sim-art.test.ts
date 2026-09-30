@@ -97,7 +97,7 @@ describe('five builds and eight looks', () => {
 
   it('takes the look key from the identity, and the build from seed and id alone, within the atlas looks', () => {
     // Package P3: a worker's look key is the identity's; the build is the id's own where the
-    // person atlas keeps it for that key (two builds a key), else one of the kept two.
+    // person atlas keeps it for that key (one build a key), else the kept one.
     let own = 0;
     for (let id = 1; id < 200; id++) {
       const code = personLookCode(777, id, 'worker');
@@ -107,7 +107,7 @@ describe('five builds and eight looks', () => {
       expect(personLookCode(777, id, 'worker')).toBe(code); // stable across calls
       expect(atlasLookCode('worker', code)).toBe(code); // already a kept look
     }
-    expect(own).toBeGreaterThan(40);
+    expect(own).toBeGreaterThan(20); // about one in five
     const builds = new Set(Array.from({ length: 200 }, (_, id) => bodyOf(5, id)));
     expect(builds.size).toBe(BODY_COUNT);
   });
@@ -130,10 +130,12 @@ describe('five builds and eight looks', () => {
 });
 
 describe('the person atlas looks (package P3)', () => {
-  it('keeps 50 looks: every look key in two builds for workers and the casual crowd, one build for staff, a few for the rare wardrobes', () => {
-    expect(ATLAS_LOOKS).toEqual({ casual: 16, worker: 16, staff: 8, vip: 4, guard: 3, collector: 3 });
+  it('keeps 24 looks: every look key in one build for workers and the casual crowd, four for staff, a few for the rare wardrobes', () => {
+    // Package P3 fix round, I2: 50 looks overran the texture budget; 24 is the floor.
+    expect(ATLAS_LOOKS).toEqual({ casual: 8, worker: 8, staff: 4, vip: 2, guard: 1, collector: 1 });
+    expect(Object.values(ATLAS_LOOKS).reduce((a, b) => a + b, 0)).toBe(24);
     for (const w of WARDROBES) expect(new Set(ATLAS_CODES[w]).size, w).toBe(ATLAS_LOOKS[w]);
-    for (const w of ['casual', 'worker', 'staff'] as const) expect(new Set(ATLAS_CODES[w].map((c) => decodeLook(c).look)).size, w).toBe(LOOK_KEYS);
+    for (const w of ['casual', 'worker'] as const) expect(new Set(ATLAS_CODES[w].map((c) => decodeLook(c).look)).size, w).toBe(LOOK_KEYS);
     for (const w of ['casual', 'worker'] as const) expect(new Set(ATLAS_CODES[w].map((c) => decodeLook(c).body)).size, w).toBe(BODY_COUNT);
   });
 

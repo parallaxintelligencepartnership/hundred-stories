@@ -5,14 +5,17 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { Container, Graphics, Rectangle, Texture, type Renderer as PixiRenderer } from 'pixi.js';
-import { createArt, FLOOR_PX, GHOST_KEEP, SHAFT_PIECE_FLOORS, PERSON_ATLAS_CELLS, PERSON_ATLAS_COLS, PERSON_ATLAS_ROWS, PERSON_CELL_H, PERSON_CELL_W, TEXTURE_CLASS, TEXTURE_SIZE, VENUE_SHELL } from '../../src/render/art';
+import { createArt, FLOOR_PX, GHOST_KEEP, SHAFT_PIECE_FLOORS, PERSON_ATLAS_CELLS, PERSON_ATLAS_COLS, PERSON_ATLAS_ROWS, PERSON_CELL_GUTTER, PERSON_CELL_H, PERSON_CELL_W, TEXTURE_CLASS, TEXTURE_SIZE, VENUE_SHELL } from '../../src/render/art';
 import { FRAME, PERSON_FRAME_COUNT, type PersonFrame } from '../../src/render/anim';
 import { LOOK_CODES, MARK_H, MARK_W, PROP_KINDS, PROP_SIZE } from '../../src/render/figure';
 import type { SimKind } from '../../src/sim/types';
-import { LINE_PX, SIM_H, SIM_W, TILE_PX } from '../../src/render/grid';
+import { bakeResolution, LINE_PX, SIM_H, SIM_W, TILE_PX } from '../../src/render/grid';
 import { INK, wallShadow } from '../../src/render/palette';
 import { VENUE_BAND } from '../../src/render/illustrated';
 import { ATLAS_BUDGET_PX } from '../../src/render/renderer';
+
+/** The person atlas line of the texture budget, docs/VISUAL.md (package P3 fix round). */
+const PERSON_ATLAS_BUDGET_BYTES = 7_352_704;
 
 interface Baked {
   scaleMode: string;
@@ -81,12 +84,16 @@ describe('texture classes', () => {
     }
   });
 
-  it('cuts a person of 16 by 48 logical px from the one person atlas, 1020 by 980 canvas px at resolution 1', () => {
+  it('cuts a person of 16 by 48 logical px from the one person atlas, 527 by 872 canvas px at resolution 1', () => {
     const { art, canvases } = harness(1);
     const t = art.sim('resident', 'pink', FRAME.stand, 3);
     expect([t.width, t.height]).toEqual([TEXTURE_SIZE.sim().width, TEXTURE_SIZE.sim().height]);
-    expect(canvases).toEqual([{ width: PERSON_ATLAS_COLS * PERSON_CELL_W * 2, height: PERSON_ATLAS_ROWS * PERSON_CELL_H * 2 }]);
-    expect(canvases[0]).toEqual({ width: 1020, height: 980 });
+    expect(canvases).toEqual([
+      { width: (PERSON_ATLAS_COLS * PERSON_CELL_W - PERSON_CELL_GUTTER) * 2, height: (PERSON_ATLAS_ROWS * PERSON_CELL_H - PERSON_CELL_GUTTER) * 2 },
+    ]);
+    expect(canvases[0]).toEqual({ width: 527, height: 872 });
+    // Every gutter is at least one device px at this, the smallest illustrated scale.
+    expect(PERSON_CELL_GUTTER * 2).toBeGreaterThanOrEqual(1);
   });
 
   it('crops a venue texture to the rows it draws', () => {
@@ -112,10 +119,10 @@ describe('texture budget', () => {
   it('counts every baked texture and its bytes at its own resolution', () => {
     const { art } = harness(1);
     art.room('office', 9, 1, VENUE_SHELL, 'day'); // 144 x 72 x 4
-    art.sim('worker', 'calm', FRAME.stand, 0); // the person atlas, 1020 x 980 x 4
+    art.sim('worker', 'calm', FRAME.stand, 0); // the person atlas, 527 x 872 x 4
     art.sim('guest', 'red', FRAME.sit, 17); // a cell of the same atlas: nothing more is baked
     const stats = art.stats!();
-    const atlas = 1020 * 980 * 4;
+    const atlas = 527 * 872 * 4;
     expect(stats.structural).toEqual({ textures: 1, bytes: 144 * 72 * 4 });
     expect(stats.illustrated).toEqual({ textures: 1, bytes: atlas });
     expect(stats.bytes).toBe(144 * 72 * 4 + atlas);
@@ -141,7 +148,7 @@ describe('texture budget', () => {
     }
     expect(sources.size).toBe(1);
     expect(cells.size).toBe(PERSON_ATLAS_CELLS);
-    expect(PERSON_ATLAS_CELLS).toBe(300);
+    expect(PERSON_ATLAS_CELLS).toBe(144);
     expect(canvases).toHaveLength(1); // painted once, at the first ask
     expect(art.stats!().illustrated.textures).toBe(1);
   });
@@ -151,7 +158,23 @@ describe('texture budget', () => {
     art.sim('worker', 'calm', FRAME.stand, 0);
     expect(canvases[0]!.width).toBeLessThanOrEqual(ATLAS_BUDGET_PX);
     expect(canvases[0]!.height).toBeLessThanOrEqual(ATLAS_BUDGET_PX);
-    expect(canvases[0]).toEqual({ width: 2040, height: 1960 });
+    expect(canvases[0]).toEqual({ width: 1054, height: 1744 });
+  });
+
+  // Package P3 fix round, I2: the 50 look atlas was 2040 by 1960, 15,993,600 bytes, 2.6 times the
+  // whole texture budget on its own. 24 looks and a half px gutter bring it to 7,352,704 bytes, the
+  // atlas line docs/VISUAL.md records beside the 1.6 times budget for everything else.
+  it('pins the person atlas bytes at a device pixel ratio of 2 to the atlas line of the texture budget', () => {
+    const { art } = harness(2);
+    art.sim('worker', 'calm', FRAME.stand, 0);
+    const person = art.stats!().byFamily.person!;
+    expect(person).toBe(1054 * 1744 * 4);
+    expect(person).toBeLessThanOrEqual(PERSON_ATLAS_BUDGET_BYTES);
+  });
+
+  it('bakes the atlas no finer on a DPR 3 phone: the bake resolution caps at 2', () => {
+    expect(bakeResolution(3)).toBe(2);
+    expect(bakeResolution(2.6)).toBe(2);
   });
 });
 
@@ -164,6 +187,28 @@ describe('the person atlas cells', () => {
     expect(cell('thief')).toEqual(cell('visitor'));
     expect(cell('guard')).not.toEqual(cell('worker'));
     expect(cell('collector')).not.toEqual(cell('staff'));
+  });
+
+  it('keeps each person kind its own looks in the 24 look atlas: the crowds eight, staff four, the VIP two, a guard and a collector one', () => {
+    const { art } = harness(1);
+    const cellsOf = (kind: SimKind): Set<string> => {
+      const out = new Set<string>();
+      for (let code = 0; code < LOOK_CODES; code++) {
+        const t = art.sim(kind, 'calm', FRAME.stand, code);
+        out.add(`${t.frame.x},${t.frame.y}`);
+      }
+      return out;
+    };
+    const looks: [SimKind, number][] = [['worker', 8], ['visitor', 8], ['staff', 4], ['vip', 2], ['guard', 1], ['collector', 1]];
+    const seen = new Set<string>();
+    for (const [kind, n] of looks) {
+      const cells = cellsOf(kind);
+      expect(cells.size, kind).toBe(n);
+      for (const c of cells) expect(seen.has(c), `${kind} shares a look`).toBe(false);
+      for (const c of cells) seen.add(c);
+    }
+    // The thief dresses as a visitor by design (docs/VISUAL.md) until the encounter is resolved.
+    expect(cellsOf('thief')).toEqual(cellsOf('visitor'));
   });
 });
 

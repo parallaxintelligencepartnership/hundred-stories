@@ -223,12 +223,14 @@ export const WARDROBE_KIND: Record<Wardrobe, SimKind> = { casual: 'visitor', wor
 /**
  * Package P3: every person draws from one baked atlas (art.ts sim), so the whole crowd batches
  * under one texture and nothing is painted when someone new walks into view. It holds a fixed
- * set of looks per wardrobe. Worker and casual, the crowds, keep all eight look keys, each in two
- * builds; staff keep the eight in one build; the three rare wardrobes keep a few. A person's
+ * set of 24 looks, the fewest the texture budget allows (docs/VISUAL.md): worker and casual, the
+ * crowds, keep all eight look keys in one build each (all five builds turn up across the keys);
+ * housekeeping staff keep four, the VIP two, the guard and the collector one, their uniforms
+ * telling them apart from everyone else. A person's
  * look is brought into their wardrobe's set by atlasLookCode, a pure function of the look code,
  * so a person keeps one look all their life.
  */
-export const ATLAS_LOOKS: Readonly<Record<Wardrobe, number>> = { casual: 16, worker: 16, staff: 8, vip: 4, guard: 3, collector: 3 };
+export const ATLAS_LOOKS: Readonly<Record<Wardrobe, number>> = { casual: 8, worker: 8, staff: 4, vip: 2, guard: 1, collector: 1 };
 
 /** The look codes a wardrobe keeps, variant order. */
 function atlasCodesOf(n: number): number[] {

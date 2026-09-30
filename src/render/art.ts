@@ -218,18 +218,25 @@ export const VENUE_SHELL = 2;
 
 /**
  * The person atlas (package P3): every wardrobe's kept looks (figure.ts ATLAS_LOOKS) in each of
- * the six baked frames (the mirrored two are flips), PERSON_ATLAS_COLS cells across, a cell the
- * person box plus a 1 px clear gutter so linear sampling never picks up a neighbour. 50 looks by
- * 6 frames is 300 cells, 30 by 10: 510 by 490 logical px, 2040 by 1960 device px at a device
- * pixel ratio of 2, inside the atlas budget (renderer.ts ATLAS_BUDGET_PX).
+ * the six baked frames (the mirrored two are flips), PERSON_ATLAS_COLS cells across, the person
+ * boxes apart by a clear gutter of half a logical px (one device px at the smallest scale, 2), so
+ * linear sampling never picks up a neighbour; no gutter past the last row or column. 24 looks by
+ * 6 frames is 144 cells, 16 by 9: 263.5 by 436 logical px, 1054 by 1744 device px (7,352,704
+ * bytes) at the illustrated scale of a device pixel ratio of 2, which bakeResolution caps, so a
+ * DPR 3 phone samples the same sheet. Inside ATLAS_BUDGET_PX, and the atlas line of the texture
+ * budget (docs/VISUAL.md).
  */
 export const PERSON_BAKED_FRAMES: readonly PersonFrame[] = [FRAME.stand, FRAME.stride, FRAME.shiftLeft, FRAME.glance, FRAME.sit, FRAME.browse];
 export const PERSON_ATLAS_LOOKS = WARDROBES.reduce((sum, w) => sum + ATLAS_LOOKS[w], 0);
 export const PERSON_ATLAS_CELLS = PERSON_ATLAS_LOOKS * PERSON_BAKED_FRAMES.length;
-export const PERSON_ATLAS_COLS = 30;
+export const PERSON_ATLAS_COLS = 16;
 export const PERSON_ATLAS_ROWS = Math.ceil(PERSON_ATLAS_CELLS / PERSON_ATLAS_COLS);
-export const PERSON_CELL_W = SIM_W + 1;
-export const PERSON_CELL_H = SIM_H + 1;
+export const PERSON_CELL_GUTTER = 0.5;
+export const PERSON_CELL_W = SIM_W + PERSON_CELL_GUTTER;
+export const PERSON_CELL_H = SIM_H + PERSON_CELL_GUTTER;
+/** The atlas in logical px: the cells, less the gutter after the last column and row. */
+export const PERSON_ATLAS_W = PERSON_ATLAS_COLS * PERSON_CELL_W - PERSON_CELL_GUTTER;
+export const PERSON_ATLAS_H = PERSON_ATLAS_ROWS * PERSON_CELL_H - PERSON_CELL_GUTTER;
 /** The first variant of each wardrobe in the atlas, WARDROBES order. */
 const WARDROBE_FIRST: Readonly<Record<string, number>> = (() => {
   const out: Record<string, number> = {};
@@ -2016,8 +2023,8 @@ export function createArt(renderer: Renderer, options: { createCanvas?: CanvasFa
     if (personCells) return personCells;
     const atlas = paint(
       'person:atlas',
-      PERSON_ATLAS_COLS * PERSON_CELL_W,
-      PERSON_ATLAS_ROWS * PERSON_CELL_H,
+      PERSON_ATLAS_W,
+      PERSON_ATLAS_H,
       (ctx) => {
         for (const w of WARDROBES) {
           const kind = WARDROBE_KIND[w];

@@ -356,8 +356,8 @@ export function simKeyOf(kind: SimKind, frame: PersonFrame, look: number): numbe
 
 /**
  * The person atlas (art.ts sim) stays inside ATLAS_BUDGET_PX device pixels on a side at a device
- * pixel ratio of 2: 30 cells of 17 logical px across and 10 of 49 down, at the illustrated scale
- * of 4 device px a logical px, is 2040 by 1960.
+ * pixel ratio of 2: 16 cells of 16.5 logical px across and 9 of 48.5 down, less the last gutter,
+ * at the illustrated scale of 4 device px a logical px, is 1054 by 1744.
  */
 export const ATLAS_BUDGET_PX = 2048;
 
@@ -753,8 +753,9 @@ export function simIsVisible(sim: Sim): boolean {
  *  sensitive to motion is not looking at hundreds of walkers at once. Chosen by id so
  *  a sim is either always drawn or never drawn, no popping. The tower's recurring
  *  characters, few by nature, are always drawn: the guards at their posts, the collectors,
- *  the VIP and the thief (package 8b). Housekeepers stay in the sample: a hotel's six would
- *  cost more person textures than the budget has room for. */
+ *  the VIP and the thief (package 8b). Housekeepers stay in the sample, like every
+ *  crowd role: since package P3 every person draws from the one person atlas, so drawing them
+ *  would cost no texture, only sprites and the busier hotel floors the sample is there to calm. */
 export const CROWD_ONE_IN = 4;
 export const ALWAYS_DRAWN: ReadonlySet<SimKind> = new Set<SimKind>(['guard', 'collector', 'vip', 'thief']);
 export function inCrowd(sim: Sim): boolean {
