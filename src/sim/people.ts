@@ -289,13 +289,20 @@ function runSchedules(world: World, clock: Clock): void {
       }
       if (sim.state === 'outside') continue;
     }
-    if (sim.state === 'inRoom' && sim.stayUntil !== null && world.time.minute >= sim.stayUntil) {
+    // A keeper in a hotel room with no end time is one an older save parked there: due now.
+    if (sim.state === 'inRoom' && (sim.stayUntil !== null ? world.time.minute >= sim.stayUntil : parkedKeeper(world, sim))) {
       onStayEnded(world, sim, clock);
       continue;
     }
     if (sim.state !== 'inRoom' && sim.state !== 'outside') continue;
     dispatchDueEntries(world, sim, clock);
   }
+}
+
+function parkedKeeper(world: World, sim: Sim): boolean {
+  if (sim.kind !== 'staff' || sim.inRoomId === null) return false;
+  const room = world.rooms.get(sim.inRoomId);
+  return room !== undefined && HOTEL_KINDS.has(room.kind);
 }
 
 function dispatchDueEntries(world: World, sim: Sim, clock: Clock): void {
