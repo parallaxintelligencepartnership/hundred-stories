@@ -196,7 +196,22 @@ export function createPauseMenu(options: PauseMenuOptions): PauseMenu {
     const top = Number(list.scrollTop) || 0;
     if (at.top < box.top) list.scrollTop = Math.max(0, top - (box.top - at.top));
     else if (at.bottom > box.bottom) list.scrollTop = top + (at.bottom - box.bottom);
+    syncMore();
   }
+
+  /**
+   * The column draws no scroll bar, so where entries sit past its edge the card fades that edge
+   * (ui.css has-more, has-above): the one cue that Settings and How to play are further down on a
+   * short screen (P6 review A7). Read from the column's own scroll numbers, after every move.
+   */
+  function syncMore(): void {
+    const top = Number(list.scrollTop) || 0;
+    const seen = Number(list.clientHeight) || 0;
+    const whole = Number(list.scrollHeight) || 0;
+    card.classList.toggle('has-more', seen > 0 && top + seen < whole - 1);
+    card.classList.toggle('has-above', seen > 0 && top > 1);
+  }
+  list.addEventListener('scroll', syncMore);
 
   /** `scroll`: bring it into the column's view (keys, the controller, a Tab), not for a pointer on it. */
   function select(index: number, focus: boolean, scroll = focus): void {
@@ -270,6 +285,7 @@ export function createPauseMenu(options: PauseMenuOptions): PauseMenu {
     });
     list.replaceChildren(...(line ? [line, ...buttons] : buttons));
     list.scrollTop = 0;
+    syncMore();
   }
 
   function answerEntry(answer: PauseAnswer, id: string): PauseEntry {
@@ -363,6 +379,7 @@ export function createPauseMenu(options: PauseMenuOptions): PauseMenu {
     paint();
     options.host.append(node);
     select(0, true);
+    syncMore();
     options.cue?.('menu.open');
     options.changed?.();
   }
@@ -388,6 +405,7 @@ export function createPauseMenu(options: PauseMenuOptions): PauseMenu {
     options.host.append(node);
     paint();
     select(selected < 0 ? 0 : selected, true);
+    syncMore();
     options.changed?.();
   }
 

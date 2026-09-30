@@ -12,7 +12,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createGame } from '../../src/game/game';
 import { applyCommand } from '../../src/sim/build';
 import type { Command } from '../../src/sim/types';
-import { createWorld } from '../../src/sim/world';
+import { addRoom, addShaft, allocId, createWorld } from '../../src/sim/world';
+import type { Room, RoomKind, Shaft } from '../../src/sim/types';
+import { ROOMS, SHAFTS } from '../../src/sim/rules';
 import { resetEventTestHooks } from '../../src/sim/events';
 import { createQueryPanel, type PanelContext } from '../../src/ui/panels';
 import { othersWaitLonger, RIDER_LABEL, RIDER_NOTE, RIDER_WARNING } from '../../src/ui/riders';
@@ -156,11 +158,14 @@ describe('the note and the warning', () => {
     expect(shaft.cars.map((c) => c.serves)).toEqual(['hotel', 'office']);
   });
 
-  it('decides from the rooms on its floors and the other elevators', () => {
+  it('decides from the trips other tenants plan and the other elevators', () => {
     const { world, shaft } = tower(1);
-    shaft.cars[0]!.serves = 'office';
+    const serve = (serves: 'any' | 'hotel' | 'office'): void => {
+      expect(applyCommand(world, { kind: 'shaft.setCarServes', shaftId: shaft.id, carId: shaft.cars[0]!.id, serves }).ok).toBe(true);
+    };
+    serve('office');
     expect(othersWaitLonger(world, shaft)).toBe(true); // the hotel room on 2
-    shaft.cars[0]!.serves = 'hotel';
+    serve('hotel');
     expect(othersWaitLonger(world, shaft)).toBe(true); // the office on 2
     // Another elevator with an Everyone car stopping on 2 carries them.
     expect(applyCommand(world, { kind: 'shaft.build', shaft: 'standard', x: 36, floorMin: 1, floorMax: 2 }).ok).toBe(true);
@@ -171,16 +176,84 @@ describe('the note and the warning', () => {
     const { world, shaft: hotel } = tower(1);
     expect(applyCommand(world, { kind: 'shaft.build', shaft: 'standard', x: 36, floorMin: 1, floorMax: 3 }).ok).toBe(true);
     const office = [...world.shafts.values()].find((s) => s !== hotel)!;
-    hotel.cars[0]!.serves = 'hotel';
-    office.cars[0]!.serves = 'office';
+    const serve = (shaft: Shaft, serves: 'any' | 'hotel' | 'office'): void => {
+      expect(applyCommand(world, { kind: 'shaft.setCarServes', shaftId: shaft.id, carId: shaft.cars[0]!.id, serves }).ok).toBe(true);
+    };
+    serve(hotel, 'hotel');
+    serve(office, 'office');
     // The office's staff ride the office car and the guests the hotel car: nobody waits longer.
     expect([othersWaitLonger(world, hotel), othersWaitLonger(world, office)]).toEqual([false, false]);
-    // A home on 3 is nobody's group, and neither elevator carries everyone: both warn.
+    // A home on 3 is nobody's group, and neither elevator carries everyone: the elevator its
+    // residents' trip rides warns (routing plans them on one of the two, as a leftover).
     expect(applyCommand(world, { kind: 'build', room: 'condo', floor: 3, x: 0 }).ok).toBe(true);
-    expect([othersWaitLonger(world, hotel), othersWaitLonger(world, office)]).toEqual([true, true]);
+    expect([othersWaitLonger(world, hotel), othersWaitLonger(world, office)].filter(Boolean)).toHaveLength(1);
     // Turned back to Everyone, the other elevator carries the home, so the hotel card is quiet.
-    office.cars[0]!.serves = 'any';
+    serve(office, 'any');
     expect(othersWaitLonger(world, hotel)).toBe(false);
+  });
+
+  it('warns on an express kept for hotel guests that is the only way up to a sky lobby, whose floors hold no office (P6 review A1)', () => {
+    const world = createWorld(8);
+    const room = (kind: RoomKind, floor: number, x: number): Room => {
+      const rule = ROOMS[kind];
+      const made: Room = {
+        id: allocId(world), kind, floor, x, width: rule.width, height: rule.height, eval: 0.7, tenants: [], occupancy: 0,
+        builtAtMinute: 0, vacant: false, dirty: false, infested: false, lowEvalSinceMinute: null, onFire: false, rent: 100,
+      };
+      addRoom(world, made);
+      return made;
+    };
+    const shaft = (kind: 'express' | 'standard', x: number, floorMin: number, floorMax: number, stops: number[], serves: 'any' | 'hotel'): Shaft => {
+      const made: Shaft = {
+        id: allocId(world), kind, x, width: SHAFTS[kind].width, floorMin, floorMax, stops: new Set(stops), homeFloor: floorMin, cars: [], hallCalls: new Map(),
+      };
+      made.cars.push({ id: allocId(world), shaftId: made.id, y: floorMin, dir: 0, state: 'idle', doorTimer: 0, idleSince: null, passengers: [], calls: new Set(), serves, range: null });
+      addShaft(world, made);
+      return made;
+    };
+    for (let x = 100; x < 140; x += 1) room('lobby', 1, x);
+    room('skyLobby', 15, 100);
+    room('office', 17, 100);
+    const express = shaft('express', 140, 1, 15, [1, 15], 'hotel');
+    shaft('standard', 150, 15, 20, [15, 16, 17, 18, 19, 20], 'any');
+    world.routingDirty = true;
+    // The express stops only at 1 and 15, where no office stands: the old floors-only rule was
+    // silent, but every office trip rides it as a leftover to reach the sky lobby.
+    expect(othersWaitLonger(world, express)).toBe(true);
+    express.cars[0]!.serves = 'any';
+    world.routingDirty = true;
+    expect(othersWaitLonger(world, express)).toBe(false);
+  });
+});
+
+describe("a car's floors and keys (P6 review A2, A4)", () => {
+  it('reads as one face, "Floors 1-3", with the bottom\'s minus and plus at its left end and the top\'s at its right', () => {
+    const { world, shaftId } = tower(1);
+    const card = open(world, shaftId);
+    const strip = card.panel.descendants().find((n) => has(n, 'hs-car-range'))!;
+    expect(strip.getAttribute('role')).toBe('group');
+    expect(strip.getAttribute('aria-label')).toBe('Floors car 1 works');
+    expect(strip.children.map((n) => n.textContent)).toEqual(['\u2212', '+', 'Floors 1\u20133', '\u2212', '+']);
+    expect(strip.children.filter((n) => n.tagName === 'BUTTON').map((n) => n.getAttribute('aria-label'))).toEqual([
+      'Bottom \u2212 floor for car 1', 'Bottom + floor for car 1', 'Top \u2212 floor for car 1', 'Top + floor for car 1',
+    ]);
+    // The top's minus takes the car to floors 1 to 2, and the words follow.
+    click(strip.children[3]!);
+    card.panel.refresh();
+    expect(card.sent.at(-1)).toMatchObject({ kind: 'shaft.setCarRange', range: { lo: 1, hi: 2 } });
+    expect(strip.children[2]!.textContent).toBe('Floors 1\u20132');
+  });
+
+  it('keeps the arrow keys inside the rider choices, so the tower behind does not pan on them', () => {
+    const { world, shaftId } = tower(1);
+    const card = open(world, shaftId);
+    const group = card.groups()[0]!;
+    let stopped = 0;
+    let prevented = 0;
+    for (const fn of group.listeners.get('keydown') ?? []) {
+      fn({ key: 'ArrowRight', preventDefault: () => (prevented += 1), stopPropagation: () => (stopped += 1) } as never);
+    }
+    expect([prevented, stopped]).toEqual([1, 1]);
   });
 });
 
@@ -246,9 +319,10 @@ describe('the look', () => {
     const plate = card.panel.descendants().find((n) => has(n, 'hs-plate'))!;
     expect(plate.descendants().filter((n) => has(n, 'hs-plate-title')).map((n) => n.textContent)).toEqual(['Elevator']);
     expect(plate.descendants().find((n) => has(n, 'hs-plate-state'))!.textContent).toBe('Floor 1 to floor 3 · 1 of 8 cars · nobody riding');
-    // Every button on the card is a face, with its icon where it has one.
+    // Every button on the card is a face, with its icon where it has one, or a step inside the
+    // one face-shaped strip of a car's floors.
     const buttons = card.panel.descendants().filter((n) => n.tagName === 'BUTTON' && !has(n, 'hs-sheet-handle') && !has(n, 'hs-panel-close'));
-    expect(buttons.filter((n) => !has(n, 'hs-face'))).toEqual([]);
+    expect(buttons.filter((n) => !has(n, 'hs-face') && !(has(n, 'hs-car-step') && has(n.parentNode as FakeElement, 'hs-car-range')))).toEqual([]);
     const iconOf = (label: string): string | null =>
       buttons.find((n) => n.textContent === label)!.descendants().find((n) => n.tagName.toLowerCase() === 'use')?.getAttribute('href') ?? null;
     expect([iconOf('Everyone'), iconOf('Hotel guests first'), iconOf('Office staff first'), iconOf('Remove car')]).toEqual([

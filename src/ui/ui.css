@@ -80,6 +80,8 @@
   --motion-fade: 200ms;
   --motion: var(--motion-fast);
   --press-scale: 0.96;
+  /* How far a pressed face sinks; none under reduced motion, with the press scale. */
+  --press-sink: 1px;
   --enter-x: 16px;
   --enter-y: 100%;
   --toast-rise: 8px;
@@ -2498,6 +2500,15 @@ button.hs-readout:hover {
   }
 }
 
+/* The hint is centered in the row of Save, Sound and Watch: where it would meet one of them
+   (ui.ts syncHintStep measures it, as it does the view chip) it takes the row under theirs, so a
+   tap on Save never lands on it. A phone keeps the hint elsewhere (below). */
+@media (min-width: 721px) {
+  .hs-ui.is-hint-under .hs-hint {
+    top: calc(var(--top-actual, calc(var(--top-h) + var(--safe-top))) + 2 * var(--gap-float) + var(--chip-h, 0px) + var(--touch));
+  }
+}
+
 .hs-hint-close {
   flex: 0 0 auto;
   min-height: 36px;
@@ -3267,8 +3278,9 @@ button.hs-news-toast {
   display: none;
 }
 
-/* Where the chip would meet Save, Sound or Watch in their row (ui.ts placeViewChip measures it,
-   words shown), it takes the row under theirs, and what hangs under it steps down with it. */
+/* Where the chip would meet Save, Sound or Watch in their row (ui.ts placeViewChip measures them
+   as they stand, words out or folded, and once low for a layout the chip stays low while their
+   words come and go), it takes the row under theirs, and what hangs under it steps down with it. */
 @media (min-width: 721px) {
   .hs-ui.is-view-low .hs-view-chip {
     top: calc(100% + 2 * var(--gap-float) + var(--touch) + 8px);
@@ -4094,6 +4106,31 @@ button.hs-news-toast {
   display: none;
 }
 
+/* With no bar drawn, an edge of the column with entries past it fades into the card (pause-menu.ts
+   has-more, has-above), so a short screen shows there is more below Stories. The fades are the
+   column's own first and last items, held to its edges while it scrolls; they take no room and
+   no taps. */
+.hs-pause-card.has-more .hs-pause-list::after,
+.hs-pause-card.has-above .hs-pause-list::before {
+  content: '';
+  position: sticky;
+  flex: none;
+  height: 32px;
+  pointer-events: none;
+}
+
+.hs-pause-card.has-more .hs-pause-list::after {
+  bottom: -4px;
+  margin-top: -40px;
+  background: linear-gradient(to bottom, transparent, var(--surface));
+}
+
+.hs-pause-card.has-above .hs-pause-list::before {
+  top: -4px;
+  margin-bottom: -40px;
+  background: linear-gradient(to top, transparent, var(--surface));
+}
+
 /* A question in the card (New tower, a Save that would replace a save that did not open): one
    line over its two answers. */
 .hs-pause-question {
@@ -4185,7 +4222,7 @@ button.hs-news-toast {
 }
 
 .hs-ui .hs-face:active:not(:disabled) {
-  transform: translateY(1px) scale(var(--press-scale));
+  transform: translateY(var(--press-sink)) scale(var(--press-scale));
   box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
 }
 
@@ -4246,6 +4283,61 @@ button.hs-news-toast {
 
 .hs-elevator-plate {
   margin: 0 0 12px;
+}
+
+/* A car's floors: one face, the words between two pairs of steps (panels.ts), the rent stepper's
+   shape in the face's steel. */
+.hs-car-range {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 2px;
+  box-sizing: border-box;
+  min-height: calc(48px * var(--ui-scale));
+  padding: 2px;
+  border-radius: var(--radius-16);
+  background: var(--steel-2);
+  box-shadow: var(--shadow-1), inset 0 1px 0 var(--hairline);
+  color: var(--ink);
+  font-family: var(--font-ui);
+}
+
+.hs-car-range-words {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: center;
+  font-size: var(--size-16);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.hs-car-step {
+  flex: none;
+  width: var(--touch);
+  height: var(--touch);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--ink);
+  font-size: var(--size-20);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.hs-car-step:hover:not(:disabled) {
+  background: var(--raise-hover);
+}
+
+.hs-car-step:active:not(:disabled) {
+  transform: translateY(var(--press-sink)) scale(var(--press-scale));
+}
+
+.hs-car-step:disabled {
+  color: var(--ink-dim);
+  opacity: 0.5;
+  cursor: default;
 }
 
 /* A row of smaller faces (Add car, Extend up, a car's floors), wrapping on a narrow card. */
@@ -4314,11 +4406,12 @@ button.hs-news-toast {
   display: none;
 }
 
-/* The shaft has no Everyone car and other tenants depend on it: one plain line, amber edged. */
+/* Other tenants' trips ride this elevator as leftovers: one plain line, amber edged. The edge is
+   a 3 px inset drawn as a shadow, as every alert edge is (VISUAL.md: no hard borders). */
 .hs-elevator-warning {
   margin: 0 0 12px;
-  padding: 6px 10px;
-  border-left: 2px solid var(--amber-text);
+  padding: 6px 10px 6px 13px;
+  box-shadow: inset 3px 0 0 var(--amber-text);
   font-size: var(--size-14);
   font-weight: 600;
   color: var(--ink);
@@ -4331,6 +4424,7 @@ button.hs-news-toast {
 .hs-ui.is-reduced {
   --ease-spring: var(--ease-standard);
   --press-scale: 1;
+  --press-sink: 0px;
   --enter-x: 0px;
   --enter-y: 0px;
   --toast-rise: 0px;
@@ -4342,6 +4436,7 @@ button.hs-news-toast {
   .hs-ui {
     --ease-spring: var(--ease-standard);
     --press-scale: 1;
+    --press-sink: 0px;
     --enter-x: 0px;
     --enter-y: 0px;
     --toast-rise: 0px;
@@ -4473,14 +4568,16 @@ button.hs-news-toast {
      shadow and rounded corners are never cut square by the band. */
   .hs-toasts {
     --toast-bleed: 24px;
-    top: calc(var(--top-actual, calc(var(--top-h) * 2 + var(--safe-top))) + var(--gap-float) + var(--chip-h, 0px) - var(--toast-bleed));
+    /* The band starts under Watch, Sound and Save's row (one 52 px round button and a gap), or
+       under the view chip when that is lower, so no tap on a round button lands on an alert and
+       the cards keep the row's whole width left of the map: 302 px at 390, where stopping short
+       of Save in its own row left them 182 (P1 review A-3). */
+    top: calc(var(--top-actual, calc(var(--top-h) * 2 + var(--safe-top))) + var(--gap-float) + max(var(--chip-h, 0px), calc(var(--touch) + 8px + var(--gap-float))) - var(--toast-bleed));
     bottom: auto;
     left: calc(var(--pad) + var(--safe-left) - var(--toast-bleed));
     /* The map's corner stays free whether it shows or not: the map comes and goes with every
-       pan, and the alerts keep one right edge instead of jumping sideways with it. The band starts
-       on Watch, Sound and Save's row, so it also stops two round buttons and two gaps short of
-       Sound: a tap on Sound or Save never lands on an alert. */
-    right: calc(64px + 2 * var(--edge) + var(--safe-right) + 2 * (var(--touch) + 8px + var(--gap-float)) - var(--toast-bleed));
+       pan, and the alerts keep one right edge instead of jumping sideways with it. */
+    right: calc(64px + 2 * var(--edge) + var(--safe-right) - var(--toast-bleed));
     width: auto;
     max-height: calc(25vh + 2 * var(--toast-bleed));
     padding: var(--toast-bleed);
@@ -4491,7 +4588,7 @@ button.hs-news-toast {
 
   /* The same edge with the map up: this outranks the wide screen's step left of a 96 px map. */
   .hs-minimap:not(.is-hidden) ~ .hs-toasts {
-    right: calc(64px + 2 * var(--edge) + var(--safe-right) + 2 * (var(--touch) + 8px + var(--gap-float)) - var(--toast-bleed));
+    right: calc(64px + 2 * var(--edge) + var(--safe-right) - var(--toast-bleed));
   }
 
   /* Tight on a phone, except on the left: the words clear the colour edge by 7 px. */

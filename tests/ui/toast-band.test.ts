@@ -37,10 +37,11 @@ describe('the phone alert band', () => {
     expect(rule).toContain('max-height: calc(25vh + 2 * var(--toast-bleed));');
     expect(rule).toContain('left: calc(var(--pad) + var(--safe-left) - var(--toast-bleed));');
     expect(rule).toContain(
-      'right: calc(64px + 2 * var(--edge) + var(--safe-right) + 2 * (var(--touch) + 8px + var(--gap-float)) - var(--toast-bleed));',
+      'right: calc(64px + 2 * var(--edge) + var(--safe-right) - var(--toast-bleed));',
     );
     expect(rule).toContain(
-      'top: calc(var(--top-actual, calc(var(--top-h) * 2 + var(--safe-top))) + var(--gap-float) + var(--chip-h, 0px) - var(--toast-bleed));',
+      // Under the round buttons' row (a 52 px button and a gap), or under the view chip when lower.
+      'top: calc(var(--top-actual, calc(var(--top-h) * 2 + var(--safe-top))) + var(--gap-float) + max(var(--chip-h, 0px), calc(var(--touch) + 8px + var(--gap-float))) - var(--toast-bleed));',
     );
   });
 

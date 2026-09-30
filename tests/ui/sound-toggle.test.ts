@@ -298,24 +298,30 @@ describe('a phone at 390 px: the alerts band stops short of Sound and Save', () 
     return m[1] as string;
   };
 
-  it('ends every alert card at least a gap left of Save, map up or not', () => {
+  it('starts every alert card a gap under Save, Sound and Watch, map up or not, left of the map (P1 review A-3)', () => {
     const width = 390;
     expect(vars['--edge']).toBe(Number(/--edge: (\d+)px;/.exec(phone)?.[1]));
-    // The bar's right edge on a phone, then Sound one round button and a gap in from it.
-    const barRight = width - px(declIn(phone, '.hs-top', 'right'));
-    const soundRight = barRight - px(declIn(phone, '.hs-sound-btn.is-placed', 'right'));
-    const soundLeft = soundRight - px('calc(var(--touch) + 8px)');
-    expect(soundLeft).toBe(270);
-    // Save one more round button and gap in, left of Sound.
-    const saveLeft = barRight - px(declIn(phone, '.hs-save-btn.is-placed', 'right')) - px('calc(var(--touch) + 8px)');
-    expect(saveLeft).toBe(soundLeft - 60);
-    // The phone's own alerts rules, in the last phone block: the wide screen's step left of a
-    // 96 px map comes earlier in the file and is outranked there.
+    // The round buttons' row: one gap under the bar, a round button (touch plus 8 px) tall.
+    const bar = 56; // any bar bottom: both sides of the comparison carry it
+    const rowBottom = bar + vars['--gap-float']! + px('calc(var(--touch) + 8px)');
     const alertsBlock = css.slice(css.lastIndexOf('@media (max-width: 720px) {'));
+    const top = declIn(alertsBlock, '  .hs-toasts', 'top')
+      .replace('var(--top-actual, calc(var(--top-h) * 2 + var(--safe-top)))', String(bar))
+      .replace('max(var(--chip-h, 0px), ', 'M(0, ');
+    const js = top.replace(/var\((--[\w-]+)\)/g, (_, name: string) => String(vars[name])).replace(/calc\(/g, '(').replace(/(\d+(?:\.\d+)?)px/g, '$1');
+    expect(/^[\dM\s+\-*/().,]+$/.test(js)).toBe(true);
+    // The cards start --toast-bleed inside the band's top edge.
+    const cardsTop = (Function('M', `return (${js});`)(Math.max) as number) + vars['--toast-bleed']!;
+    expect(cardsTop).toBeGreaterThanOrEqual(rowBottom + vars['--gap-float']!);
     for (const selector of ['  .hs-toasts', '.hs-minimap:not(.is-hidden) ~ .hs-toasts']) {
-      // The cards end --toast-bleed inside the band's right edge.
+      // The cards end --toast-bleed inside the band's right edge, left of the 64 px map's column.
       const cardsRight = width - px(declIn(alertsBlock, selector, 'right')) - vars['--toast-bleed']!;
-      expect(cardsRight).toBeLessThanOrEqual(saveLeft - vars['--gap-float']!);
+      expect(cardsRight).toBeLessThanOrEqual(width - vars['--edge']! - 64 - vars['--edge']!);
+      // The cards' own left edge is --pad in (8 px): 302 px of card at 390, from 182 beside Save.
+      const cardsLeft = Number(/--pad: (\d+)px;/.exec(css)?.[1]);
+      expect(declIn(alertsBlock, '  .hs-toasts', 'left')).toBe('calc(var(--pad) + var(--safe-left) - var(--toast-bleed))');
+      expect(cardsRight - cardsLeft).toBe(302);
     }
   });
+
 });

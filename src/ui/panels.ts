@@ -768,6 +768,8 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
     riders: { serves: RiderSetting; node: HTMLButtonElement }[];
     note: HTMLParagraphElement;
     steps: { node: HTMLButtonElement; edge: 'lo' | 'hi'; step: -1 | 1 }[];
+    /** The strip's words: the floors this car works, between its two pairs of steps. */
+    span: HTMLElement;
     whole: HTMLButtonElement;
     why: HTMLParagraphElement;
   }
@@ -809,14 +811,22 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
         const at = riders.findIndex((option) => option.node === (document as { activeElement?: unknown }).activeElement);
         const next = riders[((at < 0 ? 0 : at) + step + riders.length) % riders.length];
         event.preventDefault();
+        // The arrows are the group's here: the tower's own window listener would pan the view
+        // on them until the key came up (P6 review A2).
+        (event as { stopPropagation?: () => void }).stopPropagation?.();
         next?.node.focus?.();
       });
       const note = el('p', 'hs-rider-note', RIDER_NOTE);
 
       const actions = el('div', 'hs-face-row hs-car-actions');
       const steps: CarRow['steps'] = [];
+      // One face for the car's floors, "Floors 3-10", with its bottom's minus and plus at the
+      // left end and its top's at the right, like the rent stepper: no row of five form buttons
+      // (P6 review A4). Each step keeps its own name for a screen reader and its own refusal.
       const stepper = (text: string, edge: 'lo' | 'hi', step: -1 | 1): HTMLButtonElement => {
-        const btn = face(text, null, 'is-compact', () => {
+        const btn = el('button', 'hs-car-step', step === -1 ? '\u2212' : '+');
+        btn.type = 'button';
+        btn.addEventListener('click', () => {
           const shaftNow = game.world.shafts.get(shaftId);
           const now = shaftNow?.cars.find((c) => c.id === car.id);
           if (!shaftNow || !now) return;
@@ -834,17 +844,22 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
         ctx.apply({ kind: 'shaft.setCarRange', shaftId, carId: car.id, range: null });
       });
 
-      actions.append(
+      const strip = el('div', 'hs-car-range');
+      strip.setAttribute('role', 'group');
+      strip.setAttribute('aria-label', `Floors car ${index + 1} works`);
+      const spanWords = el('span', 'hs-car-range-words');
+      strip.append(
         stepper('Bottom \u2212', 'lo', -1),
         stepper('Bottom +', 'lo', 1),
+        spanWords,
         stepper('Top \u2212', 'hi', -1),
         stepper('Top +', 'hi', 1),
-        whole,
       );
+      actions.append(strip, whole);
       const why = el('p', 'hs-note hs-refused');
       node.append(label, group, note, actions, why);
       carList.append(node);
-      return { carId: car.id, label, riders, note, steps, whole, why };
+      return { carId: car.id, label, riders, note, steps, span: spanWords, whole, why };
     });
   };
 
@@ -864,6 +879,7 @@ function shaftPanel(shaftId: Id, game: GameApi, ctx: PanelContext): PanelElement
       }
       const span = carRangeOf(shaft, car);
       setText(row.label, `Car ${i + 1} \u00b7 ${floorsLabel(span.lo, span.hi)}`);
+      setText(row.span, floorsLabel(span.lo, span.hi));
       for (const option of row.riders) {
         const on = option.serves === car.serves;
         option.node.setAttribute('aria-checked', on ? 'true' : 'false');

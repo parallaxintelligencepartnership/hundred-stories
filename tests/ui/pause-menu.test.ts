@@ -399,7 +399,10 @@ describe('the entries', () => {
     expect(heading?.textContent).toBe('Stories');
   });
 
-  it('turning Watch on closes it like any other panel, the speed given back', () => {
+  // No player reaches this path: the scrim covers the round Watch button while the menu is shown
+  // (pause-menu-fixes.test.ts, P4 review A6), and Watch has no key. It stays as the guard for
+  // Watch turned on by any other way (the Settings switch, below) while the menu is open.
+  it('turning Watch on by any path closes it like any other panel, the speed given back (a guard: the scrim covers the button)', () => {
     const ui = mount({ speed: 4 });
     ui.open();
     const watch = ui.root.descendants().find((n) => n.tagName === 'BUTTON' && n.getAttribute('aria-label') === 'Watch')!;
@@ -553,7 +556,7 @@ describe('the look', () => {
     expect(face).toMatch(/box-shadow: var\(--shadow-1\)/);
     expect(face).not.toMatch(/border-(top|bottom):/);
     expect(rule(".hs-ui .hs-face:is(.is-selected, [aria-checked='true'], [aria-pressed='true'])")).toMatch(/background: var\(--amber\);/);
-    expect(rule('.hs-ui .hs-face:active:not(:disabled)')).toMatch(/transform: translateY\(1px\) scale\(var\(--press-scale\)\);/);
+    expect(rule('.hs-ui .hs-face:active:not(:disabled)')).toMatch(/transform: translateY\(var\(--press-sink\)\) scale\(var\(--press-scale\)\);/);
   });
 
   it('wears the shared classes on its plate, its entries and their icons', () => {

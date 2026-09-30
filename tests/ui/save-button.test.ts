@@ -190,6 +190,18 @@ describe('the Save button in the ui', () => {
     expect(save.style['--save-x']).toBe('102px');
   });
 
+  it('is placed only where Sound is laid out, whatever Watch is doing (P1 review A-4)', () => {
+    const { byLabel } = mount();
+    const [save, sound] = [byLabel('Save'), byLabel('Sound')];
+    // Watch has a box, Sound none (not laid out yet): Save has no edge to sit against.
+    sound.getBoundingClientRect = () => ({ width: 0, height: 0, top: 0, left: 0, right: 0, bottom: 0 });
+    dom.fireWindow('resize');
+    expect(classesOf(save)).not.toContain('is-placed');
+    sound.getBoundingClientRect = () => ({ width: 52, height: 52, top: 0, left: 140, right: 192, bottom: 52 });
+    dom.fireWindow('resize');
+    expect(classesOf(save)).toContain('is-placed');
+  });
+
   it('runs the same save as Settings, Save now, and says the same words in the same notice', async () => {
     const { root, save, byLabel } = mount();
     click(byLabel('Save'));

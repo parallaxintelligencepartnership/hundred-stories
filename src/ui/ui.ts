@@ -341,6 +341,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     placeWatchButton();
   });
   const viewChipRow = createViewChipRow();
+  // The first-run hint's row under Save, Sound and Watch: decided per layout, like the view chip's.
+  const hintRow = createViewChipRow();
 
   pill.append(status.cash, status.population, status.stars, status.clock, hoverReadout);
   top.append(view.chip);
@@ -910,7 +912,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
       () => {
         node.remove();
         if (starToast === node) starToast = null;
-        setPanel('recap');
+        openPanelFromToast('recap');
       },
       () => {
         node.remove();
@@ -1375,6 +1377,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     saveButton.button.classList.toggle('is-placed', savePlaced);
     if (savePlaced) saveButton.button.style.setProperty('--save-x', `${Math.round(soundBox.left - bar.left)}px`);
     placeViewChip(bar);
+    syncHintStep();
   }
 
   /**
@@ -1404,9 +1407,23 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   /**
    * On a wide screen the night speed chip hangs under the bar in the first-run hint's row: while
    * both are up the hint takes the row under (ui.css is-hint-low), so neither covers the other.
+   * The hint is centered in the round buttons' row too: where it would meet Save, Sound or Watch
+   * (measured, as the view chip is) it takes the row under theirs (ui.css is-hint-under), so no
+   * tap aimed at Save lands on the hint for its first three loads (P1 review A-2).
    */
   function syncHintStep(): void {
-    shell.classList.toggle('is-hint-low', !hint.classList.contains('is-hidden') && !status.mode.classList.contains('is-hidden'));
+    const up = !hint.classList.contains('is-hidden');
+    shell.classList.toggle('is-hint-low', up && !status.mode.classList.contains('is-hidden'));
+    let under = false;
+    if (up && !inSheetLayout()) {
+      const box = hint.getBoundingClientRect();
+      if (box.width > 0) {
+        const buttons = [saveButton.button, soundToggle.button, watchToggle.button].map((b) => b.getBoundingClientRect());
+        const bar = top.getBoundingClientRect();
+        under = hintRow(`${Math.round(box.width)}|${Math.round(bar.width)}`, viewChipMeets(box, buttons, VIEW_CHIP_GAP));
+      }
+    }
+    shell.classList.toggle('is-hint-under', under);
   }
 
   /** The view, a media query or a font changed under the chip and the bar: measure them again. */
@@ -1676,7 +1693,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   }
 
   function openLog(): void {
-    setPanel('log');
+    openPanelFromToast('log');
   }
 
   /** The newest beat about a followed person since the news last looked, or null. */
@@ -1738,9 +1755,13 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
 
   // ---------------------------------------------------------- pause menu
 
-  /** No panel, card, list or sheet is up: the one time Escape opens the menu. */
+  /**
+   * No panel, card, list or sheet is up: the one time Escape opens the menu. The game-over card
+   * counts as up (it stays out of alerts' Escape on purpose), so Escape never traps focus in a
+   * menu over it and away from its buttons (P4 review A4).
+   */
   function nothingOpen(): boolean {
-    return panelKind === 'none' && mountedPanel === null && !view.isOpen() && build.sheet() === 'closed';
+    return panelKind === 'none' && mountedPanel === null && !view.isOpen() && build.sheet() === 'closed' && !game.world.gameOver;
   }
 
   function openPauseMenu(): void {
@@ -1862,6 +1883,17 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
           },
     );
     return entries;
+  }
+
+  /**
+   * A tap on something over the dimmed tower (the star card's Stories, a news toast, a
+   * notification) that opens a panel: toasts sit above the pause menu's scrim, so with the menu
+   * on screen it closes first, the speed given back, as its own Stories entry does, and the panel
+   * opens. Before, the panel waited unseen behind the menu (P4 review A3).
+   */
+  function openPanelFromToast(kind: PanelKind): void {
+    if (pauseMenu.isShown()) pauseMenu.close({ restoreFocus: false });
+    setPanel(kind);
   }
 
   function setPanel(kind: PanelKind): void {
@@ -2171,7 +2203,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   // A tap on a notification brought the game forward; an alert's also opens the news.
   notifier?.onTap((kind) => {
     if (destroyed || kind !== 'alerts') return;
-    setPanel('log');
+    openPanelFromToast('log');
     update();
   });
 

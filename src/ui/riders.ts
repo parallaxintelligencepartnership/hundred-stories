@@ -3,11 +3,14 @@
 // staff first" serves those riders first and carries everyone else when it is free. The words
 // here are the elevator card's and the hover card's; the command is shaft.setCarServes as before.
 //
-// The warning asks one question of the tower the UI already reads (GameApi.world): with this shaft
-// holding no Everyone car, is there a room on its floors whose people no car anywhere carries on
-// that floor, either as everyone or as the riders it serves first?
+// The warning asks routing one question of the tower the UI already reads (GameApi.world): does a
+// trip other tenants make from the street to their rooms ride this elevator on a car kept for
+// somebody else, as a leftover? Asking routing, rather than looking at the rooms on this shaft's
+// floors, also catches an express that is the only way up to a sky lobby (P6 review A1), and
+// stays quiet for a floor whose people take the stairs.
 
-import { carRangeOf, type Car, type RoomKind, type Shaft, type World } from '../sim/types';
+import { entrances, findRoute } from '../sim/routing';
+import { carRangeOf, type Car, type RiderClass, type Room, type RoomKind, type Shaft, type World } from '../sim/types';
 import type { IconName } from './icons';
 
 export type RiderSetting = Car['serves'];
@@ -68,30 +71,79 @@ function groupsOfRoom(kind: RoomKind): readonly Group[] | null {
 const STAFF_ROOMS: ReadonlySet<RoomKind> = new Set<RoomKind>(['housekeeping', 'security', 'recycling']);
 
 /**
- * True when this shaft has no Everyone car and a room on one of its floors (above or below the
- * ground floor, where everyone walks in) has no car anywhere that stops on its floor and either
- * carries everyone or serves that room's people first. Every elevator counts, this one included:
- * a hotel shaft beside an office shaft leaves nobody waiting, since each rides its own car.
+ * How the people of a room of this kind ask routing for their way (people.ts routeOptsFor): the
+ * rider class and whether they are staff. Null for rooms nobody rides to, and for guards and
+ * collectors, whom every car carries as its own (routing.ts graphKeyOf), so never as leftovers.
+ */
+function tripOf(kind: RoomKind): { riderClass: RiderClass; staff: boolean } | null {
+  const groups = groupsOfRoom(kind);
+  if (groups === null) return null;
+  if (kind === 'security' || kind === 'recycling') return null;
+  if (kind === 'housekeeping') return { riderClass: 'hotel', staff: true };
+  if (groups.includes('hotel')) return { riderClass: 'hotel', staff: false };
+  if (groups.includes('office')) return { riderClass: 'office', staff: false };
+  return { riderClass: 'other', staff: STAFF_ROOMS.has(kind) };
+}
+
+/** Does a car of this shaft carry this class as its own on the whole ride from `from` to `to`? */
+function ownCarRides(shaft: Shaft, cls: RiderClass, from: number, to: number): boolean {
+  return shaft.cars.some((car) => {
+    if (car.serves !== 'any' && car.serves !== cls) return false;
+    const span = carRangeOf(shaft, car);
+    return from >= span.lo && from <= span.hi && to >= span.lo && to <= span.hi;
+  });
+}
+
+/** The answer per shaft, kept while the rooms and the cars' settings stay as they were. */
+const remembered = new WeakMap<World, Map<string, boolean>>();
+
+function carsSignature(world: World): string {
+  const parts: string[] = [];
+  for (const shaft of world.shafts.values()) for (const car of shaft.cars) parts.push(`${car.id}:${car.serves}:${car.range ? `${car.range.lo}-${car.range.hi}` : ''}`);
+  return parts.join(',');
+}
+
+/**
+ * True when a trip from the street to a room of other tenants, planned the way those tenants plan
+ * it (routing.ts, with its rider class), rides this elevator where no car of it carries them as
+ * its own: they wait for a kept car to be free. One trip is asked per floor and kind of rider, from
+ * the ground lobby's first door to the room's middle. An elevator whose cars all carry everyone
+ * never warns.
  */
 export function othersWaitLonger(world: World, shaft: Shaft): boolean {
-  if (shaft.cars.length === 0 || shaft.cars.some((car) => car.serves === 'any')) return false;
-  const shafts = [...world.shafts.values()];
+  if (shaft.cars.length === 0 || shaft.cars.every((car) => car.serves === 'any')) return false;
+  const door = entrances(world)[0];
+  if (!door) return false;
+  const key = `${shaft.id}|${world.structureVersion}|${carsSignature(world)}`;
+  let known = remembered.get(world);
+  if (!known) remembered.set(world, (known = new Map()));
+  const hit = known.get(key);
+  if (hit !== undefined) return hit;
+  const answer = anyLeftoverTrip(world, shaft, door);
+  known.clear(); // one answer per shaft for the tower as it stands; an older one is never read again
+  known.set(key, answer);
+  return answer;
+}
+
+function anyLeftoverTrip(world: World, shaft: Shaft, door: { floor: number; x: number }): boolean {
+  const asked = new Set<string>();
   for (const room of world.rooms.values()) {
-    if (room.floor === 1 || !shaft.stops.has(room.floor)) continue;
-    const groups = groupsOfRoom(room.kind);
-    if (groups === null) continue;
-    const staff = STAFF_ROOMS.has(room.kind);
-    if (shaft.kind === 'service' && !staff) continue;
-    const carried = shafts.some(
-      (any) =>
-        (any.kind !== 'service' || staff) &&
-        any.stops.has(room.floor) &&
-        any.cars.some((car) => {
-          const span = carRangeOf(any, car);
-          return room.floor >= span.lo && room.floor <= span.hi && (car.serves === 'any' || groups.includes(car.serves));
-        }),
-    );
-    if (!carried) return true;
+    if (room.floor === door.floor) continue; // walked to
+    const trip = tripOf(room.kind);
+    if (!trip) continue;
+    const once = `${room.floor}|${trip.riderClass}|${trip.staff}`;
+    if (asked.has(once)) continue;
+    asked.add(once);
+    const legs = findRoute(world, door, { floor: room.floor, x: roomMiddle(room) }, trip);
+    if (!legs) continue;
+    for (const leg of legs) {
+      if (leg.kind !== 'ride' || leg.shaftId !== shaft.id) continue;
+      if (!ownCarRides(shaft, trip.riderClass, leg.fromFloor, leg.toFloor)) return true;
+    }
   }
   return false;
+}
+
+function roomMiddle(room: Room): number {
+  return room.x + Math.floor(room.width / 2);
 }

@@ -496,6 +496,34 @@ describe('the first-run hint and the night speed chip', () => {
     expect(has(ui.shell, 'is-hint-low')).toBe(false);
   });
 
+  it('takes the row under Save, Sound and Watch where it would meet one of them, and keeps its row where it would not (P1 review A-2)', () => {
+    const ui = mount({ speed: 1 });
+    const hint = ui.shell.children.find((n) => has(n, 'hs-hint'))!;
+    const [save, sound, watch] = ['Save', 'Sound', 'Watch'].map((label) => ui.root.descendants().find((n) => n.tagName === 'BUTTON' && n.getAttribute('aria-label') === label)!);
+    const box = (left: number, width: number) => () => ({ width, height: 44, top: 0, left, right: left + width, bottom: 44 });
+    // The hint, centered, 484 px wide in a 1280 px bar; the three round buttons at the bar's right.
+    hint.getBoundingClientRect = box(398, 484);
+    save!.getBoundingClientRect = box(801, 83);
+    sound!.getBoundingClientRect = box(894, 94);
+    watch!.getBoundingClientRect = box(996, 94);
+    dom.fireWindow('resize');
+    expect(has(ui.shell, 'is-hint-under')).toBe(true);
+    // A wider bar with the buttons clear of it: the hint stays in its row.
+    const wide = mount({ speed: 1 });
+    const wideHint = wide.shell.children.find((n) => has(n, 'hs-hint'))!;
+    wideHint.getBoundingClientRect = box(700, 484);
+    for (const label of ['Save', 'Sound', 'Watch']) {
+      wide.root.descendants().find((n) => n.tagName === 'BUTTON' && n.getAttribute('aria-label') === label)!.getBoundingClientRect = box(1400, 90);
+    }
+    dom.fireWindow('resize');
+    expect(has(wide.shell, 'is-hint-under')).toBe(false);
+    // Closed, it is gone from every row.
+    click(hint.descendants().find((n) => has(n, 'hs-hint-close'))!);
+    expect(has(ui.shell, 'is-hint-under')).toBe(false);
+    const under = /@media \(min-width: 721px\) \{\s*\.hs-ui\.is-hint-under \.hs-hint \{\s*top: ([^;]+;)/.exec(css);
+    expect(under?.[1]).toMatch(/\+ 2 \* var\(--gap-float\) \+ var\(--chip-h, 0px\) \+ var\(--touch\)\);/);
+  });
+
   it('the step is one row, only in the layouts where the chip hangs under the bar', () => {
     const step = /\+ 2 \* var\(--gap-float\) \+ var\(--chip-h, 0px\) \+ var\(--touch\)\);/;
     const wide = /@media \(min-width: 1040px\) \{\s*:root:not\(\.hs-large-text\) \.hs-ui\.is-hint-low \.hs-hint \{\s*top: ([^;]+;)/.exec(css);
@@ -504,5 +532,93 @@ describe('the first-run hint and the night speed chip', () => {
     expect(large?.[1]).toMatch(step);
     // The chip's own row there: under the bar, a view's chip above it.
     expect(css).toMatch(/:root:not\(\.hs-large-text\) \.hs-speed-mode \{\s*top: calc\(100% \+ var\(--gap-float\) \+ var\(--chip-h, 0px\)\);/);
+  });
+});
+
+describe('the P4 and P6 review advisories (closed 2026-09-29)', () => {
+  it('a tap on a news toast over the menu closes the menu, the speed given back, and opens News (P4 A3)', () => {
+    const ui = mount({ speed: 2 });
+    ui.open();
+    expect(ui.card()).toBeDefined();
+    const world = ui.game.world as unknown as { log: { minute: number; text: string; level: string; notable?: boolean }[]; logTotal: number };
+    world.log.push({ minute: 12 * 60, text: 'A wedding has started in the cathedral on floor 1.', level: 'info', notable: true });
+    world.logTotal += 1;
+    ui.game.setSpeed(0); // any change tells the ui; the game is paused under the menu anyway
+    const toast = ui.root.descendants().find((n) => has(n, 'hs-news-toast'));
+    expect(toast).toBeDefined();
+    click(toast!);
+    expect(ui.card()).toBeUndefined();
+    expect(ui.state.speed).toBe(2);
+    expect(ui.root.descendants().some((n) => has(n, 'hs-panel-title-text') && n.textContent === 'News')).toBe(true);
+  });
+
+  it('Escape with only the game-over card up does not open the menu over it (P4 A4)', () => {
+    const ui = mount({ speed: 1 });
+    (ui.game.world as unknown as { gameOver: unknown }).gameOver = { reason: 'The bank took the tower.', minute: 0 };
+    key('Escape');
+    expect(ui.card()).toBeUndefined();
+    (ui.game.world as unknown as { gameOver: unknown }).gameOver = null;
+    key('Escape');
+    expect(ui.card()).toBeDefined();
+  });
+
+  it('a pressed face sinks by --press-sink, which is 0 under reduced motion like the press scale (P4 A5)', () => {
+    expect(css).toMatch(/\.hs-ui \.hs-face:active:not\(:disabled\) \{\s*transform: translateY\(var\(--press-sink\)\) scale\(var\(--press-scale\)\);/);
+    expect(css).toMatch(/--press-sink: 1px;/);
+    expect(css).toMatch(/\.hs-ui\.is-reduced \{[^}]*--press-scale: 1;\s*--press-sink: 0px;/);
+    expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.hs-ui \{[^}]*--press-scale: 1;\s*--press-sink: 0px;/);
+  });
+
+  it('the scrim sits over Save, Sound and Watch, so the menu shown is left only by its own entries, Escape, B or Start (P4 A6)', () => {
+    const z = (selector: string): number => Number(new RegExp(`\\n${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\{[^}]*?z-index: (\\d+);`).exec(css)?.[1] ?? 'NaN');
+    const scrim = z('.hs-pause');
+    expect(scrim).toBeGreaterThan(0);
+    // The round buttons sit in the shell's own stacking, under the scrim's.
+    for (const selector of ['.hs-watch-btn', '.hs-sound-btn', '.hs-save-btn']) {
+      const own = z(selector);
+      expect(Number.isNaN(own) || own < scrim, selector).toBe(true);
+    }
+  });
+
+  it("the controller's Start opens the menu and Start again resumes at the speed from before (P4 A7)", () => {
+    const pads: PadLike[] = [];
+    Object.defineProperty(globalThis, 'navigator', { value: { getGamepads: () => pads }, configurable: true });
+    const ui = mount({ speed: 4 });
+    pads.push(pad(['start']));
+    dom.fireWindow('gamepadconnected');
+    dom.runFrame();
+    expect(ui.card()).toBeDefined();
+    expect(ui.state.speed).toBe(0);
+    pads[0] = pad([]);
+    dom.runFrame();
+    pads[0] = pad(['start']);
+    dom.runFrame();
+    expect(ui.card()).toBeUndefined();
+    expect(ui.state.speed).toBe(4);
+  });
+
+  it('fades the column edge that has entries past it, since no scroll bar is drawn (P6 A7)', () => {
+    const ui = mount({ speed: 1 });
+    ui.open();
+    const card = ui.card()!;
+    const list = card.children.find((n) => has(n, 'hs-pause-list'))! as FakeElement & Record<string, unknown>;
+    // A 375 by 667 phone with Larger text: 718 px of entries in a 520 px column.
+    Object.assign(list, { clientHeight: 520, scrollHeight: 718, scrollTop: 0 });
+    for (const fn of list.listeners.get('scroll') ?? []) fn({});
+    expect([has(card, 'has-more'), has(card, 'has-above')]).toEqual([true, false]);
+    Object.assign(list, { scrollTop: 198 });
+    for (const fn of list.listeners.get('scroll') ?? []) fn({});
+    expect([has(card, 'has-more'), has(card, 'has-above')]).toEqual([false, true]);
+    // Where everything fits, neither.
+    Object.assign(list, { clientHeight: 718, scrollTop: 0 });
+    for (const fn of list.listeners.get('scroll') ?? []) fn({});
+    expect([has(card, 'has-more'), has(card, 'has-above')]).toEqual([false, false]);
+    expect(css).toMatch(/\.hs-pause-card\.has-more \.hs-pause-list::after \{\s*bottom: -4px;/);
+  });
+
+  it('the elevator warning has a 3 px inset edge drawn as a shadow, no hard border (P6 A3)', () => {
+    const body = /\n\.hs-elevator-warning \{([^}]*)\}/.exec(css)?.[1] ?? '';
+    expect(body).toContain('box-shadow: inset 3px 0 0 var(--amber-text);');
+    expect(body).not.toMatch(/border/);
   });
 });

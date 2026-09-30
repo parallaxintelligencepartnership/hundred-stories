@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { PAD_BUTTONS, type PadLike } from '../../src/ui/gamepad';
 import { createUi } from '../../src/ui/ui';
-import { FakeDom, type FakeElement } from './fake-dom';
+import { FakeDom, choosePauseEntry, type FakeElement } from './fake-dom';
 
 function pad(held: (keyof typeof PAD_BUTTONS)[] = []): PadLike {
   const buttons = Array.from({ length: 17 }, () => ({ pressed: false, value: 0 }));
@@ -81,9 +81,29 @@ it('S5: with the Settings sheet open, a tool key picks nothing and Space does no
   const calls: string[] = [];
   const root = dom.createElement('div');
   createUi(root as never, mkGame(calls), {} as never);
+  // Menu opens the pause card since 2026-09-29; Settings is its entry (P4 review A1: the test
+  // stopped at the card and never reached Settings).
   (menuButton(root).listeners.get('click') ?? []).forEach((f) => f({} as never));
-  const dialog = root.descendants().find((n) => n.getAttribute('role') === 'dialog');
-  expect(dialog?.getAttribute('aria-modal')).toBe('true');
+  choosePauseEntry(root, 'settings');
+  expect(root.descendants().some((n) => n.className.split(/\s+/).includes('hs-pause-card'))).toBe(false);
+  const settings = root.descendants().find((n) => n.className.split(/\s+/).includes('hs-settings'));
+  expect(settings).toBeDefined();
+  calls.length = 0;
+  key(dom.activeElement ?? dom.body, '1', 'Digit1');
+  key(dom.body, ' ', 'Space');
+  expect(calls).toEqual([]);
+});
+
+it('S5: with a modal sheet open and the menu closed (Stories), a tool key picks nothing and Space does not pause', () => {
+  const calls: string[] = [];
+  const root = dom.createElement('div');
+  createUi(root as never, mkGame(calls), {} as never);
+  (menuButton(root).listeners.get('click') ?? []).forEach((f) => f({} as never));
+  choosePauseEntry(root, 'stories'); // the menu closes and Stories opens: only the sheet guards the keys
+  expect(root.descendants().some((n) => n.className.split(/\s+/).includes('hs-pause-card'))).toBe(false);
+  const modal = root.descendants().find((n) => n.getAttribute('aria-modal') === 'true');
+  expect(modal).toBeDefined();
+  calls.length = 0;
   key(dom.activeElement ?? dom.body, '1', 'Digit1');
   key(dom.body, ' ', 'Space');
   expect(calls).toEqual([]);
