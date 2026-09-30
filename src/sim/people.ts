@@ -6,7 +6,7 @@
  * world.rng, so a seed plus a command list always replays the same day.
  */
 
-import { callClassesFor, hallCallPending, letOffAtNextStop, requestHallCallFor } from './elevators';
+import { callClassFor, hallCallPending, letOffAtNextStop, requestHallCallFor } from './elevators';
 import { recordCondoSale, recordHotelNight, recordVisit } from './economy';
 import { ensureRouting, entrances, findRoute, isReachableFromLobby } from './routing';
 import { ECONOMY, ROOMS, SCHEDULES, STORY, STRESS } from './rules';
@@ -571,7 +571,7 @@ function beginWait(world: World, sim: Sim, leg: Extract<Leg, { kind: 'ride' }>, 
   sim.state = 'waiting';
   if (sim.waitStart === null) {
     sim.waitStart = world.time.minute;
-    requestHallCallFor(world, shaft, sim.pos.floor, leg.toFloor > sim.pos.floor ? 1 : -1, sim.kind);
+    requestHallCallFor(world, shaft, sim.pos.floor, leg.toFloor, sim.kind);
   }
 }
 
@@ -726,9 +726,8 @@ function retryHallCall(world: World, sim: Sim): void {
   }
   if (!withinReach(sim, shaft)) return;
   const dir: 1 | -1 = leg.toFloor > sim.pos.floor ? 1 : -1;
-  const classes = callClassesFor(shaft, sim.kind);
-  if (classes.every((cls) => hallCallPending(shaft, sim.pos.floor, dir, cls))) return;
-  requestHallCallFor(world, shaft, sim.pos.floor, dir, sim.kind);
+  if (hallCallPending(shaft, sim.pos.floor, dir, callClassFor(shaft, sim.kind, sim.pos.floor, leg.toFloor))) return;
+  requestHallCallFor(world, shaft, sim.pos.floor, leg.toFloor, sim.kind);
 }
 
 /** Three silent retries: the shaft is not serving this floor, so ask routing for another way. */

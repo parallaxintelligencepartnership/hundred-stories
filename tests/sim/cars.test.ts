@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { applyCommand } from '../../src/sim/build';
-import { isLeftoverCar, requestHallCall, stopOffRefusal, tickElevators } from '../../src/sim/elevators';
+import { callClassFor, isLeftoverCar, requestHallCall, requestHallCallFor, stopOffRefusal, tickElevators } from '../../src/sim/elevators';
 import { findRoute } from '../../src/sim/routing';
 import { SHAFTS } from '../../src/sim/rules';
 import { deserialize, hashWorld, serialize, SAVE_VERSION } from '../../src/sim/save';
@@ -242,7 +242,7 @@ describe('boarding', () => {
     expect(shaft.hallCalls.get(3)?.up.has('office')).toBe(true);
   });
 
-  it('takes a rider of the other class along its own trip, and refuses one bound farther', () => {
+  it('takes riders of the other class along its own trip, one bound past its last own floor too (PM decision 2026-09-29)', () => {
     const world = createWorld(5);
     const shaft = buildShaft(world, { cars: [{ serves: 'hotel', y: 1 }] });
     const guest = addWaiter(world, shaft, 'guest', 1, 6);
@@ -252,8 +252,9 @@ describe('boarding', () => {
     run(world, 1);
     expect(guest.inCarId).not.toBeNull();
     expect(along.inCarId).toBe(guest.inCarId);
-    expect(farther.inCarId).toBeNull();
-    expect(shaft.hallCalls.get(1)?.up.has('office')).toBe(true);
+    // Going on up to 8 is straight on, not a detour: the car takes them, and the light goes out.
+    expect(farther.inCarId).toBe(guest.inCarId);
+    expect(shaft.hallCalls.get(1)?.up.has('office') ?? false).toBe(false);
   });
 });
 
@@ -704,12 +705,33 @@ describe('a kept car passing a floor stops for others going its way (owner quest
     expect(worker.pos.floor).toBe(1);
   });
 
-  it('never goes past its own call for them: a worker bound beyond it is left for later', () => {
+  it('carries a worker bound past its own call on the way it is going, then turns for its guest (PM decision 2026-09-29)', () => {
     const world = createWorld(10);
     const shaft = buildShaft(world, { cars: [{ serves: 'hotel', y: 10 }] });
     const car = carAt(shaft, 0);
     const guest = addWaiter(world, shaft, 'guest', 3, 9);
     const worker = addWaiter(world, shaft, 'worker', 5, 1);
+
+    let lowest = car.y;
+    let workerAboard = false;
+    for (let t = 0; t < 40 && guest.inCarId === null; t++) {
+      run(world, 1);
+      lowest = Math.min(lowest, car.y);
+      if (worker.inCarId === car.id) workerAboard = true;
+    }
+    expect(workerAboard).toBe(true);
+    expect(worker.inCarId).toBeNull();
+    expect(worker.pos.floor).toBe(1); // carried on down past the guest's floor, straight on
+    expect(lowest).toBe(1);
+    expect(guest.inCarId).toBe(car.id); // then it turned and came back up for its own rider
+  });
+
+  it("never turns round for them: at its guest's floor a worker going on down is left for later", () => {
+    const world = createWorld(10);
+    const shaft = buildShaft(world, { cars: [{ serves: 'hotel', y: 10 }] });
+    const car = carAt(shaft, 0);
+    const guest = addWaiter(world, shaft, 'guest', 3, 9);
+    const worker = addWaiter(world, shaft, 'worker', 3, 1);
 
     let lowest = car.y;
     for (let t = 0; t < 30 && guest.inCarId === null; t++) {
@@ -718,7 +740,8 @@ describe('a kept car passing a floor stops for others going its way (owner quest
       expect(worker.inCarId).toBeNull();
     }
     expect(guest.inCarId).toBe(car.id);
-    expect(lowest).toBe(3); // turned at the guest's floor, never lower
+    expect(lowest).toBe(3); // it turns here for its guest going up, never lower
+    expect(worker.inCarId).toBeNull();
   });
 
   it('does not stop for a worker going the other way', () => {
@@ -733,5 +756,84 @@ describe('a kept car passing a floor stops for others going its way (owner quest
       expect(worker.inCarId).toBeNull();
     }
     expect(guest.inCarId).toBe(car.id);
+  });
+});
+
+/** A housekeeper, guard or collector at the doors, with its call in the way people.ts lights it. */
+function addStaffWaiter(world: World, shaft: Shaft, kind: SimKind, fromFloor: number, toFloor: number): Sim {
+  const sim = addWaiter(world, shaft, kind, fromFloor, toFloor);
+  // addWaiter lit the plain class; staff light theirs instead (callClassFor).
+  shaft.hallCalls.delete(fromFloor);
+  requestHallCallFor(world, shaft, fromFloor, toFloor, kind);
+  return sim;
+}
+
+/** Every class lit at a floor in a direction, sorted. */
+function lit(shaft: Shaft, floor: number, dir: 1 | -1): string[] {
+  const call = shaft.hallCalls.get(floor);
+  return call ? [...(dir === 1 ? call.up : call.down)].sort() : [];
+}
+
+describe('staff at a shaft with kept cars (P5 review; PM decision 2026-09-29)', () => {
+  it('a housekeeper takes the Everyone car when one covers the trip, not the nearer hotel car', () => {
+    const world = createWorld(21);
+    const shaft = buildShaft(world, { cars: [{ serves: 'any', y: 1 }, { serves: 'hotel', y: 6 }] });
+    const everyone = carAt(shaft, 0);
+    const keeper = addStaffWaiter(world, shaft, 'staff', 6, 2);
+    expect(lit(shaft, 6, -1)).toEqual(['other']);
+    for (let t = 0; t < 30 && keeper.inCarId === null; t++) run(world, 1);
+    expect(keeper.inCarId).toBe(everyone.id);
+  });
+
+  it('a housekeeper calls as a hotel rider, and is carried as one, where no Everyone car covers the trip', () => {
+    const world = createWorld(22);
+    // The Everyone car works 5 to 10 only; the trip is 3 to 1.
+    const shaft = buildShaft(world, { cars: [{ serves: 'any', y: 5, range: { lo: 5, hi: 10 } }, { serves: 'hotel', y: 9 }] });
+    const hotel = carAt(shaft, 1);
+    // A guest's call pending elsewhere keeps the hotel car from being free: the keeper must be
+    // answered as the car's own (hotel), never as a leftover.
+    addWaiter(world, shaft, 'guest', 9, 10);
+    const keeper = addStaffWaiter(world, shaft, 'staff', 3, 1);
+    expect(isLeftoverCar(world, shaft, hotel)).toBe(false);
+    expect(lit(shaft, 3, -1)).toEqual(['hotel']);
+    for (let t = 0; t < 40 && keeper.inCarId === null; t++) run(world, 1);
+    expect(keeper.inCarId).toBe(hotel.id);
+  });
+
+  it('a guard rides a car kept for hotel guests as its own when it is the only car', () => {
+    const world = createWorld(23);
+    const shaft = buildShaft(world, { cars: [{ serves: 'hotel', y: 1 }] });
+    const car = carAt(shaft, 0);
+    addWaiter(world, shaft, 'guest', 8, 10); // the car is not free: a guest waits above
+    const guard = addStaffWaiter(world, shaft, 'guard', 5, 1);
+    expect(lit(shaft, 5, -1)).toEqual(['hotel']);
+    for (let t = 0; t < 40 && guard.inCarId === null; t++) run(world, 1);
+    expect(guard.inCarId).toBe(car.id);
+  });
+
+  it('a guard at a shaft with a hotel car and an office car calls one of them, so one car comes (P5-A1)', () => {
+    const world = createWorld(24);
+    const shaft = buildShaft(world, { cars: [{ serves: 'hotel', y: 1 }, { serves: 'office', y: 1 }] });
+    const guard = addStaffWaiter(world, shaft, 'guard', 8, 1);
+    expect(lit(shaft, 8, -1)).toEqual(['hotel']);
+    const openedAt8 = new Set<number>();
+    for (let t = 0; t < 40; t++) {
+      run(world, 1);
+      for (const car of shaft.cars) if (car.state === 'doorsOpen' && car.y === 8) openedAt8.add(car.id);
+    }
+    expect(guard.inCarId === null ? guard.pos.floor : -1).toBe(1);
+    expect([...openedAt8]).toEqual([carAt(shaft, 0).id]); // the office car never made the empty trip
+  });
+
+  it('callClassFor: plain riders keep their class; staff take plain, then their first group with a car on the trip', () => {
+    const world = createWorld(25);
+    const mixed = buildShaft(world, { cars: [{ serves: 'any' }, { serves: 'hotel' }, { serves: 'office' }] });
+    expect(callClassFor(mixed, 'worker', 1, 5)).toBe('office');
+    expect(callClassFor(mixed, 'staff', 1, 5)).toBe('other');
+    expect(callClassFor(mixed, 'guard', 1, 5)).toBe('other');
+    const kept = buildShaft(world, { x: 170, cars: [{ serves: 'office' }, { serves: 'hotel', range: { lo: 1, hi: 4 } }] });
+    expect(callClassFor(kept, 'collector', 1, 4)).toBe('hotel');
+    expect(callClassFor(kept, 'collector', 1, 8)).toBe('office'); // the hotel car does not reach 8
+    expect(callClassFor(kept, 'staff', 1, 8)).toBe('other'); // no hotel car on that trip: a plain call
   });
 });

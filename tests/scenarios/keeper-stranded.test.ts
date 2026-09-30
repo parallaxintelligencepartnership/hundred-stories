@@ -65,4 +65,23 @@ describe('F3: a housekeeper whose way home is switched off', () => {
     expect(office.tenants.length).toBeGreaterThan(0);
     expect(office.tenants).not.toContain(keeper.id);
   });
+
+  it('cleans the room once, however many times it retries for a way home (P5-A3)', () => {
+    const { world, office } = hotelTower();
+    const { keeper, roomId } = keeperMidClean(world, office);
+    const logged = world.logTotal;
+    expect(applyCommand(world, { kind: 'shaft.demolish', shaftId: onlyShaft(world).id }).ok).toBe(true);
+    let retries = 0;
+    let stay = keeper.stayUntil;
+    for (let i = 0; i < 1440 && world.sims.has(keeper.id); i++) {
+      tick(world);
+      const now = world.sims.get(keeper.id)?.stayUntil ?? null;
+      if (now !== null && now !== stay) retries += 1;
+      stay = now;
+    }
+    expect(retries).toBeGreaterThan(2); // it did retry, each a pass through the clean
+    const since = world.log.slice(Math.max(0, world.log.length - (world.logTotal - logged)));
+    const cleans = since.filter((e) => e.roomId === roomId && e.text.startsWith('Housekeeping cleaned a hotel room'));
+    expect(cleans.length).toBeLessThanOrEqual(1);
+  });
 });
