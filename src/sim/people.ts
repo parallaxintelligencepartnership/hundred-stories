@@ -984,7 +984,8 @@ function assignCleaning(world: World, keeper: Sim, room: Room): boolean {
 
 function finishCleaning(world: World, keeper: Sim): void {
   const room = keeper.inRoomId !== null ? world.rooms.get(keeper.inRoomId) : undefined;
-  if (room && HOTEL_KINDS.has(room.kind)) {
+  // Nothing left to clean on a keeper's retry for a way home (returnToHousekeeping).
+  if (room && HOTEL_KINDS.has(room.kind) && (room.dirty || room.infested)) {
     room.dirty = false;
     room.dirtySinceMinute = null;
     log(world, `Housekeeping cleaned a hotel room on ${floorLabel(room.floor)}.`, 'info', { roomId: room.id });
@@ -996,14 +997,33 @@ function finishCleaning(world: World, keeper: Sim): void {
       });
     }
   }
+  returnToHousekeeping(world, keeper);
+}
+
+/**
+ * A keeper done in a hotel room heads back to the office. With no way there (a car's rider
+ * setting or a demolition took it) the keeper is never parked in the room: it asks again
+ * every HALL_CALL_RETRY_MINUTES while housekeeping hours last, and goes back as soon as a
+ * route exists again. Outside those hours, or with the office gone, it leaves the tower by
+ * the path every leaver takes (runLeaving: the street if it can get there, else straight
+ * out), and the office hires a replacement (staffUpOffice). No new state: the clock decides.
+ */
+function returnToHousekeeping(world: World, keeper: Sim): void {
   const office = keeper.homeRoomId !== null ? world.rooms.get(keeper.homeRoomId) : undefined;
-  if (!office) {
-    keeper.stayUntil = null;
-    return;
-  }
-  const legs = findRoute(world, keeper.pos, { floor: office.floor, x: roomCenter(office) }, routeOpts(keeper));
-  if (!legs) {
-    keeper.stayUntil = null;
+  const legs = office ? findRoute(world, keeper.pos, { floor: office.floor, x: roomCenter(office) }, routeOpts(keeper)) : null;
+  if (!office || !legs) {
+    const minuteOfDay = clockOf(world.time.minute).minuteOfDay;
+    const onShift = minuteOfDay >= SCHEDULES.housekeeping.start && minuteOfDay < HOUSEKEEPING_END_MINUTE;
+    if (office && onShift) {
+      keeper.stayUntil = world.time.minute + HALL_CALL_RETRY_MINUTES;
+      return;
+    }
+    log(world, `A housekeeper on ${floorLabel(keeper.pos.floor)} had no way back to housekeeping and left the tower.`, 'warn', {
+      simId: keeper.id,
+    });
+    keeper.exiting = true;
+    keeper.state = 'leaving';
+    keeper.route = [];
     return;
   }
   departRoom(world, keeper);
