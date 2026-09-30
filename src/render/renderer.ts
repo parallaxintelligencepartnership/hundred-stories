@@ -1,6 +1,7 @@
 // The tower view: one pixi Application, nine layers, and a sprite pool reconciled
-// against the world: cars and sims every frame, the static tower when
-// world.structureVersion or the light band (light.ts) moves. See docs/DESIGN.md section 9 and docs/VISUAL.md.
+// against the world: cars and sims every frame, the static tower in full when
+// world.structureVersion moves, and only the window states when the light band (light.ts) or
+// the lit counter (world.ts litVersionOf) moves. See docs/DESIGN.md section 9 and docs/VISUAL.md.
 //
 // The renderer never mutates the world and never touches world.rng: it reads the
 // world, moves sprites, and reports picks back through onPick.
@@ -26,7 +27,7 @@ import {
 import { stressBand } from '../sim/people';
 import { ROOMS, STORY } from '../sim/rules';
 import { clockOf, spanFloors, spanTop, TOWER_WIDTH, type Car, type Id, type Room, type RoomKind, type Shaft, type ShaftKind, type Sim, type SimKind, type StressBand, type World } from '../sim/types';
-import { roomsOnFloor, shaftAt } from '../sim/world';
+import { litVersionOf, roomsOnFloor, shaftAt } from '../sim/world';
 import {
   bakeResolution,
   CAR_CLEAR_PX,
@@ -1135,10 +1136,11 @@ export async function createRenderer(
   const facadeLit = new Graphics();
   facadeLit.label = 'facade lit';
   facadeLit.visible = false;
-  const litHalo = new Graphics();
+  // One Graphics per floor in each (litFloors), so a room lit or put out redraws its own floor only.
+  const litHalo = new Container();
   litHalo.label = 'lit halo';
   litHalo.blendMode = 'add';
-  const litPanes = new Graphics();
+  const litPanes = new Container();
   litPanes.label = 'lit panes';
   const signGlowLayer = new Container();
   signGlowLayer.label = 'sign glows';
@@ -1189,6 +1191,10 @@ export async function createRenderer(
   let blocksDirty = true;
   let blocksAge = 0;
   let facadeDirty = true;
+  // A window state changed with the structure the same: the facade's panes catch up on its own
+  // refresh, at most every BLOCKS_REFRESH_MS, not on every room lit or put out.
+  let facadeLitDirty = false;
+  let facadeAge = 0;
   // The Districts view is on: the shafts step back to a faint column (setOverlay).
   let districtsOn = false;
   /** The cables fade with the shafts, at far zoom and in Districts; the car sprites stay at full strength. */
@@ -1630,39 +1636,105 @@ export async function createRenderer(
    * D-4: the lit windows over the multiply. A lit room's panes, one per tile with a pale header,
    * over a soft halo along each lit floor; a housekeeping room's lamp. Panes under a shaft or a
    * flight are skipped, and a pane is cut where the room's sign board stands in front of it, so
-   * what stood before the windows still does. Rebuilt with every full reconcile; empty by day.
+   * what stood before the windows still does. One Graphics pair per floor: a full reconcile
+   * redraws every floor, a window state change (refreshWindows) only the floors of the rooms
+   * that changed. Empty by day.
    */
+  const litFloors = new Map<number, { panes: Graphics; halo: Graphics }>();
+  /** The rooms with a window band on each floor, as the last full pass saw them. */
+  const litRoomsByFloor = new Map<number, Room[]>();
+  /** paneObstacles for the structure the last full pass saw; made on first need. */
+  let litObstacles: Map<number, [number, number][]> | null = null;
+  /** Floors whose lit windows a window state change asks to redraw; drained by refreshWindows. */
+  const litDirtyFloors = new Set<number>();
+
   function drawLitWindows(w: World): void {
-    litPanes.clear();
-    litHalo.clear();
-    let obstacles: Map<number, [number, number][]> | null = null;
+    litRoomsByFloor.clear();
+    litObstacles = null;
     for (const room of w.rooms.values()) {
+      if (!hasWindowBand(room.kind)) continue;
+      for (const f of spanFloors(room.floor, room.height)) {
+        const list = litRoomsByFloor.get(f);
+        if (list) list.push(room);
+        else litRoomsByFloor.set(f, [room]);
+      }
+    }
+    for (const [f, g] of litFloors) {
+      if (litRoomsByFloor.has(f)) continue;
+      g.panes.destroy();
+      g.halo.destroy();
+      litFloors.delete(f);
+    }
+    for (const f of litRoomsByFloor.keys()) drawLitFloor(w, f);
+  }
+
+  function drawLitFloor(w: World, f: number): void {
+    let g = litFloors.get(f);
+    if (g) {
+      g.panes.clear();
+      g.halo.clear();
+    }
+    const y = floorTopY(f);
+    for (const room of litRoomsByFloor.get(f) ?? []) {
       const entry = roomSprites.get(room.id);
       // A burning room shows its flames, not its windows: nothing of it goes over the fire.
-      if (!entry || room.onFire || (entry.state !== 'lit' && entry.state !== 'housekeeping') || !hasWindowBand(room.kind)) continue;
-      obstacles ??= paneObstacles(w);
+      if (!entry || room.onFire || (entry.state !== 'lit' && entry.state !== 'housekeeping')) continue;
+      if (!g) {
+        g = { panes: new Graphics(), halo: new Graphics() };
+        g.halo.blendMode = 'add';
+        litHalo.addChild(g.halo);
+        litPanes.addChild(g.panes);
+        litFloors.set(f, g);
+      }
+      litObstacles ??= paneObstacles(w);
       const lit = entry.state === 'lit';
       const px = room.x * TILE_PX;
       const width = room.width * TILE_PX;
       const venue = venueSprites.get(room.id);
       const board = venue?.sign ? signBoard(room.kind as 'shop' | 'restaurant', width) : null;
-      for (const f of spanFloors(room.floor, room.height)) {
-        const y = floorTopY(f);
-        const spans = obstacles.get(f);
-        if (lit) litHalo.rect(px, y + WIN_TOP, width, WIN_SILL + LINE_PX - WIN_TOP).fill({ color: LIT_PANE, alpha: HALO_ALPHA });
-        for (let x = WIN_PANE_X, n = 0; x + WIN_PANE + LINE_PX <= width; x += TILE_PX, n++) {
-          if (blockedAt(spans, room.x + n)) continue;
-          for (const [from, to] of clearOf(x, x + WIN_PANE, board)) {
-            if (lit) {
-              litPanes.rect(px + from, y + WIN_PANE_TOP, to - from, WIN_PANE).fill(LIT_PANE);
-              litPanes.rect(px + from, y + WIN_PANE_TOP, to - from, LINE_PX).fill(LIT_HEADER);
-            } else {
-              litPanes.rect(px + from, y + WIN_PANE_TOP + WIN_PANE - 4, to - from, 4).fill({ color: LIT_PANE, alpha: LAMP_ALPHA });
-            }
+      const spans = litObstacles.get(f);
+      if (lit) g.halo.rect(px, y + WIN_TOP, width, WIN_SILL + LINE_PX - WIN_TOP).fill({ color: LIT_PANE, alpha: HALO_ALPHA });
+      for (let x = WIN_PANE_X, n = 0; x + WIN_PANE + LINE_PX <= width; x += TILE_PX, n++) {
+        if (blockedAt(spans, room.x + n)) continue;
+        for (const [from, to] of clearOf(x, x + WIN_PANE, board)) {
+          if (lit) {
+            g.panes.rect(px + from, y + WIN_PANE_TOP, to - from, WIN_PANE).fill(LIT_PANE);
+            g.panes.rect(px + from, y + WIN_PANE_TOP, to - from, LINE_PX).fill(LIT_HEADER);
+          } else {
+            g.panes.rect(px + from, y + WIN_PANE_TOP + WIN_PANE - 4, to - from, 4).fill({ color: LIT_PANE, alpha: LAMP_ALPHA });
           }
         }
       }
     }
+  }
+
+  /**
+   * The window states alone, for a lit change (an occupancy crossing zero) or a light band step
+   * with the structure unchanged: each room's state is read again, and only a room whose state
+   * moved gets its texture, its grade and its floor's lit windows redrawn. The venues' pools and
+   * posts follow the occupancy. The veil and the blocks do not show window states; the facade
+   * does, and catches up on its refresh (onFrame).
+   */
+  function refreshWindows(w: World, night: boolean, minuteOfDay: number): void {
+    const peopleFloors = night || inLightWindow(minuteOfDay) ? floorsWithPeople(w) : NO_FLOORS;
+    for (const room of w.rooms.values()) {
+      const entry = roomSprites.get(room.id);
+      if (!entry) continue;
+      const state = windowStateOf(room, roomNight(w.seed, room.id, minuteOfDay), peopleFloors);
+      if (state === entry.state) continue;
+      entry.state = state;
+      entry.node.texture = roomTexture(room, entry.variant, state);
+      const grade = room.onFire ? FIRE_TINT : NIGHT_GRADE[state];
+      entry.node.tint = grade;
+      const venue = venueSprites.get(room.id);
+      if (venue) gradeVenue(venue, grade);
+      if (hasWindowBand(room.kind)) for (const f of spanFloors(room.floor, room.height)) litDirtyFloors.add(f);
+    }
+    updateVenues(w, night);
+    if (litDirtyFloors.size === 0) return;
+    for (const f of litDirtyFloors) drawLitFloor(w, f);
+    litDirtyFloors.clear();
+    facadeLitDirty = true;
   }
 
   /** The parts of [from, to) a board does not cover, room px. */
@@ -1966,6 +2038,8 @@ export async function createRenderer(
    */
   function rebuildFacade(w: World): void {
     facadeDirty = false;
+    facadeLitDirty = false;
+    facadeAge = 0;
     facade.clear();
     facadeLit.clear();
     const extents = builtFloorExtents(w);
@@ -2067,23 +2141,34 @@ export async function createRenderer(
     drawnAt.set(sim.id, { x, y, floor: yToFloor(y - 1) });
   }
 
-  // The static tower (floor strips, rooms, slabs, shafts, fire markers) is reconciled only
-  // when the world's structure version, the world itself or the light band moves since the
-  // last full pass. The light band is one value all day and one per game hour at night
-  // (light.ts lightBand), so window states the sim does not version (a hotel room going
-  // dirty, people on a lobby floor) catch up within a game hour. Cars, sims and the overlay
-  // are touched every frame.
+  // The static tower (floor strips, rooms, slabs, shafts, fire markers) is reconciled in full
+  // only when the world's structure version or the world itself moves since the last full pass.
+  // When only the lit counter (an occupancy crossing zero) or the light band moves, only the
+  // window states are read again (refreshWindows). The light band is one value all day and one
+  // per game hour at night (light.ts lightBand), so window states the sim does not count (a
+  // hotel room going dirty, people on a lobby floor) catch up within a game hour, and at the
+  // latest with the next lit change. Cars, sims and the overlay are touched every frame.
   let reconciledWorld: World | null = null;
   let reconciledVersion = -1;
   let lastLitState = -1;
+  let reconciledLit = -1;
 
   function reconcileStaticTower(w: World, night: boolean, minuteOfDay: number): void {
     const band = lightBand(night, minuteOfDay);
-    if (w === reconciledWorld && w.structureVersion === reconciledVersion && band === lastLitState) return;
+    const lit = litVersionOf(w);
+    if (w === reconciledWorld && w.structureVersion === reconciledVersion) {
+      // The same structure: a room lit or put out, or the light band stepped. Window states only.
+      if (band === lastLitState && lit === reconciledLit) return;
+      lastLitState = band;
+      reconciledLit = lit;
+      refreshWindows(w, night, minuteOfDay);
+      return;
+    }
     const animateNew = w === reconciledWorld;
     reconciledWorld = w;
     reconciledVersion = w.structureVersion;
     lastLitState = band;
+    reconciledLit = lit;
     syncFloorStrips(w);
     reconcileRooms(w, night, minuteOfDay, animateNew);
     ambient.sync(w, reducedMotion);
@@ -2812,7 +2897,8 @@ export async function createRenderer(
       blocksAge += dt;
       if (blocksDirty || blocksAge >= BLOCKS_REFRESH_MS) rebuildBlocks(lastWorld);
     } else if (plan.facade) {
-      if (facadeDirty) rebuildFacade(lastWorld);
+      facadeAge += dt;
+      if (facadeDirty || (facadeLitDirty && facadeAge >= BLOCKS_REFRESH_MS)) rebuildFacade(lastWorld);
     } else if (plan.windowVeil > 0 && veilDirty) rebuildVeil(lastWorld);
     curb.update({
       world: lastWorld,
@@ -2895,6 +2981,13 @@ export async function createRenderer(
     for (const entry of slabSprites.values()) entry.node.destroy();
     slabSprites.clear();
     for (const [id, entry] of [...venueSprites]) dropVenue(id, entry);
+    for (const g of litFloors.values()) {
+      g.panes.destroy();
+      g.halo.destroy();
+    }
+    litFloors.clear();
+    litRoomsByFloor.clear();
+    litObstacles = null;
     for (const entry of shaftSprites.values()) for (const part of entry.parts) part.destroy();
     shaftSprites.clear();
     for (const entry of carSprites.values()) {
@@ -2920,6 +3013,7 @@ export async function createRenderer(
     reconciledWorld = null;
     reconciledVersion = -1;
     lastLitState = -1;
+    reconciledLit = -1;
     venueClock = -1;
     veilDirty = true;
     blocksDirty = true;

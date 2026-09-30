@@ -7,7 +7,7 @@ import { applyCommand } from '../../src/sim/build';
 import { startFire } from '../../src/sim/events';
 import { deserialize, hashWorld, serialize } from '../../src/sim/save';
 import type { Command, Shaft, World } from '../../src/sim/types';
-import { createWorld } from '../../src/sim/world';
+import { createWorld, litVersionOf, setOccupancy } from '../../src/sim/world';
 
 function tower(): World {
   const world = createWorld(42);
@@ -58,6 +58,42 @@ describe('structureVersion writers', () => {
     startFire(world);
     expect(world.events.some((e) => e.kind === 'fire')).toBe(true);
     expect(world.structureVersion).toBeGreaterThan(before);
+  });
+});
+
+// Package P3 F1: people coming and going change no structure. A room's occupancy crossing zero
+// moves the lit counter the renderer reads for window states only, never structureVersion.
+describe('the lit counter', () => {
+  it('moves when an occupancy crosses zero, and leaves structureVersion alone', () => {
+    const world = tower();
+    applyCommand(world, { kind: 'build', room: 'office', floor: 2, x: 100 });
+    const office = [...world.rooms.values()].find((r) => r.kind === 'office')!;
+    const version = world.structureVersion;
+    const lit = litVersionOf(world);
+    setOccupancy(world, office, 1);
+    expect(litVersionOf(world)).toBe(lit + 1);
+    setOccupancy(world, office, 3); // still occupied: nothing on screen changes
+    expect(litVersionOf(world)).toBe(lit + 1);
+    setOccupancy(world, office, 0);
+    expect(litVersionOf(world)).toBe(lit + 2);
+    expect(world.structureVersion).toBe(version);
+  });
+
+  it('never reaches the save or the hash, and a loaded world starts at 0', () => {
+    const world = tower();
+    applyCommand(world, { kind: 'build', room: 'office', floor: 2, x: 100 });
+    const office = [...world.rooms.values()].find((r) => r.kind === 'office')!;
+    setOccupancy(world, office, 1);
+    const text = serialize(world);
+    const hash = hashWorld(world);
+    setOccupancy(world, office, 0);
+    setOccupancy(world, office, 1);
+    expect(litVersionOf(world)).toBe(3);
+    expect(serialize(world)).toBe(text);
+    expect(hashWorld(world)).toBe(hash);
+    const loaded = deserialize(text);
+    expect(loaded.ok).toBe(true);
+    if (loaded.ok) expect(litVersionOf(loaded.world)).toBe(0);
   });
 });
 

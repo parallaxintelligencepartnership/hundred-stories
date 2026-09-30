@@ -127,8 +127,12 @@ interface Drawn {
   h: number;
   color: number;
 }
-function fills(g: Graphics): Drawn[] {
+// A Graphics, or a layer of them (the lit panes and halo are one Graphics per floor since package P3).
+function fills(node: Container): Drawn[] {
   const out: Drawn[] = [];
+  for (const child of node.children) out.push(...fills(child as Container));
+  if (!(node instanceof Graphics)) return out;
+  const g = node;
   for (const ins of g.context.instructions) {
     if (ins.action !== 'fill') continue;
     const data = ins.data as { style: { color: number }; path: GraphicsPath };

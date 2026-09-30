@@ -218,7 +218,7 @@ describe('static tower reconcile on the structure version', () => {
     expect(roomSprite(stage).tint).toBe(0xffffff);
   });
 
-  it('lights a room at night when its occupancy crosses zero, and only then bumps', async () => {
+  it('lights a room at night when its occupancy crosses zero, with no structure version bump', async () => {
     const { world, room } = officeWorld(MIDNIGHT);
     const { renderer, stage } = await mount(world);
     renderer.render(world, 1);
@@ -226,9 +226,8 @@ describe('static tower reconcile on the structure version', () => {
 
     const before = world.structureVersion;
     setOccupancy(world, room, 1);
-    expect(world.structureVersion).toBe(before + 1);
     setOccupancy(world, room, 2); // still occupied: nothing on screen changes
-    expect(world.structureVersion).toBe(before + 1);
+    expect(world.structureVersion).toBe(before); // people are not structure (package P3 F1)
     renderer.render(world, 1);
     expect(roomSprite(stage).texture.label).toMatch(/\|lit$/);
 

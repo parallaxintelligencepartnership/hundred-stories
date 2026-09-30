@@ -15,7 +15,7 @@ import { NIGHT_GRADE } from '../../src/render/light';
 import { createRenderer, type Renderer } from '../../src/render/renderer';
 import { ROOMS, STRESS } from '../../src/sim/rules';
 import type { Car, Room, RoomKind, Sim, World } from '../../src/sim/types';
-import { addRoom, addShaft, addSim, allocId, createWorld } from '../../src/sim/world';
+import { addRoom, addShaft, addSim, allocId, createWorld, setOccupancy } from '../../src/sim/world';
 
 const apps = vi.hoisted(() => [] as { stage: import('pixi.js').Container; frames: (() => void)[]; ticker: { deltaMS: number } }[]);
 
@@ -119,8 +119,12 @@ interface Drawn {
   color: number;
   alpha: number;
 }
-function fills(g: Graphics): Drawn[] {
+// A Graphics, or a layer of them (the lit panes and halo are one Graphics per floor since package P3).
+function fills(node: Container): Drawn[] {
   const out: Drawn[] = [];
+  for (const child of node.children) out.push(...fills(child as Container));
+  if (!(node instanceof Graphics)) return out;
+  const g = node;
   for (const ins of g.context.instructions) {
     if (ins.action !== 'fill') continue;
     const data = ins.data as { style: { color: number; alpha: number }; path: GraphicsPath };
@@ -231,6 +235,41 @@ describe('D-4: the emissive layer', () => {
     renderer.render(world, 1);
     expect(fills(find(stage, 'lit panes') as Graphics)).toEqual([]);
     expect(fills(find(stage, 'lit halo') as Graphics)).toEqual([]);
+  });
+
+  it('redraws only the floor of a room lit or put out, and never the whole tower (package P3 F1)', async () => {
+    const world = createWorld(5);
+    world.time.minute = at(23);
+    const a = makeRoom(world, 'office', 3, 100, { occupancy: 2 });
+    makeRoom(world, 'office', 5, 100, { occupancy: 1 });
+    const { renderer, stage } = await mount(world);
+    renderer.render(world, 1);
+    const panes = find(stage, 'lit panes');
+    const floorOf = (g: Container): number | undefined => {
+      const first = fills(g)[0];
+      return first === undefined ? undefined : [3, 5].find((f) => first.y === floorTopY(f) + 6);
+    };
+    const five = panes.children.find((g) => floorOf(g as Container) === 5) as Graphics;
+    const three = panes.children.find((g) => floorOf(g as Container) === 3) as Graphics;
+    expect(five).toBeDefined();
+    expect(three).toBeDefined();
+    const cleared = { three: 0, five: 0 };
+    const clearThree = three.clear.bind(three);
+    const clearFive = five.clear.bind(five);
+    three.clear = () => (cleared.three++, clearThree());
+    five.clear = () => (cleared.five++, clearFive());
+
+    setOccupancy(world, a, 0); // floor 3 goes dark: a lit change, no structure change
+    renderer.render(world, 1);
+    expect(fills(three)).toEqual([]);
+    expect(cleared).toEqual({ three: 1, five: 0 });
+    expect(fills(five).length).toBeGreaterThan(0);
+    expect(spritesWith(stage, 'room|office').map((s) => s.texture.label?.split('|')[5]).sort()).toEqual(['lit', 'vacant']);
+
+    setOccupancy(world, a, 1); // and on again
+    renderer.render(world, 1);
+    expect(fills(three).length).toBe(fills(five).length);
+    expect(cleared).toEqual({ three: 2, five: 0 });
   });
 
   it('grades the empty rooms at night, their fixtures, shutters and staff with them, and leaves lit rooms and the day alone', async () => {

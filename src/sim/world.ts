@@ -105,11 +105,26 @@ export function markStructureChanged(world: World): void {
 }
 
 /**
+ * Room lit changes per world: bumped when a room's occupancy crosses zero, the empty or occupied
+ * bit a lit window shows at night, and by nothing else. The renderer compares it with the count it
+ * last drew and re-reads only the window states, not the whole static tower (structureVersion).
+ * Held beside the world in a WeakMap, never on it, so it cannot reach a save, the hash or the
+ * World type, and a loaded or replaced world starts at zero.
+ */
+const litVersions = new WeakMap<World, number>();
+
+/** The lit change counter for this world; 0 for a world that never had one. */
+export function litVersionOf(world: World): number {
+  return litVersions.get(world) ?? 0;
+}
+
+/**
  * Set a room's head count. Only the empty or occupied bit shows on screen (a lit window
- * at night), so the structure version moves only when the count crosses zero.
+ * at night), so the lit counter moves only when the count crosses zero. The structure
+ * version does not: the tower's structure is the same with people in it.
  */
 export function setOccupancy(world: World, room: Room, occupancy: number): void {
-  if ((room.occupancy > 0) !== (occupancy > 0)) markStructureChanged(world);
+  if ((room.occupancy > 0) !== (occupancy > 0)) litVersions.set(world, litVersionOf(world) + 1);
   room.occupancy = occupancy;
 }
 
