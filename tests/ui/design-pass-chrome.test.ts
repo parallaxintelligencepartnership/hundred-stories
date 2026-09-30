@@ -19,6 +19,27 @@ function ruleOf(source: string, selector: string): string {
 }
 
 /**
+ * A rule inside ui.css's plain `@media (min-width: 721px)` blocks (there are several; each is read
+ * to its own closing brace, so a later rule of the same selector outside them never answers).
+ */
+function wideRuleOf(selector: string): string {
+  const head = '@media (min-width: 721px) {';
+  const found: string[] = [];
+  for (let at = css.indexOf(head); at >= 0; at = css.indexOf(head, at + 1)) {
+    let depth = 0;
+    let end = at + head.length - 1;
+    for (; end < css.length; end += 1) {
+      if (css[end] === '{') depth += 1;
+      else if (css[end] === '}' && --depth === 0) break;
+    }
+    const rule = ruleOf(css.slice(at + head.length, end), selector);
+    if (rule) found.push(rule);
+  }
+  expect(found).toHaveLength(1);
+  return found[0]!;
+}
+
+/**
  * The style ui.css gives a fake node, as a browser would compute it for the rules that matter
  * here: plain rules whose selector is a compound of classes the node carries, at the top level
  * or inside one of the `media` queries named, the more specific winning, then the later. A
@@ -185,8 +206,7 @@ describe('D-22: the collapsed goals card is a small pill', () => {
     const card = root.descendants().find((n) => n.className.split(' ').includes('hs-card')) as FakeElement;
     expect(card.style['--pill-max-w']).toBe(`${988 - 780}px`);
     expect(card.style['--pill-right']).toBe(`${1000 - 988}px`);
-    const wide = css.slice(css.lastIndexOf('@media (min-width: 721px) {'));
-    const pillRule = ruleOf(wide, '.hs-card.is-collapsed');
+    const pillRule = wideRuleOf('.hs-card.is-collapsed');
     expect(pillRule).toContain('max-width: var(--pill-max-w');
     expect(pillRule).toContain('right: var(--pill-right');
     // A very long title ends in an ellipsis rather than pushing the pill wider.
@@ -246,8 +266,7 @@ describe('D-22: the collapsed goals card is a small pill', () => {
   });
 
   it('shrinks the collapsed card to its content above 720 px', () => {
-    const wide = css.slice(css.lastIndexOf('@media (min-width: 721px) {'));
-    expect(ruleOf(wide, '.hs-card.is-collapsed')).toContain('width: max-content;');
+    expect(wideRuleOf('.hs-card.is-collapsed')).toContain('width: max-content;');
   });
 });
 
