@@ -41,6 +41,28 @@ describe('drainTicks', () => {
     expect(loop.accumulator).toBeCloseTo(15.5, 10); // package P3 F4: carried, not dropped
   });
 
+  it('runs a cut batch\'s leftover on the next drain and drops what that drain cannot run', () => {
+    let ms = 0;
+    let cost = 10;
+    const tick = (): void => {
+      ms += cost;
+    };
+    const loop: { accumulator: number; carried?: number } = { accumulator: 6.5 };
+    expect(drainTicks(loop, tick, () => ms)).toBe(1); // cut by the box: 5 whole ticks carried
+    expect(loop.accumulator).toBeCloseTo(5.5, 10);
+
+    // The next drain is cut again after one tick: the 4 carried ticks it could not run are dropped,
+    // and only the ticks this drain earned (2) wait for the one after.
+    loop.accumulator += 2;
+    expect(drainTicks(loop, tick, () => ms)).toBe(1);
+    expect(loop.accumulator).toBeCloseTo(2.5, 10);
+
+    // Load lifts: the drain after runs what the last one carried, and nothing older.
+    cost = 0;
+    expect(drainTicks(loop, tick, () => ms)).toBe(2);
+    expect(loop.accumulator).toBeCloseTo(0.5, 10);
+  });
+
   it('runs every earned tick when the ticks are fast', () => {
     const loop = { accumulator: 16.5 };
     let ticks = 0;
@@ -365,7 +387,7 @@ describe('a batch the time box cuts', () => {
     return { game, frame };
   }
 
-  it('leaves a consistent motion snapshot on every frame at 3 ms a tick at 4x night, and carries the leftover ticks', () => {
+  it('leaves a consistent motion snapshot on every frame at 3 ms a tick at 4x night, and keeps no backlog', () => {
     const { game, frame } = slowTicks(3);
     game.world.time.minute = 23 * 60 + 5; // 5.33 ticks earned a frame
     game.setSpeed(4);
@@ -379,10 +401,10 @@ describe('a batch the time box cuts', () => {
       expect(f.snapshot, `frame ${i}`).not.toBeNull();
       expect(f.final - f.snapshot!, `frame ${i}`).toBeLessThanOrEqual(1);
     }
-    // The box still holds each frame to about 8 ms (three 3 ms ticks), and what it could not run
-    // waits for the next frame instead of being dropped.
+    // The box still holds each frame to about 8 ms (three 3 ms ticks). What it could not run waits
+    // for the next frame only, so the backlog never passes one frame's earnings (5.33) and a carry.
     expect(ran).toBe(180);
-    expect(game.accumulator()).toBeGreaterThan(100);
+    expect(game.accumulator()).toBeLessThan(7);
   });
 
   it('still snapshots when a single tick runs past the box', () => {
@@ -451,5 +473,123 @@ describe('motion resets when the world is replaced', () => {
     const { game, resets } = gameWithAFrameLoop(true);
     expect(game.importSave('not a save').ok).toBe(false);
     expect(resets).toHaveLength(0);
+  });
+});
+
+// Package P3 fix round, I1: the ticks a cut batch carries had outlived pause, a speed change, New
+// game and a hidden tab, and ran as a burst of up to 74 game minutes in one frame once the load
+// lifted. The backlog is built here at 3 ms a tick at 4x night (5.33 ticks earned a frame, three
+// run), then the load lifts to nothing and the player acts.
+describe('a carried backlog', () => {
+  function loadedGame() {
+    const clock = { ms: 0, base: 0, tickMs: 3, hidden: false };
+    const holder: { game: ReturnType<typeof createGame> | null } = { game: null };
+    const game = createGame(11, {
+      now: () => clock.ms + clock.tickMs * (holder.game ? holder.game.world.time.minute - clock.base : 0),
+      scheduleIdle: () => () => {},
+      hidden: () => clock.hidden,
+    });
+    holder.game = game;
+    const renderer = {
+      render: () => {},
+      commitMotion: () => {},
+      resetMotion: () => {},
+      camera: { reset: () => {}, ensureFloorVisible: () => {} },
+      setGhost: () => {},
+      setSelection: () => {},
+      onPick: () => {},
+      setToolOwnsDrag: () => {},
+      setReducedMotion: () => {},
+      setChrome: () => {},
+    } as unknown as Renderer;
+    game.attach(renderer, { addEventListener: () => {} } as unknown as HTMLElement);
+    const frame = (): number => {
+      clock.base = game.world.time.minute;
+      clock.ms += FRAME_MS;
+      game.frameOnce();
+      return game.world.time.minute - clock.base;
+    };
+    /** Sixty overloaded frames at 4x night, then the load lifts. */
+    const buildBacklog = (): void => {
+      game.world.time.minute = 23 * 60 + 5;
+      clock.base = game.world.time.minute; // the injected clock does not jump with the minute set
+      game.setSpeed(4);
+      for (let i = 0; i < 60; i++) frame();
+      clock.tickMs = 0;
+    };
+    return { game, clock, frame, buildBacklog };
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('runs no burst when the player picks 1x after a backlog', () => {
+    const { game, frame, buildBacklog } = loadedGame();
+    buildBacklog();
+    game.setSpeed(1);
+    expect(frame()).toBeLessThanOrEqual(2); // 1x night earns 1.33 a frame
+  });
+
+  it('runs no burst on Resume after a pause', () => {
+    const { game, frame, buildBacklog } = loadedGame();
+    buildBacklog();
+    game.setSpeed(0);
+    for (let i = 0; i < 30; i++) expect(frame()).toBe(0);
+    game.setSpeed(4);
+    expect(frame()).toBeLessThanOrEqual(6); // 4x night earns 5.33 a frame
+  });
+
+  it('runs none of the old tower\'s backlog on a New game', () => {
+    const { game, frame, buildBacklog } = loadedGame();
+    buildBacklog();
+    game.newGame(5);
+    const start = game.world.time.minute;
+    expect(frame()).toBeLessThanOrEqual(1); // 4x by day earns 0.67 a frame
+    for (let i = 0; i < 9; i++) frame();
+    expect(game.world.time.minute - start).toBeLessThanOrEqual(7);
+  });
+
+  it('runs no burst when the tab becomes visible again', () => {
+    const listeners = new Map<string, () => void>();
+    vi.stubGlobal('window', { setInterval: () => 7, clearInterval: () => {} });
+    vi.stubGlobal('document', {
+      hidden: false,
+      addEventListener: (type: string, fn: () => void) => listeners.set(type, fn),
+      removeEventListener: () => {},
+    });
+    vi.stubGlobal('requestAnimationFrame', () => 3);
+    vi.stubGlobal('cancelAnimationFrame', () => {});
+    const { game, clock, frame, buildBacklog } = loadedGame();
+    game.world.time.minute = 23 * 60 + 5;
+    clock.base = game.world.time.minute;
+    game.start();
+    buildBacklog();
+    clock.hidden = true;
+    listeners.get('visibilitychange')?.();
+    clock.hidden = false;
+    listeners.get('visibilitychange')?.();
+    expect(frame()).toBeLessThanOrEqual(6);
+    game.stop();
+  });
+
+  it('runs a cut batch\'s leftover on the next frame', () => {
+    const { game, clock, frame } = loadedGame();
+    game.world.time.minute = 23 * 60 + 5;
+    clock.base = game.world.time.minute;
+    game.setSpeed(4);
+    expect(frame()).toBe(3); // cut by the box: two whole ticks carried
+    clock.tickMs = 0;
+    const next = frame(); // the carried two plus this frame's 5.33
+    expect(next).toBeGreaterThanOrEqual(7);
+    expect(next).toBeLessThanOrEqual(8);
+  });
+
+  it('drops a carried tick the next frame could not run, so nothing older runs later', () => {
+    const { frame, buildBacklog } = loadedGame();
+    buildBacklog(); // sixty cut frames, then the load lifts
+    // At most the last cut batch's leftover (under 6) and this frame's 5.33, then normal frames.
+    expect(frame()).toBeLessThanOrEqual(12);
+    for (let i = 0; i < 5; i++) expect(frame()).toBeLessThanOrEqual(6);
   });
 });

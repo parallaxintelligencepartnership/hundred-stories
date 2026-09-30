@@ -96,7 +96,7 @@ export function unreadableMessage(reason: string, copied: boolean): string {
 const ALPHA_MAX = 1 - 1e-9;
 const MAX_TICKS_PER_FRAME = 240;
 // A step drains missed ticks until this much wall time has passed; the rest wait for the next
-// step, up to MAX_TICKS_PER_FRAME of them, so a slow tick costs a frame's time, not a freeze.
+// step only, and what that step cannot run is dropped, so a slow tick is slow motion, not a burst.
 const MAX_STEP_MS = 8;
 
 // Clock constants for the autosave schedule. rules.ts holds no clock lengths, so these live
@@ -227,18 +227,21 @@ export interface DrainLimits {
 /**
  * Drain the whole ticks the accumulator has earned, and say how many ran.
  *
- * Stops at maxTicks, and at maxMs of wall time: past the box the ticks not run wait in the
- * accumulator for the next drain (package P3 F4), so a slow tick is caught up on the next frames,
- * and a run of them turns into slow motion: an accumulator that outran the tick cap entirely (a
- * tab asleep for minutes, or a box that cannot keep up) is reset.
+ * Stops at maxTicks, and at maxMs of wall time. The whole ticks a cut batch could not run wait in
+ * the accumulator for the next drain only (package P3 F4, so the snapshot pair stays consistent
+ * without dropping a frame's ticks); those still unrun after that one carry are dropped, as they
+ * were before F4. So a steady overload runs slow and smooth, never in bursts, and the backlog
+ * never grows past about one frame's earnings. An accumulator that outran the tick cap entirely
+ * (a hidden tab's second) is reset. `carried` records the whole ticks this drain left for the next.
  */
 export function drainTicks(
-  loop: { accumulator: number },
+  loop: { accumulator: number; carried?: number },
   runTick: () => void,
   now: () => number,
   limits: DrainLimits = { maxTicks: MAX_TICKS_PER_FRAME, maxMs: MAX_STEP_MS },
 ): number {
   const start = now();
+  const inherited = loop.carried ?? 0;
   let n = 0;
   let slowest = 0;
   while (loop.accumulator >= 1 && n < limits.maxTicks) {
@@ -257,7 +260,12 @@ export function drainTicks(
       break;
     }
   }
+  // The batch runs the oldest ticks first: what the last drain carried in and this one did not run
+  // has had its one frame, and goes.
+  const stale = Math.min(Math.max(0, inherited - n), Math.floor(loop.accumulator));
+  loop.accumulator -= stale;
   if (loop.accumulator > limits.maxTicks) loop.accumulator = 0;
+  loop.carried = Math.max(0, Math.floor(loop.accumulator));
   return n;
 }
 
@@ -333,7 +341,16 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
   let timer = 0;
   let last = 0;
   // Boxed so drainTicks, which frame() and the loop tests share, can spend it.
-  const loop = { accumulator: 0 };
+  const loop = { accumulator: 0, carried: 0 };
+  /**
+   * Zero the earned ticks and any carried backlog. Called on pause and every speed change, on New
+   * game, load and tower switch, and when the tab comes back, so ticks earned under one clock never
+   * run as a burst under the next.
+   */
+  const resetClock = (): void => {
+    loop.accumulator = 0;
+    loop.carried = 0;
+  };
   const subscribers = new Set<() => void>();
   const notify = () => subscribers.forEach((cb) => cb());
   // The event stream. The tap is primed when the first listener arrives and on every world
@@ -447,7 +464,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     // is left on screen that every tap refuses.
     if (tool.kind !== 'none' || pending) api.setTool({ kind: 'none' });
     speed = 0;
-    loop.accumulator = 0;
+    resetClock();
     cancelScheduledSave();
     const date = dailyDate();
     // This date never opens fresh again, unless the tower in hand is only a stand-in for a daily
@@ -496,8 +513,12 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
   function onVisibilityChange(): void {
     // Going away, save what moved: a hidden tab may never come back.
     if (time.hidden()) saveNow();
-    // Coming back, start the clock from now: the frame loop must not earn the hidden gap again.
-    else last = time.now();
+    // Coming back, start the clock from now: the frame loop must not earn the hidden gap again,
+    // nor run a backlog the hidden timer left.
+    else {
+      last = time.now();
+      resetClock();
+    }
   }
 
   /** The page is going away (closed, reloaded, or put in the back-forward cache). */
@@ -638,7 +659,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     pending = null;
     drag = null;
     press = null;
-    loop.accumulator = 0;
+    resetClock();
     renderer?.resetMotion(); // no sprite may lerp from the old tower into the new one
     renderer?.setSelection(null);
     renderer?.setGhost(null);
@@ -671,6 +692,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     const done = switchChain.then(run).finally(() => {
       holds--;
       last = time.now(); // the held time is not earned again
+      resetClock(); // nor a backlog from before the switch, whichever tower is in hand after it
     });
     switchChain = done.catch(() => {});
     return done;
@@ -1079,6 +1101,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
       if (dailyOver() || (dailyChoice && !(dailyChoice.locked && lockStays) && s > 0)) return;
       // Pausing is a natural moment to step away: save what moved.
       if (s === 0 && speed !== 0 && dirty) saveWhenIdle();
+      if (s !== speed) resetClock(); // pause, Resume and a new speed start from an empty backlog
       speed = s;
       if (s > 0) speedBeforePause = s;
       notify();
@@ -1389,6 +1412,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
       standIn = false;
       world = createWorld(newSeed);
       startBuildLog(world);
+      resetClock(); // the old tower's backlog must not run on the new one
       dailyChoice = null;
       primeTap(tap, world);
       selection = null;
