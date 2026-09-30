@@ -4021,6 +4021,17 @@ button.hs-news-toast {
   text-align: left;
 }
 
+/* Larger text on a 390 by 844 phone in the app: nine 60 px entries, the plate and the card's
+   padding come to 738.5 px against 739 px inside the notch and the home bar, so the list and the
+   plate give back 20 px and no entry sits on the edge. */
+:root.hs-large-text .hs-pause-list {
+  gap: 6px;
+}
+
+:root.hs-large-text .hs-pause-plate {
+  padding-bottom: 4px;
+}
+
 /* No entrance under reduced motion: the card is simply there. */
 .hs-ui.is-reduced .hs-pause-card {
   animation: none;

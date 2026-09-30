@@ -572,6 +572,29 @@ describe('the look', () => {
     menu.destroy();
   });
 
+  it('fits a 390 by 844 phone with Larger text, nine entries and the app\'s safe areas, with room to spare', () => {
+    const scale = 1.25;
+    const px = (text: string, re: RegExp): number => Number(re.exec(text)![1]);
+    const card = rule('.hs-pause-card');
+    const [padTop, , padBottom] = /padding: (\d+)px (\d+)px (\d+)px;/.exec(card)!.slice(1).map(Number) as [number, number, number];
+    const cardGap = px(card, /gap: (\d+)px;/);
+    const plate = rule('.hs-plate');
+    const plateTop = px(plate, /padding: (\d+)px/);
+    const plateBottom = px(rule(':root.hs-large-text .hs-pause-plate'), /padding-bottom: (\d+)px;/);
+    const title = 28 * scale * px(rule('.hs-plate-title'), /line-height: ([\d.]+);/);
+    const state = px(rule('.hs-plate-state'), /margin: (\d+)px/) + 16 * scale * 1.4;
+    const entry = px(rule('.hs-ui .hs-face'), /min-height: calc\((\d+)px \* var\(--ui-scale\)\);/) * scale;
+    const listGap = px(rule(':root.hs-large-text .hs-pause-list'), /gap: (\d+)px;/);
+    // Resume, Save, My tower, Today's tower, Stories, Views, Share, Settings, How to play.
+    const entries = 9;
+    const height = padTop + plateTop + title + state + plateBottom + cardGap + entries * entry + (entries - 1) * listGap + padBottom;
+    // The scrim's padding: the 12 px edge plus the safe areas of a 390 by 844 phone in the app.
+    const room = 844 - 2 * 12 - 47 - 34;
+    expect(height).toBeLessThanOrEqual(room - 16);
+    // And 360 px wide inside 390 less the edges.
+    expect(Math.min(360, 390 - 2 * 12)).toBe(360);
+  });
+
   it('enters with a short scale and fade, and not at all under reduced motion', () => {
     expect(rule('.hs-pause-card')).toMatch(/animation: hs-pause-in var\(--motion-fast\)/);
     expect(css).toMatch(/@keyframes hs-pause-in \{\s*from \{\s*opacity: 0;\s*transform: scale\(0\.94\);/);
