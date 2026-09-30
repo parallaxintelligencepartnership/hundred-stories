@@ -1208,8 +1208,11 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     },
     save() {
       // The player pressed Save, so this one logs; in a held My tower it is also the player
-      // choosing the new tower over the save that would not open.
+      // choosing the new tower over the save that would not open. An idle autosave not yet
+      // started is dropped: this save writes the same tower now, so the two never both write
+      // (P1 review A-5). One already writing finishes on its own, as with saveNow.
       if (slot === 'mine') mineHeld = false;
+      cancelScheduledSave();
       return saveWorld('player');
     },
     async load() {

@@ -312,9 +312,16 @@ interface Drawn {
   color: number;
 }
 
-/** Every rectangle a Graphics filled, with its colour, in drawing order. */
-function fills(g: Graphics): Drawn[] {
+/**
+ * Every rectangle a Graphics filled, with its colour, in drawing order; for a layer of them (the
+ * facade's night panes are one Graphics per band of floors since 2026-09-29), each child's in turn.
+ */
+function fills(g: Graphics | Container): Drawn[] {
   const out: Drawn[] = [];
+  if (!(g instanceof Graphics)) {
+    for (const child of g.children) out.push(...fills(child as Container));
+    return out;
+  }
   for (const ins of g.context.instructions) {
     if (ins.action !== 'fill') continue;
     const data = ins.data as { style: { color: number }; path: GraphicsPath };

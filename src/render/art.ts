@@ -1918,6 +1918,9 @@ export function createArt(renderer: Renderer, options: { createCanvas?: CanvasFa
   const byFamily: Record<string, number> = {};
   /** The person atlas's cells, by personCell; empty until the atlas is baked (people()). */
   let personCells: Texture[] | null = null;
+  // The atlas could not be baked (no 2D context for a canvas that size): it is not tried again,
+  // and each person is painted into a small canvas of its own instead (P3 review advisory 4).
+  let atlasFailed = false;
   const byKey = new Map<string, number>();
   const count = (key: string, bytes: number): void => {
     const family = key.slice(0, key.indexOf(':') >>> 0);
@@ -2017,10 +2020,13 @@ export function createArt(renderer: Renderer, options: { createCanvas?: CanvasFa
   /**
    * The person atlas, baked once on first ask (the renderer asks at boot) and kept for the life of
    * the art: every kept look of every wardrobe in every baked frame, at the illustrated scale.
-   * Null while no canvas context is to be had (paint warned); the next ask tries again.
+   * Null when no canvas context was to be had (paint warned): that is remembered, so a browser out
+   * of canvas memory is not asked for a 16 MB canvas again on every person drawn; art.sim falls
+   * back to one small canvas per look and frame (personCellAlone).
    */
   function people(): Texture[] | null {
     if (personCells) return personCells;
+    if (atlasFailed) return null;
     const atlas = paint(
       'person:atlas',
       PERSON_ATLAS_W,
@@ -2040,7 +2046,10 @@ export function createArt(renderer: Renderer, options: { createCanvas?: CanvasFa
         }
       },
     );
-    if (atlas === Texture.EMPTY) return null;
+    if (atlas === Texture.EMPTY) {
+      atlasFailed = true;
+      return null;
+    }
     const cells: Texture[] = [];
     for (let cell = 0; cell < PERSON_ATLAS_CELLS; cell++) {
       const frame = new Rectangle((cell % PERSON_ATLAS_COLS) * PERSON_CELL_W, Math.floor(cell / PERSON_ATLAS_COLS) * PERSON_CELL_H, SIM_W, SIM_H);
@@ -2048,6 +2057,12 @@ export function createArt(renderer: Renderer, options: { createCanvas?: CanvasFa
     }
     personCells = cells;
     return cells;
+  }
+
+  /** One atlas cell's person on a canvas of its own, cached like any painting: the fallback when the atlas could not be baked. */
+  function personCellAlone(kind: SimKind, code: number, frame: PersonFrame): Texture {
+    const cell = personCell(kind, code, frame);
+    return paint(`person:cell:${cell}`, SIM_W, SIM_H, (ctx) => drawPerson(ctx as unknown as Ctx2D, kind, code, frame));
   }
 
   function venueTexture(kind: VenueKind, widthTiles: number, treatment: Treatment | number): Texture {
@@ -2106,7 +2121,8 @@ export function createArt(renderer: Renderer, options: { createCanvas?: CanvasFa
       // A cell of the one person atlas: mirrored frames share their twin's cell and the renderer
       // flips the sprite (anim.ts isMirrored); a look outside the set takes its kept look.
       const cells = people();
-      return cells?.[personCell(kind, code, f)] ?? Texture.EMPTY;
+      if (!cells) return personCellAlone(kind, code, f);
+      return cells[personCell(kind, code, f)] ?? Texture.EMPTY;
     },
 
     ghost(widthTiles, heightFloors, ok) {

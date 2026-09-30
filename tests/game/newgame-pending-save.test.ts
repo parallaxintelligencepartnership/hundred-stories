@@ -50,3 +50,40 @@ it('New game drops an idle save of the old tower that has not started', async ()
   expect(stored.seed).toBe(12);
   expect(stored.rooms.length).toBe(0);
 });
+
+it('the player pressing Save drops an idle autosave that has not started, so only one write runs (P1 review A-5)', async () => {
+  vi.stubGlobal('localStorage', {
+    getItem: (k: string) => data.get(k) ?? null,
+    setItem: (k: string, v: string) => void data.set(k, v),
+    removeItem: (k: string) => void data.delete(k),
+    clear: () => data.clear(),
+    key: () => null,
+    get length() {
+      return data.size;
+    },
+  });
+  vi.resetModules();
+  const { createGame } = await import('../../src/game/game');
+  const idle: (() => void)[] = [];
+  const game = createGame(11, {
+    now: () => 0,
+    hidden: () => true,
+    scheduleIdle: (run: () => void) => {
+      idle.push(run);
+      return () => {
+        const i = idle.indexOf(run);
+        if (i >= 0) idle.splice(i, 1);
+      };
+    },
+    today: () => '2026-09-29',
+    freshSeed: () => 77,
+  });
+  game.apply({ kind: 'build', room: 'lobby', floor: 1, x: 150 });
+  game.setSpeed(0); // pausing a moved tower asks for an idle save, not run yet
+  expect(idle.length).toBeGreaterThan(0);
+  const result = await game.save();
+  expect(result.ok).toBe(true);
+  expect(idle).toHaveLength(0); // the idle save is gone: the player's save wrote the tower
+  const stored = JSON.parse(data.get('hundred-stories:autosave')!) as { rooms: unknown[] };
+  expect(stored.rooms.length).toBe(1);
+});

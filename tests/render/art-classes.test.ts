@@ -296,6 +296,39 @@ describe('a canvas with no 2D context (audit 2026-09-25 F2 S3)', () => {
   });
 });
 
+describe('a browser that cannot give the person atlas a 2D context (P3 review advisory 4)', () => {
+  it('asks for the atlas canvas once, remembers, and draws each person on a small canvas of its own', () => {
+    const renderer = { generateTexture: (): Texture => new Texture() } as unknown as PixiRenderer;
+    const noop = (): void => {};
+    const ctx = new Proxy(
+      {},
+      {
+        get: (_t, key) =>
+          key === 'measureText' ? () => ({ width: 20 }) : key === 'createLinearGradient' || key === 'createRadialGradient' ? () => ({ addColorStop: noop }) : noop,
+        set: () => true,
+      },
+    );
+    const big: number[] = [];
+    // Out of canvas memory for the atlas's size (as iOS Safari at its cap), fine for a small one.
+    const createCanvas = (width: number, height: number): HTMLCanvasElement => {
+      const huge = width * height > 512 * 512;
+      if (huge) big.push(width * height);
+      return { width, height, getContext: () => (huge ? null : ctx) } as unknown as HTMLCanvasElement;
+    };
+    const art = createArt(renderer, { createCanvas, resolution: 2 });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const drawn = [0, 1, 2, 3, 4, 5].map((frame) => art.sim('worker', 'calm', (frame % 2) as 0 | 1, 0));
+      expect(big).toHaveLength(1); // one try at the 7 MB canvas, never one per person drawn
+      for (const texture of drawn) expect(texture).not.toBe(Texture.EMPTY);
+      // The same look and frame is the same small texture, cached.
+      expect(art.sim('worker', 'calm', 0, 0)).toBe(drawn[0]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
+
 describe('a lobby tile is a cell of one hall (design pass D-11)', () => {
   type Fill = { x: number; y: number; w: number; h: number; color: number; alpha: number };
   /** Bakes one room and returns every rect its shell fills, read before the bake frees it. */

@@ -514,6 +514,36 @@ const VENUE_CLOCK_MINUTES = 10;
 /** Far zoom blocks are redrawn this often, in real ms, so their occupancy fill stays current. */
 const BLOCKS_REFRESH_MS = 400;
 
+/**
+ * The lit windows (D-4) and the far facade's night panes (BB-2) are drawn in bands of this many
+ * floors, one Graphics per band, so a room lit or put out redraws its band and no more, and a
+ * tall tower at night costs one draw call per band rather than one per lit floor (P3 review
+ * advisory 2: 12 Graphics, each past Pixi's auto-batch limit, on a 12 floor night tower).
+ */
+export const LIT_BAND_FLOORS = 8;
+
+/** The band a floor's lit windows are drawn in (LIT_BAND_FLOORS). */
+export function litBandOf(floor: number): number {
+  return Math.floor(floor / LIT_BAND_FLOORS);
+}
+
+/**
+ * People get a sprite within this share of a viewport past each edge of the view, so a pan shows
+ * them already in place. A quarter each side (P3 review advisory 5): the view and its margin are
+ * 1.5 viewports across, where a whole viewport each side made it 3 by 3, nine times the view.
+ */
+export const CROWD_MARGIN_VIEWPORTS = 0.25;
+
+/**
+ * At most this many people are drawn in a frame; past it, the people nearest the middle of the view
+ * are drawn and the rest are skipped (the selected person always stays). A person costs about 2.5
+ * to 3 us of script a frame with its prop and mark (P3 review, measured), so 1,000 is about 3 ms,
+ * inside a 16 ms frame beside the sim's 8 ms box; every person samples one atlas texture (1054 by
+ * 1744 at a device pixel ratio of 2), so they batch in a handful of draw calls. The ceiling binds
+ * only in the very largest towers seen far out; a normal view never reaches it.
+ */
+export const CROWD_CEILING = 1000;
+
 function canvasTexture(width: number, height: number, draw: (ctx: CanvasRenderingContext2D) => void): Texture {
   try {
     const canvas = document.createElement('canvas');
@@ -1117,10 +1147,11 @@ export async function createRenderer(
   const blockGlow = new Graphics();
   blockGlow.label = 'block glow';
   blockGlow.visible = false;
-  const facadeLit = new Graphics();
+  // The facade's night panes: one Graphics per band of LIT_BAND_FLOORS floors (facadeBands).
+  const facadeLit = new Container();
   facadeLit.label = 'facade lit';
   facadeLit.visible = false;
-  // One Graphics per floor in each (litFloors), so a room lit or put out redraws its own floor only.
+  // One Graphics per band of floors in each (litBands), so a room lit or put out redraws its band only.
   const litHalo = new Container();
   litHalo.label = 'lit halo';
   litHalo.blendMode = 'add';
@@ -1178,10 +1209,15 @@ export async function createRenderer(
   let blocksDirty = true;
   let blocksAge = 0;
   let facadeDirty = true;
-  // A window state changed with the structure the same: the facade's panes catch up on its own
-  // refresh, at most every BLOCKS_REFRESH_MS, not on every room lit or put out.
+  // A room's night came with the structure the same: its lit or dark pane goes on over its day
+  // pane at once (facadeDirtyBands), and the wall is redrawn without the day pane under it on
+  // its own refresh, at most every BLOCKS_REFRESH_MS. Nothing shows for that wait.
   let facadeLitDirty = false;
   let facadeAge = 0;
+  // The bands whose night panes a window state change asks to redraw on the next frame, unthrottled.
+  const facadeDirtyBands = new Set<number>();
+  // Whether the facade on screen was drawn for the night (its wall's grade); null before the first.
+  let facadeNightDrawn: boolean | null = null;
   // The Districts view is on: the shafts step back to a faint column (setOverlay).
   let districtsOn = false;
   /** The cables fade with the shafts, at far zoom and in Districts; the car sprites stay at full strength. */
@@ -1529,17 +1565,17 @@ export async function createRenderer(
    * D-4: the lit windows over the multiply. A lit room's panes, one per tile with a pale header,
    * over a soft halo along each lit floor; a housekeeping room's lamp. Panes under a shaft or a
    * flight are skipped, and a pane is cut where the room's sign board stands in front of it, so
-   * what stood before the windows still does. One Graphics pair per floor: a full reconcile
-   * redraws every floor, a window state change (refreshWindows) only the floors of the rooms
-   * that changed. Empty by day.
+   * what stood before the windows still does. One Graphics pair per band of LIT_BAND_FLOORS
+   * floors: a full reconcile redraws every band, a window state change (refreshWindows) only the
+   * bands of the rooms that changed. Empty by day.
    */
-  const litFloors = new Map<number, { panes: Graphics; halo: Graphics }>();
+  const litBands = new Map<number, { panes: Graphics; halo: Graphics }>();
   /** The rooms with a window band on each floor, as the last full pass saw them. */
   const litRoomsByFloor = new Map<number, Room[]>();
   /** paneObstacles for the structure the last full pass saw; made on first need. */
   let litObstacles: Map<number, [number, number][]> | null = null;
-  /** Floors whose lit windows a window state change asks to redraw; drained by refreshWindows. */
-  const litDirtyFloors = new Set<number>();
+  /** Bands whose lit windows a window state change asks to redraw; drained by refreshWindows. */
+  const litDirtyBands = new Set<number>();
 
   function drawLitWindows(w: World): void {
     litRoomsByFloor.clear();
@@ -1552,21 +1588,29 @@ export async function createRenderer(
         else litRoomsByFloor.set(f, [room]);
       }
     }
-    for (const [f, g] of litFloors) {
-      if (litRoomsByFloor.has(f)) continue;
+    const bands = new Set<number>();
+    for (const f of litRoomsByFloor.keys()) bands.add(litBandOf(f));
+    for (const [b, g] of litBands) {
+      if (bands.has(b)) continue;
       g.panes.destroy();
       g.halo.destroy();
-      litFloors.delete(f);
+      litBands.delete(b);
     }
-    for (const f of litRoomsByFloor.keys()) drawLitFloor(w, f);
+    for (const b of bands) drawLitBand(w, b);
   }
 
-  function drawLitFloor(w: World, f: number): void {
-    let g = litFloors.get(f);
+  function drawLitBand(w: World, band: number): void {
+    const g = litBands.get(band);
     if (g) {
       g.panes.clear();
       g.halo.clear();
     }
+    for (let f = band * LIT_BAND_FLOORS; f < (band + 1) * LIT_BAND_FLOORS; f++) drawLitFloor(w, band, f);
+  }
+
+  /** One floor's lit windows, into its band's pair (made on the first lit room). */
+  function drawLitFloor(w: World, band: number, f: number): void {
+    let g = litBands.get(band);
     const y = floorTopY(f);
     for (const room of litRoomsByFloor.get(f) ?? []) {
       const entry = roomSprites.get(room.id);
@@ -1577,7 +1621,7 @@ export async function createRenderer(
         g.halo.blendMode = 'add';
         litHalo.addChild(g.halo);
         litPanes.addChild(g.panes);
-        litFloors.set(f, g);
+        litBands.set(band, g);
       }
       litObstacles ??= paneObstacles(w);
       const lit = entry.state === 'lit';
@@ -1615,19 +1659,27 @@ export async function createRenderer(
       if (!entry) continue;
       const state = windowStateOf(room, roomNight(w.seed, room.id, minuteOfDay), peopleFloors);
       if (state === entry.state) continue;
+      const was = entry.state;
       entry.state = state;
       entry.node.texture = roomTexture(room, entry.variant, state);
       const grade = room.onFire ? FIRE_TINT : NIGHT_GRADE[state];
       entry.node.tint = grade;
       const venue = venueSprites.get(room.id);
       if (venue) gradeVenue(venue, grade);
-      if (hasWindowBand(room.kind)) for (const f of spanFloors(room.floor, room.height)) litDirtyFloors.add(f);
+      if (!hasWindowBand(room.kind)) continue;
+      for (const f of spanFloors(room.floor, room.height)) {
+        litDirtyBands.add(litBandOf(f));
+        facadeDirtyBands.add(litBandOf(f));
+      }
+      // The facade: a room's day pane is on the wall. Coming back to day it needs the wall
+      // redrawn at once; leaving day, its night pane covers the old one until the wall's refresh.
+      if (state === 'day') facadeDirty = true;
+      else if (was === 'day') facadeLitDirty = true;
     }
     updateVenues(w, night);
-    if (litDirtyFloors.size === 0) return;
-    for (const f of litDirtyFloors) drawLitFloor(w, f);
-    litDirtyFloors.clear();
-    facadeLitDirty = true;
+    if (litDirtyBands.size === 0) return;
+    for (const b of litDirtyBands) drawLitBand(w, b);
+    litDirtyBands.clear();
   }
 
   /** The parts of [from, to) a board does not cover, room px. */
@@ -1929,17 +1981,26 @@ export async function createRenderer(
    * day the panes are glass; once a room's night has come (roomNight, D-15) its pane is lit or
    * dark by the room's window state, on the emissive layer over the night tint.
    */
+  /** Per built floor above the street, as the last facade rebuild saw it: for drawFacadeBand. */
+  const facadeRows = new Map<number, { min: number; max: number; row: Map<number, Room> | undefined; spans: [number, number][] | undefined }>();
+  /** The facade's night panes, one Graphics per band of floors. */
+  const facadeBands = new Map<number, Graphics>();
+
   function rebuildFacade(w: World): void {
     facadeDirty = false;
     facadeLitDirty = false;
     facadeAge = 0;
+    facadeDirtyBands.clear();
     facade.clear();
-    facadeLit.clear();
+    facadeRows.clear();
     const extents = builtFloorExtents(w);
     const obstacles = paneObstacles(w);
     // At night the wall takes the grade an empty room takes (D-4), so the facade is a dark slab and
-    // its lit panes, on the emissive layer and never graded, carry it.
-    facade.tint = isNight(clockOf(w.time.minute).minuteOfDay) ? NIGHT_GRADE.vacant : 0xffffff;
+    // its lit panes, on the emissive layer and never graded, carry it. The grade is read again
+    // whenever night comes or goes (onFrame), not only when a window changes (P3 advisory 1).
+    const night = isNight(clockOf(w.time.minute).minuteOfDay);
+    facadeNightDrawn = night;
+    facade.tint = night ? NIGHT_GRADE.vacant : 0xffffff;
     const cells = new Map<number, Map<number, Room>>();
     for (const room of w.rooms.values()) {
       if (drawsOverRooms(room.kind) || !hasWindowBand(room.kind)) continue;
@@ -1965,24 +2026,59 @@ export async function createRenderer(
       facade.rect(x, top, width, FLOOR_PX).fill(FACADE_WALL);
       const row = cells.get(floor);
       const spans = obstacles.get(floor);
-      if (row) {
-        for (let t = extent.min + (((extent.min % 2) + 2) % 2); t < extent.max; t += 2) {
-          const room = row.get(t);
-          if (!room || blockedAt(spans, t)) continue;
-          const state = roomSprites.get(room.id)?.state ?? 'day';
-          // The pane's second tile: cut back to one tile's pane at a shaft, a flight or the floor's end.
-          const paneW = blockedAt(spans, t + 1) || t + 1 >= extent.max ? WIN_PANE : FACADE_PANE_W;
-          const px = t * TILE_PX + WIN_PANE_X;
-          const py = top + WIN_PANE_TOP;
-          if (state === 'day') facade.rect(px, py, paneW, WIN_PANE).fill(PALETTE.windowDay);
-          // A burning room shows no lit light at any zoom: its panes stay dark while it burns.
-          else facadeLit.rect(px, py, paneW, WIN_PANE).fill(state === 'lit' && !room.onFire ? PALETTE.windowLit : PALETTE.windowUnlit);
-        }
-      }
+      facadeRows.set(floor, { min: extent.min, max: extent.max, row, spans });
+      forFacadePanes(floor, (room, state, px, py, paneW) => {
+        if (state === 'day') facade.rect(px, py, paneW, WIN_PANE).fill(PALETTE.windowDay);
+      });
       facade.rect(x, top + FLOOR_PX - SLAB_PX, width, LINE_PX).fill(FACADE_SLAB);
     }
     for (const shaft of w.shafts.values()) {
       facade.rect(shaft.x * TILE_PX, floorTopY(shaft.floorMax), shaft.width * TILE_PX, shaftFloorSpan(shaft) * FLOOR_PX).fill({ color: FACADE_SHAFT, alpha: districtsOn ? DISTRICTS_SHAFT_ALPHA : 1 });
+    }
+    const bands = new Set<number>();
+    for (const floor of facadeRows.keys()) bands.add(litBandOf(floor));
+    for (const [b, g] of facadeBands) {
+      if (bands.has(b)) continue;
+      g.destroy();
+      facadeBands.delete(b);
+    }
+    for (const b of bands) drawFacadeBand(b);
+  }
+
+  /** Each pane of a floor's facade row (facadeRows): its room, that room's window state, and where it goes. */
+  function forFacadePanes(floor: number, each: (room: Room, state: WindowState, px: number, py: number, paneW: number) => void): void {
+    const at = facadeRows.get(floor);
+    if (!at || !at.row) return;
+    const py = floorTopY(floor) + WIN_PANE_TOP;
+    for (let t = at.min + (((at.min % 2) + 2) % 2); t < at.max; t += 2) {
+      const room = at.row.get(t);
+      if (!room || blockedAt(at.spans, t)) continue;
+      const state = roomSprites.get(room.id)?.state ?? 'day';
+      // The pane's second tile: cut back to one tile's pane at a shaft, a flight or the floor's end.
+      const paneW = blockedAt(at.spans, t + 1) || t + 1 >= at.max ? WIN_PANE : FACADE_PANE_W;
+      each(room, state, t * TILE_PX + WIN_PANE_X, py, paneW);
+    }
+  }
+
+  /**
+   * One band's night panes on the emissive layer, from the rows the last rebuild saw: a window
+   * state change redraws its band on the next frame, not the whole facade on a 400 ms clock, so
+   * the far facade lights room by room at any speed (D-15, P3 advisory 3).
+   */
+  function drawFacadeBand(band: number): void {
+    let g = facadeBands.get(band);
+    if (g) g.clear();
+    for (let f = band * LIT_BAND_FLOORS; f < (band + 1) * LIT_BAND_FLOORS; f++) {
+      forFacadePanes(f, (room, state, px, py, paneW) => {
+        if (state === 'day') return;
+        if (!g) {
+          g = new Graphics();
+          facadeLit.addChild(g);
+          facadeBands.set(band, g);
+        }
+        // A burning room shows no lit light at any zoom: its panes stay dark while it burns.
+        g.rect(px, py, paneW, WIN_PANE).fill(state === 'lit' && !room.onFire ? PALETTE.windowLit : PALETTE.windowUnlit);
+      });
     }
   }
 
@@ -2215,6 +2311,27 @@ export async function createRenderer(
     entry.mark.position.set(x, y - markBottomAboveFeet(look));
   }
 
+  /**
+   * Past CROWD_CEILING people in range, the ones nearest the middle of the view (then by id, so
+   * the pick holds still frame to frame), and the selected person whatever the distance; null
+   * when everyone in range is drawn. The loop keeps its id order, so room slots do not reshuffle.
+   */
+  function crowdKept(inRange: readonly Sim[]): Set<Id> | null {
+    if (inRange.length <= CROWD_CEILING) return null;
+    const cx = camera.x;
+    const cy = camera.y;
+    const far = inRange.map((sim) => {
+      const dx = sim.pos.x * TILE_PX - cx;
+      const dy = simFeetY(sim.pos.floor) - cy;
+      return { id: sim.id, d: dx * dx + dy * dy };
+    });
+    far.sort((a, b) => a.d - b.d || a.id - b.id);
+    const kept = new Set<Id>();
+    for (let i = 0; i < CROWD_CEILING; i++) kept.add((far[i] as { id: Id }).id);
+    if (selection?.simId !== undefined) kept.add(selection.simId);
+    return kept;
+  }
+
   function reconcileSims(w: World, alpha: number): void {
     drawnAt.clear();
     // Far zoom: nobody but the selected person, so the blocks read as the tower.
@@ -2236,21 +2353,28 @@ export async function createRenderer(
     // Sims standing in a room take a fixed slot, in id order, so they stop jittering.
     simSlots.clear();
 
-    // One viewport of margin on every side of the camera, in world px; a sim further
-    // out than this gets no sprite until it comes back into range.
-    const halfW = app.screen.width / camera.zoom;
-    const halfH = app.screen.height / camera.zoom;
+    // The view and a quarter viewport of margin on every side (CROWD_MARGIN_VIEWPORTS), in world
+    // px; a sim further out than this gets no sprite until it comes back into range.
+    const halfW = (app.screen.width * (0.5 + CROWD_MARGIN_VIEWPORTS)) / camera.zoom;
+    const halfH = (app.screen.height * (0.5 + CROWD_MARGIN_VIEWPORTS)) / camera.zoom;
     const viewLeft = camera.x - halfW;
     const viewRight = camera.x + halfW;
     const viewTop = camera.y - halfH;
     const viewBottom = camera.y + halfH;
-
-    seenSims.clear();
-    const now = performance.now();
+    let inRange = 0;
     for (const sim of drawnSims) {
       const sx = sim.pos.x * TILE_PX;
       const sy = simFeetY(sim.pos.floor);
       if (sx < viewLeft || sx > viewRight || sy < viewTop || sy > viewBottom) continue;
+      drawnSims[inRange++] = sim;
+    }
+    drawnSims.length = inRange;
+    const kept = crowdKept(drawnSims);
+
+    seenSims.clear();
+    const now = performance.now();
+    for (const sim of drawnSims) {
+      if (kept && !kept.has(sim.id)) continue;
       seenSims.add(sim.id);
       const kind = sim.kind;
       const band = stressBand(sim.stress);
@@ -2745,7 +2869,13 @@ export async function createRenderer(
       if (blocksDirty || blocksAge >= BLOCKS_REFRESH_MS) rebuildBlocks(lastWorld);
     } else if (plan.facade) {
       facadeAge += dt;
+      // Night came or went: the wall takes its grade now, whether or not a window changed with it.
+      if (facadeNightDrawn !== isNight(clock.minuteOfDay)) facadeDirty = true;
       if (facadeDirty || (facadeLitDirty && facadeAge >= BLOCKS_REFRESH_MS)) rebuildFacade(lastWorld);
+      else if (facadeDirtyBands.size > 0) {
+        for (const b of facadeDirtyBands) drawFacadeBand(b);
+        facadeDirtyBands.clear();
+      }
     } else if (plan.windowVeil > 0 && veilDirty) rebuildVeil(lastWorld);
     curb.update({
       world: lastWorld,
@@ -2828,11 +2958,11 @@ export async function createRenderer(
     for (const entry of slabSprites.values()) entry.node.destroy();
     slabSprites.clear();
     for (const [id, entry] of [...venueSprites]) dropVenue(id, entry);
-    for (const g of litFloors.values()) {
+    for (const g of litBands.values()) {
       g.panes.destroy();
       g.halo.destroy();
     }
-    litFloors.clear();
+    litBands.clear();
     litRoomsByFloor.clear();
     litObstacles = null;
     for (const entry of shaftSprites.values()) for (const part of entry.parts) part.destroy();

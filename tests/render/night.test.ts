@@ -237,19 +237,19 @@ describe('D-4: the emissive layer', () => {
     expect(fills(find(stage, 'lit halo') as Graphics)).toEqual([]);
   });
 
-  it('redraws only the floor of a room lit or put out, and never the whole tower (package P3 F1)', async () => {
+  it('redraws only the band of floors of a room lit or put out, and never the whole tower (package P3 F1, bands 2026-09-29)', async () => {
     const world = createWorld(5);
     world.time.minute = at(23);
     const a = makeRoom(world, 'office', 3, 100, { occupancy: 2 });
-    makeRoom(world, 'office', 5, 100, { occupancy: 1 });
+    makeRoom(world, 'office', 11, 100, { occupancy: 1 }); // the next band of LIT_BAND_FLOORS
     const { renderer, stage } = await mount(world);
     renderer.render(world, 1);
     const panes = find(stage, 'lit panes');
     const floorOf = (g: Container): number | undefined => {
       const first = fills(g)[0];
-      return first === undefined ? undefined : [3, 5].find((f) => first.y === floorTopY(f) + 6);
+      return first === undefined ? undefined : [3, 11].find((f) => first.y === floorTopY(f) + 6);
     };
-    const five = panes.children.find((g) => floorOf(g as Container) === 5) as Graphics;
+    const five = panes.children.find((g) => floorOf(g as Container) === 11) as Graphics;
     const three = panes.children.find((g) => floorOf(g as Container) === 3) as Graphics;
     expect(five).toBeDefined();
     expect(three).toBeDefined();
@@ -259,7 +259,7 @@ describe('D-4: the emissive layer', () => {
     three.clear = () => (cleared.three++, clearThree());
     five.clear = () => (cleared.five++, clearFive());
 
-    setOccupancy(world, a, 0); // floor 3 goes dark: a lit change, no structure change
+    setOccupancy(world, a, 0); // floor 3 goes dark: a lit change, no structure change; floor 11's band is left alone
     renderer.render(world, 1);
     expect(fills(three)).toEqual([]);
     expect(cleared).toEqual({ three: 1, five: 0 });
