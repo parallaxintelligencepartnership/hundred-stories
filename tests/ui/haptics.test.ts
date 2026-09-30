@@ -11,7 +11,7 @@ import {
 } from '../../src/ui/haptics';
 import { PREF_KEYS, getPref } from '../../src/ui/prefs';
 import { createUi } from '../../src/ui/ui';
-import { FakeDom, type FakeElement } from './fake-dom';
+import { FakeDom, type FakeElement, choosePauseEntry } from './fake-dom';
 
 let dom: FakeDom;
 let uninstall: () => void;
@@ -115,6 +115,7 @@ describe('the Haptics switch', () => {
       subscribe: () => () => {},
       getHover: () => null,
       getSpeed: () => 1,
+      setSpeed: () => {},
       getTool: () => ({ kind: 'none' }),
       setTool: () => {},
       getPlacement: () => null,
@@ -128,6 +129,7 @@ describe('the Haptics switch', () => {
     createUi(root as never, game as never, {} as never);
     const menu = root.descendants().find((n) => n.getAttribute('aria-label') === 'Menu')!;
     for (const fn of menu.listeners.get('click') ?? []) fn({});
+    choosePauseEntry(root, 'settings');
     const control = root.descendants().find((n) => n.id === 'hs-haptics')!;
     const row = control.parentNode!;
     const list = row.parentNode!;

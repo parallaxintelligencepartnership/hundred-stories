@@ -272,21 +272,13 @@ describe('the words for an older daily', () => {
 });
 
 describe('settings', () => {
-  it("puts Today's tower next to New game in My tower", () => {
+  // New game, My tower and Today's tower moved to the pause menu (2026-09-29): its slot rules are
+  // pinned in tests/ui/pause-menu.test.ts. Settings carries none of them in any tower.
+  it.each(['mine', 'daily', 'friend'] as const)('carries no New game, My tower or Today\'s tower in %s', (slot) => {
     const opened: string[] = [];
-    const panel = createSettingsPanel(dailyGame({ slot: 'mine' }), { ...ctx, openDaily: () => opened.push('daily'), openMyTower: () => opened.push('mine') }) as unknown as FakeElement;
-    const newGame = buttonNamed(panel, 'New game');
-    const today = buttonNamed(panel, "Today's tower");
-    expect(newGame.parentNode).toBe(today.parentNode);
-    click(today);
-    expect(opened).toEqual(['daily']);
-  });
-
-  it('outside My tower offers My tower in place of New game, so New game never runs in another slot', () => {
-    const opened: string[] = [];
-    const panel = createSettingsPanel(dailyGame({ slot: 'daily' }), { ...ctx, openDaily: () => opened.push('daily'), openMyTower: () => opened.push('mine') }) as unknown as FakeElement;
-    expect(panel.descendants().some((n) => n.tagName === 'BUTTON' && n.textContent === 'New game')).toBe(false);
-    click(buttonNamed(panel, 'My tower'));
-    expect(opened).toEqual(['mine']);
+    const panel = createSettingsPanel(dailyGame({ slot }), { ...ctx, openDaily: () => opened.push('daily'), openMyTower: () => opened.push('mine') }) as unknown as FakeElement;
+    const words = panel.descendants().filter((n) => n.tagName === 'BUTTON').map((n) => n.textContent);
+    for (const gone of ['New game', 'My tower', "Today's tower"]) expect(words).not.toContain(gone);
+    expect(opened).toEqual([]);
   });
 });

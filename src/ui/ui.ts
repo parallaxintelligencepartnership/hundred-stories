@@ -51,6 +51,8 @@ import {
   createSharePanel,
   createStoriesPanel,
   el,
+  freshStart,
+  HOW_TO_PLAY_HREF,
   readGlassClear,
 } from './panels';
 import type { PanelContext, PanelElement } from './panels';
@@ -71,7 +73,8 @@ import { focusablesIn, SHEET_CARD_MIN_WIDTH } from './sheet';
 import { createQuietLabels } from './quiet-labels';
 import { WATCH_CLASS, createWatchMode, createWatchToggle } from './watch';
 import { createSoundToggle } from './sound-toggle';
-import { createSaveButton } from './save-button';
+import { createSaveAction, createSaveButton, SAVE_TIP, SAVE_WORD, type SaveAction } from './save-button';
+import { createPauseMenu, type PauseEntry } from './pause-menu';
 import { UPDATE_TEXT, type Notifier } from './notify';
 
 export interface Ui {
@@ -375,9 +378,9 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   const shareButton = iconButton('share', 'Share', 'Share your tower', 'hs-round', () =>
     setPanel(panelKind === 'share' ? 'none' : 'share'),
   );
-  const menuButton = iconButton('menu', 'Menu', 'Open the menu', 'hs-round', () =>
-    setPanel(panelKind === 'settings' ? 'none' : 'settings'),
-  );
+  // Menu opens the pause menu (src/ui/pause-menu.ts); a second press, with it or anything it
+  // opened still up, resumes.
+  const menuButton = iconButton('menu', 'Menu', 'Open the menu', 'hs-round', () => togglePauseMenu());
   // Outside My tower (today's tower, a friend's tower) one tap goes back to it. The word on a
   // wide screen; a phone shows the house alone (ui.css), named by the aria-label.
   const myTowerButton = button('', 'hs-btn hs-pill-btn hs-my-tower', () => openMyTower());
@@ -652,7 +655,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   };
   const watch = createWatchMode({
     shell,
-    busy: () => mountedPanel !== null || view.isOpen() || build.sheet() === 'full' || guideActive() || placing(),
+    busy: () =>
+      mountedPanel !== null || pauseMenu.isOpen() || view.isOpen() || build.sheet() === 'full' || guideActive() || placing(),
     onWatch: () => {
       if (build.sheet() === 'row') build.close();
     },
@@ -666,7 +670,29 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
       const sheet = build.sheet();
       if (sheet === 'row' || sheet === 'full') build.close();
       if (game.getSelection()) game.select(null);
+      // The pause menu closes like any other panel, the speed put back, focus left on Watch; it
+      // closes even under a card holding work, so that card closing later goes back to the game.
+      pauseMenu.close({ restoreFocus: false });
       if (!mountedPanel?.holdsWork?.()) setPanel('none');
+      else update();
+    },
+  });
+
+  // The pause menu: a card over the dimmed tower, the game held still while it is up. Its Save
+  // runs the same save and says the same notice as the round Save button.
+  let menuSave: SaveAction | null = null;
+  /** True while update() runs, so the menu's own redraw request does not re-enter it. */
+  let updating = false;
+  const pauseMenu = createPauseMenu({
+    host: shell,
+    getSpeed: () => game.getSpeed(),
+    setSpeed: (speed) => game.setSpeed(speed),
+    entries: () => pauseEntries(),
+    cue: (name) => sound.cue?.(name),
+    returnFocus: () => menuButton,
+    changed() {
+      shell.classList.toggle('is-paused-menu', pauseMenu.isShown());
+      if (!updating) update();
     },
   });
 
@@ -792,6 +818,16 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
 
   function update(): void {
     if (destroyed) return;
+    const outer = !updating;
+    updating = true;
+    try {
+      updateNow();
+    } finally {
+      if (outer) updating = false;
+    }
+  }
+
+  function updateNow(): void {
     const world = game.world;
     const speed = game.getSpeed();
     if (world !== seenWorld) onWorld(world);
@@ -1360,9 +1396,14 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   }
 
   function refreshPanel(): void {
+    // Whatever the pause menu opened over itself (Settings, and anything Settings opened) has
+    // closed: the menu comes back, not the game.
+    if (panelKind === 'none' && pauseMenu.isOpen() && !pauseMenu.isShown()) pauseMenu.show();
     const selection = game.getSelection();
-    const key =
-      panelKind !== 'none'
+    // While the menu is on screen no card stands beside it; the one it covered comes back after.
+    const key = pauseMenu.isShown()
+      ? ''
+      : panelKind !== 'none'
         ? `panel:${panelKind}${panelKind === 'daily' ? `:${dailyKey()}` : ''}`
         : selection
           ? `query:${selection.roomId ?? ''}:${selection.simId ?? ''}:${selection.shaftId ?? ''}:${
@@ -1647,6 +1688,102 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     return result;
   }
 
+  // ---------------------------------------------------------- pause menu
+
+  /** No panel, card, list or sheet is up: the one time Escape opens the menu. */
+  function nothingOpen(): boolean {
+    return panelKind === 'none' && mountedPanel === null && !view.isOpen() && build.sheet() === 'closed';
+  }
+
+  function openPauseMenu(): void {
+    if (pauseMenu.isOpen()) return;
+    if (view.isOpen()) view.close();
+    const sheet = build.sheet();
+    if (sheet === 'row' || sheet === 'full') build.close();
+    if (panelKind !== 'none') setPanel('none');
+    pauseMenu.open();
+    update();
+  }
+
+  function closePauseMenu(): void {
+    pauseMenu.close();
+    if (panelKind !== 'none') setPanel('none');
+    update();
+  }
+
+  function togglePauseMenu(): void {
+    if (pauseMenu.isOpen()) closePauseMenu();
+    else openPauseMenu();
+  }
+
+  /**
+   * The menu's entries, in order: Resume, Save, New game in My tower or My tower anywhere else
+   * (a new game only ever replaces My tower), Today's tower outside it, Stories, on a phone Views
+   * and Share, Settings, How to play. A new tower always gets a fresh random start; the starting
+   * number is only in the page address (?seed=, read in main.ts) for testing, never here.
+   */
+  function pauseEntries(): PauseEntry[] {
+    const slot = game.getSlot?.() ?? 'mine';
+    const entries: PauseEntry[] = [
+      { id: 'resume', label: 'Resume', icon: 'play', kind: 'resume' },
+      {
+        id: 'save',
+        label: SAVE_WORD,
+        icon: 'save',
+        kind: 'stay',
+        title: SAVE_TIP,
+        bind(item) {
+          menuSave?.destroy();
+          menuSave = createSaveAction({ save: () => game.save(), notice: (text) => notice(text) }, item);
+        },
+        run: () => menuSave?.run(),
+      },
+      slot === 'mine'
+        ? {
+            id: 'newGame',
+            label: 'New game',
+            icon: 'structure',
+            kind: 'leave',
+            run() {
+              game.newGame(freshStart());
+              notice('New game started.');
+            },
+          }
+        : { id: 'myTower', label: 'My tower', icon: 'home', kind: 'leave', run: () => openMyTower() },
+    ];
+    if (slot !== 'daily') entries.push({ id: 'daily', label: "Today's tower", icon: 'star', kind: 'leave', run: () => ctx.openDaily?.() });
+    entries.push({
+      id: 'stories',
+      label: 'Stories',
+      icon: 'population',
+      kind: 'leave',
+      title: 'The people you follow and the latest from around the tower',
+      run: () => setPanel('stories'),
+    });
+    // A phone's top bar is the pill alone (ui.css), so Views and Share live here instead.
+    if (inSheetLayout()) {
+      entries.push(
+        { id: 'views', label: 'Views', icon: 'views', kind: 'leave', title: 'Stress, noise, vacancy and elevator wait', run: () => ctx.openViews?.() },
+        { id: 'share', label: 'Share', icon: 'share', kind: 'leave', title: 'Share your tower', run: () => setPanel('share') },
+      );
+    }
+    entries.push(
+      { id: 'settings', label: 'Settings', icon: 'settings', kind: 'over', run: () => setPanel('settings') },
+      // The guide, linked the way Settings always linked it: the page, in a new tab.
+      {
+        id: 'guide',
+        label: 'How to play',
+        icon: 'help',
+        kind: 'link',
+        href: HOW_TO_PLAY_HREF,
+        target: '_blank',
+        rel: 'noopener',
+        title: 'The full guide, in a new tab',
+      },
+    );
+    return entries;
+  }
+
   function setPanel(kind: PanelKind): void {
     // Any way out of the intro (Skip, Close, finishing, another panel) counts as seen.
     if (panelKind === 'intro' && kind !== 'intro') markIntroSeen();
@@ -1685,6 +1822,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
 
   /** Something that holds focus for the d-pad: an open panel, the Views list, the build sheet. */
   function padMenu(): HTMLElement | null {
+    if (pauseMenu.isShown()) return pauseMenu.card;
     if (view.isOpen()) return view.menu;
     if (mountedPanel) return (mountedPanel.sheet?.node as HTMLElement | undefined) ?? mountedPanel;
     const sheet = build.sheet();
@@ -1746,7 +1884,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
         update();
       },
       start() {
-        setPanel(panelKind === 'settings' ? 'none' : 'settings');
+        togglePauseMenu();
       },
       dpad(direction: PadDirection) {
         const menu = padMenu();
@@ -1806,6 +1944,10 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
 
   /** B: close the nearest thing open, else put the tool down. */
   function padBack(): void {
+    if (pauseMenu.isShown()) {
+      closePauseMenu();
+      return;
+    }
     if (view.isOpen()) {
       view.close({ restoreFocus: true });
       return;
@@ -1872,6 +2014,12 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
 
   function onKeyDown(event: KeyboardEvent): void {
     if (event.defaultPrevented) return;
+    // The pause menu is modal: its keys are its own, and nothing reaches the tower behind it.
+    if (pauseMenu.isShown()) {
+      pauseMenu.handleKey(event);
+      event.stopImmediatePropagation?.();
+      return;
+    }
     // The Views list and the phone build sheet close on Escape before anything else.
     if (event.key === 'Escape' && view.isOpen()) {
       event.preventDefault();
@@ -1907,6 +2055,12 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
         // An alert on screen takes the first Escape; the next one drops the tool.
         if (alerts.dismissNewest() || toastLayer.dismissNewestAlert()) {
           event.preventDefault();
+          return;
+        }
+        // Nothing in hand and nothing open: Escape opens the pause menu.
+        if (game.getTool().kind === 'none' && !game.getPlacement()?.pending && nothingOpen()) {
+          event.preventDefault();
+          openPauseMenu();
           return;
         }
         game.setTool({ kind: 'none' });
@@ -1965,6 +2119,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
       watchToggle.destroy();
       soundToggle.destroy();
       saveButton.destroy();
+      menuSave?.destroy();
+      pauseMenu.destroy();
       stopSoundPref();
       display.stop();
       unsubscribeHaptics?.();

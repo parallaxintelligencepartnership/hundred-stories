@@ -144,6 +144,52 @@ export function keyHelpLines(groupCount: number): string[] {
   return [
     `Tools: 1 to ${Math.min(9, groupCount)} pick a group of build tools and its first tool, then the letter on a tile picks that tool. Point at a tile to see its keys.`,
     `Speed: comma slows down one step and period speeds up one step (${SPEED_STEPS.map(speedWords).join(', ')}). Space pauses and starts again.`,
-    'Escape puts down the tool you are holding.',
+    'Escape puts down the tool you are holding. With nothing in hand, it opens the menu.',
   ];
+}
+
+/** What a key does in the pause menu (src/ui/pause-menu.ts). */
+export type MenuKeyAction =
+  | { kind: 'move'; step: 1 | -1 }
+  | { kind: 'first' }
+  | { kind: 'last' }
+  | { kind: 'activate' }
+  | { kind: 'resume' };
+
+/**
+ * A key press in the open pause menu, or null when it is not the menu's. Up and Down (and Tab
+ * and Shift Tab, so focus stays in the card) move the selection, Home and End jump to the ends,
+ * Enter or Space chooses, Escape resumes.
+ */
+export function menuKeyAction(event: KeyLike & { shiftKey?: boolean }): MenuKeyAction | null {
+  if (event.metaKey || event.ctrlKey || event.altKey) return null;
+  switch (event.key) {
+    case 'ArrowDown':
+      return { kind: 'move', step: 1 };
+    case 'ArrowUp':
+      return { kind: 'move', step: -1 };
+    case 'Tab':
+      return { kind: 'move', step: event.shiftKey ? -1 : 1 };
+    case 'Home':
+      return { kind: 'first' };
+    case 'End':
+      return { kind: 'last' };
+    case 'Enter':
+    case ' ':
+    case 'Spacebar':
+      return { kind: 'activate' };
+    case 'Escape':
+      return { kind: 'resume' };
+  }
+  return event.code === 'Space' ? { kind: 'activate' } : null;
+}
+
+/** Where the selection goes: a move wraps round the ends, Home and End jump to them. */
+export function menuIndex(at: number, count: number, action: Pick<MenuKeyAction, 'kind'> & { step?: 1 | -1 }): number {
+  if (count <= 0) return -1;
+  if (action.kind === 'first') return 0;
+  if (action.kind === 'last') return count - 1;
+  if (action.kind !== 'move') return at;
+  if (at < 0) return action.step === -1 ? count - 1 : 0;
+  return (((at + (action.step ?? 1)) % count) + count) % count;
 }

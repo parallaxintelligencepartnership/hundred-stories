@@ -9,7 +9,7 @@ vi.mock('../../src/game/storage', async (orig) => ({
 }));
 
 import { createUi } from '../../src/ui/ui';
-import { FakeDom, type FakeElement } from './fake-dom';
+import { FakeDom, type FakeElement, choosePauseEntry } from './fake-dom';
 
 let dom: FakeDom;
 let uninstall: () => void;
@@ -64,9 +64,10 @@ function mount(ok: boolean): { root: FakeElement; slot: () => string } {
 const click = (node: FakeElement): void => (node.listeners.get('click') ?? []).forEach((fn) => fn({} as never));
 const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 
-it('desktop dialog: Menu > Open a saved file in a friend tower points the address back at My tower', async () => {
+it('desktop dialog: Menu > Settings > Open a saved file in a friend tower points the address back at My tower', async () => {
   const { root, slot } = mount(true);
   click(root.descendants().find((n) => n.tagName === 'BUTTON' && n.getAttribute('aria-label') === 'Menu')!);
+  choosePauseEntry(root, 'settings');
   const pick = root.descendants().find((n) => n.id === 'hs-import');
   expect(pick?.tagName).toBe('BUTTON');
   click(pick!);
@@ -77,6 +78,7 @@ it('desktop dialog: Menu > Open a saved file in a friend tower points the addres
 it('desktop dialog: a refused file leaves the address alone', async () => {
   const { root } = mount(false);
   click(root.descendants().find((n) => n.tagName === 'BUTTON' && n.getAttribute('aria-label') === 'Menu')!);
+  choosePauseEntry(root, 'settings');
   const pick = root.descendants().find((n) => n.id === 'hs-import');
   click(pick!);
   for (let i = 0; i < 5; i++) await settle();

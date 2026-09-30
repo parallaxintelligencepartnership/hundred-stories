@@ -59,18 +59,18 @@ const store = (): { getItem(k: string): string | null } =>
   (globalThis as unknown as { window: { localStorage: { getItem(k: string): string | null } } }).window.localStorage;
 
 describe('settings groups', () => {
-  it('reads like a phone settings app: Game, Saving, Display, Help, each a titled list of rows', () => {
+  it('reads like a phone settings app: Saving, Display, Help, each a titled list of rows; the Game group is the pause menu now', () => {
     const panel = panelOf();
     const main = panel.descendants().find((n) => n.className === 'hs-set-main') as FakeElement;
     const titles = main.children.map((s) => s.children[0]?.textContent);
-    expect(titles).toEqual(['Game', 'Saving', 'Display', 'Help']);
+    expect(titles).toEqual(['Saving', 'Display', 'Help']);
     for (const group of main.children) {
       expect(group.className).toBe('hs-section');
       expect(group.lastElementChild?.className).toBe('hs-set-list');
     }
-    const game = main.children[0] as FakeElement;
-    expect(game.lastElementChild?.children.map((r) => r.textContent)).toEqual(["Today's tower", 'New game', 'Stories']);
-    const help = main.children[3] as FakeElement;
+    const words = panel.descendants().filter((n) => n.tagName === 'BUTTON').map((n) => n.textContent);
+    for (const moved of ["Today's tower", 'New game', 'My tower', 'Stories', 'Views', 'Share']) expect(words).not.toContain(moved);
+    const help = main.children[2] as FakeElement;
     expect(help.lastElementChild?.children.map((r) => r.textContent)).toEqual(['Intro', 'How to play', 'Controls']);
   });
 });

@@ -9,7 +9,7 @@ import { LABEL_IDLE_MS } from '../../src/ui/quiet-labels';
 import { SOUND_TIP, createSoundToggle, setSoundOn } from '../../src/ui/sound-toggle';
 import { createUi } from '../../src/ui/ui';
 import { WATCH_CLASS } from '../../src/ui/watch';
-import { FakeDom, type FakeElement } from './fake-dom';
+import { FakeDom, type FakeElement, choosePauseEntry } from './fake-dom';
 
 const css = readFileSync(new URL('../../src/ui/ui.css', import.meta.url), 'utf8');
 
@@ -129,6 +129,7 @@ describe('the Sound button', () => {
     const { root } = mount();
     const sound = byLabel(root, 'Sound');
     click(byLabel(root, 'Menu'));
+    choosePauseEntry(root, 'settings');
     const toggle = root.descendants().find((n) => n.id === 'hs-sound')!;
     const music = root.descendants().find((n) => n.id === 'hs-sound-music') as unknown as { disabled: boolean };
     expect(toggle.getAttribute('aria-checked')).toBe('false');

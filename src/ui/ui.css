@@ -3888,6 +3888,159 @@ button.hs-news-toast {
   }
 }
 
+/* The pause menu (src/ui/pause-menu.ts) ---------------------------------- */
+
+/* Over everything but the toasts, so Save's "Game saved." still shows above it. The scrim dims
+   the tower and the chrome alike; a tap on it resumes. */
+.hs-pause {
+  position: absolute;
+  inset: 0;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(var(--edge) + var(--safe-top)) calc(var(--edge) + var(--safe-right)) calc(var(--edge) + var(--safe-bottom))
+    calc(var(--edge) + var(--safe-left));
+  box-sizing: border-box;
+  background: var(--scrim);
+  pointer-events: auto;
+}
+
+/* The card: the nearly solid surface, a title plate, then the column of buttons. */
+.hs-pause-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  box-sizing: border-box;
+  width: min(360px, 100%);
+  max-height: 100%;
+  padding: 20px 16px 16px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  border-radius: var(--radius-20);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  animation: hs-pause-in var(--motion-fast) var(--ease-spring);
+}
+
+.hs-pause-card::-webkit-scrollbar {
+  display: none;
+}
+
+@keyframes hs-pause-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* The title plate: the name in the display type, the state under it. */
+.hs-pause-plate {
+  padding: 4px 8px 8px;
+  text-align: center;
+}
+
+.hs-pause-title {
+  margin: 0;
+  font-size: var(--size-28);
+  font-weight: 600;
+  line-height: 1.1;
+  color: var(--amber-text);
+}
+
+.hs-pause-state {
+  margin: 4px 0 0;
+  font-size: var(--size-16);
+  color: var(--ink-dim);
+}
+
+.hs-pause-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Each entry: a raised face, full width, at least 48 px, its icon on the left. Pressed, it sinks
+   and loses its lift; selected (by the keys or the pointer), it turns amber. The focus ring stays,
+   as on every control. */
+.hs-ui .hs-pause-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: calc(48px * var(--ui-scale));
+  padding: 0 16px;
+  border: 0;
+  border-radius: var(--radius-16);
+  background: var(--steel-2);
+  box-shadow: var(--shadow-1), inset 0 1px 0 var(--hairline);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--size-16);
+  font-weight: 600;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    transform 80ms var(--ease-standard),
+    box-shadow 80ms var(--ease-standard),
+    background-color 80ms var(--ease-standard);
+}
+
+.hs-ui .hs-pause-item.is-selected {
+  background: var(--amber);
+  color: var(--on-amber);
+}
+
+.hs-ui .hs-pause-item:active {
+  transform: translateY(1px) scale(var(--press-scale));
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.hs-pause-icon {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  color: var(--amber-text);
+}
+
+.hs-pause-item.is-selected .hs-pause-icon {
+  color: inherit;
+}
+
+.hs-pause-word {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* No entrance under reduced motion: the card is simply there. */
+.hs-ui.is-reduced .hs-pause-card {
+  animation: none;
+}
+
+.hs-ui.is-reduced .hs-pause-item {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hs-pause-card {
+    animation: none;
+  }
+
+  .hs-pause-item {
+    transition: none;
+  }
+}
+
 /* Reduced motion ------------------------------------------------------- */
 
 /* The setting or the system: every move becomes a plain fade. No slide, no overshoot, no

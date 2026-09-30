@@ -10,7 +10,7 @@ import { phraseFor, voicesFor, type Note } from './phrase';
 import { activeLayers, easeMood, moodFor, venueFillFor, type Mood } from './mood';
 import { sectionFor } from './arrangement';
 import { drumHitsFor, playDrum } from './drums';
-import { beatCue, cueDuration, type Cue } from './cues';
+import { beatCue, cueDuration, MENU_CUE_NOTES, type Cue, type MenuCue } from './cues';
 
 export const SOUND_KEY = 'hs.sound';
 export const SOUND_EFFECTS_KEY = 'hs.sound.effects';
@@ -505,6 +505,8 @@ export interface Sound {
   pin?(source: PinSource | null): void;
   /** Dev only: feeds one game event to the controller, as if the game had emitted it. */
   devEvent?(event: GameEvent): void;
+  /** A chrome sound (the pause menu opening, an entry chosen). Silent while Sound is off. */
+  cue?(name: MenuCue): void;
   destroy(): void;
 }
 
@@ -963,6 +965,13 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
       tower: [261, 329, 392, 440, 523, 659, 784, 1047, 784, 1047, 1318, 1047],
     };
     if (name === 'door') { playDoorSwish(ctx, effectsBus); return; }
+    if (name === 'menu.open' || name === 'menu.select') {
+      // The chrome answers at once, not on the next beat, in the score's key and chapter.
+      const { hz, peak } = MENU_CUE_NOTES[name];
+      const step = cueDuration(name) / hz.length;
+      hz.forEach((note, i) => tone(ctx!, effectsBus!, 'sine', musicalHz(note, key, chapter), ctx!.currentTime + i * step, step, peak));
+      return;
+    }
     if (name.startsWith('bell')) { playBell(ctx, effectsBus, Number(name.slice(-1)), ctx.currentTime, key, chapter); return; }
     if (name === 'build' || name === 'register') { playEffect(ctx, effectsBus, name); return; }
     const line = notes[name] ?? [];
@@ -1261,6 +1270,11 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
       writeSoundSettings(settings, store);
       if (on) { if (ctx && master) master.gain.setValueAtTime(1, ctx.currentTime); wake(); }
       else sleep();
+    },
+    cue(name) {
+      // Sound off, or no gesture yet: nothing is built and nothing plays.
+      if (destroyed || !settings.on || dozing) return;
+      playNamedCue(name);
     },
     setEffects(level) {
       settings.effects = clampLevel(level);

@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createStoryState, followSim, recordBeat, storyName } from '../../src/sim/story';
 import { createUi } from '../../src/ui/ui';
-import { FakeDom, type FakeElement } from './fake-dom';
+import { FakeDom, type FakeElement, choosePauseEntry } from './fake-dom';
 
 let dom: FakeDom;
 let uninstall: () => void;
@@ -63,6 +63,9 @@ function stubGame(): Stub {
     subscribeEvents: () => () => {},
     getHover: () => null,
     getSpeed: () => stub.speed,
+    setSpeed: (speed: number) => {
+      stub.speed = speed;
+    },
     getTool: () => ({ kind: 'none' }),
     setTool: () => {},
     getPlacement: () => null,
@@ -148,6 +151,7 @@ describe('intro', () => {
     const { root } = mount(game);
     expect(introOf(root)).toBeUndefined();
     click(buttonNamed(root, 'Menu'));
+    choosePauseEntry(root, 'settings');
     const help = root.descendants().find((n) => n.className === 'hs-section' && n.textContent.startsWith('Help'));
     expect(help).toBeDefined();
     const link = help?.descendants().find((n) => n.tagName === 'A');
@@ -360,6 +364,7 @@ describe('tips', () => {
     const game = readyGame();
     const { root } = mount(game);
     click(buttonNamed(root, 'Menu'));
+    choosePauseEntry(root, 'settings');
     expect(tipsOf(root)[0]?.textContent).toContain('Panels show the details');
   });
 

@@ -7,7 +7,7 @@ import type { Renderer } from '../../src/render/renderer';
 import { createSharePanel, type PanelContext } from '../../src/ui/panels';
 import { createUi } from '../../src/ui/ui';
 import { WATCH_CLASS, WATCH_IDLE_MS } from '../../src/ui/watch';
-import { FakeDom, type FakeElement } from './fake-dom';
+import { FakeDom, type FakeElement, choosePauseEntry } from './fake-dom';
 
 const shareModule = vi.hoisted(() => ({
   composeShareImage: vi.fn<(source: unknown, stats: unknown) => unknown>(),
@@ -76,6 +76,7 @@ function mount(renderer: unknown = {}): { root: FakeElement; shell: FakeElement 
 
 function openFeedback(root: FakeElement): Field {
   click(byLabel(root, 'Menu'));
+  choosePauseEntry(root, 'settings');
   click(buttonNamed(root, 'Send feedback'));
   return root.descendants().find((n) => n.id === 'hs-feedback-text') as Field;
 }

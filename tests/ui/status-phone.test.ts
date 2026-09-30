@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { applyCommand } from '../../src/sim/build';
 import { createWorld } from '../../src/sim/world';
 import { createUi } from '../../src/ui/ui';
-import { FakeDom, type FakeElement } from './fake-dom';
+import { FakeDom, type FakeElement, choosePauseEntry, pauseEntry } from './fake-dom';
 
 let dom: FakeDom;
 let uninstall: () => void;
@@ -224,6 +224,7 @@ function mount(minute: number, extra: Record<string, unknown> = {}, apiExtra: Re
     subscribe: () => () => {},
     getHover: () => null,
     getSpeed: () => 1,
+    setSpeed: () => {},
     getTool: () => ({ kind: 'none' }),
     setTool: () => {},
     getPlacement: () => null,
@@ -482,10 +483,11 @@ describe('top bar at phone width', () => {
     click(find(root, 'hs-build-close'));
     expect(has(shell, 'is-building')).toBe(false);
     click(named(root, 'Menu'));
+    choosePauseEntry(root, 'settings');
     expect(has(shell, 'is-panel-open')).toBe(true);
   });
 
-  it('gives focus back to Menu when Settings closes, once the controls are back', () => {
+  it('gives focus back to Menu when the menu closes after Settings, once the controls are back', () => {
     returning();
     setWidth(390);
     const root = mount(9 * 60);
@@ -499,42 +501,42 @@ describe('top bar at phone width', () => {
     };
     focus(); // the player is on Menu
     click(menu);
+    choosePauseEntry(root, 'settings');
     expect(has(shell, 'is-panel-open')).toBe(true);
     click(find(find(root, 'hs-settings'), 'hs-panel-close'));
+    // Settings closes back to the pause menu, then Resume gives focus back to Menu.
+    expect(dom.activeElement).toBe(pauseEntry(root, 'settings'));
+    choosePauseEntry(root, 'resume');
     expect(dom.activeElement).toBe(menu);
     expect(hiddenWhenFocused).toBe(false);
   });
 
-  it('moves Views and Share into Settings on a phone: Views opens the list, Share the share card', () => {
+  it('moves Views and Share into the pause menu on a phone, after Stories: Views opens the list, Share the share card', () => {
     returning();
     setWidth(390);
     const root = mount(9 * 60);
     click(named(root, 'Menu'));
-    const settings = find(root, 'hs-settings');
-    const gameRows = (settings.descendants().find((n) => has(n, 'hs-set-list')) as FakeElement).children.map((r) => r.textContent);
-    expect(gameRows.slice(-2)).toEqual(['Views', 'Share']);
-    click(rowNamed(settings, 'Share'));
+    const words = root.descendants().filter((n) => has(n, 'hs-pause-item')).map((n) => n.textContent);
+    expect(words.slice(words.indexOf('Stories'), words.indexOf('Stories') + 3)).toEqual(['Stories', 'Views', 'Share']);
+    choosePauseEntry(root, 'share');
     expect(sheetTitle(root)).toBe('Share');
 
     click(named(root, 'Menu'));
-    click(rowNamed(find(root, 'hs-settings'), 'Views'));
+    choosePauseEntry(root, 'views');
     // The menu steps aside so the view picked is not behind it, and the list is open.
-    expect(root.descendants().some((n) => has(n, 'hs-settings'))).toBe(false);
+    expect(root.descendants().some((n) => has(n, 'hs-pause'))).toBe(false);
     expect(find(root, 'hs-views-menu').hidden).toBe(false);
     expect(named(root, 'Views').getAttribute('aria-expanded')).toBe('true');
     // With the button hidden the list has no anchor, so a phone hangs it under the bar.
     expect(rule(phoneBlock(), '.hs-views-menu').top).toBe('calc(var(--top-actual, calc(var(--top-h) + var(--safe-top))) + var(--gap-float))');
   });
 
-  it('keeps Views and Share out of Settings on a wide screen, where the bar has them', () => {
+  it('keeps Views and Share out of the pause menu on a wide screen, where the bar has them', () => {
     returning();
     setWidth(1280);
     const root = mount(9 * 60);
     click(named(root, 'Menu'));
-    const rows = find(root, 'hs-settings')
-      .descendants()
-      .filter((n) => has(n, 'hs-set-action'))
-      .map((n) => n.textContent);
+    const rows = root.descendants().filter((n) => has(n, 'hs-pause-item')).map((n) => n.textContent);
     expect(rows).toContain('Stories');
     expect(rows).not.toContain('Views');
     expect(rows).not.toContain('Share');

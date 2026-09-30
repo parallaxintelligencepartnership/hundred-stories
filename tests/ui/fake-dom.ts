@@ -246,3 +246,19 @@ export class FakeDom {
     for (const fn of this.windowListeners.get(type) ?? []) fn(event);
   }
 }
+
+/**
+ * An entry of the pause menu by its id (src/ui/pause-menu.ts): 'resume', 'save', 'newGame',
+ * 'myTower', 'daily', 'stories', 'views', 'share', 'settings', 'guide'. Menu opens the pause menu
+ * since 2026-09-29, and Settings is one entry inside it.
+ */
+export function pauseEntry(root: FakeElement, id: string): FakeElement | undefined {
+  return root.descendants().find((n) => n.className.split(/\s+/).includes('hs-pause-item') && n.dataset['entry'] === id);
+}
+
+/** Press a pause menu entry as a tap would. */
+export function choosePauseEntry(root: FakeElement, id: string): void {
+  const item = pauseEntry(root, id);
+  if (!item) throw new Error(`No pause menu entry ${id}`);
+  for (const fn of item.listeners.get('click') ?? []) fn({});
+}

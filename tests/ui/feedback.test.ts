@@ -17,7 +17,7 @@ import {
 import { PREF_KEYS, setFlag } from '../../src/ui/prefs';
 import { createUi } from '../../src/ui/ui';
 import { WATCH_CLASS, WATCH_IDLE_MS } from '../../src/ui/watch';
-import { FakeDom, type FakeElement } from './fake-dom';
+import { FakeDom, choosePauseEntry, type FakeElement } from './fake-dom';
 
 const PKG_VERSION = (JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { version: string }).version;
 const CHROME_UA =
@@ -72,6 +72,8 @@ const buttonNamed = (root: FakeElement, text: string): FakeElement | undefined =
   root.descendants().find((n) => n.tagName === 'BUTTON' && n.textContent === text);
 const menuButton = (root: FakeElement): FakeElement =>
   root.descendants().find((n) => n.tagName === 'BUTTON' && n.getAttribute('aria-label') === 'Menu')!;
+const pauseItems = (root: FakeElement): string[] =>
+  root.descendants().filter((n) => n.className.split(/\s+/).includes('hs-pause-item')).map((n) => n.textContent);
 const card = (root: FakeElement): FakeElement | undefined =>
   root.descendants().find((n) => n.className.split(/\s+/).includes('hs-feedback'));
 const flush = async (): Promise<void> => {
@@ -85,13 +87,14 @@ const type = (field: Field, text: string): void => {
   fire(field, 'input');
 };
 
-/** The ui with the card open, the way a player gets there: Menu, then Send feedback. */
+/** The ui with the card open, the way a player gets there: Menu, Settings, then Send feedback. */
 function openCard(): { root: FakeElement; shell: FakeElement; menu: FakeElement; node: FakeElement } {
   const root = dom.createElement('div');
   createUi(root as never, mkGame(), {} as never);
   const menu = menuButton(root);
   menu.focus();
   click(menu);
+  choosePauseEntry(root, 'settings');
   const row = buttonNamed(root, 'Send feedback');
   if (!row) throw new Error('no Send feedback row in the menu');
   click(row);
@@ -227,6 +230,8 @@ describe('the Send feedback card', () => {
     expect(dom.activeElement).toBe(close);
     click(close);
     expect(card(root)).toBeUndefined();
+    // Back in the pause menu it was opened from; Resume puts focus back on Menu.
+    choosePauseEntry(root, 'resume');
     expect(dom.activeElement).toBe(menu);
   });
 
@@ -300,20 +305,26 @@ describe('the Send feedback card', () => {
     expect(buttonNamed(node, 'Send')!.disabled).toBe(false);
   });
 
-  it('closes on Escape and on Cancel, and focus goes back to Menu', () => {
+  it('closes on Escape and on Cancel, back to the pause menu it came from; Escape there puts focus back on Menu', () => {
+    const escape = (target: unknown): void =>
+      dom.fireWindow('keydown', {
+        key: 'Escape', code: 'Escape', target, defaultPrevented: false,
+        preventDefault() { (this as { defaultPrevented: boolean }).defaultPrevented = true; },
+        stopImmediatePropagation() {},
+      });
     const first = openCard();
-    const text = byId(first.root, 'hs-feedback-text');
-    dom.fireWindow('keydown', {
-      key: 'Escape', code: 'Escape', target: text, defaultPrevented: false,
-      preventDefault() { (this as { defaultPrevented: boolean }).defaultPrevented = true; },
-      stopImmediatePropagation() {},
-    });
+    escape(byId(first.root, 'hs-feedback-text'));
     expect(card(first.root)).toBeUndefined();
+    expect(pauseItems(first.root)).toContain('Settings');
+    escape(dom.activeElement);
+    expect(pauseItems(first.root)).toEqual([]);
     expect(dom.activeElement).toBe(first.menu);
 
     const second = openCard();
     click(buttonNamed(second.node, 'Cancel')!);
     expect(card(second.root)).toBeUndefined();
+    expect(pauseItems(second.root)).toContain('Settings');
+    choosePauseEntry(second.root, 'resume');
     expect(dom.activeElement).toBe(second.menu);
   });
 
@@ -324,6 +335,7 @@ describe('the Send feedback card', () => {
     expect(shell.classList.contains(WATCH_CLASS)).toBe(false);
     click(buttonNamed(node, 'Cancel')!);
     expect(card(root)).toBeUndefined();
+    choosePauseEntry(root, 'resume'); // back in the pause menu, which counts as open too
     vi.advanceTimersByTime(2 * WATCH_IDLE_MS);
     expect(shell.classList.contains(WATCH_CLASS)).toBe(true);
   });
@@ -353,6 +365,7 @@ describe('the daily card and the feedback card', () => {
   }
   const openFeedback = (root: FakeElement): void => {
     click(menuButton(root));
+    choosePauseEntry(root, 'settings');
     click(buttonNamed(root, 'Send feedback')!);
   };
   const dailyHeading = (root: FakeElement) =>

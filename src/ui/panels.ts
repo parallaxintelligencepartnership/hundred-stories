@@ -1530,7 +1530,7 @@ export function createChroniclePanel(game: GameApi, ctx: PanelContext): PanelEle
 // --------------------------------------------------------- settings panel
 
 /** A fresh random start for New game, drawn the same way main.ts draws one for a first visit. */
-function freshStart(): number {
+export function freshStart(): number {
   return Math.floor(Date.now() % 1_000_000);
 }
 
@@ -1636,15 +1636,6 @@ function themeRow(): HTMLDivElement {
   return row;
 }
 
-/** Is the window a phone's, by the same 720 px break as ui.css (src/ui/build.ts)? */
-function phoneWidth(): boolean {
-  try {
-    return isPhoneWidth(typeof window === 'undefined' ? undefined : (window as { innerWidth?: number }).innerWidth);
-  } catch {
-    return false;
-  }
-}
-
 /** The title words in a sheet's head, to name the page the settings sheet is on. */
 function titleText(panel: PanelElement): HTMLElement | null {
   const heading = panel.sheet?.head.firstElementChild as HTMLElement | null | undefined;
@@ -1656,38 +1647,10 @@ export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElem
   panel.classList.add('hs-settings');
   const main = el('div', 'hs-set-main');
 
-  // Game: Today's tower, then New game in My tower or My tower anywhere else, then Stories, then
-  // on a phone Views and Share.
-  // A new tower always gets a fresh random start; the starting number is only in the page
-  // address (?seed=, read in main.ts) for testing, never in this panel. New game only ever
-  // replaces My tower, so outside it the row is My tower instead.
-  const gameGroup = settingsGroup('Game');
+  // The game's own actions (New game or My tower, Today's tower, Stories, and on a phone Views
+  // and Share) live in the pause menu (src/ui/pause-menu.ts), which opens this sheet as one of its
+  // entries: one place for each action (Matt, 2026-09-29).
   const slot = game.getSlot?.() ?? 'mine';
-  const openDaily = ctx.openDaily;
-  if (openDaily && slot !== 'daily') gameGroup.list.append(actionRow("Today's tower", () => openDaily()));
-  const openMine = ctx.openMyTower;
-  if (slot === 'mine') {
-    gameGroup.list.append(
-      actionRow('New game', () => {
-        game.newGame(freshStart());
-        ctx.notice('New game started.');
-      }),
-    );
-  } else if (openMine) {
-    gameGroup.list.append(actionRow('My tower', () => openMine()));
-  }
-  const openStories = ctx.openStories;
-  if (openStories) {
-    gameGroup.list.append(actionRow('Stories', () => openStories(), 'The people you follow and the latest from around the tower'));
-  }
-  // A phone's top bar is the pill alone (ui.css), so Views and Share live here instead.
-  if (phoneWidth()) {
-    const openViews = ctx.openViews;
-    if (openViews) gameGroup.list.append(actionRow('Views', () => openViews(), 'Stress, noise, vacancy and elevator wait'));
-    const openShare = ctx.openShare;
-    if (openShare) gameGroup.list.append(actionRow('Share', () => openShare(), 'Share your tower'));
-  }
-  if (gameGroup.list.children.length > 0) main.append(gameGroup.node);
 
   // Saving: the tower saves itself; these are for the player who wants to be sure, or a copy.
   // Today's tower is one try per date, so there nothing rewinds or replaces the run: no Go back

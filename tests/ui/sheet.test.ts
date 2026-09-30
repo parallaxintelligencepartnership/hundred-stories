@@ -13,7 +13,7 @@ import {
 } from '../../src/ui/sheet';
 import { panelShell } from '../../src/ui/panels';
 import { createUi } from '../../src/ui/ui';
-import { FakeDom, type FakeElement } from './fake-dom';
+import { FakeDom, choosePauseEntry, type FakeElement } from './fake-dom';
 
 let dom: FakeDom;
 let uninstall: () => void;
@@ -256,13 +256,14 @@ describe('panels on the sheet', () => {
     expect(closed).toBe(1);
   });
 
-  it('opens Menu as a dialog over a backdrop, closes it on Escape and puts focus back on Menu', () => {
+  it('opens Settings from the menu as a dialog over a backdrop, closes it on Escape back to the menu, and a second Escape puts focus back on Menu', () => {
     const world = { cash: 1, population: 0, stars: 1, seed: 1, time: { minute: 600 }, log: [], logTotal: 0, rooms: new Map(), shafts: new Map(), sims: new Map(), events: [] };
     const api = {
       world,
       subscribe: () => () => {},
       getHover: () => null,
       getSpeed: () => 1,
+      setSpeed: () => {},
       getTool: () => ({ kind: 'none' }),
       setTool: () => {},
       getPlacement: () => null,
@@ -278,26 +279,36 @@ describe('panels on the sheet', () => {
     const menu = root.descendants().find((n) => n.tagName === 'BUTTON' && n.getAttribute('aria-label') === 'Menu') as FakeElement;
     menu.focus();
     click(menu);
+    choosePauseEntry(root, 'settings');
     const slot = byClass(root, 'hs-panel-slot')[0] as FakeElement;
     const dialog = slot.children.find((n) => n.getAttribute('role') === 'dialog') as FakeElement;
     expect(dialog.textContent).toContain('Settings');
     expect(has(slot.children[0] as FakeElement, 'hs-sheet-backdrop')).toBe(true);
     expect(dom.activeElement).toBe(dialog);
     let prevented = false;
-    dom.fireWindow('keydown', {
-      key: 'Escape',
-      code: 'Escape',
-      target: dialog,
-      get defaultPrevented() {
-        return prevented;
-      },
-      preventDefault() {
-        prevented = true;
-      },
-      stopImmediatePropagation() {},
-    });
+    const escape = (target: unknown): void => {
+      prevented = false;
+      dom.fireWindow('keydown', {
+        key: 'Escape',
+        code: 'Escape',
+        target,
+        get defaultPrevented() {
+          return prevented;
+        },
+        preventDefault() {
+          prevented = true;
+        },
+        stopImmediatePropagation() {},
+      });
+    };
+    escape(dialog);
     expect(prevented).toBe(true);
     expect(slot.children).toHaveLength(0);
+    // Back in the pause menu, on its Settings entry.
+    expect((dom.activeElement as FakeElement).dataset['entry']).toBe('settings');
+    escape(dom.activeElement);
+    expect(prevented).toBe(true);
+    expect(byClass(root, 'hs-pause')).toHaveLength(0);
     expect(dom.activeElement).toBe(menu);
   });
 });

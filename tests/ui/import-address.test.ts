@@ -2,7 +2,7 @@
 // friend's ?seed= query, or a reload opens the friend's tower again (audit 2026-09-28, D S4).
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { createUi } from '../../src/ui/ui';
-import { FakeDom, type FakeElement } from './fake-dom';
+import { FakeDom, type FakeElement, choosePauseEntry } from './fake-dom';
 
 let dom: FakeDom;
 let uninstall: () => void;
@@ -72,9 +72,10 @@ function chooseFile(input: FakeElement): void {
   for (const fn of input.listeners.get('change') ?? []) fn({} as never);
 }
 
-it('Menu > Open a saved file in a friend\'s tower points the address back at My tower', async () => {
+it('Menu > Settings > Open a saved file in a friend\'s tower points the address back at My tower', async () => {
   const { root } = mount();
   click(root.descendants().find((n) => n.tagName === 'BUTTON' && n.getAttribute('aria-label') === 'Menu')!);
+  choosePauseEntry(root, 'settings');
   const input = root.descendants().find((n) => n.id === 'hs-import');
   expect(input?.tagName).toBe('INPUT');
   chooseFile(input!);

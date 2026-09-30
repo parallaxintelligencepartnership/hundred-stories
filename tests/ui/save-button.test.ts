@@ -9,7 +9,7 @@ import { ICON_NAMES } from '../../src/ui/icons';
 import { SAVED_MS, SAVED_NOTICE, SAVE_TIP, createSaveButton } from '../../src/ui/save-button';
 import { createUi } from '../../src/ui/ui';
 import { WATCH_CLASS } from '../../src/ui/watch';
-import { FakeDom, type FakeElement } from './fake-dom';
+import { FakeDom, type FakeElement, choosePauseEntry } from './fake-dom';
 
 const css = readFileSync(new URL('../../src/ui/ui.css', import.meta.url), 'utf8');
 const phone = css.slice(css.indexOf('@media (max-width: 720px) {\n  /* The top bar on a phone'));
@@ -169,6 +169,7 @@ describe('the Save button in the ui', () => {
     expect(said()).toBeGreaterThan(0);
     // Settings, Save now: the same call and the same words.
     click(byLabel('Menu'));
+    choosePauseEntry(root, 'settings');
     const row = root.descendants().find((n) => classesOf(n).includes('hs-set-action') && n.textContent === 'Save now')!;
     const before = said();
     click(row);
@@ -181,6 +182,7 @@ describe('the Save button in the ui', () => {
     const { root, byLabel } = mount({ getSlot: () => slot });
     expect(byLabel('Save').hidden).toBe(false);
     click(byLabel('Menu'));
+    choosePauseEntry(root, 'settings');
     expect(root.descendants().some((n) => n.textContent === 'Save now' && classesOf(n).includes('hs-set-action'))).toBe(true);
   });
 });

@@ -6,7 +6,7 @@ import type { Tool } from '../../src/game/api';
 import { RESERVED_LETTERS, assignLetters, hasTextField, isFormField, keyAction, keyHelpLines, stepSpeed } from '../../src/ui/keys';
 import { GROUPS } from '../../src/ui/palette';
 import { createUi } from '../../src/ui/ui';
-import { FakeDom, type FakeElement } from './fake-dom';
+import { FakeDom, choosePauseEntry, type FakeElement } from './fake-dom';
 
 let dom: FakeDom;
 let uninstall: () => void;
@@ -227,6 +227,7 @@ describe('tiles and help', () => {
     const root = mount(stubGame());
     const menu = root.descendants().find((n) => n.tagName === 'BUTTON' && n.textContent === 'Menu') as FakeElement;
     for (const fn of menu.listeners.get('click') ?? []) fn({});
+    choosePauseEntry(root, 'settings');
     const controls = root.descendants().find((n) => n.className === 'hs-help-controls');
     for (const line of lines) expect(controls?.textContent).toContain(line);
     expect(controls?.textContent).not.toContain('1, 2, 3 set the clock speed');

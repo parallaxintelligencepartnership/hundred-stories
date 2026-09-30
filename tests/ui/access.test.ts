@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { LARGE_TEXT_SCALE, applyDisplayPrefs, readDisplayPrefs, watchDisplayPrefs } from '../../src/ui/display';
 import { PREF_KEYS, setFlag } from '../../src/ui/prefs';
 import { createUi } from '../../src/ui/ui';
-import { FakeDom, type FakeElement } from './fake-dom';
+import { FakeDom, choosePauseEntry, type FakeElement } from './fake-dom';
 
 let dom: FakeDom;
 let uninstall: () => void;
@@ -31,6 +31,7 @@ function fakeGame(): never {
     subscribe: () => () => {},
     getHover: () => null,
     getSpeed: () => 1,
+    setSpeed: () => {},
     getTool: () => ({ kind: 'none' }),
     setTool: () => {},
     getPlacement: () => null,
@@ -150,6 +151,7 @@ describe('color-blind friendly views in the shell', () => {
     createUi(root as never, game as never, { setOverlayColorBlind: (on: boolean) => calls.push(on) } as never);
     const menu = root.descendants().find((n) => n.getAttribute('aria-label') === 'Menu')!;
     for (const fn of menu.listeners.get('click') ?? []) fn({});
+    choosePauseEntry(root, 'settings');
     const press = (id: string): void => {
       const control = root.descendants().find((n) => n.id === id)!;
       for (const fn of control.listeners.get('click') ?? []) fn({});

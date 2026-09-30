@@ -140,7 +140,7 @@ describe('room panel occupants', () => {
 });
 
 describe('stories', () => {
-  it('opens from a Stories row in the Game group, with the save rows in their own group', () => {
+  it('is not in Settings any more (it opens from the pause menu), and the save rows keep their own group', () => {
     const c = context();
     const panel = createSettingsPanel({ world: { seed: 1, log: [], logTotal: 0 } } as never, c.ctx);
     const lists = node(panel).descendants().filter((n) => n.className === 'hs-set-list');
@@ -148,10 +148,8 @@ describe('stories', () => {
       (list?.children ?? []).filter((b) => b.tagName === 'BUTTON').map((b) => b.textContent);
     const saves = lists.find((list) => list.children.some((b) => b.textContent === 'Save to a file'));
     expect(rows(saves)).toEqual(['Save now', 'Go back to last save', 'Save to a file', 'Open a saved file']);
-    const game = lists.find((list) => list.children.some((b) => b.textContent === 'New game'));
-    expect(rows(game)).toEqual(['New game', 'Stories']);
-    press(buttonsNamed(panel, 'Stories')[0]);
-    expect(c.stories).toBe(1);
+    expect(buttonsNamed(panel, 'Stories')).toEqual([]);
+    expect(c.stories).toBe(0);
   });
 
   it('lists the followed people with their latest line, and the last tower beats', () => {

@@ -34,17 +34,23 @@ export interface SaveButton {
   destroy(): void;
 }
 
-export function createSaveButton(options: SaveButtonOptions): SaveButton {
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = 'hs-icon-btn hs-round hs-save-btn';
-  const label = document.createElement('span');
-  label.className = 'hs-btn-label';
-  label.textContent = SAVE_WORD;
-  button.append(icon('save', 'hs-icon hs-btn-icon') as unknown as HTMLElement, label);
-  button.setAttribute('aria-label', SAVE_WORD);
-  button.title = SAVE_TIP;
+/** What a save action paints: the word, and busy while the save is written. */
+export interface SaveActionView {
+  setWord(word: string): void;
+  setBusy(busy: boolean): void;
+}
 
+export interface SaveAction {
+  /** Save now, unless a save is still being written. */
+  run(): void;
+  destroy(): void;
+}
+
+/**
+ * The save both the round Save button and the pause menu's Save run: GameApi.save, the notice
+ * ("Game saved." or the save's own reason), busy while written, "Saved" for SAVED_MS after.
+ */
+export function createSaveAction(options: SaveButtonOptions, view: SaveActionView): SaveAction {
   let saving = false;
   let destroyed = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -57,40 +63,67 @@ export function createSaveButton(options: SaveButtonOptions): SaveButton {
   const done = (result: CommandResult): void => {
     saving = false;
     if (destroyed) return;
-    button.disabled = false;
+    view.setBusy(false);
     if (result.ok) {
-      label.textContent = SAVED_WORD;
+      view.setWord(SAVED_WORD);
       clearTimer();
       timer = setTimeout(() => {
         timer = null;
-        label.textContent = SAVE_WORD;
+        view.setWord(SAVE_WORD);
       }, SAVED_MS);
       options.notice(SAVED_NOTICE);
     } else {
       clearTimer();
-      label.textContent = SAVE_WORD;
+      view.setWord(SAVE_WORD);
       options.notice(result.reason);
     }
   };
 
-  button.addEventListener('click', () => {
-    if (saving || destroyed) return;
-    saving = true;
-    button.disabled = true;
-    let pending: Promise<CommandResult>;
-    try {
-      pending = options.save();
-    } catch {
-      pending = Promise.resolve({ ok: false, reason: SAVE_FAILED_NOTICE });
-    }
-    void pending.then(done, () => done({ ok: false, reason: SAVE_FAILED_NOTICE }));
+  return {
+    run() {
+      if (saving || destroyed) return;
+      saving = true;
+      view.setBusy(true);
+      let pending: Promise<CommandResult>;
+      try {
+        pending = options.save();
+      } catch {
+        pending = Promise.resolve({ ok: false, reason: SAVE_FAILED_NOTICE });
+      }
+      void pending.then(done, () => done({ ok: false, reason: SAVE_FAILED_NOTICE }));
+    },
+    destroy() {
+      destroyed = true;
+      clearTimer();
+    },
+  };
+}
+
+export function createSaveButton(options: SaveButtonOptions): SaveButton {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'hs-icon-btn hs-round hs-save-btn';
+  const label = document.createElement('span');
+  label.className = 'hs-btn-label';
+  label.textContent = SAVE_WORD;
+  button.append(icon('save', 'hs-icon hs-btn-icon') as unknown as HTMLElement, label);
+  button.setAttribute('aria-label', SAVE_WORD);
+  button.title = SAVE_TIP;
+
+  const action = createSaveAction(options, {
+    setWord(word) {
+      label.textContent = word;
+    },
+    setBusy(busy) {
+      button.disabled = busy;
+    },
   });
+  button.addEventListener('click', () => action.run());
 
   return {
     button,
     destroy() {
-      destroyed = true;
-      clearTimer();
+      action.destroy();
     },
   };
 }

@@ -7,7 +7,7 @@ import { addRoom, addShaft, addSim, allocId, createWorld } from '../../src/sim/w
 import { createHoverCard, hoverCardBox, hoverTargetAt, roomCard, shaftCard } from '../../src/ui/hover';
 import { hallQueues } from '../../src/render/overlays';
 import { createUi } from '../../src/ui/ui';
-import { FakeDom, type FakeElement } from './fake-dom';
+import { FakeDom, type FakeElement, choosePauseEntry } from './fake-dom';
 
 let dom: FakeDom;
 let uninstall: () => void;
@@ -286,6 +286,7 @@ describe('hover card on the fake DOM', () => {
     expect(node.style['left']).toBe('746px'); // nothing open: right of the pointer
     const menu = root.descendants().find((n) => n.tagName === 'BUTTON' && n.getAttribute('aria-label') === 'Menu') as FakeElement;
     (menu.listeners.get('click') ?? []).forEach((f) => f({}));
+    choosePauseEntry(root, 'settings'); // Menu opens the pause menu; Settings is the card
     // The card is 120 wide in the fake and stands two edges in from the right of a 1000 wide shell
     // (ui.ts cardLeft, D-23): its edge is 1000 - (120 + 24) = 856. At 710 the preview would end at
     // 846, past 856 less the 16 px gutter, so it flips; one edge (868) would have left it right.

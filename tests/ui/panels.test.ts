@@ -340,23 +340,15 @@ describe('settings: saved games and new game', () => {
     expect(notices).toEqual(['Back to your last save.']);
   });
 
-  it('has no starting number field, and New game starts a fresh random tower', () => {
+  it('has no starting number field, and no New game row: New game is in the pause menu (tests/ui/pause-menu.test.ts)', () => {
     const started: number[] = [];
-    const notices: string[] = [];
     const game = { world: { seed: 424242, log: [], logTotal: 0 }, newGame: (n: number) => started.push(n) } as never;
-    const panel = createSettingsPanel(game, { ...ctx, notice: (t) => notices.push(t) });
+    const panel = createSettingsPanel(game, ctx);
     const all = node(panel).descendants();
     expect(all.some((n) => n.id === 'hs-seed')).toBe(false);
     expect(all.some((n) => n.tagName === 'INPUT' && (n as unknown as { type: string }).type === 'number')).toBe(false);
-    const realNow = Date.now;
-    Date.now = () => 1_758_700_000_123;
-    try {
-      click(named(panel, 'New game')[0] as FakeElement);
-    } finally {
-      Date.now = realNow;
-    }
-    expect(started).toEqual([123]);
-    expect(notices).toEqual(['New game started.']);
+    expect(named(panel, 'New game')).toEqual([]);
+    expect(started).toEqual([]);
   });
 });
 
