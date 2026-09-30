@@ -9,6 +9,7 @@ import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { applyCommand } from '../../src/sim/build';
 import { createWorld } from '../../src/sim/world';
+import { POPULATION_HOTEL_NOTE } from '../../src/ui/status';
 import { createUi } from '../../src/ui/ui';
 import { FakeDom, type FakeElement, choosePauseEntry, pauseEntry } from './fake-dom';
 
@@ -304,7 +305,8 @@ describe('top bar at phone width', () => {
     expect(find(cash, 'hs-readout-meta').textContent).toBe('+$522,007 earned this quarter');
     expect(cash.getAttribute('title')).toBe('Open finances. +$522,007 earned this quarter');
     expect(find(pop, 'hs-readout-value').textContent).toBe('177');
-    expect(pop.getAttribute('title')).toBe('Up 7 today');
+    // The change, then the line on hotel guests (b715618), which stays in the tooltip.
+    expect(pop.getAttribute('title')).toBe(`Up 7 today. ${POPULATION_HOTEL_NOTE}`);
     expect(find(root, 'hs-stars-count-text').textContent).toBe('3');
   });
 

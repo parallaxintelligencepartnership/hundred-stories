@@ -36,7 +36,7 @@ import {
 } from './onboarding';
 import { PREF_KEYS, addToList, getFlag, getList, getPref, onPrefChange, setFlag, setPref } from './prefs';
 import { createIconSheet, icon, type IconName } from './icons';
-import { chromeInsets, isSheetLayout, placementBoxes, viewInsets } from './layout';
+import { chromeInsets, createViewChipRow, isSheetLayout, placementBoxes, viewChipMeets, viewInsets } from './layout';
 import { createToasts } from './toast';
 import type { Box } from './layout';
 import {
@@ -109,6 +109,8 @@ interface ChromeWatch {
 
 /** ui.css --edge: how far a card open on the right sits from the edge. */
 const CARD_EDGE = 12;
+/** ui.css --gap-float: the least room kept between the view's chip and a round button. */
+const VIEW_CHIP_GAP = 8;
 
 /** The controls hint rides along for the first three loads, then gets out of the way. */
 const HINT_LOADS = 3;
@@ -333,7 +335,10 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   const view = createViewControl((kind) => {
     if (typeof renderer.setOverlay === 'function') renderer.setOverlay(kind);
     shell.classList.toggle('has-view', kind !== null);
+    // The chip is up, gone or another width: whether it shares the buttons' row is new.
+    placeWatchButton();
   });
+  const viewChipRow = createViewChipRow();
 
   pill.append(status.cash, status.population, status.stars, status.clock, hoverReadout);
   top.append(view.chip);
@@ -1359,6 +1364,23 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     const savePlaced = soundPlaced && soundBox.width > 0;
     saveButton.button.classList.toggle('is-placed', savePlaced);
     if (savePlaced) saveButton.button.style.setProperty('--save-x', `${Math.round(soundBox.left - bar.left)}px`);
+    placeViewChip(bar);
+  }
+
+  /**
+   * The view's chip is centered under the bar, in the row of Save, Sound and Watch. Where it would
+   * meet one of them it takes the row under theirs (ui.css is-view-low), so none of them covers
+   * its close button. A phone keeps it clear of them by its own width (ui.css).
+   */
+  function placeViewChip(bar: { width: number }): void {
+    const chip = view.chip.getBoundingClientRect();
+    if (inSheetLayout() || !(chip.width > 0)) {
+      shell.classList.remove('is-view-low');
+      return;
+    }
+    const buttons = [saveButton.button, soundToggle.button, watchToggle.button].map((b) => b.getBoundingClientRect());
+    const meets = viewChipMeets(chip, buttons, VIEW_CHIP_GAP);
+    shell.classList.toggle('is-view-low', viewChipRow(`${Math.round(chip.width)}|${Math.round(bar.width)}`, meets));
   }
 
   /** The view, a media query or a font changed under the chip and the bar: measure them again. */

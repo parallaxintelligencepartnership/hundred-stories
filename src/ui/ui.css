@@ -731,25 +731,62 @@ button.hs-readout:hover {
   white-space: nowrap;
 }
 
-/* By day the chip is empty and unseen, but it keeps its box: showing, changing or clearing it at
-   nightfall never resizes the controls, so the bar never wraps differently and Views, Share, Menu,
-   the pill and the round buttons under the bar (placed from Views) never move. */
 .hs-speed-mode.is-hidden {
-  visibility: hidden;
+  display: none;
 }
 
-/* On a wide screen its box is one fixed size, sized in its own text's em so it scales with
-   Larger text: the night speed on one line, the paused line on two. (A phone hangs it over the
-   speed pill, out of the row, as it was.) */
+/* The chip is out of the bar's flow at every width, so showing, changing or clearing it at
+   nightfall never resizes the controls: the bar never wraps differently, and Views, Share, Menu,
+   the pill and the round buttons under the bar (placed from Views) never move. A phone hangs it
+   over the speed pill in the bottom left corner (the phone block).
+   Where the bar has wrapped to two rows (below 1040 px, 1300 px with Larger text: the pill and
+   the controls never fit one row there) the controls' row has room on its left, so the chip sits
+   there, one gap left of the speed pill, its words wrapping inside the room the row leaves. */
 @media (min-width: 721px) {
   .hs-speed-mode {
-    flex: none;
-    width: 16em;
-    justify-content: center;
+    position: absolute;
+    top: 50%;
+    right: calc(100% + var(--gap-float));
+    translate: 0 -50%;
+    width: max-content;
+    max-width: calc(100vw - 2 * var(--edge) - var(--safe-left) - var(--safe-right) - 100% - var(--gap-float));
     line-height: 1.2;
-    text-align: center;
-    text-wrap: balance;
+    text-align: right;
     white-space: normal;
+  }
+}
+
+/* Wider, the bar may be one row, so the chip hangs under it on the start side, one gap right of
+   the Build dock, in the row of Save, Sound and Watch (which end far enough right at these widths)
+   and a step lower while a view's chip is up. Its box is the bar's, so the controls give up
+   theirs. */
+@media (min-width: 1040px) {
+  :root:not(.hs-large-text) .hs-top-actions {
+    position: static;
+  }
+
+  :root:not(.hs-large-text) .hs-speed-mode {
+    top: calc(100% + var(--gap-float) + var(--chip-h, 0px));
+    right: auto;
+    left: calc(var(--palette-w) + var(--gap-float));
+    translate: none;
+    max-width: none;
+    white-space: nowrap;
+  }
+}
+
+@media (min-width: 1300px) {
+  :root.hs-large-text .hs-top-actions {
+    position: static;
+  }
+
+  :root.hs-large-text .hs-speed-mode {
+    top: calc(100% + var(--gap-float) + var(--chip-h, 0px));
+    right: auto;
+    left: calc(var(--palette-w) + var(--gap-float));
+    translate: none;
+    max-width: none;
+    white-space: nowrap;
   }
 }
 
@@ -2966,7 +3003,7 @@ button.hs-news-toast {
    (ui.ts placeWatchButton measures Sound's left edge into --save-x). Right of Watch is the
    goals pill's, under Share and Menu, so Save takes the row's left end. Until the first measure
    it waits hidden, like Sound. An action, not a mode: no amber edge; while its save is being
-   written it is disabled. */
+   written it is aria-disabled. */
 .hs-save-btn {
   position: absolute;
   top: calc(100% + var(--gap-float));
@@ -2983,7 +3020,7 @@ button.hs-news-toast {
   translate: -100% 0;
 }
 
-.hs-save-btn:disabled {
+.hs-save-btn[aria-disabled='true'] {
   cursor: progress;
 }
 
@@ -3025,6 +3062,42 @@ button.hs-news-toast {
   max-width: 0;
   opacity: 0;
   margin-left: -6px;
+}
+
+/* Where their words would reach the open Build dock (Save's left edge meets the dock's right
+   edge near 808 px, 932 px with Larger text) the three keep to their icons, hovered or not, as a
+   phone does; the aria-label and the tooltip still name each one. */
+@media (min-width: 721px) and (max-width: 819px) {
+  .hs-ui :is(.hs-watch-btn, .hs-sound-btn, .hs-save-btn) {
+    padding: 0;
+  }
+
+  .hs-ui :is(.hs-watch-btn, .hs-sound-btn, .hs-save-btn) .hs-btn-label {
+    max-width: 0;
+    opacity: 0;
+    margin-left: -6px;
+  }
+}
+
+@media (min-width: 721px) and (max-width: 1023px) {
+  :root.hs-large-text .hs-ui :is(.hs-watch-btn, .hs-sound-btn, .hs-save-btn) {
+    padding: 0;
+  }
+
+  :root.hs-large-text .hs-ui :is(.hs-watch-btn, .hs-sound-btn, .hs-save-btn) .hs-btn-label {
+    max-width: 0;
+    opacity: 0;
+    margin-left: -6px;
+  }
+}
+
+/* With Larger text under 840 px even the icons reach it (Save's left edge meets it near 830 px),
+   so the dock starts under their row instead, as the open side card does. */
+@media (min-width: 721px) and (max-width: 839px) {
+  :root.hs-large-text .hs-palette {
+    top: calc(var(--top-actual, calc(var(--top-h) + var(--safe-top))) + 2 * var(--gap-float) + var(--touch) + 8px);
+    max-height: calc(100% - var(--top-actual, calc(var(--top-h) + var(--safe-top))) - 2 * var(--gap-float) - var(--touch) - 8px - var(--gap-float) - var(--edge) - var(--safe-bottom));
+  }
 }
 
 /* The list: a small card of rows, an icon and a name each. Without anchor positioning it sits
@@ -3147,6 +3220,18 @@ button.hs-news-toast {
 
 .hs-view-chip.is-hidden {
   display: none;
+}
+
+/* Where the chip would meet Save, Sound or Watch in their row (ui.ts placeViewChip measures it,
+   words shown), it takes the row under theirs, and what hangs under it steps down with it. */
+@media (min-width: 721px) {
+  .hs-ui.is-view-low .hs-view-chip {
+    top: calc(100% + 2 * var(--gap-float) + var(--touch) + 8px);
+  }
+
+  .hs-ui.has-view.is-view-low {
+    --chip-h: calc(2 * var(--touch) + 8px + 2 * var(--gap-float));
+  }
 }
 
 .hs-view-chip-icon {

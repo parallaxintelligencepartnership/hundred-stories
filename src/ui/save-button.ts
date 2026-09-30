@@ -1,7 +1,7 @@
 // The round Save button on the game view, in the row with Sound and Watch. It is an action, not a
 // toggle: a tap saves the tower now through the same path as Settings, Save now (GameApi.save),
 // and says the result the same way, as a notice ("Game saved." or the save's own reason). While
-// the save is being written the button is disabled and a second tap does nothing; once it is
+// the save is being written the button is aria-disabled and a second tap does nothing; once it is
 // written the word reads "Saved" for SAVED_MS, then "Save" again. Autosave is not its business.
 // Watch mode hides it with the rest of the chrome, and the quiet labels fold its word away like
 // Watch's and Sound's (ui.css).
@@ -115,7 +115,10 @@ export function createSaveButton(options: SaveButtonOptions): SaveButton {
       label.textContent = word;
     },
     setBusy(busy) {
-      button.disabled = busy;
+      // aria-disabled, not disabled: a disabled button drops keyboard focus to the page, and the
+      // action's own guard already ignores a second press while the save is written.
+      if (busy) button.setAttribute('aria-disabled', 'true');
+      else button.removeAttribute('aria-disabled');
     },
   });
   button.addEventListener('click', () => action.run());

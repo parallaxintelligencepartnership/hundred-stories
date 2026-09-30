@@ -266,7 +266,10 @@ describe('Sound button styles', () => {
     expect(phone).toMatch(/\.hs-sound-btn:not\(\.is-placed\),\s*\.hs-save-btn:not\(\.is-placed\) \{\s*visibility: visible;/);
     // Its size is .hs-round's, the Watch button's own: no rule of its own sets one. The quiet
     // fold (quiet-labels.ts) takes Watch's and Sound's padding to 0 alike while the words are away.
-    const resting = css.replace(/\.hs-ui\.is-quiet-labels[^{]*\{[^}]*\}/g, '');
+    // So does the fold where the words would reach the open Build dock (P1 review I-3).
+    const resting = css
+      .replace(/\.hs-ui\.is-quiet-labels[^{]*\{[^}]*\}/g, '')
+      .replace(/@media \(min-width: 721px\) and \(max-width: (819|1023)px\) \{[^@]*?\}\s*\}/g, '');
     expect(resting).not.toMatch(/\.hs-sound-btn[^{]*\{[^}]*(min-height|min-width|padding):/);
   });
 });

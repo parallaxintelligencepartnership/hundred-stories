@@ -108,3 +108,37 @@ export function placementBoxes(frame: PlacementFrame): {
     },
   };
 }
+
+/** A horizontal extent on screen. */
+export interface Span {
+  left: number;
+  right: number;
+}
+
+/**
+ * Would the view's chip, centered under the top bar, come within `gap` of any of the round
+ * buttons in the row under the bar (Save, Sound, Watch)? Only their left and right edges count:
+ * the question is whether the two would share the row. A button not laid out (width 0) is ignored.
+ */
+export function viewChipMeets(chip: Span, buttons: readonly Span[], gap: number): boolean {
+  if (!(chip.right > chip.left)) return false;
+  return buttons.some((b) => b.right > b.left && chip.left < b.right + gap && chip.right + gap > b.left);
+}
+
+/**
+ * Whether the view's chip takes the row under the buttons, decided once per layout (`key`: the
+ * chip's and the bar's widths) and then only ever lowered, never raised: the buttons' words fold
+ * away after 2 s idle and come back on any input, and the chip must not ride up and down with
+ * them. A new layout (another view, a resize, Larger text) decides afresh.
+ */
+export function createViewChipRow(): (key: string, meets: boolean) => boolean {
+  let lastKey = '';
+  let low = false;
+  return (key, meets) => {
+    if (key !== lastKey) {
+      lastKey = key;
+      low = meets;
+    } else if (meets) low = true;
+    return low;
+  };
+}

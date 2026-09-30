@@ -1,6 +1,6 @@
 // The round Save button in the row under the top bar, left of Sound and Watch: a tap runs the same
-// save as Settings, Save now (GameApi.save) and says the result in the same notice; it is disabled
-// while the save is written, reads "Saved" for a moment after, and follows every rule Watch and
+// save as Settings, Save now (GameApi.save) and says the result in the same notice; it is aria-disabled
+// (keeping keyboard focus) while the save is written, reads "Saved" for a moment after, and follows every rule Watch and
 // Sound follow (placed by the same measure, hidden in Watch mode, its word folded when quiet).
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -57,19 +57,19 @@ describe('createSaveButton', () => {
     expect(ICON_NAMES).toContain('save');
   });
 
-  it('a press saves once; while it is written the button is disabled and a second press does nothing', async () => {
+  it('a press saves once; while it is written the button is aria-disabled, never disabled (focus stays), and a second press does nothing', async () => {
     const { save, finish } = deferredSave();
     const notice = vi.fn();
     const node = createSaveButton({ save, notice }).button as unknown as FakeElement;
     click(node);
     expect(save).toHaveBeenCalledTimes(1);
-    expect(node.disabled).toBe(true);
+    expect([node.getAttribute('aria-disabled'), node.disabled]).toEqual(['true', false]);
     click(node);
     click(node);
     expect(save).toHaveBeenCalledTimes(1);
     finish({ ok: true });
     await settle();
-    expect(node.disabled).toBe(false);
+    expect([node.getAttribute('aria-disabled'), node.disabled]).toEqual([null, false]);
     expect(notice.mock.calls).toEqual([[SAVED_NOTICE]]);
     // Written: another press saves again.
     click(node);
@@ -98,12 +98,12 @@ describe('createSaveButton', () => {
     click(node);
     await settle();
     expect(notice.mock.calls).toEqual([[reason]]);
-    expect([labelOf(node), node.disabled]).toEqual(['Save', false]);
+    expect([labelOf(node), node.getAttribute('aria-disabled')]).toEqual(['Save', null]);
     // A save that throws still lets go of the button, with plain words.
     const broken = createSaveButton({ save: () => Promise.reject(new Error('x')), notice }).button as unknown as FakeElement;
     click(broken);
     await settle();
-    expect([notice.mock.calls[1], broken.disabled]).toEqual([['Could not save.'], false]);
+    expect([notice.mock.calls[1], broken.getAttribute('aria-disabled')]).toEqual([['Could not save.'], null]);
   });
 });
 
@@ -202,7 +202,11 @@ describe('Save button styles', () => {
     // A phone keeps Watch at the right edge: Save is two buttons and two gaps in, shown at once.
     expect(phone).toMatch(/\.hs-save-btn,\s*\.hs-save-btn\.is-placed \{\s*left: auto;\s*right: calc\(2 \* \(var\(--touch\) \+ 8px \+ var\(--gap-float\)\)\);/);
     expect(phone).toMatch(/\.hs-save-btn:not\(\.is-placed\) \{\s*visibility: visible;/);
-    const resting = css.replace(/\.hs-ui\.is-quiet-labels[^{]*\{[^}]*\}/g, '');
+    // Only the folds take the padding: the quiet labels, and the widths where the words would
+    // reach the open Build dock (I-3 of the P1 review).
+    const resting = css
+      .replace(/\.hs-ui\.is-quiet-labels[^{]*\{[^}]*\}/g, '')
+      .replace(/@media \(min-width: 721px\) and \(max-width: (819|1023)px\) \{[^@]*?\}\s*\}/g, '');
     expect(resting).not.toMatch(/\.hs-save-btn[^{]*\{[^}]*(min-height|min-width|padding):/);
   });
 });
