@@ -5,14 +5,14 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { Container, Graphics, Rectangle, Texture, type Renderer as PixiRenderer } from 'pixi.js';
-import { createArt, FLOOR_PX, GHOST_KEEP, SHAFT_PIECE_FLOORS, PERSON_ATLAS_CELLS, PERSON_ATLAS_COLS, PERSON_ATLAS_ROWS, PERSON_CELL_H, PERSON_CELL_W, CROWD_COLS, CROWD_KINDS, CROWD_ROWS, CROWD_STRIP_H, TEXTURE_CLASS, TEXTURE_SIZE, VENUE_SHELL } from '../../src/render/art';
+import { createArt, FLOOR_PX, GHOST_KEEP, SHAFT_PIECE_FLOORS, PERSON_ATLAS_CELLS, PERSON_ATLAS_COLS, PERSON_ATLAS_ROWS, PERSON_CELL_H, PERSON_CELL_W, TEXTURE_CLASS, TEXTURE_SIZE, VENUE_SHELL } from '../../src/render/art';
 import { FRAME, PERSON_FRAME_COUNT, type PersonFrame } from '../../src/render/anim';
 import { LOOK_CODES, MARK_H, MARK_W, PROP_KINDS, PROP_SIZE } from '../../src/render/figure';
 import type { SimKind } from '../../src/sim/types';
 import { LINE_PX, SIM_H, SIM_W, TILE_PX } from '../../src/render/grid';
 import { INK, wallShadow } from '../../src/render/palette';
 import { VENUE_BAND } from '../../src/render/illustrated';
-import { ATLAS_BUDGET_PX, CROWD_EXTRA_SCALE } from '../../src/render/renderer';
+import { ATLAS_BUDGET_PX } from '../../src/render/renderer';
 
 interface Baked {
   scaleMode: string;
@@ -155,54 +155,18 @@ describe('texture budget', () => {
   });
 });
 
-// Package 8b: crowd mode draws what people carry and their stress marks, from a strip at the
-// foot of the same atlas, so the particle container still draws from one source.
-describe('the crowd atlas', () => {
-  it('lays out one column group per wardrobe, so roles that dress alike share cells', () => {
+// The person atlas lays the wardrobes out, not the kinds: roles that dress alike share cells.
+describe('the person atlas cells', () => {
+  it('gives roles that dress alike one cell, and keeps the uniforms apart', () => {
     const { art } = harness(1);
-    const atlas = art.crowd!()!;
-    const cell = (kind: Parameters<typeof atlas.frameOf>[0]): Rectangle => atlas.frameOf(kind, 3, FRAME.stand).frame;
-    expect(cell('resident').x).toBe(cell('visitor').x);
-    expect(cell('thief').x).toBe(cell('visitor').x);
-    expect(cell('guard').x).not.toBe(cell('worker').x);
-    expect(cell('collector').x).not.toBe(cell('staff').x);
-    expect(CROWD_KINDS).toHaveLength(6);
-  });
-
-  it('stays inside the atlas budget at a device pixel ratio of 2, strip included', () => {
-    const { canvases } = (() => {
-      const h = harness(2);
-      h.art.crowd!();
-      return h;
-    })();
-    const atlas = canvases[canvases.length - 1]!;
-    expect(atlas.width).toBe(CROWD_COLS * SIM_W * 2);
-    expect(atlas.width).toBeLessThanOrEqual(ATLAS_BUDGET_PX);
-    expect(atlas.height).toBe((CROWD_ROWS * SIM_H + CROWD_STRIP_H) * 2);
-    expect(atlas.height).toBeLessThanOrEqual(ATLAS_BUDGET_PX);
-  });
-
-  it('cuts every prop and both stress marks from the strip under the people', () => {
-    const { art } = harness(1);
-    const atlas = art.crowd!()!;
-    for (const prop of PROP_KINDS) {
-      const t = atlas.propOf!(prop);
-      expect(t.frame.y, prop).toBe(CROWD_ROWS * SIM_H);
-      expect([t.frame.width, t.frame.height], prop).toEqual([PROP_SIZE[prop].w, PROP_SIZE[prop].h]);
-      expect(t.source, prop).toBe(atlas.frameOf('worker', 0, FRAME.stand).source);
-    }
-    for (const mark of ['dot', 'bang'] as const) {
-      const t = atlas.markOf!(mark);
-      expect(t.frame.y, mark).toBe(CROWD_ROWS * SIM_H);
-      expect([t.frame.width, t.frame.height], mark).toEqual([MARK_W, MARK_H]);
-    }
-    expect(CROWD_STRIP_H).toBeGreaterThanOrEqual(Math.max(...PROP_KINDS.map((p) => PROP_SIZE[p].h), MARK_H));
-  });
-
-  it('draws them at three quarters of their size in crowd mode', () => {
-    expect(CROWD_EXTRA_SCALE).toBe(0.75);
+    const cell = (kind: SimKind): Rectangle => art.sim(kind, 'calm', FRAME.stand, 3).frame;
+    expect(cell('resident')).toEqual(cell('visitor'));
+    expect(cell('thief')).toEqual(cell('visitor'));
+    expect(cell('guard')).not.toEqual(cell('worker'));
+    expect(cell('collector')).not.toEqual(cell('staff'));
   });
 });
+
 
 describe('tall spans stay inside the GPU limit (audit 2026-09-25 F2 S1, new S4)', () => {
   /** A generateTexture that records each bake's family, device px height, and whether it was freed. */

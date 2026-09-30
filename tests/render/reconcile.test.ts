@@ -308,13 +308,29 @@ describe('crowd sample in the sim draw loop', () => {
     expect(spritesWith(stage, 'sim|')).toHaveLength(40);
   });
 
-  it('counts only the sample toward particle mode', async () => {
-    // 1,600 visible, 400 drawn: under the particle threshold of 500, so sprites stay.
-    const world = crowdWorld(1600);
+  // Package P3 F3: the whole crowd used to switch drawing style at 500 drawn people (a particle
+  // atlas of stand and stride only) and back at 400. With every person a cell of one atlas the
+  // detailed sprites batch at any size, so there is no switch: the same sprites stay through it.
+  it('keeps every drawn person a detailed sprite past 500 and back, with no whole crowd switch', async () => {
+    const world = crowdWorld(1600); // 400 drawn
+    // An art that still offers the old crowd atlas: the renderer must not take it up.
+    const cell = tex('crowd|cell');
+    const crowd = { frameOf: () => cell, propOf: () => cell, markOf: () => cell };
+    artHolder.art = { ...stubArt, crowd: () => crowd } as unknown as Art;
     const { renderer, stage } = await mount(world);
     renderer.render(world, 1);
+    const before = new Set(spritesWith(stage, 'sim|'));
+    expect(before.size).toBe(400);
+    for (let i = 0; i < 2400; i++) makeWalker(world, 1, 186 + (i % 8)); // 1,000 drawn
+    renderer.render(world, 1);
     expect(hasParticles(stage)).toBe(false);
-    expect(spritesWith(stage, 'sim|')).toHaveLength(400);
+    const many = spritesWith(stage, 'sim|');
+    expect(many).toHaveLength(1000);
+    for (const sprite of before) expect(many).toContain(sprite); // nobody was redrawn
+    for (const sim of [...world.sims.values()].slice(1200)) world.sims.delete(sim.id); // 300 drawn
+    renderer.render(world, 1);
+    expect(hasParticles(stage)).toBe(false);
+    expect(spritesWith(stage, 'sim|')).toHaveLength(300);
   });
 });
 

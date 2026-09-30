@@ -22,7 +22,6 @@
 
 import { CanvasSource, Container, Graphics, Rectangle, Texture } from 'pixi.js';
 import type { Renderer } from 'pixi.js';
-import { LOOK_KEYS } from '../sim/identity';
 import type { RoomKind, ShaftKind, SimKind, StressBand } from '../sim/types';
 import { SHAFTS } from '../sim/rules';
 import { canonicalFrame, DOOR_FRAMES, doorFrameOf, FRAME, type PersonFrame } from './anim';
@@ -31,14 +30,11 @@ import {
   ATLAS_LOOKS,
   atlasLookCode,
   atlasVariantOf,
-  BODY_COUNT,
   drawPerson,
   drawProp,
   drawStressMark,
-  lookCode,
   MARK_H,
   MARK_W,
-  PROP_KINDS,
   PROP_SIZE,
   WARDROBE_KIND,
   WARDROBES,
@@ -148,8 +144,6 @@ export interface Art {
   mark?(mark: 'dot' | 'bang'): Texture;
   umbrella?(colour: number): Texture;
   vehicle?(kind: VehicleKind): Texture;
-  /** The crowd atlas for particle mode, built on first use; null if it cannot be built. */
-  crowd?(): CrowdAtlas | null;
   /** How many textures are baked and their bytes at the bake resolution (width x height x 4). */
   stats?(): TextureStats;
   /** Free every ghost texture: the placement ended, and a drag's spans should not stay baked. */
@@ -195,15 +189,6 @@ export function shaftPieces(floors: number): number[] {
 /** Ghost textures kept baked at once: the one showing and the one before it (ok and refused). */
 export const GHOST_KEEP = 2;
 
-export interface CrowdAtlas {
-  /** The atlas cell for a person: walk frames show the stride, every other frame stands. */
-  frameOf(kind: SimKind, look: number, frame: PersonFrame): Texture;
-  /** A prop in the atlas's strip, so crowd mode can draw what people carry from the same source. */
-  propOf?(prop: PropKind): Texture;
-  /** A stress mark in the atlas's strip. */
-  markOf?(mark: 'dot' | 'bang'): Texture;
-}
-
 export interface TextureStats {
   textures: number;
   bytes: number;
@@ -230,16 +215,6 @@ export const TEXTURE_CLASS = {
  * whole pixel room, which the palette thumbnails are cut from.
  */
 export const VENUE_SHELL = 2;
-
-/**
- * The crowd atlas layout: every wardrobe and look key across (roles that dress alike share a
- * column, as their textures do), every build by stand and stride down, then one strip of props
- * and stress marks, CROWD_STRIP_H tall, one per 16 px cell.
- */
-export const CROWD_KINDS: readonly SimKind[] = WARDROBES.map((w) => WARDROBE_KIND[w]);
-export const CROWD_COLS = CROWD_KINDS.length * LOOK_KEYS;
-export const CROWD_ROWS = BODY_COUNT * 2;
-export const CROWD_STRIP_H = 20;
 
 /**
  * The person atlas (package P3): every wardrobe's kept looks (figure.ts ATLAS_LOOKS) in each of
@@ -1944,7 +1919,6 @@ export function createArt(renderer: Renderer, options: { createCanvas?: CanvasFa
     if (left > 0) byKey.set(key, left);
     else byKey.delete(key);
   };
-  let crowdAtlas: CrowdAtlas | null | undefined;
   let noContextWarned = false;
   /** The ghost keys baked now, oldest first; at most GHOST_KEEP stay (ghost()). */
   const ghostKeys: string[] = [];
@@ -2221,87 +2195,6 @@ export function createArt(renderer: Renderer, options: { createCanvas?: CanvasFa
     vehicle(kind) {
       const { w, h } = VEHICLE_SIZE[kind];
       return paint(`vehicle:${kind}`, w, h, (ctx) => drawVehicle(ctx, kind));
-    },
-
-    crowd() {
-      if (crowdAtlas !== undefined) return crowdAtlas;
-      crowdAtlas = null;
-      try {
-        // One canvas at the structural resolution: at crowd zoom a person is a few pixels tall.
-        const cellW = SIM_W;
-        const cellH = SIM_H;
-        const stripY = CROWD_ROWS * cellH;
-        const marks = ['dot', 'bang'] as const;
-        const atlas = paint(
-          'crowd',
-          CROWD_COLS * cellW,
-          stripY + CROWD_STRIP_H,
-          (ctx) => {
-            for (let k = 0; k < CROWD_KINDS.length; k++) {
-              for (let l = 0; l < LOOK_KEYS; l++) {
-                for (let b = 0; b < BODY_COUNT; b++) {
-                  for (let s = 0; s < 2; s++) {
-                    ctx.save();
-                    ctx.translate((k * LOOK_KEYS + l) * cellW, (b * 2 + s) * cellH);
-                    drawPerson(ctx as unknown as Ctx2D, CROWD_KINDS[k] as SimKind, lookCode(b, l), s === 0 ? FRAME.stand : FRAME.stride);
-                    ctx.restore();
-                  }
-                }
-              }
-            }
-            // The strip: every prop, then the two stress marks, one to a cell.
-            PROP_KINDS.forEach((prop, i) => {
-              ctx.save();
-              ctx.translate(i * cellW, stripY);
-              drawProp(ctx as unknown as Ctx2D, prop);
-              ctx.restore();
-            });
-            marks.forEach((mark, i) => {
-              ctx.save();
-              ctx.translate((PROP_KINDS.length + i) * cellW, stripY);
-              drawStressMark(ctx as unknown as Ctx2D, mark);
-              ctx.restore();
-            });
-          },
-          resolution,
-        );
-        if (atlas === Texture.EMPTY) {
-          // No canvas context this time (paint warned): stay on sprites, and try again later.
-          crowdAtlas = undefined;
-          return null;
-        }
-        const stripCell = (i: number, w: number, h: number): Texture =>
-          new Texture({ source: atlas.source, frame: new Rectangle(i * cellW, stripY, w, h) });
-        const propCells = new Map<PropKind, Texture>(PROP_KINDS.map((prop, i) => [prop, stripCell(i, PROP_SIZE[prop].w, PROP_SIZE[prop].h)]));
-        const markCells = new Map(marks.map((mark, i) => [mark, stripCell(PROP_KINDS.length + i, MARK_W, MARK_H)]));
-        const cells = new Map<number, Texture>();
-        crowdAtlas = {
-          propOf(prop) {
-            return propCells.get(prop) as Texture;
-          },
-          markOf(mark) {
-            return markCells.get(mark) as Texture;
-          },
-          frameOf(kind, look, frame) {
-            const k = Math.max(0, WARDROBES.indexOf(wardrobeOf(kind)));
-            const codes = BODY_COUNT * LOOK_KEYS;
-            const code = ((Math.trunc(look) % codes) + codes) % codes;
-            const col = k * LOOK_KEYS + (code % LOOK_KEYS);
-            const row = Math.floor(code / LOOK_KEYS) * 2 + (frame === FRAME.stride || frame === FRAME.strideMirrored ? 1 : 0);
-            const id = row * CROWD_COLS + col;
-            let cell = cells.get(id);
-            if (!cell) {
-              cell = new Texture({ source: atlas.source, frame: new Rectangle(col * cellW, row * cellH, cellW, cellH) });
-              cells.set(id, cell);
-            }
-            return cell;
-          },
-        };
-      } catch (error) {
-        console.warn('render: crowd atlas failed, staying on sprites', error);
-        crowdAtlas = null;
-      }
-      return crowdAtlas;
     },
 
     stats() {

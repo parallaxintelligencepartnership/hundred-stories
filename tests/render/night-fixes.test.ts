@@ -49,7 +49,6 @@ function tex(key: string): Texture {
   if (!t) textures.set(key, (t = new Texture({ label: key })));
   return t;
 }
-const atlas = tex('atlas');
 const stubArt: Art = {
   room: (kind, width, height, variant, state) => tex(`room|${kind}|${width}|${height}|${variant}|${state}`),
   slab: (width) => tex(`slab|${width}`),
@@ -62,8 +61,6 @@ const stubArt: Art = {
   glow: () => tex('glow'),
   shut: (kind, w, h) => tex(`shut|${kind}|${w}|${h}`),
   mark: (mark) => tex(`mark|${mark}`),
-  // One atlas for crowd mode: people, props and marks all from the same source.
-  crowd: () => ({ frameOf: () => atlas, propOf: () => atlas, markOf: () => atlas }),
 };
 vi.mock('../../src/render/art', async (importOriginal) => {
   const art = await importOriginal<typeof import('../../src/render/art')>();
@@ -321,21 +318,16 @@ describe('stress marks at any crowd size', () => {
     return stage;
   }
 
-  it('puts the mark on the emissive layer at 499 people as sprites and at 501 as particles', async () => {
-    const few = await crowd(499);
-    const emissiveFew = find(few, 'emissive');
-    expect(walk(few, (n) => n instanceof ParticleContainer)).toHaveLength(0);
-    expect(spritesWith(emissiveFew, 'mark|')).toHaveLength(1);
-
-    const many = await crowd(501);
-    const emissiveMany = find(many, 'emissive');
-    const people = walk(find(many, 'selected person').parent as Container, (n) => n instanceof ParticleContainer) as ParticleContainer[];
-    expect(people.length).toBe(1); // crowd mode is on
-    const marks = walk(emissiveMany, (n) => n instanceof ParticleContainer) as ParticleContainer[];
-    expect(marks).toHaveLength(1);
-    expect(marks[0]!.particleChildren).toHaveLength(1);
-    // The people (and what they carry) stay in the world under the night tint; the mark does not.
-    expect(people[0]!.particleChildren.length).toBeGreaterThanOrEqual(501);
-    expect(people[0]!.particleChildren).not.toContain(marks[0]!.particleChildren[0]);
+  // Package P3 F3: there is no crowd mode any more, so past 500 people the mark is the same
+  // sprite on the emissive layer, and the people stay sprites in the world under the night tint.
+  it('puts the mark on the emissive layer as a sprite at 499 people and at 501 alike', async () => {
+    for (const count of [499, 501]) {
+      const stage = await crowd(count);
+      const emissive = find(stage, 'emissive');
+      expect(walk(stage, (n) => n instanceof ParticleContainer), `${count}`).toHaveLength(0);
+      expect(spritesWith(emissive, 'mark|'), `${count}`).toHaveLength(1);
+      expect(spritesWith(emissive, 'sim|'), `${count}`).toHaveLength(0);
+      expect(spritesWith(stage, 'sim|').length, `${count}`).toBeGreaterThanOrEqual(count);
+    }
   });
 });

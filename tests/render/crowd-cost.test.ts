@@ -215,7 +215,7 @@ describe('one day at about 900 people, real art', () => {
     const art = realArtOnAFakeCanvas();
     artHolder.art = art;
     const { renderer, frame, stage } = await mount(world);
-    const personTextures = (): number => Object.keys(art.stats!().byKey).filter((key) => key.startsWith('person:')).length;
+    const personTextures = (): number => Object.keys(art.stats!().byKey ?? {}).filter((key) => key.startsWith('person:')).length;
     let peakTextures = 0;
     let peakDrawn = 0;
     const sources = new Set<TextureSource>();

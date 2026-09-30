@@ -17,8 +17,6 @@ import {
   isWebGLSupported,
   isWebGPUSupported,
   Graphics,
-  Particle,
-  ParticleContainer,
   Rectangle,
   Sprite,
   Texture,
@@ -44,7 +42,6 @@ import {
   VENUE_SHELL,
   hasWindowBand,
   type Art,
-  type CrowdAtlas,
 } from './art';
 import {
   createCamera,
@@ -90,11 +87,8 @@ import {
   MARK_H,
   MARK_W,
   markBottomAboveFeet,
-  PROP_SIZE,
   personLookCode,
-  propPlacement,
   stressMarkOf,
-  type PropKind,
   type StressMark,
 } from './figure';
 import { bakesAtStructuralScale, DECOR, INTERIORS, interiorFlip, interiorOpen, interiorVariant, interiorVariants, lookOf as interiorLook } from './interiors';
@@ -265,13 +259,10 @@ export function pickTargetAt(world: World, floor: number, x: number): { roomId: 
 
 const SIM_WIDTH_PX = SIM_W; // one tile wide, matching art.ts
 const SIM_HEIGHT_PX = SIM_H; // three tiles tall
-const PARTICLE_THRESHOLD = 500;
-const PARTICLE_RELEASE = 400; // hysteresis, so a crowd on the edge does not thrash
-/**
- * Crowd mode draws props and stress marks too, at three quarters of their size (package 8b):
- * they come from a strip in the crowd atlas, so they cost one small row of it and nothing else.
- */
-export const CROWD_EXTRA_SCALE = 0.75;
+// There is no crowd mode (package P3 F3): the whole crowd used to switch to a particle atlas of
+// stand and stride only at 500 drawn people and back at 400, a visible flip of every person. Every
+// person is now a cell of one person atlas (art.ts sim), so the detailed sprites, their props and
+// their marks batch under a handful of textures at any crowd size, and nothing switches.
 /** How long a mouse press may hold still and still count as a click. A finger gets no limit. */
 const CLICK_MS = 600;
 const FIRE_FLICKER_MS = 110;
@@ -364,9 +355,9 @@ export function simKeyOf(kind: SimKind, frame: PersonFrame, look: number): numbe
 }
 
 /**
- * The crowd atlas (art.ts crowd) stays inside ATLAS_BUDGET_PX device pixels on a side at a device
- * pixel ratio of 2: 8 kinds by 8 look keys is 64 cells of 16 px, 1024 css px, 2048 device px
- * wide; 5 builds by stand and stride is 10 rows of 48 px, 960 device px tall.
+ * The person atlas (art.ts sim) stays inside ATLAS_BUDGET_PX device pixels on a side at a device
+ * pixel ratio of 2: 30 cells of 17 logical px across and 10 of 49 down, at the illustrated scale
+ * of 4 device px a logical px, is 2040 by 1960.
  */
 export const ATLAS_BUDGET_PX = 2048;
 
@@ -709,10 +700,6 @@ function guardArt(primary: Art, backup: Art): Art {
   if (p.mark) guarded.mark = extra('mark', p.mark);
   if (p.umbrella) guarded.umbrella = extra('umbrella', p.umbrella);
   if (p.vehicle) guarded.vehicle = extra('vehicle', p.vehicle);
-  if (p.crowd) {
-    const crowd = p.crowd;
-    guarded.crowd = () => (broken ? null : crowd());
-  }
   if (p.stats) guarded.stats = p.stats;
   if (p.dropGhosts) guarded.dropGhosts = p.dropGhosts;
   guarded.extrasOn = () => !broken && !extrasBroken;
@@ -1301,7 +1288,7 @@ export async function createRenderer(
   const simSlots = new Map<Id, number>();
   const drawnSims: Sim[] = [];
   /**
-   * Where the last frame drew each person (sprite or particle), feet point. A tap picks a
+   * Where the last frame drew each person, feet point. A tap picks a
    * person here and the selection ring goes here, so both follow the picture: a person at a
    * desk is picked at the desk, and one nobody drew (outside the sample, riding, far zoom)
    * can be neither picked nor ringed.
@@ -1321,104 +1308,11 @@ export async function createRenderer(
   const overlayPass = createOverlayPass(overlayTint);
   const overlayView: ViewRect = { left: 0, top: 0, right: 0, bottom: 0 };
 
-  // Sim particle mode: one shared atlas (art.crowd) so every particle draws from one source.
-  let particles: ParticleContainer | null = null;
-  // Crowd mode's stress marks: their own particle container in the marks layer, so a mark sits on
-  // the emissive layer above the night tint whatever the crowd size, as a sprite mark does (D-4).
-  let crowdMarks: ParticleContainer | null = null;
-  let crowdAtlas: CrowdAtlas | null = null;
-  let particleMode = false;
-  const simParticles = new Map<Id, Particle>();
-  // What people carry and their stress marks, as particles from the atlas's strip, at CROWD_EXTRA_SCALE.
-  const propParticles = new Map<Id, Particle>();
-  const markParticles = new Map<Id, { particle: Particle; mark: 'dot' | 'bang' }>();
-
   function dropSimEntry(id: Id, entry: SimEntry): void {
     entry.node.destroy();
     entry.mark?.destroy();
     entry.prop?.destroy();
     simSprites.delete(id);
-  }
-
-  function enterParticleMode(): boolean {
-    if (particles) return true;
-    const atlas = crowdAtlas ?? art.crowd?.() ?? null;
-    if (!atlas) return false;
-    crowdAtlas = atlas;
-    particles = new ParticleContainer({
-      texture: atlas.frameOf('worker', 0, FRAME.stand),
-      dynamicProperties: { position: true, uvs: true, color: false, rotation: false, vertex: false },
-      roundPixels: true,
-      boundsArea: new Rectangle(-4000, -4000, 20000, 20000),
-    });
-    layers.sims.addChild(particles);
-    crowdMarks = new ParticleContainer({
-      texture: atlas.frameOf('worker', 0, FRAME.stand),
-      dynamicProperties: { position: true, uvs: true, color: false, rotation: false, vertex: false },
-      roundPixels: true,
-      boundsArea: new Rectangle(-4000, -4000, 20000, 20000),
-    });
-    crowdMarks.label = 'crowd marks';
-    markLayer.addChild(crowdMarks);
-    for (const [id, entry] of simSprites) dropSimEntry(id, entry);
-    simSpriteLayer.removeChildren();
-    particleMode = true;
-    return true;
-  }
-
-  function leaveParticleMode(): void {
-    if (!particles) return;
-    particles.destroy();
-    particles = null;
-    crowdMarks?.destroy();
-    crowdMarks = null;
-    simParticles.clear();
-    propParticles.clear();
-    markParticles.clear();
-    particleMode = false;
-  }
-
-  /**
-   * Crowd mode's prop and stress mark for one person, drawn from the atlas strip at
-   * CROWD_EXTRA_SCALE: the prop in the hand for the atlas frame shown, the mark over the head.
-   */
-  function syncCrowdExtras(id: Id, kind: SimKind, look: number, frame: PersonFrame, band: StressBand, x: number, y: number): void {
-    const container = particles;
-    const marks = crowdMarks;
-    const atlas = crowdAtlas;
-    if (!container || !marks || !atlas) return;
-    const atlasFrame = frame === FRAME.stride || frame === FRAME.strideMirrored ? FRAME.stride : FRAME.stand;
-    const place = atlas.propOf ? propPlacement(kind, look, atlasFrame) : null;
-    let prop = propParticles.get(id);
-    if (place && atlas.propOf) {
-      const size = PROP_SIZE[place.prop as PropKind];
-      if (!prop) {
-        prop = new Particle({ texture: atlas.propOf(place.prop), anchorX: 0.5, anchorY: 0.5, scaleX: CROWD_EXTRA_SCALE, scaleY: CROWD_EXTRA_SCALE });
-        propParticles.set(id, prop);
-        container.addParticle(prop);
-      }
-      prop.x = x - SIM_WIDTH_PX / 2 + place.x + size.w / 2;
-      prop.y = y - SIM_HEIGHT_PX + place.y + size.h / 2;
-    } else if (prop) {
-      container.removeParticle(prop);
-      propParticles.delete(id);
-    }
-    const mark = atlas.markOf ? stressMarkOf(band) : null;
-    let held = markParticles.get(id);
-    if (held && held.mark !== mark) {
-      marks.removeParticle(held.particle);
-      markParticles.delete(id);
-      held = undefined;
-    }
-    if (mark && atlas.markOf) {
-      if (!held) {
-        held = { particle: new Particle({ texture: atlas.markOf(mark), anchorX: 0.5, anchorY: 1, scaleX: CROWD_EXTRA_SCALE, scaleY: CROWD_EXTRA_SCALE }), mark };
-        markParticles.set(id, held);
-        marks.addParticle(held.particle);
-      }
-      held.particle.x = x;
-      held.particle.y = y - markBottomAboveFeet(look);
-    }
   }
 
   /** Target this key at (x, y) and return where to draw it at alpha. */
@@ -2327,7 +2221,6 @@ export async function createRenderer(
     simSpriteLayer.visible = !solo;
     propLayer.visible = !solo;
     markLayer.visible = !solo;
-    if (particles) particles.visible = !solo;
     if (solo) {
       drawSolo(w);
       return;
@@ -2338,16 +2231,12 @@ export async function createRenderer(
     // the loop below walks only the sims that are drawn.
     drawnSims.length = 0;
     for (const sim of w.sims.values()) if (drawn(sim)) drawnSims.push(sim);
-    const visible = drawnSims.length;
-
-    if (!particleMode && visible > PARTICLE_THRESHOLD) enterParticleMode();
-    else if (particleMode && visible < PARTICLE_RELEASE) leaveParticleMode();
 
     // Sims standing in a room take a fixed slot, in id order, so they stop jittering.
     simSlots.clear();
 
     // One viewport of margin on every side of the camera, in world px; a sim further
-    // out than this gets no sprite or particle until it comes back into range.
+    // out than this gets no sprite until it comes back into range.
     const halfW = app.screen.width / camera.zoom;
     const halfH = app.screen.height / camera.zoom;
     const viewLeft = camera.x - halfW;
@@ -2386,22 +2275,6 @@ export async function createRenderer(
       // floor is the one the feet stand on: a slot in a two floor room sits on its base floor.
       drawnAt.set(sim.id, { x: point.x, y: point.y, floor: yToFloor(point.y - 1) });
 
-      const atlasTile = particleMode && particles && crowdAtlas ? crowdAtlas.frameOf(kind, look, frame) : undefined;
-      if (particles && atlasTile) {
-        let particle = simParticles.get(sim.id);
-        if (!particle) {
-          particle = new Particle({ texture: atlasTile, anchorX: 0.5, anchorY: 1 });
-          simParticles.set(sim.id, particle);
-          particles.addParticle(particle);
-        } else if (particle.texture !== atlasTile) {
-          particle.texture = atlasTile;
-        }
-        particle.x = drawX;
-        particle.y = drawY;
-        syncCrowdExtras(sim.id, kind, look, frame, band, drawX, drawY);
-        continue;
-      }
-
       let entry = simSprites.get(sim.id);
       if (!entry) {
         const sprite = new Sprite(art.sim(kind, band, frame, look));
@@ -2423,21 +2296,6 @@ export async function createRenderer(
       dropSimEntry(id, entry);
       simMotion.forget(id);
       simSteps.delete(id);
-    }
-    if (particles) {
-      for (const [id, particle] of simParticles) {
-        if (seenSims.has(id)) continue;
-        particles.removeParticle(particle);
-        simParticles.delete(id);
-        simMotion.forget(id);
-        simSteps.delete(id);
-        const prop = propParticles.get(id);
-        if (prop) particles.removeParticle(prop);
-        propParticles.delete(id);
-        const held = markParticles.get(id);
-        if (held) crowdMarks?.removeParticle(held.particle);
-        markParticles.delete(id);
-      }
     }
   }
 
@@ -2985,7 +2843,6 @@ export async function createRenderer(
     }
     carSprites.clear();
     for (const [id, entry] of [...simSprites]) dropSimEntry(id, entry);
-    leaveParticleMode();
     for (const g of fireGraphics.values()) g.destroy();
     fireGraphics.clear();
     drawnAt.clear();
@@ -3200,8 +3057,6 @@ export async function createRenderer(
       weatherFx.destroy();
       publishWeatherView(0, null);
       curb.destroy();
-      leaveParticleMode();
-      crowdAtlas = null;
       app.destroy({ removeView: true }, { children: true });
     },
     thumbnail: createThumbnails({ art: () => art, extract: (t) => app.renderer.extract.canvas(t) as HTMLCanvasElement }),
