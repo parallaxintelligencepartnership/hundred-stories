@@ -1343,21 +1343,34 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
       }),
     async peekDaily(): Promise<DailyPeek> {
       // What openDaily would find, read the same way and decided by the same rule, with nothing
-      // taken: no slot, no world, no record written. The daily in hand, if any, is the newest copy.
+      // taken: no slot, no world, no record written, and no slot's protection lifted (readFrom,
+      // not tryRead). The daily in hand, if any, is the newest copy.
       const today = time.today();
-      const read = slot === 'daily' ? { world, failed: false } : await readWorld('daily');
-      const saved = read.world;
+      const inHand = slot === 'daily';
+      let saved: World | null = inHand ? world : null;
+      if (!inHand) {
+        let text: string | null;
+        try {
+          text = await readFrom('daily');
+        } catch {
+          // Nothing is known: not fresh, not locked. Only opening it can tell (and say so).
+          return { today, opening: 'unreadable', inHand, savedDate: null, savedUnfinished: false, yesterday: false, result: null };
+        }
+        const res = text ? openSaveText(text) : null;
+        saved = res?.ok ? res.world : null;
+      }
       const savedDate = saved ? dateOfMode(buildLogOf(saved).mode) : null;
-      const known = !read.failed && saved && savedDate !== null ? { date: savedDate, finished: dailyFinished(saved) } : null;
+      const known = saved && savedDate !== null ? { date: savedDate, finished: dailyFinished(saved) } : null;
       const record = settleDailyRecord(seedDailyRecord(readDailyRecord(), known), today);
-      const opening = read.failed ? 'fresh' : dailyOpening(known, today, record);
+      const opening = dailyOpening(known, today, record);
       return {
         today,
         opening,
+        inHand,
         savedDate: known?.date ?? null,
         savedUnfinished: known !== null && !known.finished,
         yesterday: opening === 'choose' && known?.date === previousDateKey(today),
-        result: saved && known?.date === today && known.finished ? dailyResult(saved, today) : null,
+        result: saved && known?.finished && (known.date === today || inHand) ? dailyResult(saved, known.date) : null,
       };
     },
     async chooseDaily(which) {

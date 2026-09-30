@@ -2,8 +2,15 @@
 // input, the desktop save and open dialogs, the phone share sheet. storage.ts picks the platform
 // off the globals; the plugin calls are stubbed so no dialog or share sheet is loaded.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createSettingsPanel, type PanelContext } from '../../src/ui/panels';
+import { el, settingsBody, type PanelContext } from '../../src/ui/panels';
 import { FakeDom, type FakeElement } from './fake-dom';
+
+/** Settings as the pause menu's Settings page holds them (settingsBody; the old sheet is gone). */
+function settingsNode(game: unknown, ctx: PanelContext): FakeElement {
+  const root = el('div');
+  root.append(settingsBody(game as never, ctx, { openControls() {} }).node);
+  return root as unknown as FakeElement;
+}
 
 const plugins = vi.hoisted(() => ({
   exportSaveWithDialog: vi.fn<(text: string) => Promise<boolean>>(),
@@ -55,7 +62,7 @@ function setup(importResult: ImportResult = { ok: true }) {
     reducedMotion: false,
     setReducedMotion: () => {},
   };
-  const panel = createSettingsPanel(game, ctx) as unknown as FakeElement;
+  const panel = settingsNode(game, ctx);
   const all = panel.descendants();
   const exportBtn = all.find((n) => n.tagName === 'BUTTON' && n.textContent === 'Save to a file');
   const importCtl = all.find((n) => n.id === 'hs-import');
@@ -159,7 +166,7 @@ describe('the kept copy of a tower that could not be opened', () => {
       getKeptCopy: () => kept,
     } as never;
     const ctx: PanelContext = { apply: () => ({ ok: true }) as never, notice: () => {}, close: () => {}, reducedMotion: false, setReducedMotion: () => {} };
-    return createSettingsPanel(game, ctx) as unknown as FakeElement;
+    return settingsNode(game, ctx);
   };
   const oldTowerButton = (panel: FakeElement): FakeElement | undefined =>
     panel.descendants().find((n) => n.tagName === 'BUTTON' && n.textContent === 'Save the old tower to a file');

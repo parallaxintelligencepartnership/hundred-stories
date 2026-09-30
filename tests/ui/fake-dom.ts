@@ -134,6 +134,12 @@ export class FakeElement {
     return node === this || this.descendants().includes(node as FakeElement);
   }
 
+  /** Hands the event to this element's own listeners for its type (no bubbling). */
+  dispatchEvent(event: { type: string }): boolean {
+    for (const fn of this.listeners.get(event.type) ?? []) fn(event);
+    return true;
+  }
+
   /** Records the click on the dom (a download link's click is how the web export fires). */
   click(): void {
     this.dom.clicked.push(this);

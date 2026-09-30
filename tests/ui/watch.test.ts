@@ -9,7 +9,7 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PAD_BUTTONS, type PadLike } from '../../src/ui/gamepad';
-import { createSettingsPanel, type PanelContext } from '../../src/ui/panels';
+import { el, settingsBody, type PanelContext } from '../../src/ui/panels';
 import { getFlag, PREF_KEYS, setFlag } from '../../src/ui/prefs';
 import { applyCommand } from '../../src/sim/build';
 import { ROOMS } from '../../src/sim/rules';
@@ -19,6 +19,13 @@ import { LABELS_QUIET_CLASS } from '../../src/ui/quiet-labels';
 import { createUi } from '../../src/ui/ui';
 import { WATCH_CLASS, WATCH_ENABLE_GRACE_MS, WATCH_FADE_MS, WATCH_IDLE_MS, WATCH_TIP } from '../../src/ui/watch';
 import { FakeDom, type FakeElement } from './fake-dom';
+
+/** Settings as the pause menu's Settings page holds them (settingsBody; the old sheet is gone). */
+function settingsNode(game: unknown, ctx: PanelContext): FakeElement {
+  const root = el('div');
+  root.append(settingsBody(game as never, ctx, { openControls() {} }).node);
+  return root as unknown as FakeElement;
+}
 
 // ------------------------------------------------------------ the stylesheet, read as a browser would
 // The fake DOM lays nothing out and computes no style, so these few helpers apply ui.css's own
@@ -213,7 +220,7 @@ describe('watch mode', () => {
 
   it('Settings no longer has a Watch mode switch', () => {
     const ctx = { apply: () => ({ ok: true }), notice() {}, close() {}, reducedMotion: false, setReducedMotion() {} } as unknown as PanelContext;
-    const panel = createSettingsPanel({ world: { seed: 1, log: [], logTotal: 0 } } as never, ctx) as unknown as FakeElement;
+    const panel = settingsNode({ world: { seed: 1, log: [], logTotal: 0 } }, ctx);
     expect(panel.descendants().some((n) => n.id === 'hs-watch-mode' || n.textContent === 'Watch mode')).toBe(false);
   });
 

@@ -51,6 +51,7 @@ import {
   createSharePanel,
   createStoriesPanel,
   el,
+  exportSave,
   freshStart,
   HOW_TO_PLAY_HREF,
   guideOpensOutside,
@@ -828,7 +829,12 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   const pad: GamepadInput | null = padDeps ? createGamepadInput(watchedPad(padHandlers()), padDeps) : null;
 
   lastLogTotal = game.world.logTotal;
-  const unsubscribe = game.subscribe(() => update());
+  // The menu holds the game still while it is open: a saved file opened from its Settings page
+  // starts the tower's clock, and the menu takes that speed as the one to give back on close.
+  const unsubscribe = game.subscribe(() => {
+    if (pauseMenu.isOpen()) pauseMenu.hold();
+    update();
+  });
   // Capture, so a card with a text field open can hold the camera's keys back as well.
   window.addEventListener('keydown', onKeyDown, { capture: true });
   window.addEventListener('resize', onPlacementResize);
@@ -1834,7 +1840,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   /**
    * The menu's entries, in order: Resume, Save, New tower in My tower (it asks first: it replaces
    * My tower) or My tower anywhere else (a new game only ever replaces My tower), Today's tower
-   * outside it, Stories, on a phone Views and Share, Settings, How to play. A new tower always gets
+   * (inside it too), Stories, on a phone Views and Share, Settings, How to play. A new tower always gets
    * a fresh random start; the starting number is only in the page address (?seed=, read in
    * main.ts) for testing, never here.
    */
@@ -1865,7 +1871,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
         ? { id: 'newTower', label: 'New tower', icon: 'structure', kind: 'stay', run: () => askNewTower() }
         : { id: 'myTower', label: 'My tower', icon: 'home', kind: 'leave', run: () => openMyTower() },
     ];
-    if (slot !== 'daily') entries.push({ id: 'daily', label: "Today's tower", icon: 'star', kind: 'page', run: () => openDailyPage() });
+    // In every tower, Today's tower included: its page carries the result's Share and the kept copy.
+    entries.push({ id: 'daily', label: "Today's tower", icon: 'star', kind: 'page', run: () => openDailyPage() });
     entries.push({
       id: 'stories',
       label: 'Stories',
@@ -1922,6 +1929,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     openFeedback: () => pauseMenu.stepAside(() => ctx.openFeedback?.()),
     openRecap: () => leaveMenu(() => ctx.openRecap?.()),
     openChronicle: () => leaveMenu(() => ctx.openChronicle?.()),
+    rowsChanged: (focus: HTMLElement | null) => pauseMenu.settle(focus),
   });
 
   function settingsPage(): PausePage {
@@ -1958,13 +1966,14 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     };
   }
 
-  function sharePage(): PausePage {
+  /** `words`: a message and link of its own (Today's tower's result shares its score). */
+  function sharePage(words?: { text: string; url: string }): PausePage {
     let body: PanelBody | null = null;
     return {
       id: 'share',
       title: 'Share',
       build() {
-        body = shareBody(game, renderer, pageCtx);
+        body = shareBody(game, renderer, pageCtx, words);
         return body.node;
       },
       dispose: () => body?.dispose?.(),
@@ -1973,14 +1982,26 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
 
   /**
    * Today's tower: a page with the card opening it would put up (the twist, the older tower's
-   * choice, the result), read before any switch. A game that cannot read ahead shows today's
-   * start card at once.
+   * choice, the result with its Share, the kept copy), read before any switch. A game that cannot
+   * read ahead shows today's start card at once.
    */
   function openDailyPage(): void {
+    const asked = pauseMenu.generation();
     const push = (peek: ReturnType<typeof freshPeek>): void => {
-      // Closed, or on another page, while the slot was being read: nothing to show it on.
-      if (!pauseMenu.isOpen() || pauseMenu.page()) return;
-      pauseMenu.pushPage({ id: 'daily', title: DAILY_TITLE, build: () => dailyPeekBody(peek, playDaily) });
+      // Closed (even if opened again since), or on another page, while the slot was being read:
+      // the answer is for a menu that is gone, so it is dropped.
+      if (!pauseMenu.isOpen() || pauseMenu.generation() !== asked || pauseMenu.page()) return;
+      const kept = game.getKeptDailyCopy?.() ?? null;
+      pauseMenu.pushPage({
+        id: 'daily',
+        title: DAILY_TITLE,
+        build: () =>
+          dailyPeekBody(peek, playDaily, {
+            // The result card's Share: the share page, with the daily's own message and link.
+            share: (text, url) => pauseMenu.pushPage(sharePage({ text, url })),
+            saveKept: kept === null ? null : () => exportSave(game.getKeptDailyCopy?.() ?? kept, pageCtx),
+          }),
+      });
     };
     if (!game.peekDaily) {
       push(freshPeek());

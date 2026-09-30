@@ -23,9 +23,16 @@ import {
   type NotifyKind,
 } from '../../src/ui/notify';
 import { getFlag, PREF_KEYS } from '../../src/ui/prefs';
-import { createSettingsPanel, type PanelContext } from '../../src/ui/panels';
+import { el, settingsBody, type PanelContext } from '../../src/ui/panels';
 import { createUi } from '../../src/ui/ui';
 import { FakeDom, type FakeElement } from './fake-dom';
+
+/** Settings as the pause menu's Settings page holds them (settingsBody; the old sheet is gone). */
+function settingsNode(game: unknown, ctx: PanelContext): FakeElement {
+  const root = el('div');
+  root.append(settingsBody(game as never, ctx, { openControls() {} }).node);
+  return root as unknown as FakeElement;
+}
 
 let dom: FakeDom;
 let uninstall: () => void;
@@ -435,7 +442,7 @@ function stubNotifications(reason: string | null) {
 
 function settings(extra: Partial<PanelContext>): FakeElement {
   const ctx = { apply: () => ({ ok: true }), notice() {}, close() {}, reducedMotion: false, setReducedMotion() {}, ...extra } as unknown as PanelContext;
-  return createSettingsPanel({ world: { seed: 1, log: [], logTotal: 0 } } as never, ctx) as unknown as FakeElement;
+  return settingsNode({ world: { seed: 1, log: [], logTotal: 0 } }, ctx);
 }
 
 describe('the Notifications settings', () => {

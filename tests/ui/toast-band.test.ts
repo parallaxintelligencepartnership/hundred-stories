@@ -103,6 +103,39 @@ describe('the text cards: an icon, no stripe', () => {
   });
 });
 
+describe("the star card's star sits on its headline's first line (review A7)", () => {
+  it('by layout: the icon box is the headline line box on desktop and phone, the 20 px star drawn in its middle, no nudge', () => {
+    const icon = '.hs-toast.is-star .hs-toast-icon';
+    const head = '.hs-toast.is-star .hs-toast-body > .hs-toast-text:first-child';
+    expect(declOf(icon, 'height')).toBe('var(--star-line)');
+    expect(declOf(icon, 'margin-top')).toBe('');
+    expect(declOf(head, 'line-height')).toBe('var(--star-line)');
+    const phoneAt = css.indexOf('@media (max-width: 720px) {\n  /* A phone');
+    const phone = phoneAt < 0 ? '' : css.slice(phoneAt, css.indexOf('\n}\n', phoneAt));
+    const size = (text: string, selector: string, prop: string): number => {
+      const at = text.indexOf(`${selector} {`);
+      const body = at < 0 ? '' : text.slice(at, text.indexOf('}', at));
+      const m = new RegExp(`${prop}:\\s*calc\\(var\\(--size-(\\d+)\\) \\* ([\\d.]+)\\)|${prop}:\\s*var\\(--size-(\\d+)\\)`).exec(body);
+      if (!m) throw new Error(`no ${prop} in ${selector}`);
+      return m[1] ? Number(m[1]) * Number(m[2]) : Number(m[3]);
+    };
+    // The card's own rule: at the top level on desktop, indented inside the phone block.
+    const cases: [string, string, string][] = [
+      ['desktop', css, '\n.hs-toast.is-star'],
+      ['phone', phone, '\n  .hs-toast.is-star'],
+    ];
+    const offsets = cases.map(([name, text, card]) => {
+      const line = size(text, card, '--star-line');
+      const font = size(text, head, 'font-size');
+      // The line box is the headline's own: its size at 1.25, as the headline sets it.
+      expect(line, name).toBe(font * 1.25);
+      // The star (20 px wide, a square viewBox) is centred in a box the height of that line.
+      return (line - Number.parseFloat(declOf('.hs-toast-icon', 'width'))) / 2;
+    });
+    expect(offsets).toEqual([2.5, 0]); // 25 px line on desktop, 20 px on a phone
+  });
+});
+
 describe('every text card leads with one icon in its colour', () => {
   let dom: FakeDom;
   let uninstall: () => void;

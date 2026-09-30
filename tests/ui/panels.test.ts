@@ -1,6 +1,6 @@
 // The log and room panels on a fake DOM: what a refresh builds, and what it leaves alone.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createFinancesPanel, createLogPanel, createQueryPanel, createSettingsPanel, financeLists, nextSettleMinute, nextSettleTitle, type PanelContext } from '../../src/ui/panels';
+import { createFinancesPanel, createLogPanel, createQueryPanel, el, settingsBody, financeLists, nextSettleMinute, nextSettleTitle, type PanelContext } from '../../src/ui/panels';
 import { onQuarterStart, quarterForecast } from '../../src/sim/economy';
 import type { Sound } from '../../src/audio/audio';
 import { RENT } from '../../src/sim/rules';
@@ -8,6 +8,13 @@ import { applyCommand } from '../../src/sim/build';
 import type { LogEntry, World } from '../../src/sim/types';
 import { createWorld } from '../../src/sim/world';
 import { FakeDom, type FakeElement } from './fake-dom';
+
+/** Settings as the pause menu's Settings page holds them (settingsBody; the old sheet is gone). */
+function settingsNode(game: unknown, ctx: PanelContext): FakeElement {
+  const root = el('div');
+  root.append(settingsBody(game as never, ctx, { openControls() {} }).node);
+  return root as unknown as FakeElement;
+}
 
 let dom: FakeDom;
 let uninstall: () => void;
@@ -250,7 +257,7 @@ describe('settings panel sound section', () => {
 
   it('shows the switch off and both levels disabled by default, and wires them to the sound module', () => {
     const { sound, calls } = stubSound();
-    const panel = node(createSettingsPanel(settingsGame, { ...ctx, sound }));
+    const panel = settingsNode(settingsGame, { ...ctx, sound });
     const all = panel.descendants();
     expect(all.some((n) => n.className === 'hs-section-title' && n.textContent === 'Sound')).toBe(true);
     const box = all.find((n) => n.id === 'hs-sound') as FakeElement;
@@ -268,10 +275,12 @@ describe('settings panel sound section', () => {
     ambient.value = '0';
     fire(ambient, 'input');
     expect(calls).toEqual(['on:true', 'effects:25', 'ambient:0']);
+    // A level's row is not a button: a tap on its padding does nothing.
+    expect((effects.parentNode as FakeElement).listeners.get('click') ?? []).toEqual([]);
   });
 
   it('has no sound section when the shell made no sound module', () => {
-    const panel = node(createSettingsPanel(settingsGame, ctx));
+    const panel = settingsNode(settingsGame, ctx);
     expect(panel.descendants().some((n) => n.textContent === 'Sound')).toBe(false);
   });
 });
@@ -294,7 +303,6 @@ describe('panel header', () => {
     } as never;
     const cases: [unknown, string, string][] = [
       [createLogPanel(game, ctx), 'News', 'log'],
-      [createSettingsPanel({ world: { seed: 1, log: [], logTotal: 0 } } as never, ctx), 'Settings', 'settings'],
       [createQueryPanel(room, { roomId: 1 }, ctx), 'Office', 'room'],
       [createQueryPanel(room, { roomId: 99 }, ctx), 'Nothing selected', 'query'],
     ];
@@ -319,7 +327,7 @@ describe('settings: saved games and new game', () => {
     node(panel).descendants().filter((n) => n.tagName === 'BUTTON' && n.textContent === text);
 
   it('says the tower saves by itself and names each save button in plain words', () => {
-    const panel = createSettingsPanel({ world: { seed: 1, log: [], logTotal: 0 } } as never, ctx);
+    const panel = settingsNode({ world: { seed: 1, log: [], logTotal: 0 } }, ctx);
     const all = node(panel).descendants();
     expect(all.some((n) => n.className === 'hs-section-title' && n.textContent === 'Saving')).toBe(true);
     expect(all.some((n) => n.className === 'hs-note' && n.textContent === 'Your tower saves by itself.')).toBe(true);
@@ -333,7 +341,7 @@ describe('settings: saved games and new game', () => {
   it('tells the player where they are after going back to the last save', async () => {
     const notices: string[] = [];
     const game = { world: { seed: 1, log: [], logTotal: 0 }, load: async () => ({ ok: true }) } as never;
-    const panel = createSettingsPanel(game, { ...ctx, notice: (t) => notices.push(t) });
+    const panel = settingsNode(game, { ...ctx, notice: (t) => notices.push(t) });
     click(named(panel, 'Go back to last save')[0] as FakeElement);
     await Promise.resolve();
     await Promise.resolve();
@@ -343,7 +351,7 @@ describe('settings: saved games and new game', () => {
   it('has no starting number field, and no New game row: New game is in the pause menu (tests/ui/pause-menu.test.ts)', () => {
     const started: number[] = [];
     const game = { world: { seed: 424242, log: [], logTotal: 0 }, newGame: (n: number) => started.push(n) } as never;
-    const panel = createSettingsPanel(game, ctx);
+    const panel = settingsNode(game, ctx);
     const all = node(panel).descendants();
     expect(all.some((n) => n.id === 'hs-seed')).toBe(false);
     expect(all.some((n) => n.tagName === 'INPUT' && (n as unknown as { type: string }).type === 'number')).toBe(false);

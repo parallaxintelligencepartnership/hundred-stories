@@ -3,8 +3,11 @@
 // the switch used to forget that sheet was mounted, so Close, Escape, the backdrop and the swipe
 // all did nothing and the modal sheet trapped the game.
 //
-// Since 2026-09-30 the card is a page inside the pause card, said before the switch; the day
-// chosen there switches towers and closes the menu, and no card comes up again on its own.
+// Since 2026-09-30 the menu's card is a page inside the pause card, said before the switch; the
+// day chosen there switches towers and closes the menu, and no card comes up again on its own.
+// The card itself still mounts during a switch elsewhere: an older daily's result card has
+// "Start today's", which switches with the card watched, and the start card the open puts up
+// mid-switch must still close (the last describe).
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createUi } from '../../src/ui/ui';
 import { FakeDom, type FakeElement } from './fake-dom';
@@ -22,9 +25,10 @@ afterEach(() => uninstall());
 
 const DAILY = { date: '2026-09-26', twist: { name: 'x', line: 'y' }, endMinute: 0, finished: false };
 
-function mount(): { root: FakeElement; shell: FakeElement } {
-  let slot = 'mine';
-  let daily: typeof DAILY | null = null;
+function mount(start: { slot?: string; daily?: typeof DAILY | null } = {}): { root: FakeElement; shell: FakeElement; opens: () => number } {
+  let slot = start.slot ?? 'mine';
+  let daily: typeof DAILY | null = start.daily ?? null;
+  let opens = 0;
   const subscribers = new Set<() => void>();
   const notify = (): void => subscribers.forEach((cb) => cb());
   const game = {
@@ -52,9 +56,12 @@ function mount(): { root: FakeElement; shell: FakeElement } {
     getDaily: () => daily,
     getDailyChoice: () => null,
     async openDaily() {
+      opens += 1;
       slot = 'daily';
       daily = { ...DAILY };
+      // The open notifies (and the card mounts) before the switch has finished.
       notify();
+      await Promise.resolve();
     },
     async openMyTower() {
       slot = 'mine';
@@ -64,7 +71,7 @@ function mount(): { root: FakeElement; shell: FakeElement } {
   };
   const root = dom.createElement('div');
   createUi(root as never, game as never, {} as never);
-  return { root, shell: root.children[0]! };
+  return { root, shell: root.children[0]!, opens: () => opens };
 }
 
 function click(node: FakeElement): void {
@@ -121,6 +128,40 @@ describe("Menu > Today's tower", () => {
     click(button(card, (n) => n.textContent === 'Start building', 'Start building'));
     await settle();
     menuRow(root, 'My tower');
+    await settle();
+    expectNothingOpen(root, shell);
+  });
+});
+
+describe("an older daily's result card: Start today's", () => {
+  // Finished on an earlier date: the result card comes up by itself, with Start today's.
+  const OLDER = { date: '2026-09-20', twist: { name: 'x', line: 'y' }, endMinute: 0, finished: true };
+
+  async function startToday(): Promise<{ root: FakeElement; shell: FakeElement; card: FakeElement }> {
+    const ui = mount({ slot: 'daily', daily: OLDER });
+    const [result] = dialogs(ui.root);
+    expect(result?.textContent).toContain('That was the tower from September 20, 2026.');
+    click(button(result!, (n) => n.textContent === "Start today's", "Start today's"));
+    await settle();
+    expect(ui.opens()).toBe(1);
+    // The start card the open put up mid-switch is the one on screen, and it is a real sheet.
+    const open = dialogs(ui.root);
+    expect(open).toHaveLength(1);
+    expect(open[0]!.textContent).toContain('Start building');
+    expect(backdrops(ui.root).length + (ui.shell.classList.contains('is-panel-open') ? 1 : 0)).toBeGreaterThan(0);
+    return { ...ui, card: open[0]! };
+  }
+
+  it('the start card that mounted during the switch closes with its Close', async () => {
+    const { root, shell, card } = await startToday();
+    click(button(card, (n) => n.textContent === 'Close', 'Close'));
+    await settle();
+    expectNothingOpen(root, shell);
+  });
+
+  it('and with Start building', async () => {
+    const { root, shell, card } = await startToday();
+    click(button(card, (n) => n.textContent === 'Start building', 'Start building'));
     await settle();
     expectNothingOpen(root, shell);
   });

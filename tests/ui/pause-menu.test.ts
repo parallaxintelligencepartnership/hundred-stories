@@ -149,10 +149,10 @@ describe('the pause menu card', () => {
     for (const item of ui.items()) expect(item.descendants().some((n) => n.tagName === 'USE')).toBe(true);
   });
 
-  it('reads My tower outside My tower, and has no Today\'s tower inside Today\'s tower', () => {
+  it('reads My tower outside My tower, and keeps Today\'s tower inside Today\'s tower (its page holds the Share and the kept copy)', () => {
     const daily = mount({ slot: 'daily' });
     daily.open();
-    expect(daily.words()).toEqual(['Resume', 'Save', 'My tower', 'Stories', 'Settings', 'How to play']);
+    expect(daily.words()).toEqual(['Resume', 'Save', 'My tower', "Today's tower", 'Stories', 'Settings', 'How to play']);
     const friend = mount({ slot: 'friend' });
     friend.open();
     expect(friend.words()).toEqual(['Resume', 'Save', 'My tower', "Today's tower", 'Stories', 'Settings', 'How to play']);

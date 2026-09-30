@@ -139,3 +139,54 @@ describe('toasts keep their contents inside the card', () => {
     expect(decl(ruleOf('.hs-icon'), 'flex')).toBe('0 0 auto');
   });
 });
+
+// Review A10 (2026-09-30): with Larger text on a 390 px phone, "Today's tower" wrapped to two
+// lines between Back and its twin pad on the plate. A page's title steps down there instead.
+describe("a page's plate title with Larger text on a phone", () => {
+  const scale = 1.25; // :root.hs-large-text
+  const width = 390;
+  /** A generous average advance for the UI face at 600 weight, in em: estimates run wide, not tight. */
+  const EM_PER_CHAR = 0.6;
+  const TITLES = ['Settings', 'Controls', 'Stories', 'Share', "Today's tower"];
+  const phoneLarge = blockOf('@media (max-width: 480px) {\n  :root.hs-large-text .hs-pause-card.is-page .hs-plate-title {');
+  const sizeOf = (value: string): number => {
+    const m = /^var\(--size-(\d+)\)$/.exec(value);
+    if (!m) throw new Error(`not a size token: ${value}`);
+    return Number(m[1]) * scale;
+  };
+
+  /** Room for the title: the card at this width, less its padding and the plate's two pads (Back's and its twin). */
+  function room(at: number): { room: number; back: number; pad: number } {
+    const edge = px(decl(ruleOf(':root'), '--edge'), scale);
+    const card = Math.min(440, at - 2 * edge);
+    const [, right, , left] = box(decl(ruleOf('.hs-pause-card'), 'padding'), 1);
+    const plate = ruleOf('.hs-pause-card.is-page .hs-pause-plate');
+    const padL = px(decl(plate, 'padding-left'), scale);
+    const padR = px(decl(plate, 'padding-right'), scale);
+    return { room: card - left - right - padL - padR, back: px(decl(ruleOf('.hs-pause-back'), 'width'), scale), pad: padL };
+  }
+
+  it('fits every page title on one line at 390 px, Back clear of it, never cut short', () => {
+    expect(phoneLarge).not.toBe('');
+    const size = sizeOf(decl(phoneLarge.slice(phoneLarge.indexOf('.hs-plate-title {')), 'font-size'));
+    const { room: space, back, pad } = room(width);
+    const longest = Math.max(...TITLES.map((t) => t.length)) * EM_PER_CHAR;
+    expect(longest * size).toBeLessThanOrEqual(space);
+    // Back sits in the plate's pad, 8 px short of where the title may start.
+    expect(pad - back).toBeGreaterThanOrEqual(8);
+    // Without the step the 35 px title would not fit: this is the rule that keeps it on one line.
+    expect(longest * sizeOf(decl(ruleOf('.hs-plate-title'), 'font-size'))).toBeGreaterThan(space);
+    // One line by size alone: nothing truncates or forbids the wrap.
+    for (const body of [ruleOf('.hs-plate-title'), phoneLarge]) {
+      expect(body).not.toMatch(/text-overflow|ellipsis|white-space:\s*nowrap/);
+    }
+  });
+
+  it('steps down wherever the full size would wrap: the breakpoint is past the width where 35 px fits', () => {
+    const full = sizeOf(decl(ruleOf('.hs-plate-title'), 'font-size'));
+    const longest = Math.max(...TITLES.map((t) => t.length)) * EM_PER_CHAR;
+    let fitsFrom = 320;
+    while (longest * full > room(fitsFrom).room) fitsFrom += 1;
+    expect(480).toBeGreaterThanOrEqual(fitsFrom);
+  });
+});

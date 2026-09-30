@@ -2418,32 +2418,7 @@ button.hs-readout:hover {
   color: var(--ink-dim);
 }
 
-/* The Controls page: a way back, then one row per control with its picture. */
-.hs-set-back {
-  --r: var(--radius-pill);
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-height: var(--touch);
-  margin: 0 0 16px;
-  padding: 0 16px 0 10px;
-  border: 0;
-  border-radius: var(--radius-pill);
-  background: var(--raise-strong);
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.hs-set-back::before {
-  content: '\2039';
-  font-size: var(--size-20);
-  line-height: 1;
-}
-
-.hs-set-back:hover {
-  background: var(--raise-hover);
-}
-
+/* The Controls page: one row per control with its picture. */
 .hs-controls-row {
   align-items: flex-start;
   padding-top: 12px;
@@ -2801,8 +2776,15 @@ a.hs-btn {
   color: var(--alert);
 }
 
+/* The star card's headline is a bigger line than the other cards': the star's box is that line's
+   box (--star-line, the same length the headline's line-height is), and the 20 px star is drawn
+   in its middle (the svg's viewBox keeps its middle), so it sits on the first line at any size. */
+.hs-toast.is-star {
+  --star-line: calc(var(--size-20) * 1.25);
+}
+
 .hs-toast.is-star .hs-toast-icon {
-  margin-top: 3px;
+  height: var(--star-line);
   fill: currentColor;
 }
 
@@ -2994,7 +2976,7 @@ button.hs-news-toast {
    the plate title's 28 px so it fits the 340 px column. */
 .hs-toast.is-star .hs-toast-body > .hs-toast-text:first-child {
   font-size: var(--size-20);
-  line-height: 1.25;
+  line-height: var(--star-line);
   color: var(--amber-text);
 }
 
@@ -4128,7 +4110,8 @@ button.hs-news-toast {
   display: none;
 }
 
-/* The column and each page fade in as they take the card's body: a page opened, or Back. */
+/* The column and each page fade in as they take the card's body (a page opened, or Back); the
+   one they replace is gone at once. */
 @keyframes hs-pause-swap {
   from {
     opacity: 0;
@@ -4402,6 +4385,14 @@ button.hs-news-toast {
   color: var(--ink-dim);
 }
 
+/* Larger text on a phone: a page's 35 px title ("Today's tower") would wrap between Back and its
+   twin pad, so it steps down to 25 px there and stays one line. Never cut short. */
+@media (max-width: 480px) {
+  :root.hs-large-text .hs-pause-card.is-page .hs-plate-title {
+    font-size: var(--size-20);
+  }
+}
+
 /* A raised face, at least 48 px, its icon first. Pressed, it sinks and loses its lift; selected
    (the pause menu's keys or pointer) or chosen (a radio's aria-checked, a toggle's aria-pressed),
    it turns amber. The focus ring stays, as on every control. No dividers. */
@@ -4436,6 +4427,13 @@ button.hs-news-toast {
 .hs-ui .hs-face:active:not(:disabled) {
   transform: translateY(var(--press-sink)) scale(var(--press-scale));
   box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+/* A row that only holds a control (a switch row, a sound level) is not itself the button: it
+   stays put while its switch is pressed or its slider dragged. Only the switch moves. */
+.hs-ui .hs-face:is(.hs-set-switch, .hs-level):active {
+  transform: none;
+  box-shadow: var(--shadow-1), inset 0 1px 0 var(--hairline);
 }
 
 .hs-ui .hs-face:disabled {
@@ -4812,6 +4810,10 @@ button.hs-news-toast {
   .hs-toast-text {
     margin-bottom: 4px;
     font-size: var(--size-12);
+  }
+
+  .hs-toast.is-star {
+    --star-line: calc(var(--size-16) * 1.25);
   }
 
   .hs-toast.is-star .hs-toast-body > .hs-toast-text:first-child {

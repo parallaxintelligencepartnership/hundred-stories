@@ -6,13 +6,20 @@ import type { Room, Sim, World } from '../../src/sim/types';
 import { addRoom, addSim, allocId, createWorld } from '../../src/sim/world';
 import {
   createQueryPanel,
-  createSettingsPanel,
+  el, settingsBody,
   createStoriesPanel,
   FOLLOW_LIMIT_TEXT,
   type PanelContext,
   type Selection,
 } from '../../src/ui/panels';
 import { FakeDom, type FakeElement } from './fake-dom';
+
+/** Settings as the pause menu's Settings page holds them (settingsBody; the old sheet is gone). */
+function settingsNode(game: unknown, ctx: PanelContext): FakeElement {
+  const root = el('div');
+  root.append(settingsBody(game as never, ctx, { openControls() {} }).node);
+  return root as unknown as FakeElement;
+}
 
 let dom: FakeDom;
 let uninstall: () => void;
@@ -142,7 +149,7 @@ describe('room panel occupants', () => {
 describe('stories', () => {
   it('is not in Settings any more (it opens from the pause menu), and the save rows keep their own group', () => {
     const c = context();
-    const panel = createSettingsPanel({ world: { seed: 1, log: [], logTotal: 0 } } as never, c.ctx);
+    const panel = settingsNode({ world: { seed: 1, log: [], logTotal: 0 } }, c.ctx);
     const lists = node(panel).descendants().filter((n) => n.className === 'hs-set-list');
     const rows = (list: FakeElement | undefined): string[] =>
       (list?.children ?? []).filter((b) => b.tagName === 'BUTTON').map((b) => b.textContent);

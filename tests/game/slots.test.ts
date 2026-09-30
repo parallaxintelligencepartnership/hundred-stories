@@ -326,6 +326,123 @@ describe("a Today's tower date already played", () => {
   });
 });
 
+// The pause menu's Today's tower page reads the slot before any switch (review A1, 2026-09-30):
+// peekDaily says what openDaily would open, by the same rule, and takes nothing: no slot, no
+// world, no record, no speed. A slot that will not read claims nothing.
+describe('peekDaily', () => {
+  async function finishDaily(date: string) {
+    const played = gameOn(date);
+    await played.game.openDaily();
+    played.game.world.time.minute = DAILY_END_MINUTE - 1;
+    played.second();
+    await settle();
+    return played;
+  }
+
+  /** Peek, and prove nothing moved: every stored slot and the record, the slot, the world, the speed. */
+  async function peekStill(game: ReturnType<typeof gameOn>['game']) {
+    const stored = [...slots.entries()];
+    const slot = game.getSlot();
+    const world = game.world;
+    const speed = game.getSpeed();
+    const logged = world.log.length;
+    const peek = await game.peekDaily!();
+    expect([...slots.entries()]).toEqual(stored);
+    expect(game.getSlot()).toBe(slot);
+    expect(game.world).toBe(world);
+    expect(game.world.log.length).toBe(logged);
+    expect(game.getSpeed()).toBe(speed);
+    expect(game.getDailyChoice()).toBe(null);
+    return peek;
+  }
+
+  it('fresh with nothing saved; openDaily then starts today\'s', async () => {
+    const { game } = gameOn(TIGHT_DAY);
+    expect(await peekStill(game)).toEqual({ today: TIGHT_DAY, opening: 'fresh', inHand: false, savedDate: null, savedUnfinished: false, yesterday: false, result: null });
+    await game.openDaily();
+    expect(game.getDaily()).toMatchObject({ date: TIGHT_DAY, finished: false });
+  });
+
+  it("resume for today's unfinished tower", async () => {
+    const today = gameOn(TIGHT_DAY);
+    await today.game.openDaily();
+    await today.game.save();
+    const { game } = gameOn(TIGHT_DAY);
+    expect(await peekStill(game)).toMatchObject({ opening: 'resume', inHand: false, savedDate: TIGHT_DAY, savedUnfinished: true, result: null });
+  });
+
+  it("today's finished tower: resume with its result, from another tower and from inside it", async () => {
+    const played = await finishDaily(TIGHT_DAY);
+    const inHand = await peekStill(played.game);
+    expect(inHand).toMatchObject({ opening: 'resume', inHand: true, savedDate: TIGHT_DAY, savedUnfinished: false });
+    expect(inHand.result).toMatchObject({ date: TIGHT_DAY, people: played.game.world.population, stars: played.game.world.stars });
+    const { game } = gameOn(TIGHT_DAY);
+    const peek = await peekStill(game);
+    expect(peek).toMatchObject({ opening: 'resume', inHand: false, result: { date: TIGHT_DAY } });
+    await game.openDaily();
+    expect(game.getDaily()).toMatchObject({ date: TIGHT_DAY, finished: true });
+  });
+
+  it("an older finished tower in hand carries its result; one left in the slot does not", async () => {
+    const yesterday = gameOn('2026-09-27');
+    await yesterday.game.openDaily();
+    await yesterday.game.save();
+    // Today, the older one finished after the choice: the result card's result, and today's opens fresh.
+    const held = gameOn(TIGHT_DAY);
+    await held.game.openDaily();
+    await held.game.chooseDaily('finish');
+    held.game.world.time.minute = DAILY_END_MINUTE - 1;
+    held.second();
+    await settle();
+    expect(held.game.getDaily()).toMatchObject({ date: '2026-09-27', finished: true });
+    expect(await peekStill(held.game)).toMatchObject({ opening: 'fresh', inHand: true, savedDate: '2026-09-27', result: { date: '2026-09-27' } });
+    // From My tower, the same slot: nothing to show but today's start.
+    const { game } = gameOn(TIGHT_DAY);
+    expect(await peekStill(game)).toMatchObject({ opening: 'fresh', inHand: false, savedDate: '2026-09-27', result: null });
+  });
+
+  it("choose for yesterday's unfinished tower, as openDaily offers", async () => {
+    const yesterday = gameOn('2026-09-27');
+    await yesterday.game.openDaily();
+    await yesterday.game.save();
+    const { game } = gameOn(TIGHT_DAY);
+    expect(await peekStill(game)).toMatchObject({ opening: 'choose', savedDate: '2026-09-27', savedUnfinished: true, yesterday: true, result: null });
+    await game.openDaily();
+    expect(game.getDailyChoice()).toMatchObject({ yesterday: true });
+  });
+
+  it('ahead for a later tower once a far-ahead record settles to today, as openDaily offers', async () => {
+    const later = gameOn('2031-01-01');
+    await later.game.openDaily();
+    await later.game.save();
+    const { game } = gameOn('2026-09-30');
+    expect(await peekStill(game)).toMatchObject({ opening: 'ahead', savedDate: '2031-01-01', savedUnfinished: true });
+    await game.openDaily();
+    expect(game.getDailyChoice()).toMatchObject({ ahead: true });
+  });
+
+  it('done and clock-back from the record, as openDaily locks', async () => {
+    await finishDaily(TIGHT_DAY);
+    const back = gameOn('2026-09-27');
+    expect(await peekStill(back.game)).toMatchObject({ opening: 'clock-back' });
+    await back.game.openDaily();
+    expect(back.game.getDailyChoice()).toMatchObject({ locked: 'clock-back' });
+
+    slots.delete('daily');
+    const again = gameOn(TIGHT_DAY);
+    expect(await peekStill(again.game)).toMatchObject({ opening: 'done', savedDate: null, result: null });
+    await again.game.openDaily();
+    expect(again.game.getDailyChoice()).toMatchObject({ locked: 'done' });
+  });
+
+  it('a slot that will not read is unreadable, never fresh, and lifts no protection', async () => {
+    await finishDaily(TIGHT_DAY);
+    failing.add('daily');
+    const { game } = gameOn(TIGHT_DAY);
+    expect(await peekStill(game)).toEqual({ today: TIGHT_DAY, opening: 'unreadable', inHand: false, savedDate: null, savedUnfinished: false, yesterday: false, result: null });
+  });
+});
+
 describe("a friend's link", () => {
   it('reads ?seed=N as a friend\'s tower, ?daily as today\'s, anything else as My tower', () => {
     expect(bootTarget('?seed=4242')).toEqual({ kind: 'friend', seed: 4242 });

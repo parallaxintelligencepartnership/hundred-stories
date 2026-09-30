@@ -189,17 +189,27 @@ export type DailyGo = 'open' | 'finish' | 'today';
 
 /** The start card's words when nothing was read (a stand-in game with no peekDaily): today's, fresh. */
 export function freshPeek(today: string = localDateKey()): DailyPeek {
-  return { today, opening: 'fresh', savedDate: null, savedUnfinished: false, yesterday: false, result: null };
+  return { today, opening: 'fresh', inHand: false, savedDate: null, savedUnfinished: false, yesterday: false, result: null };
+}
+
+/** What the Today's tower page offers beside the switch: the result card's Share and the kept copy. */
+export interface DailyPageMore {
+  /** Share the daily's score: the same message and link the result card shares. */
+  share(text: string, url: string): void;
+  /** Save the copy "Start today's tower instead" kept, when there is one; null when there is none. */
+  saveKept: (() => void) | null;
 }
 
 /**
- * The pause menu's Today's tower page: the card openDaily would put up, said before the switch.
- * Every answer is `go`, which switches and closes the menu; a locked day with nothing to go on
- * with has no answer but Back.
+ * The pause menu's Today's tower page: the card openDaily would put up, said before the switch,
+ * and everything that card offered. A finished tower's result (today's anywhere, or the one in
+ * hand inside Today's tower) comes with its Share; a kept copy of a later tower with its Save.
+ * An answer that switches is `go`, which switches and closes the menu; a locked day with nothing
+ * to go on with has no answer but Back (and Share, or the kept copy, when there is one).
  */
-export function dailyPeekBody(peek: DailyPeek, go: (which: DailyGo) => void): HTMLDivElement {
+export function dailyPeekBody(peek: DailyPeek, go: (which: DailyGo) => void, more: DailyPageMore = { share() {}, saveKept: null }): HTMLDivElement {
   const body = el('div', 'hs-daily');
-  body.dataset['card'] = peek.opening;
+  body.dataset['card'] = peek.result ? 'result' : peek.opening;
   const actions = el('div', 'hs-actions');
   const answer = (words: string, which: DailyGo, primary = false): void => {
     actions.append(button(words, primary ? 'hs-btn is-primary' : 'hs-btn', () => go(which)));
@@ -208,7 +218,37 @@ export function dailyPeekBody(peek: DailyPeek, go: (which: DailyGo) => void): HT
   const laterLine = (): HTMLElement =>
     el('p', 'hs-note', `The tower saved here is from ${formatDateKey(peek.savedDate ?? '')}, which is later than today.`);
 
-  if (peek.opening === 'clock-back' || peek.opening === 'done') {
+  if (peek.result) {
+    // The result card, as it came up when the day ended: the score, what comes next, and Share.
+    const result = peek.result;
+    const older = result.date < peek.today;
+    const behind = result.date > peek.today;
+    body.append(
+      ...resultNodes(result),
+      el(
+        'p',
+        'hs-note',
+        behind
+          ? DATE_BEHIND_NOTE
+          : older
+            ? `That was the tower from ${formatDateKey(result.date)}. Today's tower is ready for you.`
+            : 'Come back tomorrow for a new tower.',
+      ),
+    );
+    // An older one in hand: today's opens fresh, unless that date is already locked.
+    if (older && peek.opening === 'fresh') answer("Start today's", 'open', true);
+    // Today's, seen from another tower: go and look at it.
+    else if (!peek.inHand && !older && !behind) answer("Open today's tower", 'open', true);
+    const primary = actions.children.length === 0;
+    actions.append(
+      button('Share', primary ? 'hs-btn is-primary' : 'hs-btn', () =>
+        more.share(dailyShareText(result.people, result.date, peek.today), dailyShareUrl(result.date)),
+      ),
+    );
+  } else if (peek.opening === 'unreadable') {
+    // The slot would not read: nothing is claimed about it. Opening it reads again, and says what it finds.
+    answer("Open today's tower", 'open', true);
+  } else if (peek.opening === 'clock-back' || peek.opening === 'done') {
     // A day already played: nothing starts. An unfinished tower saved here may stand behind it.
     const behind = peek.opening === 'clock-back' && peek.savedUnfinished;
     if (behind && later) body.append(laterLine());
@@ -223,14 +263,14 @@ export function dailyPeekBody(peek: DailyPeek, go: (which: DailyGo) => void): HT
     body.append(el('p', 'hs-note', `You did not finish ${older} yet. You can finish it, or start today's.`));
     answer(peek.yesterday ? "Finish yesterday's" : 'Finish the old one', 'finish');
     answer("Start today's", 'today');
-  } else if (peek.result) {
-    body.append(...resultNodes(peek.result), el('p', 'hs-note', 'Come back tomorrow for a new tower.'));
-    answer("Open today's tower", 'open', true);
   } else {
     const twist = dailyTwist(peek.today);
     body.append(row('Twist', twist.name), el('p', 'hs-note', twist.line), el('p', 'hs-note', startNote(null)));
     answer(peek.opening === 'resume' ? 'Keep building' : 'Start building', 'open', true);
   }
+  // "Start today's tower instead" kept a copy of the later tower: this is the way to get it out.
+  const saveKept = more.saveKept;
+  if (saveKept) actions.append(button(SAVE_KEPT_DAILY, 'hs-btn', () => saveKept()));
   if (actions.children.length > 0) body.append(actions);
   return body;
 }

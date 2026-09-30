@@ -12,8 +12,9 @@
 // sheet. The plate names the page, a round Back sits at its left, and the page's body takes the
 // column's place with the column's scroll and fades. Back or Escape goes back one page, and at the
 // root focus returns to the entry that opened it. The scrim, the pause and the speed given back on
-// close are the menu's, the same on a page as at the root. On a page the arrows (and Tab) move
-// through its controls in order, Back first, and Enter or Space presses the one with focus.
+// close are the menu's, the same on a page as at the root. On a page Up, Down and Tab move
+// through its controls in order, Back first, and Enter or Space presses the one with focus; a
+// slider with focus keeps Left, Right, Home and End for its value.
 //
 // Keys come through ui.ts's keydown and keys.ts (menuKeyAction): Up and Down move and wrap, Home
 // and End jump, Enter or Space chooses, Escape resumes, and focus never leaves the card. The
@@ -158,6 +159,21 @@ export interface PauseMenu {
   /** The owner redrew: the page on show rewrites its live parts. */
   refresh(): void;
   /**
+   * The page on show rewrote its rows under the player's finger (Stories' Unfollow): they wear
+   * the faces again, and focus goes to `target` when it is on the page, else to Back.
+   */
+  settle(target: HTMLElement | null): void;
+  /**
+   * Counts the opens: a page read in the background (Today's tower) is pushed only into the same
+   * open it was asked from, never into a menu closed and opened again since.
+   */
+  generation(): number;
+  /**
+   * The game started running under the open menu (a saved file opened from the Settings page):
+   * that is the speed to give back on close, and the game is held still again until then.
+   */
+  hold(): void;
+  /**
    * Step out of sight, still open and still paused, and run what a page opens over the game (the
    * Settings page's Send feedback and Intro); then the owner redraws. The owner calls show() when
    * that closes, and the menu is back on the page it left, focus where it was.
@@ -260,6 +276,8 @@ export function createPauseMenu(options: PauseMenuOptions): PauseMenu {
   node.append(card);
 
   let open = false;
+  /** One more at every open (generation()). */
+  let opens = 0;
   /** On screen: open and not stepped aside. */
   let shown = false;
   /** Where focus was when it stepped aside. */
@@ -546,6 +564,28 @@ export function createPauseMenu(options: PauseMenuOptions): PauseMenu {
     syncMore();
   }
 
+  function settle(target: HTMLElement | null): void {
+    const current = top();
+    if (!open || !current) return;
+    wearFaces(current.body);
+    syncMore();
+    const to = target && current.body.contains?.(target) ? target : back;
+    to.focus?.({ preventScroll: true });
+    if (to !== back) reveal(to);
+  }
+
+  function hold(): void {
+    if (!open) return;
+    const now = options.getSpeed();
+    // Held already, or a menu the game would not pause for (the plate reads Menu): nothing to hold.
+    if (now === 0 || (!wePaused && prior !== 0)) return;
+    options.setSpeed(0);
+    if (options.getSpeed() !== 0) return;
+    prior = now;
+    wePaused = true;
+    paint();
+  }
+
   function paint(): void {
     state.textContent = wePaused || options.getSpeed() === 0 ? PAUSED_WORD : MENU_WORD;
     card.classList.toggle('is-running', state.textContent === MENU_WORD);
@@ -553,6 +593,7 @@ export function createPauseMenu(options: PauseMenuOptions): PauseMenu {
 
   function openMenu(): void {
     if (open) return;
+    opens += 1;
     prior = options.getSpeed();
     if (prior !== 0) options.setSpeed(0);
     wePaused = prior !== 0 && options.getSpeed() === 0;
@@ -635,8 +676,36 @@ export function createPauseMenu(options: PauseMenuOptions): PauseMenu {
     if (next !== back) reveal(next);
   }
 
+  /**
+   * A slider with focus on a page (Settings' sound levels) keeps Left, Right, Home and End: they
+   * set its value, a step at a time or to its ends. Up and Down still move on, so a controller's
+   * d-pad never sticks on one. True when the key was the slider's.
+   */
+  function sliderKey(current: ShownPage, event: PauseKeyLike): boolean {
+    if (event.metaKey || event.ctrlKey || event.altKey) return false;
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return false;
+    const input = activeElement() as (HTMLInputElement & { tagName?: string }) | null;
+    if (!input || String(input.tagName).toUpperCase() !== 'INPUT' || input.type !== 'range') return false;
+    if (!current.body.contains?.(input)) return false;
+    event.preventDefault();
+    if (input.disabled) return true;
+    const min = Number(input.min || 0);
+    const max = Number(input.max || 100);
+    const step = Number(input.step) > 0 ? Number(input.step) : 1;
+    const now = Number(input.value);
+    const next =
+      event.key === 'Home' ? min : event.key === 'End' ? max : Math.min(max, Math.max(min, now + (event.key === 'ArrowRight' ? step : -step)));
+    if (next === now) return true;
+    input.value = String(next);
+    // The slider's own listeners hear it as they hear a drag.
+    for (const type of ['input', 'change']) input.dispatchEvent?.(new Event(type, { bubbles: true }));
+    return true;
+  }
+
   function handleKey(event: PauseKeyLike): boolean {
     if (!shown || event.defaultPrevented) return false;
+    const onPage = top();
+    if (onPage && sliderKey(onPage, event)) return true;
     const action = menuKeyAction(event);
     if (!action) return false;
     event.preventDefault();
@@ -682,6 +751,9 @@ export function createPauseMenu(options: PauseMenuOptions): PauseMenu {
     popPage,
     page: () => top()?.page ?? null,
     refresh,
+    settle,
+    generation: () => opens,
+    hold,
     stepAside,
     show,
     items: () => buttons,

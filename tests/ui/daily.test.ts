@@ -4,8 +4,15 @@ import type { DailyChoice, DailyInfo } from '../../src/game/api';
 import { dailyTwist } from '../../src/game/daily';
 import { DAILY_COPY_FAILED } from '../../src/game/game';
 import { createDailyPanel, dailyCard, type DailyPanelActions } from '../../src/ui/daily';
-import { createSettingsPanel, type PanelContext } from '../../src/ui/panels';
+import { el, settingsBody, type PanelContext } from '../../src/ui/panels';
 import { FakeDom, type FakeElement } from './fake-dom';
+
+/** Settings as the pause menu's Settings page holds them (settingsBody; the old sheet is gone). */
+function settingsNode(game: unknown, ctx: PanelContext): FakeElement {
+  const root = el('div');
+  root.append(settingsBody(game as never, ctx, { openControls() {} }).node);
+  return root as unknown as FakeElement;
+}
 
 let uninstall: () => void;
 beforeEach(() => {
@@ -276,7 +283,7 @@ describe('settings', () => {
   // pinned in tests/ui/pause-menu.test.ts. Settings carries none of them in any tower.
   it.each(['mine', 'daily', 'friend'] as const)('carries no New game, My tower or Today\'s tower in %s', (slot) => {
     const opened: string[] = [];
-    const panel = createSettingsPanel(dailyGame({ slot }), { ...ctx, openDaily: () => opened.push('daily'), openMyTower: () => opened.push('mine') }) as unknown as FakeElement;
+    const panel = settingsNode(dailyGame({ slot }), { ...ctx, openDaily: () => opened.push('daily'), openMyTower: () => opened.push('mine') });
     const words = panel.descendants().filter((n) => n.tagName === 'BUTTON').map((n) => n.textContent);
     for (const gone of ['New game', 'My tower', "Today's tower"]) expect(words).not.toContain(gone);
     expect(opened).toEqual([]);

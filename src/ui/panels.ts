@@ -134,6 +134,12 @@ export interface PanelContext {
   centerOn?: (floor: number, x: number) => void;
   /** The web's notifications (src/ui/notify.ts); none in the native shells, so no section there. */
   notifications?: Pick<Notifier, 'isOn' | 'turnOn' | 'turnOff'>;
+  /**
+   * A body rewrote its rows under the player's finger (Stories' Unfollow) and names where focus
+   * goes now, or null for none left. The pause menu's page dresses the new rows as faces and keeps
+   * focus in the card (Back when null); absent, the body focuses the row itself.
+   */
+  rowsChanged?: (focus: HTMLElement | null) => void;
 }
 
 const NUMBER_WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];
@@ -1440,6 +1446,14 @@ export function storiesBody(game: GameApi, ctx: PanelContext): PanelBody {
   node.append(following, tower, milestones);
 
   let followKey = '';
+  /** The row at this place in the Following list, as the control focus lands on: the person, or a gone one's Unfollow. */
+  const rowControl = (index: number): HTMLElement | null => {
+    const row = index >= 0 ? (followList.children[index] as HTMLElement | undefined) : undefined;
+    if (!row) return null;
+    if (row.tagName === 'BUTTON') return (row as HTMLButtonElement).disabled ? null : row;
+    const kids = Array.from(row.children) as HTMLElement[];
+    return kids.find((kid) => kid.tagName === 'BUTTON' && !(kid as HTMLButtonElement).disabled) ?? null;
+  };
   const refresh = (): void => {
     const world = game.world;
     const story = world.story;
@@ -1457,7 +1471,7 @@ export function storiesBody(game: GameApi, ctx: PanelContext): PanelBody {
         followList.replaceChildren(el('p', 'hs-note', 'Nobody yet. Open a person and choose Follow.'));
       } else {
         followList.replaceChildren(
-          ...rows.map((r) => {
+          ...rows.map((r, index) => {
             const item = button('', 'hs-occupant', () => {
               if (r.here) ctx.select?.({ simId: r.id });
             });
@@ -1469,6 +1483,10 @@ export function storiesBody(game: GameApi, ctx: PanelContext): PanelBody {
             const release = button('Unfollow', 'hs-btn', () => {
               unfollowSim(game.world.story, r.id);
               refresh();
+              // Focus stays in the list: the row that took this one's place, else the one before.
+              const next = rowControl(index) ?? rowControl(index - 1);
+              if (ctx.rowsChanged) ctx.rowsChanged(next);
+              else next?.focus?.();
             });
             release.setAttribute('aria-label', `Unfollow ${r.name}`);
             wrap.append(item, release);
@@ -1691,10 +1709,17 @@ export function switchRow(id: string, label: string, on: boolean, onChange: (on:
     control.setAttribute('aria-checked', next ? 'true' : 'false');
   };
   set(on);
-  control.addEventListener('click', () => {
+  const flip = (): void => {
     const next = control.getAttribute('aria-checked') !== 'true';
     set(next);
     onChange(next);
+  };
+  control.addEventListener('click', flip);
+  // The row is one target: a tap on its padding or the gap flips the switch too. A tap on the
+  // words reaches the switch through the label, and one on the switch is its own, so only a tap
+  // on the row itself flips it here: each tap flips it once.
+  row.addEventListener('click', (event: Event) => {
+    if (event.target === row) flip();
   });
   row.append(text, control);
   return { row, control, set };
@@ -1733,12 +1758,6 @@ function themeRow(): HTMLDivElement {
   return row;
 }
 
-/** The title words in a sheet's head, to name the page the settings sheet is on. */
-function titleText(panel: PanelElement): HTMLElement | null {
-  const heading = panel.sheet?.head.firstElementChild as HTMLElement | null | undefined;
-  return (heading?.lastElementChild as HTMLElement | null | undefined) ?? null;
-}
-
 /**
  * What a panel's body is, wherever it is shown: the element, and what its host calls on it. The
  * in-game sheet (panelShell) mounts it; so does a page of the pause menu (pause-menu.ts pushPage).
@@ -1753,42 +1772,6 @@ export interface PanelBody {
   holdsWork?: () => boolean;
 }
 
-export function createSettingsPanel(game: GameApi, ctx: PanelContext): PanelElement {
-  const { panel, body } = panelShell('Settings', 'settings', ctx);
-  panel.classList.add('hs-settings');
-  // The Controls page: its own page inside the sheet, with a way back. Built now for the device
-  // in hand, and again each time it opens, in case a controller was plugged in since.
-  const controlsPage = el('div', 'hs-set-page');
-  controlsPage.hidden = true;
-  const back = button('Back', 'hs-set-back', () => showControls(false));
-  back.setAttribute('aria-label', 'Back to settings');
-  const controls = el('div', 'hs-help-controls');
-  fillControlsPage(controls, controlsDevice(currentDeviceEnv()));
-  controlsPage.append(back, controls);
-  controlsPage.addEventListener('keydown', (event: Event) => {
-    const key = event as KeyboardEvent;
-    if (key.key !== 'Escape' || key.defaultPrevented) return;
-    key.preventDefault();
-    showControls(false);
-  });
-
-  const settings = settingsBody(game, ctx, { openControls: () => showControls(true) });
-  const main = settings.node;
-  if (settings.refresh) panel.refresh = settings.refresh;
-
-  function showControls(on: boolean): void {
-    if (on) fillControlsPage(controls, controlsDevice(currentDeviceEnv()));
-    main.hidden = on;
-    controlsPage.hidden = !on;
-    const title = titleText(panel);
-    if (title) title.textContent = on ? 'Controls' : 'Settings';
-    (on ? back : settings.controlsRow).focus?.({ preventScroll: true });
-  }
-
-  body.append(main, controlsPage);
-  return panel;
-}
-
 /** The Controls page's body: the lines for the device in the player's hands, asked now. */
 export function controlsBody(): HTMLDivElement {
   const controls = el('div', 'hs-help-controls');
@@ -1797,9 +1780,9 @@ export function controlsBody(): HTMLDivElement {
 }
 
 /**
- * Settings' groups (Saving, Sound, Display, Notifications, Help), for the sheet or a page of the
- * pause menu. The Controls row calls openControls: the sheet swaps in its own page, the menu
- * pushes one.
+ * Settings' groups (Saving, Sound, Display, Notifications, Help): the body of the pause menu's
+ * Settings page (ui.ts settingsPage). The Controls row calls openControls, which pushes the
+ * Controls page.
  */
 export function settingsBody(
   game: GameApi,
@@ -1810,8 +1793,8 @@ export function settingsBody(
   let refresh: (() => void) | undefined;
 
   // The game's own actions (New game or My tower, Today's tower, Stories, and on a phone Views
-  // and Share) live in the pause menu (src/ui/pause-menu.ts), which opens this sheet as one of its
-  // entries: one place for each action (Matt, 2026-09-29).
+  // and Share) live in the pause menu (src/ui/pause-menu.ts), which opens these settings as a page
+  // from one of its entries: one place for each action (Matt, 2026-09-29).
   const slot = game.getSlot?.() ?? 'mine';
 
   // Saving: the tower saves itself; these are for the player who wants to be sure, or a copy.

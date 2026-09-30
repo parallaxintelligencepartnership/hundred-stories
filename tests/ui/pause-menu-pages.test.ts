@@ -7,6 +7,8 @@ import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DailyPeek } from '../../src/game/api';
 import type { CommandResult } from '../../src/sim/types';
+import { dailyTwist } from '../../src/game/daily';
+import { SAVE_KEPT_DAILY } from '../../src/ui/daily';
 import { createPauseMenu, PAUSED_WORD, wearFaces, type PausePage } from '../../src/ui/pause-menu';
 import { createUi } from '../../src/ui/ui';
 import { FakeDom, choosePauseEntry, pauseEntry, type FakeElement } from './fake-dom';
@@ -52,17 +54,23 @@ function key(name: string, extra: Record<string, unknown> = {}): { defaultPreven
   return event;
 }
 
-function mount(opts: { speed?: number; peek?: DailyPeek | null } = {}) {
-  const state = { speed: opts.speed ?? 2, slot: 'mine', daily: null as null | { date: string; twist: { name: string; line: string }; endMinute: number; finished: boolean } };
+const TODAY = '2026-09-30';
+const FRESH: DailyPeek = { today: TODAY, opening: 'fresh', inHand: false, savedDate: null, savedUnfinished: false, yesterday: false, result: null };
+const RESULT = { date: TODAY, twist: dailyTwist(TODAY), people: 42, floors: 7, stars: 2, money: 12_345 };
+
+function mount(opts: { speed?: number; peek?: DailyPeek | null | (() => Promise<DailyPeek>); slot?: string; followed?: number[] } = {}) {
+  const state = { kept: null as string | null, speed: opts.speed ?? 2, slot: opts.slot ?? 'mine', daily: null as null | { date: string; twist: { name: string; line: string }; endMinute: number; finished: boolean } };
   const calls: string[] = [];
   const subscribers = new Set<() => void>();
   const notify = (): void => subscribers.forEach((cb) => cb());
   let choice: { savedDate: string; today: string; yesterday: boolean; ahead: boolean } | null = null;
+  /** What the page was last told: openDaily finds the same. */
+  let lastPeek: DailyPeek | null = typeof opts.peek === 'function' ? null : (opts.peek ?? null);
   const game = {
     world: {
       seed: 1, cash: 1e6, population: 0, stars: 1, time: { minute: 12 * 60 }, log: [], logTotal: 0, rooms: new Map(), shafts: new Map(),
       sims: new Map(), events: [], stats: { lastQuarter: null, vipRating: 'none', weddingsHeld: 0 },
-      story: { followed: [], threads: {}, recent: [], seq: 0 },
+      story: { followed: [...(opts.followed ?? [])], threads: {}, recent: [], seq: 0 },
     },
     subscribe(cb: () => void) {
       subscribers.add(cb);
@@ -93,20 +101,35 @@ function mount(opts: { speed?: number; peek?: DailyPeek | null } = {}) {
       : {
           peekDaily: async () => {
             calls.push('peekDaily');
-            return opts.peek ?? { today: '2026-09-30', opening: 'fresh', savedDate: null, savedUnfinished: false, yesterday: false, result: null };
+            const peek = opts.peek;
+            lastPeek = typeof peek === 'function' ? await peek() : (peek ?? FRESH);
+            return lastPeek;
           },
         }),
+    getKeptDailyCopy: () => state.kept,
+    importSave(text: string) {
+      // An opened file is My tower, with a running clock (game.ts importSave).
+      calls.push(`importSave:${text}`);
+      state.slot = 'mine';
+      state.speed = 1;
+      notify();
+      return { ok: true };
+    },
     async openDaily() {
       calls.push('openDaily');
       state.slot = 'daily';
-      const peek = opts.peek;
-      if (peek?.opening === 'choose') choice = { savedDate: peek.savedDate!, today: peek.today, yesterday: peek.yesterday, ahead: false };
+      const peek = lastPeek;
+      if (peek?.opening === 'choose' || peek?.opening === 'ahead') {
+        choice = { savedDate: peek.savedDate!, today: peek.today, yesterday: peek.yesterday, ahead: peek.opening === 'ahead' };
+      }
       state.daily = { date: peek?.savedDate ?? '2026-09-30', twist: { name: 'Normal day', line: 'x' }, endMinute: 0, finished: false };
       state.speed = choice ? 0 : 1;
       notify();
     },
     async chooseDaily(which: string) {
       calls.push(`chooseDaily:${which}`);
+      // "Start today's tower instead" keeps a copy of the later tower first.
+      if (which === 'today' && choice?.ahead) state.kept = '{"kept":"2026-10-02"}';
       choice = null;
       state.daily = { date: '2026-09-30', twist: { name: 'Normal day', line: 'x' }, endMinute: 0, finished: false };
       state.speed = 1;
@@ -297,7 +320,7 @@ describe("Today's tower, a page before the switch", () => {
   });
 
   it("offers yesterday's unfinished tower or today's; Start today's switches and answers the choice in one go", async () => {
-    const ui = mount({ peek: { today: '2026-09-30', opening: 'choose', savedDate: '2026-09-29', savedUnfinished: true, yesterday: true, result: null } });
+    const ui = mount({ peek: { today: '2026-09-30', opening: 'choose', inHand: false, savedDate: '2026-09-29', savedUnfinished: true, yesterday: true, result: null } });
     ui.open();
     choosePauseEntry(ui.root, 'daily');
     await settle();
@@ -319,12 +342,162 @@ describe("Today's tower, a page before the switch", () => {
   });
 
   it('a day already played offers nothing but Back', async () => {
-    const ui = mount({ peek: { today: '2026-09-30', opening: 'done', savedDate: null, savedUnfinished: false, yesterday: false, result: null } });
+    const ui = mount({ peek: { today: '2026-09-30', opening: 'done', inHand: false, savedDate: null, savedUnfinished: false, yesterday: false, result: null } });
     ui.open();
     choosePauseEntry(ui.root, 'daily');
     await settle();
     expect(ui.page()!.descendants().some((n) => n.tagName === 'BUTTON')).toBe(false);
     expect(dom.activeElement).toBe(ui.back());
+  });
+});
+
+describe("Today's tower keeps what its card offered (review I1)", () => {
+  it('a finished daily whose result card was dismissed: Menu, Today\'s tower shows the result, and Share shares its score', async () => {
+    const ui = mount({ peek: { ...FRESH, opening: 'resume', savedDate: TODAY, result: RESULT } });
+    ui.open();
+    choosePauseEntry(ui.root, 'daily');
+    await settle();
+    const page = ui.page()!;
+    expect(page.descendants().find((n) => has(n, 'hs-daily-people-count'))?.textContent).toBe('42');
+    expect(page.textContent).toContain('Come back tomorrow for a new tower.');
+    expect(ui.named("Open today's tower")).toBeDefined();
+    click(ui.named('Share'));
+    expect(ui.plateTitle()).toBe('Share');
+    const text = ui.page()!.descendants().find((n) => has(n, 'hs-share-text')) as unknown as { value: string };
+    expect(text.value).toContain("I got 42 people in today's tower.");
+    expect(text.value).toContain(`play/?daily=${TODAY}`);
+    // Back comes back to the result, Share still there.
+    click(ui.back());
+    expect(ui.plateTitle()).toBe("Today's tower");
+    expect(ui.named('Share')).toBeDefined();
+    expect(ui.calls).toEqual(['peekDaily']);
+  });
+
+  it("inside Today's tower the entry is there, and the finished tower in hand shows its result with Share, no switch", async () => {
+    const ui = mount({ slot: 'daily', peek: { ...FRESH, opening: 'resume', inHand: true, savedDate: TODAY, result: RESULT } });
+    ui.open();
+    expect(pauseEntry(ui.root, 'daily')).toBeDefined();
+    choosePauseEntry(ui.root, 'daily');
+    await settle();
+    expect(ui.page()!.descendants().some((n) => has(n, 'hs-daily-people-count'))).toBe(true);
+    const buttons = ui.page()!.descendants().filter((n) => n.tagName === 'BUTTON').map((n) => n.textContent);
+    expect(buttons).toEqual(['Share']);
+    expect(has(ui.named('Share'), 'is-primary')).toBe(true);
+  });
+
+  it('an older finished tower in hand: its result, Start today\'s, and Share of that date', async () => {
+    const older = { ...RESULT, date: '2026-09-28', twist: dailyTwist('2026-09-28') };
+    const ui = mount({ slot: 'daily', peek: { ...FRESH, opening: 'fresh', inHand: true, savedDate: '2026-09-28', result: older } });
+    ui.open();
+    choosePauseEntry(ui.root, 'daily');
+    await settle();
+    expect(ui.page()!.textContent).toContain("That was the tower from September 28, 2026. Today's tower is ready for you.");
+    expect(ui.page()!.descendants().filter((n) => n.tagName === 'BUTTON').map((n) => n.textContent)).toEqual(["Start today's", 'Share']);
+    click(ui.named('Share'));
+    const text = ui.page()!.descendants().find((n) => has(n, 'hs-share-text')) as unknown as { value: string };
+    expect(text.value).toContain('in the tower from September 28, 2026');
+  });
+
+  it('the kept copy can still be saved after "Start today\'s tower instead"', async () => {
+    const peeks: DailyPeek[] = [
+      { ...FRESH, opening: 'ahead', savedDate: '2026-10-02', savedUnfinished: true },
+      { ...FRESH, opening: 'resume', inHand: true, savedDate: TODAY, savedUnfinished: true },
+    ];
+    const ui = mount({ peek: async () => peeks.shift()! });
+    ui.open();
+    choosePauseEntry(ui.root, 'daily');
+    await settle();
+    click(ui.named("Start today's tower instead"));
+    await settle();
+    expect(ui.calls).toEqual(['peekDaily', 'openDaily', 'chooseDaily:today']);
+    expect(ui.card()).toBeUndefined();
+    expect(ui.state.slot).toBe('daily');
+    // No card comes up by itself; the menu's Today's tower page carries the kept copy.
+    ui.open();
+    choosePauseEntry(ui.root, 'daily');
+    await settle();
+    expect(ui.named('Keep building')).toBeDefined();
+    const save = ui.named(SAVE_KEPT_DAILY);
+    expect(has(save, 'hs-face')).toBe(true);
+    click(save);
+    const link = dom.clicked.at(-1) as FakeElement & { download?: string };
+    expect(link.tagName).toBe('A');
+    expect(link.download).toBe('hundred-stories.json');
+  });
+
+  it('a slot that would not read claims nothing: a plain Open today\'s tower, not Start building (review A1)', async () => {
+    const ui = mount({ peek: { ...FRESH, opening: 'unreadable' } });
+    ui.open();
+    choosePauseEntry(ui.root, 'daily');
+    await settle();
+    const page = ui.page()!;
+    expect(page.descendants().filter((n) => n.tagName === 'BUTTON').map((n) => n.textContent)).toEqual(["Open today's tower"]);
+    expect(page.textContent).not.toContain('Twist');
+    expect(page.textContent).not.toContain('Everyone gets the same start');
+    click(ui.named("Open today's tower"));
+    await settle();
+    expect(ui.calls).toEqual(['peekDaily', 'openDaily']);
+  });
+
+  it('a read that comes back after the menu closed and opened again is dropped (review A2)', async () => {
+    let answer: (peek: DailyPeek) => void = () => {};
+    const ui = mount({ peek: () => new Promise<DailyPeek>((resolve) => (answer = resolve)) });
+    ui.open();
+    choosePauseEntry(ui.root, 'daily');
+    key('Escape');
+    expect(ui.card()).toBeUndefined();
+    ui.open();
+    answer(FRESH);
+    await settle();
+    expect(ui.plateTitle()).toBe('Hundred Stories');
+    expect(ui.page()).toBeUndefined();
+    expect(ui.card()!.descendants().some((n) => has(n, 'hs-pause-item'))).toBe(true);
+  });
+});
+
+describe('Stories: Unfollow on the page (review A3)', () => {
+  it('the rows left wear faces again and focus stays in the card: the next row, else the one before, else Back', () => {
+    const ui = mount({ followed: [11, 12, 13] });
+    ui.open();
+    choosePauseEntry(ui.root, 'stories');
+    const unfollows = (): FakeElement[] => ui.page()!.descendants().filter((n) => n.tagName === 'BUTTON' && n.textContent === 'Unfollow');
+    expect(unfollows()).toHaveLength(3);
+    // The middle one: the row after it takes its place and focus.
+    click(unfollows()[1]!);
+    expect(unfollows()).toHaveLength(2);
+    const faces = (): boolean[] =>
+      ui.page()!.descendants().filter((n) => has(n, 'hs-occupant') || (n.tagName === 'BUTTON' && n.textContent === 'Unfollow')).map((n) => has(n, 'hs-face'));
+    expect(faces()).toEqual([true, true, true, true]);
+    expect(dom.activeElement).toBe(unfollows()[1]);
+    expect(ui.card()!.contains(dom.activeElement)).toBe(true);
+    // The last one: the one before it.
+    click(unfollows()[1]!);
+    expect(dom.activeElement).toBe(unfollows()[0]);
+    expect(faces()).toEqual([true, true]);
+    // None left: Back.
+    click(unfollows()[0]!);
+    expect(unfollows()).toHaveLength(0);
+    expect(dom.activeElement).toBe(ui.back());
+  });
+});
+
+describe('a saved file opened from the Settings page (review A8)', () => {
+  it("in a friend's tower keeps the game paused under the menu, and the new tower runs once the menu closes", async () => {
+    const ui = mount({ speed: 2, slot: 'friend' });
+    ui.open();
+    choosePauseEntry(ui.root, 'settings');
+    const input = ui.page()!.descendants().find((n) => n.id === 'hs-import') as FakeElement & { files: unknown };
+    input.files = [{ text: async () => 'SAVED' }];
+    (input.listeners.get('change') ?? []).forEach((f) => f({}));
+    await settle();
+    expect(ui.calls).toContain('importSave:SAVED');
+    expect(ui.state.speed).toBe(0);
+    expect(ui.card()!.descendants().find((n) => has(n, 'hs-plate-state'))?.textContent).toBe(PAUSED_WORD);
+    key('Escape');
+    expect(ui.state.speed).toBe(0);
+    key('Escape');
+    expect(ui.card()).toBeUndefined();
+    expect(ui.state.speed).toBe(1); // the opened tower's own speed, not the friend's 2
   });
 });
 
@@ -361,6 +534,58 @@ describe('the page stack itself', () => {
     expect(speed).toBe(2);
   });
 
+  it('a slider keeps Left, Right, Home and End for its value; Up and Down move on (review A4)', () => {
+    const host = dom.createElement('div');
+    const menu = createPauseMenu({
+      host: host as never,
+      getSpeed: () => 0,
+      setSpeed: () => {},
+      entries: () => [{ id: 'resume', label: 'Resume', icon: 'play', kind: 'resume' }],
+      returnFocus: () => null,
+    });
+    const before = dom.createElement('button');
+    const slider = Object.assign(dom.createElement('input'), { type: 'range', min: '0', max: '100', step: '5', value: '50' });
+    const after = dom.createElement('button');
+    const heard: string[] = [];
+    slider.addEventListener('input', () => heard.push(slider.value));
+    menu.open();
+    menu.pushPage({
+      id: 'levels',
+      title: 'Levels',
+      build() {
+        const body = dom.createElement('div');
+        body.append(before, slider, after);
+        return body as never;
+      },
+    });
+    const press = (name: string): boolean => {
+      let prevented = false;
+      menu.handleKey({ key: name, preventDefault: () => (prevented = true) });
+      return prevented;
+    };
+    slider.focus();
+    expect(press('ArrowRight')).toBe(true);
+    expect(slider.value).toBe('55');
+    press('ArrowLeft');
+    press('ArrowLeft');
+    expect(slider.value).toBe('45');
+    press('End');
+    expect(slider.value).toBe('100');
+    press('ArrowRight'); // at the end: stays
+    press('Home');
+    expect(slider.value).toBe('0');
+    expect(heard).toEqual(['55', '50', '45', '100', '0']);
+    expect(dom.activeElement).toBe(slider);
+    press('ArrowDown');
+    expect(dom.activeElement).toBe(after);
+    slider.focus();
+    press('ArrowUp');
+    expect(dom.activeElement).toBe(before);
+    // Home and End on a button are the page's: they jump, as before.
+    press('End');
+    expect(dom.activeElement).toBe(after);
+  });
+
   it('wearFaces turns rows and buttons into faces, not the theme holder or the Controls lines', () => {
     const root = dom.createElement('div');
     const make = (cls: string): FakeElement => {
@@ -392,10 +617,18 @@ describe('the look of a page', () => {
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.hs-pause-card \{\s*animation: none;\s*transition: none;/);
   });
 
-  it('crossfades a page in on --motion-fast, and not under reduced motion', () => {
+  it('fades a page in on --motion-fast (the one it replaces goes at once), and not under reduced motion', () => {
     expect(rule('.hs-pause-list')).toMatch(/animation: hs-pause-swap var\(--motion-fast\)/);
     expect(css).toMatch(/@keyframes hs-pause-swap \{\s*from \{\s*opacity: 0;/);
     expect(rule('.hs-ui.is-reduced .hs-pause-list')).toMatch(/animation: none;/);
+  });
+
+  it('a switch row or a level row does not sink when its switch is pressed or its slider dragged (review A5)', () => {
+    const still = rule('.hs-ui .hs-face:is(.hs-set-switch, .hs-level):active');
+    expect(still).toMatch(/transform: none;/);
+    expect(still).toMatch(/box-shadow: var\(--shadow-1\), inset 0 1px 0 var\(--hairline\);/);
+    // It comes after the sinking rule, which it matches in weight, so it wins.
+    expect(css.indexOf('.hs-ui .hs-face:is(.hs-set-switch, .hs-level):active {')).toBeGreaterThan(css.indexOf('.hs-ui .hs-face:active:not(:disabled) {'));
   });
 
   it('puts a round 44 px Back at the plate\'s left, out of the flow', () => {

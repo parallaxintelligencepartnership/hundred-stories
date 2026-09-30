@@ -48,15 +48,23 @@ export interface DailyChoice {
 export interface DailyPeek {
   /** The player's local date, YYYY-MM-DD. */
   today: string;
-  /** How openDaily would open (game/daily.ts dailyOpening). */
-  opening: DailyOpening;
+  /**
+   * How openDaily would open (game/daily.ts dailyOpening), or 'unreadable' when the daily slot
+   * could not be read: then nothing is known, and only opening it will tell.
+   */
+  opening: DailyOpening | 'unreadable';
+  /** The daily slot is the tower in hand: what was read is that tower. */
+  inHand: boolean;
   /** The date of the tower saved in the daily slot, or null. */
   savedDate: string | null;
   /** That tower is not finished yet. */
   savedUnfinished: boolean;
   /** The saved one is yesterday's and waits for the choice. */
   yesterday: boolean;
-  /** The saved tower is today's and finished: its score. */
+  /**
+   * The saved tower is finished and its result is the one the result card would show: today's
+   * wherever the player is, or the one in hand (an older or later date) inside Today's tower.
+   */
   result: DailyResult | null;
 }
 

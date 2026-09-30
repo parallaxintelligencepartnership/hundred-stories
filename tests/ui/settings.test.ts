@@ -1,13 +1,22 @@
-// The settings sheet on a fake DOM: grouped rows like a phone's settings app, real toggle
-// switches that remember, the styled Open button over a hidden file input, the Theme choice,
-// and the Controls page that shows only the device in the player's hands.
+// Settings on a fake DOM (the pause menu's Settings page, settingsBody): grouped rows like a
+// phone's settings app, real toggle switches that remember, the styled Open button over a hidden
+// file input, the Theme choice, and the Controls page that shows only the device in the player's
+// hands, a page under Settings in the pause card.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { controlLines, controlsDevice } from '../../src/ui/controls';
 import { keyHelpLines } from '../../src/ui/keys';
 import { GROUPS } from '../../src/ui/palette';
-import { createSettingsPanel, type PanelContext } from '../../src/ui/panels';
+import { controlsBody, el, settingsBody, type PanelContext } from '../../src/ui/panels';
+import { createPauseMenu } from '../../src/ui/pause-menu';
 import { getFlag, PREF_KEYS } from '../../src/ui/prefs';
 import { FakeDom, type FakeElement } from './fake-dom';
+
+/** Settings as the pause menu's Settings page holds them (settingsBody; the old sheet is gone). */
+function settingsNode(game: unknown, ctx: PanelContext): FakeElement {
+  const root = el('div');
+  root.append(settingsBody(game as never, ctx, { openControls() {} }).node);
+  return root as unknown as FakeElement;
+}
 
 let dom: FakeDom;
 let uninstall: () => void;
@@ -41,7 +50,7 @@ function context(over: Partial<PanelContext> = {}): PanelContext & { motion: boo
   };
 }
 
-const panelOf = (ctx: PanelContext = context()): FakeElement => createSettingsPanel(game, ctx) as unknown as FakeElement;
+const panelOf = (ctx: PanelContext = context()): FakeElement => settingsNode(game, ctx);
 const byId = (root: FakeElement, id: string): FakeElement => {
   const found = root.descendants().find((n) => n.id === id);
   if (!found) throw new Error(`no #${id}`);
@@ -101,6 +110,22 @@ describe('switches', () => {
     fire(control, 'click');
     expect(control.getAttribute('aria-checked')).toBe('true');
     fire(control, 'click');
+    expect(control.getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('flip once on a tap anywhere on the row: its padding and gap, the words (through the label) or the switch itself', () => {
+    const control = byId(panelOf(), 'hs-large-text');
+    const row = control.parentNode as FakeElement;
+    const label = row.children[0] as FakeElement;
+    // The row's padding or the gap before the switch: the row passes the tap to the switch.
+    fire(row, 'click', { target: row });
+    expect(control.getAttribute('aria-checked')).toBe('true');
+    // A tap on the switch reaches the row as well (it bubbles): the row passes nothing on.
+    fire(control, 'click', { target: control });
+    fire(row, 'click', { target: control });
+    expect(control.getAttribute('aria-checked')).toBe('false');
+    // A tap on the words: the label hands it to the switch itself, so the row passes nothing on.
+    fire(row, 'click', { target: label });
     expect(control.getAttribute('aria-checked')).toBe('false');
   });
 
@@ -177,10 +202,37 @@ describe('controls page', () => {
       matches: on && q.includes('coarse'),
     });
   };
-  const open = (panel: FakeElement): FakeElement => {
-    fire(buttonNamed(panel, 'Controls'), 'click');
-    return panel.descendants().find((n) => n.className === 'hs-help-controls') as FakeElement;
+  /** The Settings page in the pause card, as ui.ts pushes it, with Controls a page under it. */
+  const settingsPage = (): { card: FakeElement; page(): string | undefined; key(name: string): boolean } => {
+    const host = dom.createElement('div');
+    const menu = createPauseMenu({
+      host: host as never,
+      getSpeed: () => 0,
+      setSpeed: () => {},
+      entries: () => [{ id: 'settings', label: 'Settings', icon: 'settings', kind: 'page' }],
+      returnFocus: () => null,
+    });
+    menu.open();
+    const made = settingsBody(game, context(), {
+      openControls: () => menu.pushPage({ id: 'controls', title: 'Controls', build: () => controlsBody() }, made.controlsRow),
+    });
+    menu.pushPage({ id: 'settings', title: 'Settings', build: () => made.node });
+    return {
+      card: menu.card as unknown as FakeElement,
+      page: () => menu.page()?.id,
+      key(name) {
+        let prevented = false;
+        menu.handleKey({ key: name, preventDefault: () => (prevented = true) });
+        return prevented;
+      },
+    };
   };
+  const open = (card: FakeElement): FakeElement => {
+    fire(buttonNamed(card, 'Controls'), 'click');
+    return card.descendants().find((n) => n.className === 'hs-help-controls') as FakeElement;
+  };
+  const plate = (card: FakeElement): string | undefined => card.descendants().find((n) => n.className.includes('hs-plate-title'))?.textContent;
+  const back = (card: FakeElement): FakeElement => card.descendants().find((n) => n.getAttribute('aria-label') === 'Back') as FakeElement;
   const lines = (page: FakeElement): string[] =>
     page.descendants().filter((n) => n.className === 'hs-controls-text').map((n) => n.textContent);
 
@@ -192,38 +244,36 @@ describe('controls page', () => {
   });
 
   it('opens from a Controls row with a chevron, as its own page with a way back', () => {
-    const panel = panelOf();
-    const row = buttonNamed(panel, 'Controls');
+    const { card, page } = settingsPage();
+    const row = buttonNamed(card, 'Controls');
     expect(row.descendants().some((n) => n.getAttribute('class') === 'hs-icon hs-set-chevron')).toBe(true);
-    const main = panel.descendants().find((n) => n.className === 'hs-set-main') as FakeElement;
-    const page = panel.descendants().find((n) => n.className === 'hs-set-page') as FakeElement;
-    expect([main.hidden, page.hidden]).toEqual([false, true]);
+    expect(page()).toBe('settings');
+    expect(card.descendants().some((n) => n.className === 'hs-set-main')).toBe(true);
     fire(row, 'click');
-    expect([main.hidden, page.hidden]).toEqual([true, false]);
-    const back = buttonNamed(panel, 'Back');
-    expect(back.getAttribute('aria-label')).toBe('Back to settings');
-    expect(dom.activeElement).toBe(back);
-    const title = panel.descendants().find((n) => n.className === 'hs-panel-title-text') as FakeElement;
-    expect(title.textContent).toBe('Controls');
-    fire(back, 'click');
-    expect([main.hidden, page.hidden]).toEqual([false, true]);
-    expect(title.textContent).toBe('Settings');
+    expect(page()).toBe('controls');
+    expect(card.descendants().some((n) => n.className === 'hs-set-main')).toBe(false);
+    expect(card.descendants().some((n) => n.className === 'hs-help-controls')).toBe(true);
+    const way = back(card);
+    expect(way.hidden).toBe(false);
+    expect(dom.activeElement).toBe(way);
+    expect(plate(card)).toBe('Controls');
+    fire(way, 'click');
+    expect(page()).toBe('settings');
+    expect(plate(card)).toBe('Settings');
     expect(dom.activeElement).toBe(row);
   });
 
-  it('Escape on the page goes back to settings instead of closing the sheet', () => {
-    const panel = panelOf();
-    open(panel);
-    const page = panel.descendants().find((n) => n.className === 'hs-set-page') as FakeElement;
-    let prevented = false;
-    fire(page, 'keydown', { key: 'Escape', defaultPrevented: false, preventDefault: () => (prevented = true) });
-    expect(prevented).toBe(true);
-    expect(page.hidden).toBe(true);
+  it('Escape on the page goes back to settings instead of closing the menu', () => {
+    const { card, page, key } = settingsPage();
+    open(card);
+    expect(key('Escape')).toBe(true);
+    expect(page()).toBe('settings');
+    expect(card.descendants().some((n) => n.className === 'hs-help-controls')).toBe(false);
   });
 
   it('with a mouse shows only the mouse and keyboard lines, keys included', () => {
     coarse(false);
-    const page = open(panelOf());
+    const page = open(settingsPage().card);
     expect(page.dataset['device']).toBe('mouse');
     expect(page.children[0]?.textContent).toBe('Mouse and keyboard');
     expect(lines(page)).toEqual(controlLines('mouse').map((l) => l.text));
@@ -233,7 +283,7 @@ describe('controls page', () => {
 
   it('on a touch screen shows only the touch lines', () => {
     coarse(true);
-    const page = open(panelOf());
+    const page = open(settingsPage().card);
     expect(page.dataset['device']).toBe('touch');
     expect(page.children[0]?.textContent).toBe('Touch');
     expect(lines(page)).toEqual(controlLines('touch').map((l) => l.text));
@@ -244,11 +294,11 @@ describe('controls page', () => {
     coarse(true);
     const pads: ({ connected: boolean } | null)[] = [null];
     vi.stubGlobal('navigator', { getGamepads: () => pads });
-    const panel = panelOf();
-    expect(open(panel).dataset['device']).toBe('touch');
-    fire(buttonNamed(panel, 'Back'), 'click');
+    const { card } = settingsPage();
+    expect(open(card).dataset['device']).toBe('touch');
+    fire(back(card), 'click');
     pads.push({ connected: true });
-    const page = open(panel);
+    const page = open(card);
     expect(page.dataset['device']).toBe('controller');
     expect(lines(page)).toEqual(controlLines('controller').map((l) => l.text));
     expect(page.textContent).not.toMatch(/mouse|pinch|tap/i);

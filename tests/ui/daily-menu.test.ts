@@ -2,8 +2,15 @@
 // that rewinds or replaces the run. "Go back to last save" and "Open a saved file" (and the file
 // input behind it) are not there; Save now and Save to a file still are. My tower keeps all four.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createSettingsPanel, type PanelContext } from '../../src/ui/panels';
+import { el, settingsBody, type PanelContext } from '../../src/ui/panels';
 import { FakeDom, type FakeElement } from './fake-dom';
+
+/** Settings as the pause menu's Settings page holds them (settingsBody; the old sheet is gone). */
+function settingsNode(game: unknown, ctx: PanelContext): FakeElement {
+  const root = el('div');
+  root.append(settingsBody(game as never, ctx, { openControls() {} }).node);
+  return root as unknown as FakeElement;
+}
 
 let dom: FakeDom;
 let uninstall: () => void;
@@ -25,7 +32,7 @@ const ctx: PanelContext = {
 
 function menu(slot: 'mine' | 'daily' | 'friend'): FakeElement {
   const game = { world: { seed: 1, log: [], logTotal: 0 }, getSlot: () => slot } as never;
-  return createSettingsPanel(game, ctx) as unknown as FakeElement;
+  return settingsNode(game, ctx);
 }
 const texts = (root: FakeElement): string[] => root.descendants().map((n) => n.textContent);
 const offers = (root: FakeElement, words: string): boolean =>
