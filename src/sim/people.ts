@@ -6,7 +6,7 @@
  * world.rng, so a seed plus a command list always replays the same day.
  */
 
-import { hallCallPending, letOffAtNextStop, requestHallCall } from './elevators';
+import { callClassesFor, hallCallPending, letOffAtNextStop, requestHallCallFor } from './elevators';
 import { recordCondoSale, recordHotelNight, recordVisit } from './economy';
 import { ensureRouting, entrances, findRoute, isReachableFromLobby } from './routing';
 import { ECONOMY, ROOMS, SCHEDULES, STORY, STRESS } from './rules';
@@ -42,7 +42,10 @@ function routeOpts(sim: Sim): { staff: boolean; riderClass: ReturnType<typeof ri
 }
 
 function routeOptsFor(kind: SimKind): { staff: boolean; riderClass: ReturnType<typeof riderClassOf> } {
-  return { staff: kind === 'staff' || kind === 'guard' || kind === 'collector', riderClass: riderClassOf(kind) };
+  // A housekeeper works in hotel rooms, so it plans on the cars hotel guests may use
+  // (routing.ts graphKeyOf); guards and collectors stay `other`, which routing reads as every car.
+  if (kind === 'staff') return { staff: true, riderClass: 'hotel' };
+  return { staff: kind === 'guard' || kind === 'collector', riderClass: riderClassOf(kind) };
 }
 
 // Local rules: rules.ts has no entry for these, so they live here and are marked as our call.
@@ -557,7 +560,7 @@ function beginWait(world: World, sim: Sim, leg: Extract<Leg, { kind: 'ride' }>, 
   sim.state = 'waiting';
   if (sim.waitStart === null) {
     sim.waitStart = world.time.minute;
-    requestHallCall(world, shaft.id, sim.pos.floor, leg.toFloor > sim.pos.floor ? 1 : -1, riderClassOf(sim.kind));
+    requestHallCallFor(world, shaft, sim.pos.floor, leg.toFloor > sim.pos.floor ? 1 : -1, sim.kind);
   }
 }
 
@@ -712,8 +715,9 @@ function retryHallCall(world: World, sim: Sim): void {
   }
   if (!withinReach(sim, shaft)) return;
   const dir: 1 | -1 = leg.toFloor > sim.pos.floor ? 1 : -1;
-  if (hallCallPending(shaft, sim.pos.floor, dir, riderClassOf(sim.kind))) return;
-  requestHallCall(world, shaft.id, sim.pos.floor, dir, riderClassOf(sim.kind));
+  const classes = callClassesFor(shaft, sim.kind);
+  if (classes.every((cls) => hallCallPending(shaft, sim.pos.floor, dir, cls))) return;
+  requestHallCallFor(world, shaft, sim.pos.floor, dir, sim.kind);
 }
 
 /** Three silent retries: the shaft is not serving this floor, so ask routing for another way. */

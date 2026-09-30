@@ -4,8 +4,8 @@
 
 import { SHAFTS } from './rules';
 import type { ShaftRule } from './rules';
-import { carCovers, carRangeOf, riderClassOf } from './types';
-import type { Car, Id, RiderClass, Shaft, Sim, World } from './types';
+import { carCarriesAsOwn, carCovers, carRangeOf, riderClassOf, serviceGroupsOf } from './types';
+import type { Car, Id, RiderClass, Shaft, Sim, SimKind, World } from './types';
 import { recordBoardedWait } from './world';
 
 /** Minutes a car may stand idle away from its home floor before it goes back. */
@@ -45,6 +45,25 @@ export function requestHallCall(
     shaft.hallCalls.set(floor, call);
   }
   (dir === 1 ? call.up : call.down).add(cls);
+}
+
+/**
+ * The classes a rider of this kind lights at this shaft. Normally its rider class alone. Staff
+ * who serve a group call as that group wherever the shaft has a car dedicated to it, so the
+ * group's car answers them as its own and not as a leftover: every car that answers the
+ * group also answers them, which the plain `other` call would not. A shaft with no such car
+ * gets the plain call, exactly as before.
+ */
+export function callClassesFor(shaft: Shaft, kind: SimKind): RiderClass[] {
+  const groups = serviceGroupsOf(kind);
+  const out: RiderClass[] = [];
+  for (const group of groups) if (shaft.cars.some((car) => car.serves === group)) out.push(group);
+  return out.length > 0 ? out : [riderClassOf(kind)];
+}
+
+/** Light this rider's call classes (callClassesFor) that are not already lit. */
+export function requestHallCallFor(world: World, shaft: Shaft, floor: number, dir: 1 | -1, kind: SimKind): void {
+  for (const cls of callClassesFor(shaft, kind)) requestHallCall(world, shaft.id, floor, dir, cls);
 }
 
 /** Is anyone of this class still waiting here in this direction? */
@@ -397,16 +416,16 @@ function serveFloor(world: World, shaft: Shaft, car: Car, waiting: WaitIndex): v
   // Anyone this car could not take keeps the floor lit, so another trip comes back.
   for (const sim of queue) {
     if (!boardable(sim, shaft, floor, dir)) continue; // boarded sims are riding now
-    requestHallCall(world, shaft.id, floor, dir, riderClassOf(sim.kind));
+    requestHallCallFor(world, shaft, floor, dir, sim.kind);
   }
 }
 
-/** Would this car carry this sim: the right class, and the destination inside its range. */
+/** Would this car carry this sim: its own rider (class or service group) or a leftover, and the destination inside its range. */
 function carTakes(shaft: Shaft, car: Car, sim: Sim, leftover: boolean): boolean {
   const leg = sim.route[0];
   if (!leg || leg.kind !== 'ride') return false;
   if (!carCovers(shaft, car, leg.toFloor)) return false;
-  return carServesClass(car, riderClassOf(sim.kind), leftover);
+  return leftover || carCarriesAsOwn(car, sim.kind);
 }
 
 function boardable(sim: Sim, shaft: Shaft, floor: number, dir: 1 | -1): boolean {

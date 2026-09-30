@@ -333,18 +333,32 @@ function legsFor(node: Node, toX: number): Leg[] {
   return legs;
 }
 
+/**
+ * The graph a trip is planned on. No class named means the class blind graph: ask whether
+ * the floors connect at all. Service staff ride the cars of every group whose rooms they work
+ * in (types.ts serviceGroupsOf): a housekeeper is planned as a hotel rider (people.ts), and a
+ * staff trip still marked `other` is a guard's or a collector's, whose work is in every room,
+ * so every car counts for it. With no dedicated car in the tower every key gives the same graph.
+ */
+function graphKeyOf(opts?: { staff?: boolean; riderClass?: RiderClass }): GraphKey {
+  const cls = opts?.riderClass;
+  if (cls === undefined) return 'all';
+  if (opts?.staff === true && cls === 'other') return 'all';
+  return cls;
+}
+
 export function findRoute(
   world: World,
   from: { floor: number; x: number },
   to: { floor: number; x: number },
   opts?: { staff?: boolean; riderClass?: RiderClass },
 ): Leg[] | null {
-  // No class named means the class blind graph: ask whether the floors connect at all.
-  const graph = graphOf(world, opts?.riderClass ?? 'all');
+  const key = graphKeyOf(opts);
+  const graph = graphOf(world, key);
   if (from.floor === to.floor) return [{ kind: 'walk', toX: to.x }];
 
   const staff = opts?.staff === true;
-  const goal = chooseGoal(world, graph, opts?.riderClass ?? 'all', staff, from, to);
+  const goal = chooseGoal(world, graph, key, staff, from, to);
   if (goal === null) return null;
   return legsFor(goal, to.x);
 }
@@ -423,7 +437,7 @@ export function goalScanCheck(
   to: { floor: number; x: number },
   opts?: { staff?: boolean; riderClass?: RiderClass },
 ): { indexed: Leg[] | null; bruteForce: Leg[] | null; candidates: number } {
-  const graph = graphOf(world, opts?.riderClass ?? 'all');
+  const graph = graphOf(world, graphKeyOf(opts));
   const best = runSearch(graph, opts?.staff === true, from);
   const bruteForce = pickGoal(best.values(), to);
   let candidates = 0;

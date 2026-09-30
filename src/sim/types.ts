@@ -58,6 +58,31 @@ export function riderClassOf(kind: SimKind): RiderClass {
   return 'other';
 }
 
+/** The rider groups a car can be dedicated to. */
+export type DedicatedGroup = Exclude<RiderClass, 'other'>;
+
+const HOTEL_ONLY: readonly DedicatedGroup[] = ['hotel'];
+const EVERY_GROUP: readonly DedicatedGroup[] = ['hotel', 'office'];
+const NO_GROUP: readonly DedicatedGroup[] = [];
+
+/**
+ * The groups whose rooms this kind of staff works in. Staff ride a car dedicated to such a
+ * group as that group's own riders: housekeepers clean hotel rooms; guards patrol every floor
+ * and answer incidents in any room, and collectors empty any room, so they serve both.
+ * Everyone else serves no group. The rider class (riderClassOf) is unchanged by this.
+ */
+export function serviceGroupsOf(kind: SimKind): readonly DedicatedGroup[] {
+  if (kind === 'staff') return HOTEL_ONLY;
+  if (kind === 'guard' || kind === 'collector') return EVERY_GROUP;
+  return NO_GROUP;
+}
+
+/** Does this car carry this kind of rider as its own (not as a leftover)? */
+export function carCarriesAsOwn(car: Car, kind: SimKind): boolean {
+  if (car.serves === 'any' || car.serves === riderClassOf(kind)) return true;
+  return serviceGroupsOf(kind).includes(car.serves);
+}
+
 export type StressBand = 'calm' | 'pink' | 'red'; // calm sims draw black, like the original
 
 export type Star = 1 | 2 | 3 | 4 | 5 | 6; // 6 is TOWER status
