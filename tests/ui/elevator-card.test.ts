@@ -166,6 +166,22 @@ describe('the note and the warning', () => {
     expect(applyCommand(world, { kind: 'shaft.build', shaft: 'standard', x: 36, floorMin: 1, floorMax: 2 }).ok).toBe(true);
     expect(othersWaitLonger(world, shaft)).toBe(false);
   });
+
+  it('stays quiet on a hotel elevator beside an office elevator, where each tenant has a car of its own (P6-I3)', () => {
+    const { world, shaft: hotel } = tower(1);
+    expect(applyCommand(world, { kind: 'shaft.build', shaft: 'standard', x: 36, floorMin: 1, floorMax: 3 }).ok).toBe(true);
+    const office = [...world.shafts.values()].find((s) => s !== hotel)!;
+    hotel.cars[0]!.serves = 'hotel';
+    office.cars[0]!.serves = 'office';
+    // The office's staff ride the office car and the guests the hotel car: nobody waits longer.
+    expect([othersWaitLonger(world, hotel), othersWaitLonger(world, office)]).toEqual([false, false]);
+    // A home on 3 is nobody's group, and neither elevator carries everyone: both warn.
+    expect(applyCommand(world, { kind: 'build', room: 'condo', floor: 3, x: 0 }).ok).toBe(true);
+    expect([othersWaitLonger(world, hotel), othersWaitLonger(world, office)]).toEqual([true, true]);
+    // Turned back to Everyone, the other elevator carries the home, so the hotel card is quiet.
+    office.cars[0]!.serves = 'any';
+    expect(othersWaitLonger(world, hotel)).toBe(false);
+  });
 });
 
 describe('it is not the pause menu', () => {

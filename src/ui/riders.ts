@@ -4,8 +4,8 @@
 // here are the elevator card's and the hover card's; the command is shaft.setCarServes as before.
 //
 // The warning asks one question of the tower the UI already reads (GameApi.world): with this shaft
-// holding no Everyone car, are there rooms on its floors whose people are not the ones its cars
-// serve first, with no other elevator's Everyone car stopping on their floor?
+// holding no Everyone car, is there a room on its floors whose people no car anywhere carries on
+// that floor, either as everyone or as the riders it serves first?
 
 import { carRangeOf, type Car, type RoomKind, type Shaft, type World } from '../sim/types';
 import type { IconName } from './icons';
@@ -69,33 +69,29 @@ const STAFF_ROOMS: ReadonlySet<RoomKind> = new Set<RoomKind>(['housekeeping', 's
 
 /**
  * True when this shaft has no Everyone car and a room on one of its floors (above or below the
- * ground floor, where everyone walks in) belongs to people none of its cars reaching that floor
- * serves first, and no other elevator with an Everyone car stops there.
+ * ground floor, where everyone walks in) has no car anywhere that stops on its floor and either
+ * carries everyone or serves that room's people first. Every elevator counts, this one included:
+ * a hotel shaft beside an office shaft leaves nobody waiting, since each rides its own car.
  */
 export function othersWaitLonger(world: World, shaft: Shaft): boolean {
   if (shaft.cars.length === 0 || shaft.cars.some((car) => car.serves === 'any')) return false;
+  const shafts = [...world.shafts.values()];
   for (const room of world.rooms.values()) {
     if (room.floor === 1 || !shaft.stops.has(room.floor)) continue;
     const groups = groupsOfRoom(room.kind);
     if (groups === null) continue;
     const staff = STAFF_ROOMS.has(room.kind);
     if (shaft.kind === 'service' && !staff) continue;
-    const servedFirst = shaft.cars.some((car) => {
-      const span = carRangeOf(shaft, car);
-      return room.floor >= span.lo && room.floor <= span.hi && groups.includes(car.serves as Group);
-    });
-    if (servedFirst) continue;
-    const elsewhere = [...world.shafts.values()].some(
-      (other) =>
-        other !== shaft &&
-        (other.kind !== 'service' || staff) &&
-        other.stops.has(room.floor) &&
-        other.cars.some((car) => {
-          const span = carRangeOf(other, car);
-          return car.serves === 'any' && room.floor >= span.lo && room.floor <= span.hi;
+    const carried = shafts.some(
+      (any) =>
+        (any.kind !== 'service' || staff) &&
+        any.stops.has(room.floor) &&
+        any.cars.some((car) => {
+          const span = carRangeOf(any, car);
+          return room.floor >= span.lo && room.floor <= span.hi && (car.serves === 'any' || groups.includes(car.serves));
         }),
     );
-    if (!elsewhere) return true;
+    if (!carried) return true;
   }
   return false;
 }

@@ -16,7 +16,7 @@ export class FakeElement {
   hidden = false;
   isContentEditable = false;
   readonly dataset: Record<string, string> = {};
-  readonly style: Record<string, string> & { setProperty(name: string, value: string): void };
+  readonly style: Record<string, string> & { setProperty(name: string, value: string): void; removeProperty(name: string): void };
   readonly attributes = new Map<string, string>();
   readonly listeners = new Map<string, Listener[]>();
   private ownText = '';
@@ -30,6 +30,9 @@ export class FakeElement {
     this.style = Object.assign(style, {
       setProperty(name: string, value: string) {
         style[name] = value;
+      },
+      removeProperty(name: string) {
+        delete style[name];
       },
     });
   }

@@ -271,7 +271,10 @@ body {
   outline: none;
 }
 
-/* A view is on: its chip sits under the top bar, and what hangs under the bar steps below it. */
+/* A view is on: its chip sits under the top bar, and what hangs under the bar steps below it.
+   These figures assume a one-line chip; once the chip is laid out off a phone ui.ts
+   (placeViewChip) sets --chip-h on the shell to its measured bottom under the bar, so a chip
+   wrapped to two lines steps them down by its real height. */
 .hs-ui.has-view {
   --chip-h: calc(var(--touch) + var(--gap-float));
 }
@@ -741,7 +744,9 @@ button.hs-readout:hover {
    over the speed pill in the bottom left corner (the phone block).
    Where the bar has wrapped to two rows (below 1040 px, 1300 px with Larger text: the pill and
    the controls never fit one row there) the controls' row has room on its left, so the chip sits
-   there, one gap left of the speed pill, its words wrapping inside the room the row leaves. */
+   there, one gap left of the speed pill, its words wrapping inside the room the row leaves
+   (with Larger text outside My tower below 840 px that room is too small: it hangs under the
+   speed pill instead, below). */
 @media (min-width: 721px) {
   .hs-speed-mode {
     position: absolute;
@@ -3112,6 +3117,31 @@ button.hs-news-toast {
   :root.hs-large-text .hs-palette {
     top: calc(var(--top-actual, calc(var(--top-h) + var(--safe-top))) + 2 * var(--gap-float) + var(--touch) + 8px);
     max-height: calc(100% - var(--top-actual, calc(var(--top-h) + var(--safe-top))) - 2 * var(--gap-float) - var(--touch) - 8px - var(--gap-float) - var(--edge) - var(--safe-bottom));
+  }
+}
+
+/* With Larger text outside My tower (My tower's button in the row), below 840 px the controls
+   leave that room too narrow: the words would stack past two lines and spill over the pills. So
+   the chip does what a phone's does, only on the free side of the row: it hangs off the speed
+   pill's left edge, 4 px under the row rather than over it (over it is the status pill here),
+   in the round buttons' row, which starts at Save about 232 px right of that edge. 200 px keeps
+   it clear of Save and keeps the paused line to two lines. The dock is under that row up to
+   839 px (the rule above), so it meets nothing; the first-run hint steps under it as it does
+   under the bar from 1040 px (is-hint-low). */
+@media (min-width: 721px) and (max-width: 839px) {
+  :root.hs-large-text .hs-top-actions:has(> .hs-my-tower:not([hidden])) > .hs-speed-mode {
+    top: calc(100% + 4px);
+    right: auto;
+    left: 0;
+    translate: none;
+    max-width: 200px;
+    text-align: left;
+  }
+}
+
+@media (min-width: 721px) and (max-width: 839px) {
+  :root.hs-large-text .hs-ui.is-hint-low:has(.hs-my-tower:not([hidden])) .hs-hint {
+    top: calc(var(--top-actual, calc(var(--top-h) + var(--safe-top))) + 2 * var(--gap-float) + var(--chip-h, 0px) + var(--touch));
   }
 }
 

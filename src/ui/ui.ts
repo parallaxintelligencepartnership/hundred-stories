@@ -1381,16 +1381,24 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
    * The view's chip is centered under the bar, in the row of Save, Sound and Watch. Where it would
    * meet one of them it takes the row under theirs (ui.css is-view-low), so none of them covers
    * its close button. A phone keeps it clear of them by its own width (ui.css).
+   *
+   * What hangs under it (the night speed chip, the first-run hint) steps down by --chip-h: here
+   * the chip's measured bottom below the bar's, taken after its row is settled, so a chip whose
+   * words wrap to two lines pushes them down by its real height, not a one-line guess. Without a
+   * laid out chip (none up, or a phone) ui.css's own figure stands.
    */
-  function placeViewChip(bar: { width: number }): void {
+  function placeViewChip(bar: { width: number; bottom: number }): void {
     const chip = view.chip.getBoundingClientRect();
     if (inSheetLayout() || !(chip.width > 0)) {
       shell.classList.remove('is-view-low');
+      shell.style.removeProperty('--chip-h');
       return;
     }
     const buttons = [saveButton.button, soundToggle.button, watchToggle.button].map((b) => b.getBoundingClientRect());
     const meets = viewChipMeets(chip, buttons, VIEW_CHIP_GAP);
     shell.classList.toggle('is-view-low', viewChipRow(`${Math.round(chip.width)}|${Math.round(bar.width)}`, meets));
+    const settled = view.chip.getBoundingClientRect();
+    shell.style.setProperty('--chip-h', `${Math.ceil(settled.bottom - bar.bottom)}px`);
   }
 
   /**
