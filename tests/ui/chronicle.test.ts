@@ -5,10 +5,13 @@ import { assembleChronicle, milestoneRecap, NO_STORIES_YET, RECAP_LINE_CAP, unlo
 import { ROOMS } from '../../src/sim/rules';
 import { deserialize, hashWorld, serialize } from '../../src/sim/save';
 import { recomputeStars } from '../../src/sim/stars';
-import { CHRONICLE_LINE_CAP, followSim, recordBeat, sanitizeStory, storyName, STORY_FOLLOWED_CAP } from '../../src/sim/story';
+import { CHRONICLE_LINE_CAP, createStoryState, followSim, recordBeat, sanitizeStory, storyName, STORY_FOLLOWED_CAP } from '../../src/sim/story';
 import type { Room, RoomKind, World } from '../../src/sim/types';
 import { allocId, createWorld } from '../../src/sim/world';
 import { createChroniclePanel, createRecapPanel, createStoriesPanel, type PanelContext } from '../../src/ui/panels';
+// Imported with the file, not inside the star card test: ui.ts's module graph takes seconds to
+// load on a busy run, and a load inside the test counted against its 5 s timeout.
+import { createUi } from '../../src/ui/ui';
 import { FakeDom, type FakeElement } from './fake-dom';
 
 let dom: FakeDom;
@@ -310,9 +313,7 @@ describe('chronicle panel and export', () => {
 });
 
 describe('star card', () => {
-  it('a star.gained beat puts up the card with the unlocks, and Stories so far opens the recap', async () => {
-    const { createUi } = await import('../../src/ui/ui');
-    const { createStoryState } = await import('../../src/sim/story');
+  it('a star.gained beat puts up the card with the unlocks, and Stories so far opens the recap', () => {
     const subscribers = new Set<() => void>();
     const world = {
       seed: 5, cash: 1_000_000, population: 0, stars: 1, time: { minute: 0 }, log: [], logTotal: 0,
