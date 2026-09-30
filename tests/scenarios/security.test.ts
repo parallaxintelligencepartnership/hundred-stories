@@ -255,7 +255,7 @@ describe('the shop thief', () => {
     const rolled: number[] = [];
     let last = world.stats.lastTheftAt;
     for (let i = 0; i < 7 * 1440; i++) {
-      world.stars = 3; // this small tower would fall back on population; the roll needs three stars
+      world.stars = 3; // the roll needs three stars, which this small tower never earned: set by hand
       tick(world);
       expect(world.events.filter((e) => e.kind === 'theft').length).toBeLessThanOrEqual(1);
       if (world.stats.lastTheftAt !== last) {
@@ -376,6 +376,9 @@ describe('below three stars', () => {
     // new worker and resident windows) and stats.avgWaitMinutes written at boarding.
     // Re-recorded again 2026-09-28 (was 5bb82411): avgWaitMinutes takes the whole wait across a
     // reroute (Sim.firstWaitStart, review of ccc0f7e I1).
-    expect(hashWorld(world)).toBe('89fc5ec6');
+    // Re-recorded 2026-09-29 (was 89fc5ec6): stars never fall (b715618), so this tower keeps a
+    // star its population dips under; it hashes 89fc5ec6 at 8016684 and bf601028 from b715618 on,
+    // the same before and after the close batch's sim commit (b2b37eb).
+    expect(hashWorld(world)).toBe('bf601028');
   });
 });

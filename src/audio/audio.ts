@@ -585,8 +585,9 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
   // game.world on a tower switch, new game or import without emitting any end events, so every
   // entry point compares identity and resets from the new world (checkWorld).
   let knownWorld = game.world;
-  // The chapter follows the tower's current stars, up and down, so a session and a reload of the
-  // same save agree (audit 2026-09-25, decision 4); every chapter is a full arrangement.
+  // The chapter follows the tower's current stars, so a session and a reload of the same save
+  // agree (audit 2026-09-25, decision 4); stars only rise (DECISIONS 2026-09-29, a star once earned
+  // is never taken away), so the chapter only moves on. Every chapter is a full arrangement.
   let stars: number = game.world.stars;
   let chapter = chapterFor(stars);
   let tempo = tempoFor(game.world.seed);

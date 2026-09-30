@@ -38,8 +38,9 @@ async function tauriInvoke(cmd: string, args: { n: number }): Promise<unknown> {
 
 /**
  * Wire achievements to the game. Reports the current star once (a tower restored from a save
- * keeps what it earned, and star 1 is FIRST_TOWER), then each time the rating rises. A fall is
- * not reported: an achievement, once earned, stays. Returns the unsubscribe.
+ * keeps what it earned, and star 1 is FIRST_TOWER), then each time the rating rises. The rating
+ * never falls (DECISIONS 2026-09-29), and an achievement, once earned, stays. Returns the
+ * unsubscribe.
  */
 export function createSteam(game: Pick<GameApi, 'world' | 'subscribeEvents'>, deps: SteamDeps = {}): () => void {
   if (!isTauri(deps.global)) return () => {};

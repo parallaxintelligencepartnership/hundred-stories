@@ -24,7 +24,7 @@ describe('housekeeping built after the cockroaches moved in', () => {
       day += 1;
     }
     expect(singles.some((r) => r.infested)).toBe(true);
-    world.stars = 2; // the probe's player: stars fall back with a small population
+    world.stars = 2; // the probe's player had two stars, which housekeeping needs; set by hand, as this small tower never earned them
     buildTower(world, [{ kind: 'build', room: 'housekeeping', floor: 2, x: 205 }]);
     const from = world.log.length;
     runMinutes(world, 3 * 1440);
