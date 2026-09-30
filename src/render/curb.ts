@@ -10,7 +10,7 @@
 // draw them, so nobody is drawn inside and outside at once. Nothing here reads or writes world.rng
 // or any sim field; the renderer never touches the sim. All motion stops under reduced motion.
 
-import { Container, Sprite, type Texture } from 'pixi.js';
+import { Container, Sprite } from 'pixi.js';
 import type { StoryBeat } from '../sim/story';
 import type { Id, Sim, SimKind, World } from '../sim/types';
 import { FRAME, mix, walkFrameAt, type PersonFrame, type SimFrame } from './anim';
@@ -172,8 +172,6 @@ export interface Curb {
   update(frame: CurbFrame): void;
   /** How many commuters are drawn now, for the tests. */
   count(): number;
-  /** Add every texture the commuters show to `into`, so a sweep keeps them. */
-  textures(into: Set<Texture>): void;
   /** Forget the street for a different tower: no commuters, no vehicles, a fresh sample next frame. */
   reset(): void;
   destroy(): void;
@@ -305,9 +303,6 @@ export function createCurb(layer: Container, art: () => Art): Curb {
     },
     count() {
       return walkers.size;
-    },
-    textures(into) {
-      for (const w of walkers.values()) into.add(w.body.texture);
     },
     reset() {
       for (const id of [...walkers.keys()]) drop(id);

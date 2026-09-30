@@ -5,9 +5,11 @@
 //
 // F1: the full static tower pass (every room, slab, venue and shaft) runs only when the structure
 // changes. People coming and going (a room's occupancy crossing zero) re-read window states only.
+// F2: with the real art (on a fake canvas), every person on screen draws from one person atlas,
+// baked at boot and kept: the live person textures stay at that one, whatever the crowd does.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Texture } from 'pixi.js';
+import { Container, Sprite, Texture, type Renderer as PixiRenderer, type TextureSource } from 'pixi.js';
 import type { Art } from '../../src/render/art';
 import { doorFrameOf } from '../../src/render/anim';
 import { createRenderer, type Renderer } from '../../src/render/renderer';
@@ -18,6 +20,7 @@ import type { Command, RoomKind, World } from '../../src/sim/types';
 import { createWorld } from '../../src/sim/world';
 
 const apps = vi.hoisted(() => [] as { frames: (() => void)[]; ticker: { deltaMS: number } }[]);
+const realArt = vi.hoisted(() => ({ create: null as null | ((r: unknown, o: unknown) => unknown) }));
 // Every full static pass calls carFinishes once (reconcileShafts), and nothing else does.
 const passes = vi.hoisted(() => ({ full: 0 }));
 
@@ -78,6 +81,7 @@ const stubArt: Art = {
 const artHolder = vi.hoisted(() => ({ art: null as unknown }));
 vi.mock('../../src/render/art', async (importOriginal) => {
   const art = await importOriginal<typeof import('../../src/render/art')>();
+  realArt.create = art.createArt as (r: unknown, o: unknown) => unknown;
   return { ...art, createArt: () => (artHolder.art as Art | null) ?? stubArt };
 });
 vi.mock('../../src/render/sky', async (importOriginal) => {
@@ -143,7 +147,7 @@ function tower(): World {
   return warmed;
 }
 
-async function mount(world: World): Promise<{ renderer: Renderer; frame: () => void }> {
+async function mount(world: World): Promise<{ renderer: Renderer; frame: () => void; stage: Container }> {
   const renderer = await createRenderer({ appendChild: () => {} } as unknown as HTMLElement, world);
   renderers.push(renderer);
   const app = apps[apps.length - 1]!;
@@ -154,7 +158,7 @@ async function mount(world: World): Promise<{ renderer: Renderer; frame: () => v
     app.ticker.deltaMS = 16;
     for (const fn of app.frames) fn();
   };
-  return { renderer, frame };
+  return { renderer, frame, stage: (app as unknown as { stage: Container }).stage };
 }
 
 describe('one day at about 900 people', () => {
@@ -187,4 +191,56 @@ describe('one day at about 900 people', () => {
     process.stderr.write(`full static passes over one day: ${passes.full}; structure changes: ${structureChanges}; population ${world.population}\n`);
     expect(passes.full).toBe(structureChanges);
   }, 120_000);
+});
+
+/** The real art on a fake canvas and a fake pixi renderer, as art-classes.test.ts: no GPU. */
+function realArtOnAFakeCanvas(): Art {
+  const noop = (): void => {};
+  const ctx = new Proxy(
+    {},
+    {
+      get: (_t, key) =>
+        key === 'measureText' ? () => ({ width: 20 }) : key === 'createLinearGradient' || key === 'createRadialGradient' ? () => ({ addColorStop: noop }) : noop,
+      set: () => true,
+    },
+  );
+  const createCanvas = (width: number, height: number): HTMLCanvasElement => ({ width, height, getContext: () => ctx }) as unknown as HTMLCanvasElement;
+  const renderer = { generateTexture: (): Texture => new Texture() } as unknown as PixiRenderer;
+  return realArt.create!(renderer, { createCanvas, resolution: 1 }) as Art;
+}
+
+describe('one day at about 900 people, real art', () => {
+  it('draws every person from one baked person atlas: the live person textures stay at that one all day', async () => {
+    const world = tower();
+    const art = realArtOnAFakeCanvas();
+    artHolder.art = art;
+    const { renderer, frame, stage } = await mount(world);
+    const personTextures = (): number => Object.keys(art.stats!().byKey).filter((key) => key.startsWith('person:')).length;
+    let peakTextures = 0;
+    let peakDrawn = 0;
+    const sources = new Set<TextureSource>();
+    const start = world.time.minute;
+    while (world.time.minute < start + 1440) {
+      tick(world);
+      renderer.render(world, 1);
+      frame();
+      peakTextures = Math.max(peakTextures, personTextures());
+      if (world.time.minute % 30 !== 0) continue;
+      // Every half hour: what the person sprites on the stage are drawn from.
+      let drawn = 0;
+      const walk = (node: Container): void => {
+        if (node instanceof Sprite && node.texture.label?.startsWith('person:')) {
+          drawn++;
+          sources.add(node.texture.source);
+        }
+        for (const child of node.children) walk(child as Container);
+      };
+      walk(stage);
+      peakDrawn = Math.max(peakDrawn, drawn);
+    }
+    process.stderr.write(`live person textures, peak over one day: ${peakTextures}; person sprites drawn, peak: ${peakDrawn}; texture sources: ${sources.size}\n`);
+    expect(peakDrawn).toBeGreaterThan(100);
+    expect(peakTextures).toBe(1);
+    expect(sources.size).toBe(1);
+  }, 180_000);
 });

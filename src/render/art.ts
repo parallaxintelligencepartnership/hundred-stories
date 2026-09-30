@@ -27,6 +27,10 @@ import type { RoomKind, ShaftKind, SimKind, StressBand } from '../sim/types';
 import { SHAFTS } from '../sim/rules';
 import { canonicalFrame, DOOR_FRAMES, doorFrameOf, FRAME, type PersonFrame } from './anim';
 import {
+  ATLAS_CODES,
+  ATLAS_LOOKS,
+  atlasLookCode,
+  atlasVariantOf,
   BODY_COUNT,
   drawPerson,
   drawProp,
@@ -34,7 +38,6 @@ import {
   lookCode,
   MARK_H,
   MARK_W,
-  personKey,
   PROP_KINDS,
   PROP_SIZE,
   WARDROBE_KIND,
@@ -149,12 +152,6 @@ export interface Art {
   crowd?(): CrowdAtlas | null;
   /** How many textures are baked and their bytes at the bake resolution (width x height x 4). */
   stats?(): TextureStats;
-  /**
-   * Free every person texture that no sprite shows (`live`) and nobody asked for in `idleMs`:
-   * people come and go all day, and a pose nobody holds should not stay on the GPU. Returns how
-   * many were freed.
-   */
-  sweep?(live: ReadonlySet<Texture>, idleMs: number): number;
   /** Free every ghost texture: the placement ended, and a drag's spans should not stay baked. */
   dropGhosts?(): void;
   /**
@@ -243,6 +240,38 @@ export const CROWD_KINDS: readonly SimKind[] = WARDROBES.map((w) => WARDROBE_KIN
 export const CROWD_COLS = CROWD_KINDS.length * LOOK_KEYS;
 export const CROWD_ROWS = BODY_COUNT * 2;
 export const CROWD_STRIP_H = 20;
+
+/**
+ * The person atlas (package P3): every wardrobe's kept looks (figure.ts ATLAS_LOOKS) in each of
+ * the six baked frames (the mirrored two are flips), PERSON_ATLAS_COLS cells across, a cell the
+ * person box plus a 1 px clear gutter so linear sampling never picks up a neighbour. 50 looks by
+ * 6 frames is 300 cells, 30 by 10: 510 by 490 logical px, 2040 by 1960 device px at a device
+ * pixel ratio of 2, inside the atlas budget (renderer.ts ATLAS_BUDGET_PX).
+ */
+export const PERSON_BAKED_FRAMES: readonly PersonFrame[] = [FRAME.stand, FRAME.stride, FRAME.shiftLeft, FRAME.glance, FRAME.sit, FRAME.browse];
+export const PERSON_ATLAS_LOOKS = WARDROBES.reduce((sum, w) => sum + ATLAS_LOOKS[w], 0);
+export const PERSON_ATLAS_CELLS = PERSON_ATLAS_LOOKS * PERSON_BAKED_FRAMES.length;
+export const PERSON_ATLAS_COLS = 30;
+export const PERSON_ATLAS_ROWS = Math.ceil(PERSON_ATLAS_CELLS / PERSON_ATLAS_COLS);
+export const PERSON_CELL_W = SIM_W + 1;
+export const PERSON_CELL_H = SIM_H + 1;
+/** The first variant of each wardrobe in the atlas, WARDROBES order. */
+const WARDROBE_FIRST: Readonly<Record<string, number>> = (() => {
+  const out: Record<string, number> = {};
+  let at = 0;
+  for (const w of WARDROBES) {
+    out[w] = at;
+    at += ATLAS_LOOKS[w];
+  }
+  return out;
+})();
+
+/** The atlas cell of a kind, a look code and a frame: the look brought into the set, the frame to its unmirrored twin. */
+export function personCell(kind: SimKind, code: number, frame: PersonFrame): number {
+  const variant = Math.max(0, atlasVariantOf(kind, atlasLookCode(kind, code)));
+  const f = Math.max(0, PERSON_BAKED_FRAMES.indexOf(canonicalFrame(frame)));
+  return ((WARDROBE_FIRST[wardrobeOf(kind)] ?? 0) + variant) * PERSON_BAKED_FRAMES.length + f;
+}
 
 /** Which window band a kind has, for the far zoom veil over it. */
 export function hasWindowBand(kind: RoomKind): boolean {
@@ -1905,10 +1934,8 @@ export function createArt(renderer: Renderer, options: { createCanvas?: CanvasFa
   const illustratedScale = TEXTURE_CLASS.illustrated.scale * resolution;
   const counts = { structural: { textures: 0, bytes: 0 }, illustrated: { textures: 0, bytes: 0 } };
   const byFamily: Record<string, number> = {};
-  /** Person textures: when each was last asked for, and its bytes, for sweep. */
-  const personUsed = new Map<string, number>();
-  const personBytes = new Map<string, number>();
-  const now = (): number => (typeof performance === 'undefined' ? Date.now() : performance.now());
+  /** The person atlas's cells, by personCell; empty until the atlas is baked (people()). */
+  let personCells: Texture[] | null = null;
   const byKey = new Map<string, number>();
   const count = (key: string, bytes: number): void => {
     const family = key.slice(0, key.indexOf(':') >>> 0);
@@ -1977,8 +2004,6 @@ export function createArt(renderer: Renderer, options: { createCanvas?: CanvasFa
    * `originY` crops the top: the canvas starts that many logical px down the drawing.
    */
   function paint(key: string, w: number, h: number, draw: (ctx: CanvasRenderingContext2D) => void, scale = illustratedScale, originY = 0, originX = 0): Texture {
-    const person = key.startsWith('person:');
-    if (person) personUsed.set(key, now());
     const hit = cache.get(key);
     if (hit) return hit;
     const pw = Math.max(1, Math.ceil(w * scale));
@@ -2005,8 +2030,43 @@ export function createArt(renderer: Renderer, options: { createCanvas?: CanvasFa
     counts.illustrated.textures += 1;
     counts.illustrated.bytes += pw * ph * 4;
     count(key, pw * ph * 4);
-    if (person) personBytes.set(key, pw * ph * 4);
     return texture;
+  }
+
+  /**
+   * The person atlas, baked once on first ask (the renderer asks at boot) and kept for the life of
+   * the art: every kept look of every wardrobe in every baked frame, at the illustrated scale.
+   * Null while no canvas context is to be had (paint warned); the next ask tries again.
+   */
+  function people(): Texture[] | null {
+    if (personCells) return personCells;
+    const atlas = paint(
+      'person:atlas',
+      PERSON_ATLAS_COLS * PERSON_CELL_W,
+      PERSON_ATLAS_ROWS * PERSON_CELL_H,
+      (ctx) => {
+        for (const w of WARDROBES) {
+          const kind = WARDROBE_KIND[w];
+          ATLAS_CODES[w].forEach((code) => {
+            for (const frame of PERSON_BAKED_FRAMES) {
+              const cell = personCell(kind, code, frame);
+              ctx.save();
+              ctx.translate((cell % PERSON_ATLAS_COLS) * PERSON_CELL_W, Math.floor(cell / PERSON_ATLAS_COLS) * PERSON_CELL_H);
+              drawPerson(ctx as unknown as Ctx2D, kind, code, frame);
+              ctx.restore();
+            }
+          });
+        }
+      },
+    );
+    if (atlas === Texture.EMPTY) return null;
+    const cells: Texture[] = [];
+    for (let cell = 0; cell < PERSON_ATLAS_CELLS; cell++) {
+      const frame = new Rectangle((cell % PERSON_ATLAS_COLS) * PERSON_CELL_W, Math.floor(cell / PERSON_ATLAS_COLS) * PERSON_CELL_H, SIM_W, SIM_H);
+      cells.push(new Texture({ source: atlas.source, frame, label: `person:cell:${cell}` }));
+    }
+    personCells = cells;
+    return cells;
   }
 
   function venueTexture(kind: VenueKind, widthTiles: number, treatment: Treatment | number): Texture {
@@ -2060,12 +2120,12 @@ export function createArt(renderer: Renderer, options: { createCanvas?: CanvasFa
     },
 
     sim(kind, _band, frame, look) {
-      const { width: w, height: h } = TEXTURE_SIZE.sim();
       const f = (Number.isInteger(frame) && frame >= 0 && frame <= 7 ? frame : FRAME.stand) as PersonFrame;
       const code = look === undefined || look < 0 ? 0 : Math.trunc(look);
-      // Mirrored frames share their twin's texture; the renderer flips the sprite (anim.ts isMirrored).
-      const baked = canonicalFrame(f);
-      return paint(personKey(kind, baked, code), w, h, (ctx) => drawPerson(ctx as unknown as Ctx2D, kind, code, baked));
+      // A cell of the one person atlas: mirrored frames share their twin's cell and the renderer
+      // flips the sprite (anim.ts isMirrored); a look outside the set takes its kept look.
+      const cells = people();
+      return cells?.[personCell(kind, code, f)] ?? Texture.EMPTY;
     },
 
     ghost(widthTiles, heightFloors, ok) {
@@ -2242,32 +2302,6 @@ export function createArt(renderer: Renderer, options: { createCanvas?: CanvasFa
         crowdAtlas = null;
       }
       return crowdAtlas;
-    },
-
-    sweep(live, idleMs) {
-      const t = now();
-      let freed = 0;
-      for (const [key, used] of personUsed) {
-        if (t - used < idleMs) continue;
-        const texture = cache.get(key);
-        if (texture && live.has(texture)) continue;
-        personUsed.delete(key);
-        if (!texture) continue;
-        cache.delete(key);
-        try {
-          texture.destroy(true);
-        } catch (error) {
-          console.warn('render: freeing a person texture failed', error);
-        }
-        const bytes = personBytes.get(key) ?? 0;
-        personBytes.delete(key);
-        counts.illustrated.textures -= 1;
-        counts.illustrated.bytes -= bytes;
-        byFamily['person'] = (byFamily['person'] ?? 0) - bytes;
-        byKey.delete(key);
-        freed += 1;
-      }
-      return freed;
     },
 
     stats() {

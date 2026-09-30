@@ -6,6 +6,10 @@
 import { describe, expect, it } from 'vitest';
 import { FRAME, PERSON_FRAME_COUNT, type PersonFrame } from '../../src/render/anim';
 import {
+  ATLAS_CODES,
+  ATLAS_LOOKS,
+  atlasLookCode,
+  WARDROBES,
   BODY_COUNT,
   BODY_SHAPES,
   bodyOf,
@@ -91,13 +95,19 @@ describe('five builds and eight looks', () => {
     for (let b = 0; b < BODY_COUNT; b++) for (let k = 0; k < LOOK_KEYS; k++) expect(decodeLook(lookCode(b, k))).toEqual({ body: b, look: k });
   });
 
-  it('takes the look key from the identity, and the build from seed and id alone', () => {
+  it('takes the look key from the identity, and the build from seed and id alone, within the atlas looks', () => {
+    // Package P3: a worker's look key is the identity's; the build is the id's own where the
+    // person atlas keeps it for that key (two builds a key), else one of the kept two.
+    let own = 0;
     for (let id = 1; id < 200; id++) {
       const code = personLookCode(777, id, 'worker');
       expect(decodeLook(code).look).toBe(personIdentity(777, id, 'worker').lookKey);
-      expect(decodeLook(code).body).toBe(bodyOf(777, id));
+      expect(ATLAS_CODES.worker).toContain(code);
+      if (decodeLook(code).body === bodyOf(777, id)) own++;
       expect(personLookCode(777, id, 'worker')).toBe(code); // stable across calls
+      expect(atlasLookCode('worker', code)).toBe(code); // already a kept look
     }
+    expect(own).toBeGreaterThan(40);
     const builds = new Set(Array.from({ length: 200 }, (_, id) => bodyOf(5, id)));
     expect(builds.size).toBe(BODY_COUNT);
   });
@@ -116,6 +126,26 @@ describe('five builds and eight looks', () => {
     expect(personKey('worker', FRAME.strideMirrored, code)).toBe(personKey('worker', FRAME.stride, code));
     expect(personKey('worker', FRAME.shiftRight, code)).toBe(personKey('worker', FRAME.shiftLeft, code));
     expect(personKey('worker', FRAME.stride, code)).not.toBe(personKey('worker', FRAME.stand, code));
+  });
+});
+
+describe('the person atlas looks (package P3)', () => {
+  it('keeps 50 looks: every look key in two builds for workers and the casual crowd, one build for staff, a few for the rare wardrobes', () => {
+    expect(ATLAS_LOOKS).toEqual({ casual: 16, worker: 16, staff: 8, vip: 4, guard: 3, collector: 3 });
+    for (const w of WARDROBES) expect(new Set(ATLAS_CODES[w]).size, w).toBe(ATLAS_LOOKS[w]);
+    for (const w of ['casual', 'worker', 'staff'] as const) expect(new Set(ATLAS_CODES[w].map((c) => decodeLook(c).look)).size, w).toBe(LOOK_KEYS);
+    for (const w of ['casual', 'worker'] as const) expect(new Set(ATLAS_CODES[w].map((c) => decodeLook(c).body)).size, w).toBe(BODY_COUNT);
+  });
+
+  it('brings every look code into its wardrobe set, and leaves a kept one as it is', () => {
+    for (const kind of KINDS) {
+      const kept = ATLAS_CODES[wardrobeOf(kind)];
+      for (let code = 0; code < LOOK_CODES; code++) {
+        const mapped = atlasLookCode(kind, code);
+        expect(kept).toContain(mapped);
+        if (kept.includes(code)) expect(mapped).toBe(code);
+      }
+    }
   });
 });
 

@@ -5,9 +5,10 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { Container, Graphics, Rectangle, Texture, type Renderer as PixiRenderer } from 'pixi.js';
-import { createArt, FLOOR_PX, GHOST_KEEP, SHAFT_PIECE_FLOORS, CROWD_COLS, CROWD_KINDS, CROWD_ROWS, CROWD_STRIP_H, TEXTURE_CLASS, TEXTURE_SIZE, VENUE_SHELL } from '../../src/render/art';
-import { FRAME } from '../../src/render/anim';
-import { MARK_H, MARK_W, PROP_KINDS, PROP_SIZE } from '../../src/render/figure';
+import { createArt, FLOOR_PX, GHOST_KEEP, SHAFT_PIECE_FLOORS, PERSON_ATLAS_CELLS, PERSON_ATLAS_COLS, PERSON_ATLAS_ROWS, PERSON_CELL_H, PERSON_CELL_W, CROWD_COLS, CROWD_KINDS, CROWD_ROWS, CROWD_STRIP_H, TEXTURE_CLASS, TEXTURE_SIZE, VENUE_SHELL } from '../../src/render/art';
+import { FRAME, PERSON_FRAME_COUNT, type PersonFrame } from '../../src/render/anim';
+import { LOOK_CODES, MARK_H, MARK_W, PROP_KINDS, PROP_SIZE } from '../../src/render/figure';
+import type { SimKind } from '../../src/sim/types';
 import { LINE_PX, SIM_H, SIM_W, TILE_PX } from '../../src/render/grid';
 import { INK, wallShadow } from '../../src/render/palette';
 import { VENUE_BAND } from '../../src/render/illustrated';
@@ -80,11 +81,12 @@ describe('texture classes', () => {
     }
   });
 
-  it('bakes a person at 16 by 48 logical px, 32 by 96 canvas px at resolution 1', () => {
+  it('cuts a person of 16 by 48 logical px from the one person atlas, 1020 by 980 canvas px at resolution 1', () => {
     const { art, canvases } = harness(1);
     const t = art.sim('resident', 'pink', FRAME.stand, 3);
     expect([t.width, t.height]).toEqual([TEXTURE_SIZE.sim().width, TEXTURE_SIZE.sim().height]);
-    expect(canvases[0]).toEqual({ width: 32, height: 96 });
+    expect(canvases).toEqual([{ width: PERSON_ATLAS_COLS * PERSON_CELL_W * 2, height: PERSON_ATLAS_ROWS * PERSON_CELL_H * 2 }]);
+    expect(canvases[0]).toEqual({ width: 1020, height: 980 });
   });
 
   it('crops a venue texture to the rows it draws', () => {
@@ -110,27 +112,46 @@ describe('texture budget', () => {
   it('counts every baked texture and its bytes at its own resolution', () => {
     const { art } = harness(1);
     art.room('office', 9, 1, VENUE_SHELL, 'day'); // 144 x 72 x 4
-    art.sim('worker', 'calm', FRAME.stand, 0); // 32 x 96 x 4
+    art.sim('worker', 'calm', FRAME.stand, 0); // the person atlas, 1020 x 980 x 4
+    art.sim('guest', 'red', FRAME.sit, 17); // a cell of the same atlas: nothing more is baked
     const stats = art.stats!();
+    const atlas = 1020 * 980 * 4;
     expect(stats.structural).toEqual({ textures: 1, bytes: 144 * 72 * 4 });
-    expect(stats.illustrated).toEqual({ textures: 1, bytes: 32 * 96 * 4 });
-    expect(stats.bytes).toBe(144 * 72 * 4 + 32 * 96 * 4);
-    expect(stats.byFamily).toEqual({ room: 144 * 72 * 4, person: 32 * 96 * 4 });
+    expect(stats.illustrated).toEqual({ textures: 1, bytes: atlas });
+    expect(stats.bytes).toBe(144 * 72 * 4 + atlas);
+    expect(stats.byFamily).toEqual({ room: 144 * 72 * 4, person: atlas });
   });
 
-  it('frees person textures nobody shows once they have gone unasked for, and keeps the live ones', () => {
-    const { art } = harness(1);
-    const shown = art.sim('worker', 'calm', FRAME.stand, 0);
-    const stale = art.sim('worker', 'calm', FRAME.stride, 0);
-    expect(art.sweep!(new Set([shown]), 60_000)).toBe(0); // both asked for just now
-    expect(art.sweep!(new Set([shown]), 0)).toBe(1);
-    expect(stale.destroyed).toBe(true);
-    expect(shown.destroyed).toBe(false);
-    expect(art.stats!().illustrated).toEqual({ textures: 1, bytes: 32 * 96 * 4 });
-    // Asked for again, it is baked afresh.
-    const again = art.sim('worker', 'calm', FRAME.stride, 0);
-    expect(again).not.toBe(stale);
-    expect(again.destroyed).toBe(false);
+  // Package P3 F2: one texture per person meant hundreds of live textures in a big crowd, painted
+  // on first sight and freed after 4 s idle, so the people never batched. Now: one atlas, kept.
+  it('draws every kind, look and frame from one person atlas of a fixed cell count, baked once and kept', () => {
+    const { art, canvases } = harness(1);
+    const kinds: SimKind[] = ['worker', 'resident', 'guest', 'shopper', 'diner', 'staff', 'visitor', 'vip', 'guard', 'collector', 'thief'];
+    const sources = new Set<unknown>();
+    const cells = new Set<string>();
+    for (const kind of kinds) {
+      for (let code = 0; code < LOOK_CODES; code++) {
+        for (let f = 0; f < PERSON_FRAME_COUNT; f++) {
+          const t = art.sim(kind, 'calm', f as PersonFrame, code);
+          sources.add(t.source);
+          cells.add(`${t.frame.x},${t.frame.y}`);
+          expect([t.width, t.height]).toEqual([16, 48]);
+        }
+      }
+    }
+    expect(sources.size).toBe(1);
+    expect(cells.size).toBe(PERSON_ATLAS_CELLS);
+    expect(PERSON_ATLAS_CELLS).toBe(300);
+    expect(canvases).toHaveLength(1); // painted once, at the first ask
+    expect(art.stats!().illustrated.textures).toBe(1);
+  });
+
+  it('keeps the person atlas inside the atlas budget at a device pixel ratio of 2', () => {
+    const { art, canvases } = harness(2);
+    art.sim('worker', 'calm', FRAME.stand, 0);
+    expect(canvases[0]!.width).toBeLessThanOrEqual(ATLAS_BUDGET_PX);
+    expect(canvases[0]!.height).toBeLessThanOrEqual(ATLAS_BUDGET_PX);
+    expect(canvases[0]).toEqual({ width: 2040, height: 1960 });
   });
 });
 

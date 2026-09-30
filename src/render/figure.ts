@@ -109,10 +109,11 @@ export function lookCode(body: number, lookKey: number): number {
 
 /**
  * A person's look code: their build and their identity look key (src/sim/identity.ts), both pure
- * functions of the seed and the id, so the sprite and the panel portrait always agree.
+ * functions of the seed and the id, brought into the person atlas's looks for their wardrobe
+ * (atlasLookCode), so the sprite and the panel portrait always agree.
  */
 export function personLookCode(seed: number, simId: number, kind: SimKind): number {
-  return lookCode(bodyOf(seed, simId), personIdentity(seed, simId, kind).lookKey);
+  return atlasLookCode(kind, lookCode(bodyOf(seed, simId), personIdentity(seed, simId, kind).lookKey));
 }
 
 export function decodeLook(code: number): { body: number; look: number } {
@@ -216,6 +217,61 @@ export function wardrobeOf(kind: SimKind): Wardrobe {
 }
 /** One kind that wears each wardrobe, for drawing the wardrobe on its own (the crowd atlas). */
 export const WARDROBE_KIND: Record<Wardrobe, SimKind> = { casual: 'visitor', worker: 'worker', staff: 'staff', vip: 'vip', guard: 'guard', collector: 'collector' };
+
+// ---------------------------------------------------------------- the person atlas
+
+/**
+ * Package P3: every person draws from one baked atlas (art.ts sim), so the whole crowd batches
+ * under one texture and nothing is painted when someone new walks into view. It holds a fixed
+ * set of looks per wardrobe. Worker and casual, the crowds, keep all eight look keys, each in two
+ * builds; staff keep the eight in one build; the three rare wardrobes keep a few. A person's
+ * look is brought into their wardrobe's set by atlasLookCode, a pure function of the look code,
+ * so a person keeps one look all their life.
+ */
+export const ATLAS_LOOKS: Readonly<Record<Wardrobe, number>> = { casual: 16, worker: 16, staff: 8, vip: 4, guard: 3, collector: 3 };
+
+/** The look codes a wardrobe keeps, variant order. */
+function atlasCodesOf(n: number): number[] {
+  const codes: number[] = [];
+  for (let i = 0; i < n; i++) {
+    if (n >= LOOK_KEYS) {
+      // Every look key, in builds k, k + 2, ... (mod 5): all five builds turn up across the keys.
+      const k = i % LOOK_KEYS;
+      codes.push(lookCode((k + 2 * Math.floor(i / LOOK_KEYS)) % BODY_COUNT, k));
+    } else {
+      codes.push(lookCode(i % BODY_COUNT, Math.floor((i * LOOK_KEYS) / n)));
+    }
+  }
+  return codes;
+}
+
+/** Each wardrobe's kept look codes, variant order (the atlas lays them out in this order). */
+export const ATLAS_CODES: Readonly<Record<Wardrobe, readonly number[]>> = Object.fromEntries(
+  WARDROBES.map((w) => [w, atlasCodesOf(ATLAS_LOOKS[w])]),
+) as unknown as Record<Wardrobe, readonly number[]>;
+
+/**
+ * Any look code brought into the atlas set for this kind's wardrobe. Where the set keeps the
+ * code's look key (worker, casual, staff), the look key stays and only the build may change: to
+ * the person's own build when the set has it for that key, else one of the set's by the build.
+ * The rare wardrobes take the kept look nearest below the look key.
+ */
+export function atlasLookCode(kind: SimKind, code: number): number {
+  const { body, look } = decodeLook(code);
+  const codes = ATLAS_CODES[wardrobeOf(kind)];
+  const n = codes.length;
+  if (n >= LOOK_KEYS) {
+    const builds = n / LOOK_KEYS;
+    for (let j = 0; j < builds; j++) if (decodeLook(codes[look + j * LOOK_KEYS] as number).body === body) return lookCode(body, look);
+    return codes[look + (body % builds) * LOOK_KEYS] as number;
+  }
+  return codes[Math.floor((look * n) / LOOK_KEYS)] as number;
+}
+
+/** Where a kept look code sits among its wardrobe's variants, or -1 for a code the set does not keep. */
+export function atlasVariantOf(kind: SimKind, code: number): number {
+  return ATLAS_CODES[wardrobeOf(kind)].indexOf(code);
+}
 
 const SHOE = '#2a2a2e';
 const DEG = Math.PI / 180;

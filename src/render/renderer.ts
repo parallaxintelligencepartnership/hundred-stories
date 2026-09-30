@@ -520,9 +520,6 @@ const ACTIVITY: Partial<Record<RoomKind, Pose>> = {
 
 /** The venue clock: closed-hours state is looked at again every this many game minutes. */
 const VENUE_CLOCK_MINUTES = 10;
-/** Person textures nobody shows and nobody has asked for in PERSON_IDLE_MS are freed this often. */
-const SWEEP_EVERY_MS = 2000;
-const PERSON_IDLE_MS = 4000;
 /** Far zoom blocks are redrawn this often, in real ms, so their occupancy fill stays current. */
 const BLOCKS_REFRESH_MS = 400;
 
@@ -717,7 +714,6 @@ function guardArt(primary: Art, backup: Art): Art {
     guarded.crowd = () => (broken ? null : crowd());
   }
   if (p.stats) guarded.stats = p.stats;
-  if (p.sweep) guarded.sweep = p.sweep;
   if (p.dropGhosts) guarded.dropGhosts = p.dropGhosts;
   guarded.extrasOn = () => !broken && !extrasBroken;
   return guarded;
@@ -1177,6 +1173,9 @@ export async function createRenderer(
   }
 
   bakeRoomStates(art, world);
+  // The person atlas (art.ts sim) is baked here, once, with the rooms: every person drawn from
+  // then on is a cell of it, so nobody is painted on first sight during play.
+  art.sim('worker', 'calm', FRAME.stand, 0);
 
   // The curb scene on the street outside the ground lobby, behind the tower.
   const curb = createCurb(layers.ground, () => art);
@@ -1202,7 +1201,6 @@ export async function createRenderer(
     cableLayer.alpha = districtsOn || plan.facade ? DISTRICTS_SHAFT_ALPHA : 1;
   }
   let venueClock = -1;
-  let sweepAge = 0;
 
   /** A person's look code: build and identity look key, cached per id (a pure function of both). */
   const lookCodes = new Map<Id, number>();
@@ -2883,16 +2881,6 @@ export async function createRenderer(
       reducedMotion,
     });
     applyTier(zoomTier(camera.zoom));
-    sweepAge += dt;
-    if (sweepAge >= SWEEP_EVERY_MS && art.sweep) {
-      sweepAge = 0;
-      const live = new Set<Texture>();
-      for (const entry of simSprites.values()) live.add(entry.node.texture);
-      for (const v of venueSprites.values()) if (v.staff) live.add(v.staff.texture);
-      live.add(soloSprite.texture);
-      curb.textures(live);
-      art.sweep(live, PERSON_IDLE_MS);
-    }
     if (plan.blocks) {
       blocksAge += dt;
       if (blocksDirty || blocksAge >= BLOCKS_REFRESH_MS) rebuildBlocks(lastWorld);
