@@ -156,6 +156,39 @@ describe('a Reload whose save fails keeps the tower and shows the leave card', (
     ui.destroy();
   });
 
+  it('Try again, then Back before the retry lands: no reload, and once it lands the clock runs and a build is accepted', async () => {
+    const ls = fakeLocalStorage();
+    const idb = fakeIdb();
+    vi.stubGlobal('localStorage', ls.store);
+    vi.stubGlobal('indexedDB', idb.factory);
+    const { game, second } = gameOn();
+    game.apply({ kind: 'build', room: 'lobby', floor: 1, x: 150 });
+    idb.ctl.failPuts = true;
+    ls.ctl.refuse = true;
+    const { order, root, ui, tapReload } = mount(game);
+    tapReload();
+    await settle();
+    expect(leaveBody(root)?.dataset['leave']).toBe('failed');
+    idb.ctl.failPuts = false;
+    ls.ctl.refuse = false;
+    const open = idb.hold(); // the store works again, slowly
+    click(answer(root, 'retry'));
+    await settle();
+    click(root.descendants().find((n) => hasClass(n, 'hs-pause-back'))!); // Back while writing
+    await settle();
+    open();
+    await settle();
+    click(root.descendants().find((n) => n.dataset['entry'] === 'resume')!);
+    expect(order).toEqual([]);
+    expect(game.getSpeed()).toBe(1);
+    const minute = game.world.time.minute;
+    second();
+    second();
+    expect(game.world.time.minute).not.toBe(minute);
+    expect(game.apply({ kind: 'build', room: 'lobby', floor: 1, x: 140 }).ok).toBe(true);
+    ui.destroy();
+  });
+
   it('Keep playing: the card and the menu go, the tower runs again, and the update toast is back', async () => {
     const ls = fakeLocalStorage();
     vi.stubGlobal('localStorage', ls.store);

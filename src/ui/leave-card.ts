@@ -198,7 +198,12 @@ export function showLeaveCard(options: LeaveCardOptions): void {
       next = { ok: false, reason: '' };
     }
     busy = false;
-    if (settled) return;
+    if (settled) {
+      // The card closed (Back, Escape, scrim, menu close) while this retry wrote: an ok leave keeps
+      // its hold, so give the tower back. A failed leave released its own.
+      if (next.ok) options.stay();
+      return;
+    }
     if (kindOf(next) === null) go();
     else show(screenFor(next));
   }
