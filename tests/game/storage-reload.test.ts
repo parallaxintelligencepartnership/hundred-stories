@@ -120,7 +120,7 @@ describe('S1: IndexedDB stops answering after a good boot read', () => {
     m = await reload();
     expect(await m.createStorage({ indexedDB: factory, localStorage: ls }, 'daily').readSave()).toBe('d5');
     expect(await m.createStorage({ indexedDB: factory, localStorage: ls }).readSave()).toBe('mine 1');
-    ctl.mode = 'openFails';
+    ctl.mode = 'txThrows'; // lost mid-session, on the page's one connection (R3)
     await m.createStorage({ indexedDB: factory, localStorage: ls }).writeSave('mine 2');
     // My tower counts on from its own 1, not from Today's 5
     expect(ls.getItem('hundred-stories:autosave:seq')).toBe('2');

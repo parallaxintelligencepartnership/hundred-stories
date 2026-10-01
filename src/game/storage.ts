@@ -11,6 +11,11 @@
 // Tauri first (window.__TAURI__ or the Tauri internals global), then
 // Capacitor.isNativePlatform(), then the browser.
 //
+// Only the browser slot guards against another window: two tabs, or the installed app beside a
+// browser tab, share its stores, and a page holding an older copy must not save over a newer one
+// (SaveConflictError). The phone and desktop shells are one process each; their slots take the
+// same write options and ignore them.
+//
 // The stores arrive as dependencies rather than as bare globals, so the fallback chain can be
 // driven from a test with fakes. The module still exports the plain writeSave and readSave the
 // game calls; those run on the default instance, which reads the real stores off globalThis.
@@ -36,13 +41,27 @@ export const SLOT_FILES: Record<SlotName, string> = { mine: 'autosave.json', dai
 
 const REFUSED_REASON = 'This browser would not let the game save.';
 
+/** How long the browser slot waits for IndexedDB to open before it gives up on that call. */
+export const OPEN_DEADLINE_MS = 5000;
+
 export interface StorageDeps {
   indexedDB?: IDBFactory;
   localStorage?: Storage;
+  /** The open deadline in ms (OPEN_DEADLINE_MS when not given), so a test need not wait 5 s. */
+  openDeadlineMs?: number;
+}
+
+export interface WriteOptions {
+  /**
+   * An intentional replacement: New tower, Save anyway over a held save. The write skips the
+   * check for a newer save from another window and replaces whatever the slot holds.
+   */
+  force?: boolean;
 }
 
 export interface SaveStorage {
-  writeSave(text: string): Promise<void>;
+  /** Rejects with a SaveConflictError when another window saved the slot after this page read it. */
+  writeSave(text: string, options?: WriteOptions): Promise<void>;
   /** The slot's text, null when nothing is stored. Throws a SaveReadError when the store could not be read. */
   readSave(): Promise<string | null>;
 }
@@ -56,6 +75,28 @@ export class SaveReadError extends Error {
   constructor(cause: unknown) {
     super(`The save could not be read: ${describeError(cause)}`, { cause });
     this.name = 'SaveReadError';
+  }
+}
+
+/**
+ * A write refused because another window (another tab, or the installed app beside a browser
+ * tab) saved this slot after this page read it: writing would throw that window's tower away.
+ * Never retried and never settled by taking the higher number; the game says so to the player
+ * (src/game/game.ts knows it by its name).
+ */
+export class SaveConflictError extends Error {
+  readonly conflict = true;
+  constructor() {
+    super('Another window saved this tower after you opened it.');
+    this.name = 'SaveConflictError';
+  }
+}
+
+/** IndexedDB did not open within the deadline: a read fails, a write is refused. */
+class OpenDeadlineError extends Error {
+  constructor(ms: number) {
+    super(`IndexedDB did not open within ${ms} ms`);
+    this.name = 'OpenDeadlineError';
   }
 }
 
@@ -79,13 +120,93 @@ function isMissingFile(e: unknown): boolean {
   return /does not exist|no such file or directory|cannot find the (file|path) specified|\(os error 2\)|\bENOENT\b/i.test(describeError(e));
 }
 
-function openDb(factory: IDBFactory): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const req = factory.open(DB, 1);
+// One IndexedDB connection per page (per factory), opened on first use and kept. It closes itself
+// when another page asks for a newer database version (onversionchange), and the cache lets go of
+// it then and when the browser closes it (onclose), so the next call opens a fresh one. An open
+// that fails or misses the deadline is not kept either: the next call tries again.
+const connections = new WeakMap<IDBFactory, Promise<IDBDatabase>>();
+
+function forgetConnection(factory: IDBFactory, which: Promise<IDBDatabase>): void {
+  if (connections.get(factory) === which) connections.delete(factory);
+}
+
+function closeQuietly(db: IDBDatabase): void {
+  try {
+    db.close();
+  } catch {
+    // already closed, or a connection the browser lost
+  }
+}
+
+function openDb(factory: IDBFactory, deadlineMs: number): Promise<IDBDatabase> {
+  const cached = connections.get(factory);
+  if (cached) return cached;
+  const opening: Promise<IDBDatabase> = new Promise((resolve, reject) => {
+    let late = false;
+    // A WebKit open can hang with no event at all; past the deadline this call fails instead of
+    // waiting for ever, and an open that succeeds after that is closed at once.
+    const timer = setTimeout(() => {
+      late = true;
+      reject(new OpenDeadlineError(deadlineMs));
+    }, deadlineMs);
+    let req: IDBOpenDBRequest;
+    try {
+      req = factory.open(DB, 1);
+    } catch (e) {
+      clearTimeout(timer);
+      reject(e);
+      return;
+    }
     req.onupgradeneeded = () => req.result.createObjectStore(STORE);
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      clearTimeout(timer);
+      const db = req.result;
+      if (late) {
+        closeQuietly(db);
+        return;
+      }
+      db.onversionchange = () => {
+        forgetConnection(factory, opening);
+        closeQuietly(db);
+      };
+      db.onclose = () => forgetConnection(factory, opening);
+      resolve(db);
+    };
+    req.onerror = () => {
+      clearTimeout(timer);
+      reject(req.error);
+    };
   });
+  connections.set(factory, opening);
+  opening.catch(() => forgetConnection(factory, opening));
+  return opening;
+}
+
+/**
+ * A transaction on the page's connection. A kept connection the browser has since lost throws
+ * here (WebKit's "Connection to Indexed Database server lost"): it is let go and one fresh
+ * connection is tried before the call fails, as every call opened its own connection before.
+ */
+async function beginTransaction(factory: IDBFactory, mode: IDBTransactionMode, deadlineMs: number): Promise<IDBTransaction> {
+  const reused = connections.has(factory);
+  let pending = openDb(factory, deadlineMs);
+  let db = await pending;
+  try {
+    return db.transaction(STORE, mode);
+  } catch (e) {
+    forgetConnection(factory, pending);
+    closeQuietly(db);
+    if (!reused) throw e;
+  }
+  pending = openDb(factory, deadlineMs);
+  db = await pending;
+  try {
+    return db.transaction(STORE, mode);
+  } catch (e) {
+    forgetConnection(factory, pending);
+    closeQuietly(db);
+    throw e;
+  }
 }
 
 /** Beside each browser copy, under its key plus this: when it was written (ms since 1970). */
@@ -127,6 +248,38 @@ const lastSeq = new Map<string, number>();
 // write cannot learn that number, so it takes one no earlier copy can beat (see nextSeq).
 const learnedSeq = new Set<string>();
 
+// The stale-window guard (compare and swap). Per slot key: the number of the copy this page last
+// read (set by readSave from the copy it returned, advanced after each good write), and every
+// number this page wrote. A write finds the slot's number in the store; one newer than this
+// page's base that this page did not write came from another window, and the write is refused
+// with a SaveConflictError. A slot this page never read (no base) is written without the check:
+// this page holds no tower from it that could be stale (an opened file into My tower after a
+// link boot, or a slot whose read failed, which the game itself never writes but New tower).
+// A copy with no number (from before sequence numbers) counts as 0, so old data never conflicts.
+const baseSeq = new Map<string, number>();
+const ownSeqs = new Map<string, Set<number>>();
+
+function ownSet(key: string): Set<number> {
+  let set = ownSeqs.get(key);
+  if (!set) {
+    set = new Set<number>();
+    ownSeqs.set(key, set);
+  }
+  return set;
+}
+
+/** True when the store's number shows another window saved the slot after this page read it. */
+function overtaken(key: string, stored: number): boolean {
+  const base = baseSeq.get(key);
+  if (base === undefined) return false;
+  return stored > base && !ownSet(key).has(stored);
+}
+
+/** A good write: the page's base moves up to the number it just wrote. */
+function wroteSeq(key: string, seq: number): void {
+  baseSeq.set(key, Math.max(seq, baseSeq.get(key) ?? 0));
+}
+
 function stampOf(raw: unknown): number {
   const n = Number(raw ?? 0);
   return Number.isFinite(n) ? n : 0;
@@ -154,19 +307,7 @@ export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): 
   // what IndexedDB holds, and a clock-based number never goes back when the clock does.
   const localHighKey = `${localKey}${SEQ_SUFFIX}-high`;
 
-  /** The slot's number in IndexedDB, or null when IndexedDB would not answer. */
-  async function readIndexedDbSeq(factory: IDBFactory): Promise<number | null> {
-    try {
-      const db = await openDb(factory);
-      return await new Promise<number>((resolve, reject) => {
-        const req = db.transaction(STORE, 'readonly').objectStore(STORE).get(idbSeqKey);
-        req.onsuccess = () => resolve(stampOf(req.result));
-        req.onerror = () => reject(req.error);
-      });
-    } catch {
-      return null;
-    }
-  }
+  const deadlineMs = deps.openDeadlineMs ?? OPEN_DEADLINE_MS;
 
   /** The number of the localStorage copy itself (0 with no copy or no number). */
   function readCopySeq(): number {
@@ -193,24 +334,25 @@ export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): 
     }
   }
 
-  async function nextSeq(): Promise<number> {
-    let found = 0;
-    if (deps.indexedDB) {
-      found = readLocalSeq();
-      const fromDb = await readIndexedDbSeq(deps.indexedDB);
-      if (fromDb !== null) {
-        learnedSeq.add(KEY);
-        found = Math.max(found, fromDb);
-      } else if (!learnedSeq.has(KEY)) {
-        // IndexedDB holds a number this page never saw. A save from a build before the device
-        // record counts in ones from 1, so the clock in ms is above it; the device record keeps
-        // the number from going back when the clock is set back.
-        found = Math.max(found, Date.now());
-      }
+  /**
+   * The next number, one more than the highest in either store or in memory. `fromDb` is the
+   * IndexedDB number when this write could read it, else null. Synchronous from reading lastSeq to
+   * setting it, so two writes at once still get two numbers. The number is this page's from here.
+   */
+  function nextSeq(fromDb: number | null): number {
+    let found = readLocalSeq();
+    if (fromDb !== null) {
+      learnedSeq.add(KEY);
+      found = Math.max(found, fromDb);
+    } else if (deps.indexedDB && !learnedSeq.has(KEY)) {
+      // IndexedDB holds a number this page never saw. A save from a build before the device
+      // record counts in ones from 1, so the clock in ms is above it; the device record keeps
+      // the number from going back when the clock is set back.
+      found = Math.max(found, Date.now());
     }
-    // No await between reading lastSeq and setting it, so two writes at once still get two numbers.
     const seq = Math.max(found, lastSeq.get(KEY) ?? 0) + 1;
     lastSeq.set(KEY, seq);
+    ownSet(KEY).add(seq);
     return seq;
   }
 
@@ -251,53 +393,96 @@ export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): 
     }
   }
 
-  async function writeSave(text: string): Promise<void> {
+  /**
+   * Writes text, stamp and number in one readwrite transaction that first reads the slot's number
+   * there. IndexedDB runs readwrite transactions on one store one after another, across tabs too,
+   * so the check and the write cannot be split by another window's write. Resolves with the number
+   * written. `seen` gets the stored number as soon as it is read, for a fallback after a failed put.
+   */
+  async function writeIndexedDb(factory: IDBFactory, text: string, stamp: number, force: boolean, seen: { seq: number | null }): Promise<number> {
+    const tx = await beginTransaction(factory, 'readwrite', deadlineMs);
+    return await new Promise<number>((resolve, reject) => {
+      const store = tx.objectStore(STORE);
+      let seq = 0;
+      let conflict = false;
+      const req = store.get(idbSeqKey);
+      req.onsuccess = () => {
+        const stored = stampOf(req.result);
+        seen.seq = stored;
+        // A fallback copy newer than IndexedDB (another window could not reach IndexedDB) is the
+        // slot's newest save too, and this write would hide it.
+        if (!force && (overtaken(KEY, stored) || overtaken(KEY, readCopySeq()))) {
+          conflict = true;
+          reject(new SaveConflictError());
+          try {
+            tx.abort();
+          } catch {
+            // already finished: nothing was put
+          }
+          return;
+        }
+        seq = nextSeq(stored);
+        store.put(text, KEY);
+        store.put(stamp, idbStampKey);
+        store.put(seq, idbSeqKey);
+      };
+      req.onerror = () => reject(req.error ?? new Error('read failed'));
+      tx.oncomplete = () => resolve(seq);
+      tx.onerror = () => reject(tx.error ?? new Error('write failed'));
+      // A quota failure at commit can abort with no error event. Without this the write
+      // never settles, and every later save and slot switch waits on it for the session.
+      tx.onabort = () => reject(conflict ? new SaveConflictError() : (tx.error ?? new Error('write aborted')));
+    });
+  }
+
+  async function writeSave(text: string, options: WriteOptions = {}): Promise<void> {
+    const force = options.force === true;
     const stamp = nextStamp();
-    const seq = await nextSeq();
+    const seen: { seq: number | null } = { seq: null };
     if (deps.indexedDB) {
       try {
-        const db = await openDb(deps.indexedDB);
-        await new Promise<void>((resolve, reject) => {
-          const tx = db.transaction(STORE, 'readwrite');
-          const store = tx.objectStore(STORE);
-          store.put(text, KEY);
-          store.put(stamp, idbStampKey);
-          store.put(seq, idbSeqKey);
-          tx.oncomplete = () => resolve();
-          tx.onerror = () => reject(tx.error ?? new Error('write failed'));
-          // A quota failure at commit can abort with no error event. Without this the write
-          // never settles, and every later save and slot switch waits on it for the session.
-          tx.onabort = () => reject(tx.error ?? new Error('write aborted'));
-        });
+        const seq = await writeIndexedDb(deps.indexedDB, text, stamp, force, seen);
+        wroteSeq(KEY, seq);
         markPresent();
         recordHigh(seq);
         // A save that fell back while this one was committing holds a higher number: it stays.
         if (readCopySeq() <= seq) dropLocalCopy();
         return;
-      } catch {
+      } catch (e) {
+        if (e instanceof SaveConflictError) throw e;
+        // A stalled open is a failed save, not a reason to put a whole tower in localStorage
+        // behind the player's back: the game's save-failure path runs.
+        if (e instanceof OpenDeadlineError) throw new Error(REFUSED_REASON, { cause: e });
         // fall through to localStorage
       }
     }
+    // The same check before the fallback copy, against the copy's number and the device record
+    // (which every good write of this slot raises, in either store, from any window). Unlike the
+    // IndexedDB check this is not atomic across tabs: two windows writing in the same moment can
+    // both pass. It closes the ordinary case, and catches another window's IndexedDB writes when
+    // this window cannot reach IndexedDB.
+    if (!force && overtaken(KEY, readLocalSeq())) throw new SaveConflictError();
+    const seq = nextSeq(seen.seq);
     try {
       if (!deps.localStorage) throw new Error('no localStorage');
       deps.localStorage.setItem(localKey, text);
-      if (deps.indexedDB) {
-        deps.localStorage.setItem(localStampKey, String(stamp));
-        deps.localStorage.setItem(localSeqKey, String(seq));
-        recordHigh(seq);
-      }
+      // Numbered with IndexedDB or without: a browser with no IndexedDB at all takes part in the
+      // check through these keys too.
+      deps.localStorage.setItem(localStampKey, String(stamp));
+      deps.localStorage.setItem(localSeqKey, String(seq));
+      recordHigh(seq);
       markPresent();
     } catch {
       // a full quota, a private window, or no store at all: all one message to the player
       throw new Error(REFUSED_REASON);
     }
+    wroteSeq(KEY, seq);
   }
 
   async function readIndexedDb(factory: IDBFactory): Promise<StampedText | null> {
     try {
-      const db = await openDb(factory);
+      const tx = await beginTransaction(factory, 'readonly', deadlineMs);
       return await new Promise<StampedText | null>((resolve, reject) => {
-        const tx = db.transaction(STORE, 'readonly');
         const store = tx.objectStore(STORE);
         const req = store.get(KEY);
         const stampReq = store.get(idbStampKey);
@@ -347,12 +532,17 @@ export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): 
         // localStorage. A returning player's slot is unknown, not empty: a read failure, so no
         // fresh tower is saved over it. Only My tower's writes set the marker; a link to Today's
         // or a friend's tower on a first visit reads the same way, so no notice shows there either.
+        // An open that stalled past the deadline is never "nothing saved", marker or not: the
+        // slot is unknown, so the game's unread protection holds it.
         const local = readLocal();
         if (local) {
           sawSeq(local.seq);
-          return local.text;
+          return took(local);
         }
-        if (!markedPresent()) return null;
+        const stalled = e instanceof SaveReadError && e.cause instanceof OpenDeadlineError;
+        // Read as empty only on a first visit, and with no base: the guard then checks nothing,
+        // so a slot this read never saw is written as it always was.
+        if (!stalled && !markedPresent()) return null;
         throw e;
       }
     }
@@ -363,15 +553,21 @@ export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): 
       // Older than IndexedDB (left by a build before copies were dropped): it would only load on
       // a later boot where IndexedDB will not open, as a stale tower.
       dropLocalCopy();
-      return fromDb.text;
+      return took(fromDb);
     }
     if (fromDb && fromLocal) {
       // A copy with no number was written by a build before sequence numbers, so any numbered
       // copy is newer. The stamp decides only between equal numbers (two copies without one).
-      if (fromLocal.seq !== fromDb.seq) return fromLocal.seq > fromDb.seq ? fromLocal.text : fromDb.text;
-      return fromLocal.stamp > fromDb.stamp ? fromLocal.text : fromDb.text;
+      if (fromLocal.seq !== fromDb.seq) return took(fromLocal.seq > fromDb.seq ? fromLocal : fromDb);
+      return took(fromLocal.stamp > fromDb.stamp ? fromLocal : fromDb);
     }
-    return fromDb?.text ?? fromLocal?.text ?? null;
+    return took(fromDb ?? fromLocal);
+  }
+
+  /** The copy readSave returns, or none: its number is this page's base for the guard. */
+  function took(copy: StampedText | null): string | null {
+    baseSeq.set(KEY, copy?.seq ?? 0);
+    return copy?.text ?? null;
   }
 
   return { writeSave, readSave };
@@ -469,7 +665,7 @@ export function selectStorage(deps: SelectDeps = {}, slot: SlotName = 'mine'): S
   if (platform === 'tauri') return createTauriStorage((deps.loadTauriFs ?? loadTauriFs)(), slot);
   if (platform === 'capacitor') return createFileStorage((deps.loadFs ?? loadCapacitorFs)(), slot);
   return {
-    writeSave: (text: string) => createStorage(globalDeps(), slot).writeSave(text),
+    writeSave: (text: string, options?: WriteOptions) => createStorage(globalDeps(), slot).writeSave(text, options),
     readSave: () => createStorage(globalDeps(), slot).readSave(),
   };
 }
@@ -733,15 +929,15 @@ function active(slot: SlotName): SaveStorage {
 
 /** My tower, the original slot. */
 export const storage: SaveStorage = {
-  writeSave: (text: string) => active('mine').writeSave(text),
+  writeSave: (text: string, options?: WriteOptions) => active('mine').writeSave(text, options),
   readSave: () => active('mine').readSave(),
 };
 
-export const writeSave = (text: string): Promise<void> => storage.writeSave(text);
+export const writeSave = (text: string, options?: WriteOptions): Promise<void> => storage.writeSave(text, options);
 export const readSave = (): Promise<string | null> => storage.readSave();
 
 /** Any slot by name. The game writes My tower through writeSave and the other two through this. */
-export const writeSlot = (slot: SlotName, text: string): Promise<void> => active(slot).writeSave(text);
+export const writeSlot = (slot: SlotName, text: string, options?: WriteOptions): Promise<void> => active(slot).writeSave(text, options);
 export const readSlot = (slot: SlotName): Promise<string | null> => active(slot).readSave();
 
 const UNREADABLE_KEY = 'hs.save.unreadable';

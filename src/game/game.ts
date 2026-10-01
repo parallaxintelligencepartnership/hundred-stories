@@ -636,6 +636,13 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     notify();
   }
 
+  /** Save now. `force` (Save anyway over a held save, New tower) replaces whatever the slot holds. */
+  function playerSave(force: boolean): Promise<SaveResult> {
+    if (slot === 'mine') mineHeld = false;
+    cancelScheduledSave();
+    return saveWorld('player', slot, world, force);
+  }
+
   /**
    * Write a tower to a slot. 'player' is Save now: it logs, and its failure goes back to the
    * button. 'quiet' and 'background' are the game's own saves: a failure tells the player once
@@ -644,13 +651,13 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
    * not replaced) is never written by any save but the player's. A write another window has
    * overtaken (storage's SaveConflictError, by name) comes back with `conflict`.
    */
-  async function saveWorld(kind: 'player' | 'quiet' | 'background' | 'leave', name: SlotName = slot, w: World = world): Promise<SaveResult> {
+  async function saveWorld(kind: 'player' | 'quiet' | 'background' | 'leave', name: SlotName = slot, w: World = world, force = false): Promise<SaveResult> {
     if (kind !== 'player' && name === 'mine' && mineHeld) return { ok: true };
     if (unread.has(name)) return kind === 'player' ? { ok: false, reason: READ_FAILED_NOTICE } : { ok: true };
     const at = edits;
     try {
       markCheckpoint(w); // the hash here lets a replay find where it drifted
-      await writeTo(name, serialize(w));
+      await writeTo(name, serialize(w), force);
       if (w === world && edits === at) dirty = false;
       if (kind === 'player') {
         logEvent(world, 'Game saved.', 'info');
@@ -670,9 +677,10 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
    * later never lands under an older one (an autosave still writing, then the leave's). The text
    * is taken by the caller before this is called.
    */
-  function writeTo(name: SlotName, text: string): Promise<void> {
-    // My tower goes through the original writeSave; the other slots by name.
-    const write = (): Promise<void> => (name === 'mine' ? writeSave(text) : writeSlot(name, text));
+  function writeTo(name: SlotName, text: string, force = false): Promise<void> {
+    // My tower goes through the original writeSave; the other slots by name. `force`: a
+    // replacement on purpose (New tower, Save anyway), past storage's check for another window.
+    const write = (): Promise<void> => (name === 'mine' ? writeSave(text, { force }) : writeSlot(name, text, { force }));
     const before = writeQueues.get(name);
     const run = before ? before.then(write) : write();
     const tail = run.catch(() => {});
@@ -1337,9 +1345,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
       // choosing the new tower over the save that would not open. An idle autosave not yet
       // started is dropped: this save writes the same tower now, so the two never both write
       // (P1 review A-5). One already writing finishes on its own, as with saveNow.
-      if (slot === 'mine') mineHeld = false;
-      cancelScheduledSave();
-      return saveWorld('player');
+      return playerSave(slot === 'mine' && mineHeld);
     },
     async load() {
       const name = slot;
@@ -1600,7 +1606,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
       notify();
       // The autosave slot must not resurrect the old tower on the next reload: the save is
       // awaited, and a failure says so (the old tower is still the one stored).
-      return api.save().then((res): CommandResult => (res.ok ? res : { ok: false, reason: NEW_TOWER_NOT_SAVED }));
+      return playerSave(true).then((res): CommandResult => (res.ok ? res : { ok: false, reason: NEW_TOWER_NOT_SAVED }));
     },
     setReducedMotion(on) {
       reducedMotion = on;

@@ -10,7 +10,8 @@ const settle = async (n = 20): Promise<void> => {
   for (let i = 0; i < n; i++) await task();
 };
 
-// A minimal IndexedDB: every call settles in a later task; open() fails while failOpens > 0.
+// A minimal IndexedDB: every call settles in a later task; open() fails while failOpens > 0, and so
+// does a transaction on a connection already open.
 const idbData = new Map<string, unknown>();
 let failOpens = 0;
 const indexedDB = {
@@ -24,6 +25,9 @@ const indexedDB = {
     }
     req.result = {
       transaction() {
+        // The page keeps one connection (storage.ts R3): while the server is lost, a kept
+        // connection fails too, the way WebKit's lost connection does.
+        if (failOpens > 0) throw new DOMException('Connection to Indexed Database server lost. Refresh the page to try again', 'UnknownError');
         const tx: Record<string, unknown> & { oncomplete?: () => void } = { error: null };
         let pending = 0;
         tx.objectStore = () => ({

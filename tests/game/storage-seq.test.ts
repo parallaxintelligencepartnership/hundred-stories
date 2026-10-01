@@ -142,7 +142,8 @@ describe('F1: a slot this page never read', () => {
     await m.createStorage({ indexedDB: factory, localStorage: ls }).writeSave('mine 1');
     m = await reload();
     await m.createStorage({ indexedDB: factory, localStorage: ls }).writeSave('mine 2'); // learns 1 from IndexedDB
-    ctl.mode = 'openFails';
+    // Lost mid-session: the page keeps one connection (R3), so the loss shows on its transactions.
+    ctl.mode = 'txThrows';
     await m.createStorage({ indexedDB: factory, localStorage: ls }).writeSave('mine 3');
     expect(ls.getItem('hundred-stories:autosave:seq')).toBe('3');
   });
@@ -176,7 +177,7 @@ describe('F2: a slow IndexedDB write never drops a newer fallback copy', () => {
     const a = mine().writeSave('{"minute":2000}'); // A: a slow commit
     await new Promise((r) => setTimeout(r, 20)); // A has its number and its puts queued
     ctl.gate = null;
-    ctl.mode = 'openFails';
+    ctl.mode = 'txThrows'; // lost mid-session, on the page's one connection (R3)
     await mine().writeSave('{"minute":3000}'); // B: newer, falls back to localStorage
     release();
     await a;

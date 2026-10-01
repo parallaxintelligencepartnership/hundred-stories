@@ -88,7 +88,11 @@ describe('named save slots', () => {
     expect(await mine.readSave()).toBe('old tower');
     expect(await daily.readSave()).toBe('daily tower');
     expect(await friend.readSave()).toBe('friend tower');
-    expect([...ls.data.keys()].sort()).toEqual(['hundred-stories:autosave', 'hundred-stories:daily', 'hundred-stories:friend']);
+    // Each copy also carries its stamp and number (the stale-window check, storage.ts), under its own key.
+    const copies = [...ls.data.keys()].filter((k) => !/:(written|seq)/.test(k));
+    expect(copies.sort()).toEqual(['hundred-stories:autosave', 'hundred-stories:daily', 'hundred-stories:friend']);
+    expect(ls.data.has('hundred-stories:daily:seq')).toBe(true);
+    expect(ls.data.has('hundred-stories:autosave:seq')).toBe(false); // My tower was never written
   });
 
   it('phone: one file per slot in the app data directory', async () => {
