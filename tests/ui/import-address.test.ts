@@ -53,7 +53,7 @@ function mount(): { root: FakeElement } {
     getDaily: () => null,
     getDailyChoice: () => null,
     exportSave: () => '{}',
-    importSave() {
+    async importSave() {
       slot = 'mine';
       notify();
       return { ok: true };

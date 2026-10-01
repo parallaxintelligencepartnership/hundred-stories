@@ -457,11 +457,11 @@ describe('start and stop', () => {
 });
 
 describe('motion resets when the world is replaced', () => {
-  it('resets motion on import and on a new game, with the new world already in place', () => {
+  it('resets motion on import and on a new game, with the new world already in place', async () => {
     const { game, resets } = gameWithAFrameLoop(true);
     const text = game.exportSave();
 
-    expect(game.importSave(text)).toEqual({ ok: true });
+    expect(await game.importSave(text)).toEqual({ ok: true });
     expect(resets).toEqual([game.world]);
 
     game.newGame(5);
@@ -469,9 +469,9 @@ describe('motion resets when the world is replaced', () => {
     expect(resets[1]).toBe(game.world);
   });
 
-  it('keeps motion when an import is refused', () => {
+  it('keeps motion when an import is refused', async () => {
     const { game, resets } = gameWithAFrameLoop(true);
-    expect(game.importSave('not a save').ok).toBe(false);
+    expect((await game.importSave('not a save')).ok).toBe(false);
     expect(resets).toHaveLength(0);
   });
 });

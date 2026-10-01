@@ -215,7 +215,7 @@ describe('Open a saved file always opens My tower (probe-rd B)', () => {
 
     const { game } = gameOn(5);
     await game.openFriend(4242);
-    expect(game.importSave(file)).toEqual({ ok: true });
+    expect(await game.importSave(file)).toEqual({ ok: true });
     expect(game.getSlot()).toBe('mine');
     expect(game.world.seed).toBe(11);
     game.apply({ kind: 'build', room: 'lobby', floor: 1, x: 140 }); // the player builds on the opened file

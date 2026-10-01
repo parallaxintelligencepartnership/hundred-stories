@@ -112,7 +112,7 @@ function mkGame(opts: { speed?: number; slot?: string; held?: boolean; minute?: 
     save,
     saveHeld: () => state.held,
     load: async () => ({ ok: true }),
-    newGame: (n: number) => calls.push(`newGame:${n}`),
+    newGame: async (n: number) => (calls.push(`newGame:${n}`), { ok: true as const }),
     openDaily: async () => {
       calls.push('openDaily');
     },

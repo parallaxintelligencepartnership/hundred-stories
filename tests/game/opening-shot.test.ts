@@ -70,14 +70,14 @@ describe('the opening shot', () => {
     expect(freshCalls).toEqual([{ kind: 'reset' }]);
   });
 
-  it('swapWorld frames the tower it swaps in, never resetting it, and a new game still resets', () => {
+  it('swapWorld frames the tower it swaps in, never resetting it, and a new game still resets', async () => {
     const text = builtGame(true).exportSave();
     const calls: Call[] = [];
     const game = createGame(7, { now: () => 0, scheduleIdle: () => () => {} });
     game.attach(stubRenderer(calls), host);
     calls.length = 0;
 
-    expect(game.importSave(text)).toEqual({ ok: true });
+    expect(await game.importSave(text)).toEqual({ ok: true });
     expect(calls).toEqual([{ kind: 'frame', world: game.world }]);
 
     calls.length = 0;
@@ -85,13 +85,13 @@ describe('the opening shot', () => {
     expect(calls).toEqual([{ kind: 'reset' }]);
   });
 
-  it('a lobby-only tower (the guided start) swaps in on the reset view', () => {
+  it('a lobby-only tower (the guided start) swaps in on the reset view', async () => {
     const text = builtGame(false).exportSave();
     const calls: Call[] = [];
     const game = createGame(7, { now: () => 0, scheduleIdle: () => () => {} });
     game.attach(stubRenderer(calls), host);
     calls.length = 0;
-    expect(game.importSave(text)).toEqual({ ok: true });
+    expect(await game.importSave(text)).toEqual({ ok: true });
     expect(calls).toEqual([{ kind: 'reset' }]);
   });
 });

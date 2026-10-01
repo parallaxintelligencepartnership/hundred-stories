@@ -4890,3 +4890,11 @@ button.hs-news-toast {
   box-shadow: var(--shadow-1);
   animation: hs-watch-glass-in var(--watch-fade) var(--ease-standard);
 }
+
+/* The leave card (src/ui/leave-card.ts): a page in the pause card when leaving the tower did not
+   end in a save. One line, then its answers as a question's are drawn, 8 px apart. */
+.hs-leave {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}

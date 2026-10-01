@@ -30,7 +30,7 @@ describe('the build log in the game shell', () => {
     expect(log.entries).toEqual([{ t: 360, cmd: { kind: 'build', room: 'lobby', floor: 1, x: 150 } }]);
   });
 
-  it('exports a save that replays to the same hash, and keeps its log through an import', () => {
+  it('exports a save that replays to the same hash, and keeps its log through an import', async () => {
     const game = createGame(777);
     for (let x = 150; x <= 200; x++) game.apply({ kind: 'build', room: 'lobby', floor: 1, x });
     expect(game.apply({ kind: 'shaft.build', shaft: 'standard', x: 176, floorMin: 1, floorMax: 4 }).ok).toBe(true);
@@ -40,7 +40,7 @@ describe('the build log in the game shell', () => {
     expect(verifySave(text)).toMatchObject({ status: 'match', entries: 53, checkpoints: 1 });
 
     const other = createGame(1);
-    expect(other.importSave(text).ok).toBe(true);
+    expect((await other.importSave(text)).ok).toBe(true);
     expect(buildLogOf(other.world).entries.length).toBe(53);
     expect(other.apply({ kind: 'build', room: 'office', floor: 3, x: 158 }).ok).toBe(true);
     expect(verifySave(other.exportSave())).toMatchObject({ status: 'match', entries: 54 });

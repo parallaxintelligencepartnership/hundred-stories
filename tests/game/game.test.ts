@@ -34,15 +34,15 @@ describe('createGame in node', () => {
 });
 
 describe('export and import', () => {
-  it('exports then imports to exactly the same world', () => {
+  it('exports then imports to exactly the same world', async () => {
     const game = createGame(1);
     const before = hashWorld(game.world);
     const text = game.exportSave();
-    expect(game.importSave(text)).toEqual({ ok: true });
+    expect(await game.importSave(text)).toEqual({ ok: true });
     expect(hashWorld(game.world)).toBe(before);
   });
 
-  it('carries a built tower across the export and import', () => {
+  it('carries a built tower across the export and import', async () => {
     const game = createGame(7);
     expect(game.apply({ kind: 'build', room: 'lobby', floor: 1, x: 100 })).toEqual({ ok: true });
     expect(game.apply({ kind: 'build', room: 'office', floor: 2, x: 100 })).toEqual({ ok: true });
@@ -51,24 +51,24 @@ describe('export and import', () => {
 
     game.newGame(7);
     expect(game.world.rooms.size).toBe(0);
-    expect(game.importSave(text)).toEqual({ ok: true });
+    expect(await game.importSave(text)).toEqual({ ok: true });
     expect(game.world.rooms.size).toBe(2);
     expect(hashWorld(game.world)).toBe(before);
   });
 
-  it('refuses garbage and leaves the current world untouched', () => {
+  it('refuses garbage and leaves the current world untouched', async () => {
     const game = createGame(3);
     expect(game.apply({ kind: 'build', room: 'lobby', floor: 1, x: 100 })).toEqual({ ok: true });
     const before = hashWorld(game.world);
 
-    const result = game.importSave('not even json {{{');
+    const result = await game.importSave('not even json {{{');
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toBe('This file is not a Hundred Stories save.');
     expect(hashWorld(game.world)).toBe(before);
     expect(game.world.rooms.size).toBe(1);
   });
 
-  it('refuses a damaged save and leaves the current world untouched', () => {
+  it('refuses a damaged save and leaves the current world untouched', async () => {
     const game = createGame(3);
     expect(game.apply({ kind: 'build', room: 'lobby', floor: 1, x: 100 })).toEqual({ ok: true });
     const before = hashWorld(game.world);
@@ -77,7 +77,7 @@ describe('export and import', () => {
     damaged.rooms[0].floor = 0;
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      const result = game.importSave(JSON.stringify(damaged));
+      const result = await game.importSave(JSON.stringify(damaged));
       expect(result).toEqual({ ok: false, reason: 'This save is damaged and was not loaded.' });
       // The field path is for a developer: one console line, never the player's notice.
       expect(warn).toHaveBeenCalledTimes(1);

@@ -50,7 +50,7 @@ function setup(importResult: ImportResult = { ok: true }) {
   const game = {
     world: { seed: 1, log: [], logTotal: 0 },
     exportSave: () => SAVE,
-    importSave: (text: string) => {
+    importSave: async (text: string) => {
       imported.push(text);
       return importResult;
     },
@@ -162,7 +162,7 @@ describe('the kept copy of a tower that could not be opened', () => {
     const game = {
       world: { seed: 1, log: [], logTotal: 0 },
       exportSave: () => SAVE,
-      importSave: () => ({ ok: true }),
+      importSave: async () => ({ ok: true }),
       getKeptCopy: () => kept,
     } as never;
     const ctx: PanelContext = { apply: () => ({ ok: true }) as never, notice: () => {}, close: () => {}, reducedMotion: false, setReducedMotion: () => {} };

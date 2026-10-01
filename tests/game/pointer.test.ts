@@ -559,13 +559,13 @@ describe('stretching an elevator that is already standing', () => {
 });
 
 describe('Open a saved file drops the parked outline (audit E2 S4)', () => {
-  it('parks an outline, opens a saved file, and nothing is parked any more', () => {
+  it('parks an outline, opens a saved file, and nothing is parked any more', async () => {
     const { game, host } = started();
     const text = game.exportSave();
     host.fire('pointerdown', finger(800, 0));
     host.fire('pointerup', finger(800, 120));
     expect(game.getPlacement()).toMatchObject({ pending: true });
-    expect(game.importSave(text)).toEqual({ ok: true });
+    expect(await game.importSave(text)).toEqual({ ok: true });
     expect(game.getPlacement()).toBe(null);
   });
 });

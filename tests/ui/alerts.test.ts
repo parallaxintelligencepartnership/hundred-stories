@@ -480,7 +480,7 @@ describe('the game over card', () => {
   it('tells the player the bank took the tower, offers New tower and Open a saved file, and cannot be closed', () => {
     const world = createWorld(7);
     const started: number[] = [];
-    const h = mount(world, { getSlot: () => 'mine', newGame: (seed: number) => started.push(seed) });
+    const h = mount(world, { getSlot: () => 'mine', newGame: async (seed: number) => (started.push(seed), { ok: true }) });
     h.notify();
     world.cash = ECONOMY.bankruptAtCash - 1;
     for (let i = 0; i < ECONOMY.bankruptAfterQuarters; i += 1) onQuarterStart(world);

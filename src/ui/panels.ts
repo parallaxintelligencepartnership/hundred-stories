@@ -1852,9 +1852,10 @@ export function settingsBody(
       void importSaveWithDialog()
         .then((text) => {
           if (text === null) return;
-          const result = game.importSave(text);
-          if (result.ok) ctx.syncAddress?.();
-          ctx.notice(result.ok ? 'Tower opened.' : result.reason);
+          return game.importSave(text).then((result) => {
+            if (result.ok) ctx.syncAddress?.();
+            ctx.notice(result.ok ? 'Tower opened.' : result.reason);
+          });
         })
         .catch(() => ctx.notice('That file could not be read.'));
     });
@@ -2176,11 +2177,12 @@ function importFileInput(game: GameApi, ctx: PanelContext): HTMLInputElement {
     if (!chosen) return;
     void chosen
       .text()
-      .then((text) => {
-        const result = game.importSave(text);
-        if (result.ok) ctx.syncAddress?.();
-        ctx.notice(result.ok ? 'Tower opened.' : result.reason);
-      })
+      .then((text) =>
+        game.importSave(text).then((result) => {
+          if (result.ok) ctx.syncAddress?.();
+          ctx.notice(result.ok ? 'Tower opened.' : result.reason);
+        }),
+      )
       .catch(() => ctx.notice('That file could not be read.'))
       .finally(() => {
         file.value = '';

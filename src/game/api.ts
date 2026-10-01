@@ -109,6 +109,23 @@ export interface PlacementRect {
   h: number;
 }
 
+/** A save's outcome. `conflict`: another window saved this slot after this page read it. */
+export type SaveResult = { ok: true } | { ok: false; reason: string; conflict?: true };
+
+/**
+ * What leaving the tower in hand came to (GameApi.leave).
+ * - `{ ok: true, wrote }`: written now, or nothing had moved since the last save or load.
+ * - `{ ok: true, wrote: false, unsaved }`: a stand-in, never written by a save the player did not
+ *   ask for: a held My tower whose save would not open, or a slot that could not be read. Going
+ *   on loses it, so the ui asks.
+ * - `{ ok: false, reason }`: the save did not go through and the tower is still in hand, in the
+ *   player's words; `conflict` when another window saved this tower after this page opened it.
+ */
+export type LeaveResult =
+  | { ok: true; wrote: boolean; unsaved?: never }
+  | { ok: true; wrote: false; unsaved: 'held' | 'unread' }
+  | { ok: false; reason: string; conflict?: boolean };
+
 export interface GameApi {
   readonly world: World;
   /**
@@ -141,17 +158,22 @@ export interface GameApi {
   /** Build the pending placement. On success it clears and the tool stays in hand. */
   confirmPending(): CommandResult;
   cancelPending(): void;
-  save(): Promise<CommandResult>;
+  save(): Promise<SaveResult>;
   /**
    * True while My tower's save could not be opened and a stand-in tower is running in its place:
    * save() now would write the stand-in over the held save, so the ui asks first.
    */
   saveHeld(): boolean;
   /**
-   * Save what moved since the last save, quietly (no log line), and resolve once it is written:
-   * before the page reloads itself. Nothing to save resolves at once.
+   * Save the tower in hand before the page goes (Reload into a new version, Save and exit), and
+   * say how that went. From the call on the clock holds and every command and tap on the tower is
+   * refused, so nothing changes after the save is taken; a tower switch in flight is waited for
+   * first. Quiet: no log line. A failure lets go of the hold and gives the reason, every time.
+   * Any ok result keeps the hold until the page goes or resumeAfterLeave is called.
    */
-  flush?(): Promise<void>;
+  leave(why: 'reload' | 'exit'): Promise<LeaveResult>;
+  /** The player stayed after a leave that kept the hold: the clock and the commands run again. */
+  resumeAfterLeave(): void;
   load(): Promise<CommandResult>;
   exportSave(): string;
   /**
@@ -167,10 +189,12 @@ export interface GameApi {
   getKeptDailyCopy(): string | null;
   /**
    * Open a saved file. It always opens as My tower: from Today's tower or Friend's tower this
-   * leaves that slot first (saving it if it moved).
+   * leaves that slot first (saving it if it moved), and refuses with the reason, keeping that
+   * tower in hand, when that save fails. Runs in line with the tower switches.
    */
-  importSave(text: string): CommandResult;
-  newGame(seed: number): void;
+  importSave(text: string): Promise<CommandResult>;
+  /** A fresh tower in the slot in hand, saved over it at once: resolves with that save's outcome. */
+  newGame(seed: number): Promise<CommandResult>;
   /** Which save slot the tower in hand lives in: My tower, Today's tower or Friend's tower. */
   getSlot(): SlotName;
   /** Today's tower in hand, or null in the other slots. */
@@ -181,16 +205,17 @@ export interface GameApi {
    * Open the daily slot on today's date: go on with today's tower, start it fresh, or, when the
    * slot holds an unfinished tower from an earlier date, show that one stopped and set the choice.
    * The slot being left is saved only if it moved; My tower is never rewritten by the daily.
+   * Refused, with the reason and the tower kept in hand, when that save fails.
    */
-  openDaily(): Promise<void>;
+  openDaily(): Promise<CommandResult>;
   /** What openDaily would find, read without switching. Optional: a stand-in game has none. */
   peekDaily?(): Promise<DailyPeek>;
   /** Answer the choice: finish the older daily, or start today's fresh. */
   chooseDaily(which: 'finish' | 'today'): Promise<void>;
   /** A friend's link: the same tower they started, in the Friend's tower slot. */
-  openFriend(seed: number): Promise<void>;
-  /** Back to My tower, one call: its save, or a fresh tower when there is none. */
-  openMyTower(): Promise<void>;
+  openFriend(seed: number): Promise<CommandResult>;
+  /** Back to My tower, one call: its save, or a fresh tower when there is none. Refused as openDaily is. */
+  openMyTower(): Promise<CommandResult>;
   setReducedMotion(on: boolean): void;
   /**
    * How many screen pixels the chrome covers at the top and the bottom of the view.

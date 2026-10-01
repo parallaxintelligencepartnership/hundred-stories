@@ -503,8 +503,9 @@ describe('the new version notice', () => {
       setReducedMotion: () => {},
       getSlot: () => 'mine',
       select() {},
-      flush: async () => {
-        order.push('flush');
+      leave: async () => {
+        order.push('leave');
+        return { ok: true, wrote: true };
       },
     } as never;
   }
@@ -522,7 +523,7 @@ describe('the new version notice', () => {
     expect(toasts[0]!.className).not.toContain('is-leaving'); // sticky: no fade on its own
     click(toasts[0]!);
     await settle();
-    expect(order).toEqual(['flush', 'reload']);
+    expect(order).toEqual(['leave', 'reload']);
     ui.destroy();
   });
 

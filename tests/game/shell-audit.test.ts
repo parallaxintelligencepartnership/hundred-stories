@@ -290,7 +290,7 @@ describe('D S6: Open a saved file inside Today\'s tower leaves the daily first',
     await game.openDaily();
     game.apply({ kind: 'build', room: 'lobby', floor: 1, x: 100 }); // moved and not saved yet
 
-    expect(game.importSave(myFile)).toEqual({ ok: true });
+    expect(await game.importSave(myFile)).toEqual({ ok: true });
     await settle();
     expect(game.getSlot()).toBe('mine');
     expect(game.getDaily()).toBe(null);
@@ -394,10 +394,10 @@ describe('D S8: saves while paused and when the page is hidden or closed', () =>
     game.stop();
   });
 
-  it('flush, before a reload into a new version, has all 11 rooms on disk once it resolves, with no log line', async () => {
+  it('leave, before a reload into a new version, has all 11 rooms on disk once it resolves, with no log line', async () => {
     const { game, ls } = await pausedWithTenUnsaved();
     const lines = game.world.log.length;
-    await game.flush!();
+    expect(await game.leave('reload')).toEqual({ ok: true, wrote: true });
     expect(roomsOnDisk(ls)).toBe(11);
     expect(game.world.log.length).toBe(lines);
   });

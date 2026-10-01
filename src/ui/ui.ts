@@ -5,7 +5,9 @@
 import './ui.css';
 
 import { createSound } from '../audio/audio';
-import type { GameApi, Placement, Speed, Tool } from '../game/api';
+import type { GameApi, LeaveResult, Placement, Speed, Tool } from '../game/api';
+import { LEAVE_NOT_SAVED } from '../game/game';
+import { showLeaveCard } from './leave-card';
 import type { Renderer } from '../render/renderer';
 import { describeBeat, followSim, isFollowed, storyName, type StoryBeat } from '../sim/story';
 import type { Command, CommandResult, LogEntry, World } from '../sim/types';
@@ -566,11 +568,12 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   toasts.append(gameOverFile);
 
   /** A saved file's text, opened as the menu opens it. */
-  function openSavedText(text: string): void {
-    const result = game.importSave(text);
-    // The file lands in My tower: the address drops a friend's or today's query with it.
-    if (result.ok) syncAddress();
-    notice(result.ok ? 'Tower opened.' : result.reason);
+  function openSavedText(text: string): Promise<void> {
+    return game.importSave(text).then((result) => {
+      // The file lands in My tower: the address drops a friend's or today's query with it.
+      if (result.ok) syncAddress();
+      notice(result.ok ? 'Tower opened.' : result.reason);
+    });
   }
 
   /**
@@ -584,8 +587,11 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
         ? {
             kind: 'newTower',
             run() {
-              game.newGame(Math.floor(Date.now() % 1_000_000));
+              const saved = game.newGame(Math.floor(Date.now() % 1_000_000));
               notice('New game started.');
+              void saved.then((res) => {
+                if (!res.ok) notice(res.reason);
+              });
             },
           }
         : { kind: 'myTower', run: () => openMyTower() };
@@ -597,9 +603,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
           return;
         }
         void importSaveWithDialog()
-          .then((text) => {
-            if (text !== null) openSavedText(text);
-          })
+          .then((text) => (text !== null ? openSavedText(text) : undefined))
           .catch(() => notice('That file could not be read.'));
       },
     };
@@ -992,8 +996,10 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
    * tower or a friend's). The open may already have notified and mounted that card; mountedKey
    * is left truthful, so it is kept as it is and closes normally later.
    */
-  async function switchTower(open: () => Promise<void>, quiet = false): Promise<void> {
-    await open();
+  async function switchTower(open: () => Promise<CommandResult | void>, quiet = false): Promise<void> {
+    const result = await open();
+    // A switch refused (the tower being left did not save) says why, every time.
+    if (result && !result.ok) notice(result.reason);
     syncAddress();
     panelKind = 'none';
     // Quiet: the menu's Today's tower page already said what the card would, and the player
@@ -1829,8 +1835,11 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
         icon: 'structure',
         close: true,
         run() {
-          game.newGame(freshStart());
+          const saved = game.newGame(freshStart());
           notice('New game started.');
+          void saved.then((res) => {
+            if (!res.ok) notice(res.reason);
+          });
         },
       },
       no: { label: NEW_TOWER_NO, icon: 'home', close: false },
@@ -2016,8 +2025,10 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     dailyQuiet = true;
     void switchTower(async () => {
       try {
-        await game.openDaily();
+        const opened = await game.openDaily();
+        if (opened && !opened.ok) return opened;
         if (which !== 'open' && game.getDailyChoice?.()) await game.chooseDaily(which);
+        return opened;
       } finally {
         dailyQuiet = false;
       }
@@ -2347,21 +2358,47 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   });
 
   /**
-   * A new version has installed. The toast stays until tapped, and a tap saves what moved and
-   * then reloads: the pagehide save is fire and forget, so it is not trusted to finish first.
+   * A new version has installed. The toast stays until tapped, and a tap saves the tower and then
+   * reloads (the pagehide save is fire and forget, so it is not trusted to finish first), but only
+   * once the tower is written or nothing had moved. Anything else keeps the tower and shows the
+   * leave card (leave-card.ts); a player who keeps playing gets the toast back, to reload later.
    */
   function updateReady(): void {
     if (destroyed || updateToldAt) return;
+    putUpdateToast();
+    notifier?.updateReady();
+  }
+
+  function putUpdateToast(): void {
     updateToldAt = toastLayer.alert(UPDATE_TEXT, {
       className: 'is-update',
       action: 'Reload',
       tapLabel: 'Reload to get the new version',
-      onTap: () => {
-        const flushed = game.flush?.() ?? Promise.resolve();
-        void flushed.catch(() => {}).finally(() => reload());
-      },
+      onTap: () => void reloadWhenSaved(),
     });
-    notifier?.updateReady();
+  }
+
+  async function reloadWhenSaved(): Promise<void> {
+    const leave = (): Promise<LeaveResult> =>
+      game.leave('reload').catch((): LeaveResult => ({ ok: false, reason: LEAVE_NOT_SAVED }));
+    const left = await leave();
+    if (destroyed) return;
+    if (left.ok && !left.unsaved) {
+      reload();
+      return;
+    }
+    showLeaveCard({
+      menu: pauseMenu,
+      result: left,
+      retry: leave,
+      proceed: () => reload(),
+      stay: () => {
+        game.resumeAfterLeave();
+        if (!destroyed) putUpdateToast();
+      },
+      saveFile: (text) => exportSave(text, pageCtx),
+      game,
+    });
   }
 
   return {

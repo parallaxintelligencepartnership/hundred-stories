@@ -107,7 +107,7 @@ function mount(opts: { speed?: number; peek?: DailyPeek | null | (() => Promise<
           },
         }),
     getKeptDailyCopy: () => state.kept,
-    importSave(text: string) {
+    async importSave(text: string) {
       // An opened file is My tower, with a running clock (game.ts importSave).
       calls.push(`importSave:${text}`);
       state.slot = 'mine';

@@ -49,7 +49,7 @@ function mount(ok: boolean): { root: FakeElement; slot: () => string } {
     getPlacement: () => null, getPlacementRect: () => null, getSelection: () => null, select() {},
     setChrome: () => {}, setReducedMotion: () => {}, getSlot: () => slot, getDaily: () => null, getDailyChoice: () => null,
     exportSave: () => '{}',
-    importSave() {
+    async importSave() {
       if (!ok) return { ok: false, reason: 'This file is not a Hundred Stories save.' };
       slot = 'mine';
       notify();
