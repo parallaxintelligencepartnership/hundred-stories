@@ -345,6 +345,8 @@ export interface VipVisitRecord {
   suiteBand: VipRating;
   incident: boolean;
   reason: string | null; // why the visit ended early, null for a full stay
+  suiteFloor?: number; // the booked suite's floor; absent in records written before it was kept
+  suiteId?: Id; // the booked suite's id, absent likewise
 }
 
 /**

@@ -251,12 +251,15 @@ export function recordVisit(world: World, room: Room): void {
     case 'cinema':
       credit(world, 'cinema', ECONOMY.cinemaIncomePerViewer);
       break;
-    case 'partyHall':
-      credit(world, 'partyHall', ECONOMY.partyHallIncomePerEvent);
-      break;
     default:
+      // A party hall is paid per party, not per guest: recordPartyEvent.
       break;
   }
+}
+
+/** One party, one fee, paid in the tick the crowd is booked (people.ts spawnShowAudiences). */
+export function recordPartyEvent(world: World): void {
+  credit(world, 'partyHall', ECONOMY.partyHallIncomePerEvent);
 }
 
 export function recordHotelNight(world: World, room: Room): void {

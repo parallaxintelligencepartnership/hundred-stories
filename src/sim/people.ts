@@ -7,7 +7,7 @@
  */
 
 import { callClassFor, hallCallPending, letOffAtNextStop, requestHallCallFor } from './elevators';
-import { recordCondoSale, recordHotelNight, recordVisit } from './economy';
+import { recordCondoSale, recordHotelNight, recordPartyEvent, recordVisit } from './economy';
 import { ensureRouting, entrances, findRoute, isReachableFromLobby } from './routing';
 import { ECONOMY, ROOMS, SCHEDULES, STORY, STRESS } from './rules';
 import { collectorLostRoute, inWasteBacklog, runCollectors } from './recycling';
@@ -239,6 +239,8 @@ function spawnShowAudiences(world: World, clock: Clock): void {
     const fill = Math.min(1, (SHOW_FILL_MIN + world.rng.next() * (1 - SHOW_FILL_MIN)) * weekend);
     const audience = Math.max(0, Math.min(seats - room.occupancy, Math.round(seats * fill)));
     for (let i = 0; i < audience; i++) spawnVisitor(world, room, 'visitor', stay, clock);
+    // The party is paid here, once, with its crowd booked; the guests' visits pay nothing more.
+    if (room.kind === 'partyHall' && audience > 0) recordPartyEvent(world);
   }
 }
 
@@ -923,6 +925,7 @@ function runHousekeeping(world: World, clock: Clock): void {
   const offices = roomsOfKind(world, 'housekeeping');
   if (offices.length === 0) return;
   for (const office of offices) staffUpOffice(world, office);
+  if (clock.minuteOfDay === SCHEDULES.housekeeping.start) noteRoomsOutOfReach(world);
   if (clock.minuteOfDay < SCHEDULES.housekeeping.start || clock.minuteOfDay > HOUSEKEEPING_END_MINUTE) return;
   const dirty = dirtyHotelRooms(world);
   if (dirty.length === 0) return;
@@ -930,18 +933,54 @@ function runHousekeeping(world: World, clock: Clock): void {
   const wanted = Math.ceil(dirty.length / SCHEDULES.housekeeping.roomsPerKeeper);
   let sent = 0;
   for (const office of offices) {
+    // Every keeper sent from here starts in this office, so a room with no route for one has
+    // none for the rest this tick: it is asked once, not once per keeper.
+    const noRoute = new Set<Id>();
     for (const id of office.tenants) {
       if (sent >= wanted) return;
       const keeper = world.sims.get(id);
       if (!keeper || keeper.kind !== 'staff') continue;
       if (keeper.state !== 'inRoom' || keeper.inRoomId !== office.id) continue;
-      const room = dirty.find((r) => !claimed.has(r.id));
-      if (!room) return;
-      if (!assignCleaning(world, keeper, room)) continue;
-      claimed.add(room.id);
-      sent += 1;
+      // The first unclaimed room this keeper can get to: one it cannot reach never holds up the rest.
+      let took = false;
+      for (const room of dirty) {
+        if (claimed.has(room.id) || noRoute.has(room.id)) continue;
+        if (!assignCleaning(world, keeper, room)) {
+          noRoute.add(room.id);
+          continue;
+        }
+        claimed.add(room.id);
+        sent += 1;
+        took = true;
+        break;
+      }
+      if (!took) break; // nothing left this office can reach; another office may
     }
   }
+}
+
+/**
+ * The hotel rooms waiting for a clean that no housekeeping office has a route to, by id. Empty
+ * when the tower has no housekeeping office: then no room is housekeeping's to reach. Reads the
+ * world only (routing builds its cache on demand), for the UI and the shift's warn line.
+ */
+export function hotelRoomsHousekeepingCannotReach(world: World): Room[] {
+  const offices = roomsOfKind(world, 'housekeeping');
+  if (offices.length === 0) return [];
+  const opts = routeOptsFor('staff');
+  return dirtyHotelRooms(world)
+    .filter((room) => !offices.some((office) => findRoute(world, { floor: office.floor, x: roomCenter(office) }, { floor: room.floor, x: roomCenter(room) }, opts)))
+    .sort((a, b) => a.id - b.id);
+}
+
+/** At the start of the shift, one warn line naming the floors whose rooms housekeeping cannot reach. Stateless: only while there are some. */
+function noteRoomsOutOfReach(world: World): void {
+  const rooms = hotelRoomsHousekeepingCannotReach(world);
+  const first = rooms[0];
+  if (!first) return;
+  const floors = [...new Set(rooms.map((r) => r.floor))].sort((a, b) => a - b).map(floorLabel);
+  const named = floors.length === 1 ? floors[0] : `${floors.slice(0, -1).join(', ')} and ${floors[floors.length - 1]}`;
+  log(world, `Housekeeping could not reach the hotel rooms on ${named}.`, 'warn', { roomId: first.id });
 }
 
 function staffUpOffice(world: World, office: Room): void {

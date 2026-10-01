@@ -319,11 +319,31 @@ describe('economy: record functions', () => {
     expect(world.cash).toBe(LIMITS.startingCash + ECONOMY.cinemaIncomePerViewer);
   });
 
-  it('recordVisit credits party hall income per event, not per visitor', () => {
-    const world = createWorld(1);
-    const room = makeRoom({ kind: 'partyHall', floor: 1, x: 0 });
-    recordVisit(world, room);
-    expect(world.cash).toBe(LIMITS.startingCash + ECONOMY.partyHallIncomePerEvent);
+  it('a party hall earns its fee per event, not per visitor: a full crowd through the tick pays once', () => {
+    const world = createWorld(77);
+    world.cash = 50_000_000;
+    world.stars = 3;
+    const script = [
+      ...Array.from({ length: 201 }, (_, x) => ({ kind: 'build' as const, room: 'lobby' as const, floor: 1, x })),
+      { kind: 'shaft.build' as const, shaft: 'standard' as const, x: 190, floorMin: 1, floorMax: 3 },
+      { kind: 'build' as const, room: 'partyHall' as const, floor: 2, x: 0 },
+    ];
+    for (const cmd of script) expect(applyCommand(world, cmd).ok).toBe(true);
+    const hall = [...world.rooms.values()].find((r) => r.kind === 'partyHall') as Room;
+    // Day 2 is the weekend; the party starts at noon and runs four hours.
+    tickUntil(world, 2 * 1440 + 12 * 60);
+    const before = world.stats.incomeByKind.partyHall ?? 0;
+    let peak = 0;
+    while (world.time.minute < 2 * 1440 + 17 * 60) {
+      tick(world);
+      peak = Math.max(peak, hall.occupancy);
+    }
+    expect(peak).toBe(ROOMS.partyHall.capacity);
+    expect((world.stats.incomeByKind.partyHall ?? 0) - before).toBe(ECONOMY.partyHallIncomePerEvent);
+    // A guest's visit on its own credits nothing.
+    const cash = world.cash;
+    recordVisit(world, hall);
+    expect(world.cash).toBe(cash);
   });
 
   it('recordVisit does nothing for kinds with no visit income', () => {

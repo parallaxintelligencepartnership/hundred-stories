@@ -5,10 +5,10 @@
 import { EVAL, EVENTS, THEFT } from './rules';
 import { ROOMS } from './rules';
 import { clockOf, TOWER_WIDTH } from './types';
-import type { ActiveEvent, Command, CommandResult, GuardResponse, Id, Room, RoomKind, Sim, TheftEvent, VipRating, World } from './types';
+import type { ActiveEvent, Command, CommandResult, GuardResponse, Id, Room, RoomKind, Shaft, Sim, TheftEvent, VipRating, World } from './types';
 import { personName, vipArrivalHour, vipPreference } from './identity';
 import { fireBurning, roomMiddle, sendAway, sendThiefOut, sendThiefTo, sendVipToSuite } from './people';
-import { ensureRouting, entrances, findRoute } from './routing';
+import { ensureRouting, entrances, findRoute, isReachableFromLobby } from './routing';
 import { inWasteBacklog, rollWaste } from './recycling';
 import { dispatchGuard, releaseGuard, routeMinutes } from './security';
 import { isFollowed, recordBeat, type StoryBeat } from './story';
@@ -378,10 +378,15 @@ export function tickBomb(world: World, event: BombEvent): void {
 
 type VipEventState = Extract<ActiveEvent, { kind: 'vip' }>;
 
+/**
+ * The suite a VIP books: the first clean, empty one the lobby can reach, by id; only when no
+ * free suite is reachable, the first free one, so the notice still names a floor to fix.
+ */
 function freeSuite(world: World): Room | undefined {
-  return roomsOfKind(world, HOTEL_SUITE)
+  const free = roomsOfKind(world, HOTEL_SUITE)
     .sort((a, b) => a.id - b.id)
-    .find((r) => r.tenants.length === 0 && !r.dirty && !r.infested && !r.onFire);
+    .filter((r) => r.tenants.length === 0 && !r.dirty && !r.infested && !r.onFire);
+  return free.find((r) => isReachableFromLobby(world, r.floor, r.x)) ?? free[0];
 }
 
 function entrancePos(world: World): { floor: number; x: number } {
@@ -490,7 +495,10 @@ function releaseSuite(world: World, event: VipEventState): void {
 function closeVisit(world: World, event: VipEventState, rating: VipRating, reason: string | null, leftEarly = false): void {
   const value = VIP_ORDER[rating];
   event.score = value / 2;
-  world.stats.vipRating = rating;
+  // The stars read the best visit so far: a poor visit never undoes a fair or good one.
+  const best = world.stats.vipRating;
+  if (best === 'none' || VIP_ORDER[rating] > VIP_ORDER[best]) world.stats.vipRating = rating;
+  const suite = event.suiteId === null ? undefined : world.rooms.get(event.suiteId);
   world.stats.lastVip = {
     simId: event.simId,
     minute: world.time.minute,
@@ -502,6 +510,7 @@ function closeVisit(world: World, event: VipEventState, rating: VipRating, reaso
     suiteBand: vipSuiteBand(event.checkInClean, event.checkInEval),
     incident: event.incident,
     reason,
+    ...(suite ? { suiteFloor: suite.floor, suiteId: suite.id } : {}),
   };
   endEvent(world, event);
   const beat: Omit<StoryBeat, 'code' | 'minute'> = { simId: event.simId, value };
@@ -757,20 +766,57 @@ function theftBegins(world: World, event: TheftEvent, sim: Sim, target: Room): v
   log(world, event.noGuard, 'warn', { roomId: target.id });
 }
 
-/** The guard sent is on the thief's floor, off the car, within THEFT.detectTiles of the thief. */
+/**
+ * The guard sent is on the thief's floor, off the car, within THEFT.detectTiles of the thief.
+ * A thief who has stepped into a car is still on the floor while its doors stand open there:
+ * the guard who reaches the door in the minute the thief boards has them.
+ */
 function guardHasThief(world: World, event: TheftEvent, sim: Sim): boolean {
   if (event.guardId === null || event.floor === null) return false;
   const guard = world.sims.get(event.guardId);
   if (!guard || guard.inCarId !== null || guard.state === 'riding' || guard.state === 'gone') return false;
-  if (sim.inCarId !== null || sim.state === 'riding') return false;
+  if ((sim.inCarId !== null || sim.state === 'riding') && !boardingAt(world, sim, event.floor)) return false;
   if (guard.pos.floor !== event.floor || sim.pos.floor !== event.floor) return false;
   return Math.abs(guard.pos.x - sim.pos.x) <= THEFT.detectTiles;
+}
+
+/** The car this sim rides, with its shaft. */
+function carOfRider(world: World, sim: Sim): { shaft: Shaft; car: Shaft['cars'][number] } | undefined {
+  if (sim.inCarId === null) return undefined;
+  for (const shaft of world.shafts.values()) {
+    const car = shaft.cars.find((c) => c.id === sim.inCarId);
+    if (car) return { shaft, car };
+  }
+  return undefined;
+}
+
+/** In a car whose doors are still open on `floor`: aboard, but not gone from the floor yet. */
+function boardingAt(world: World, sim: Sim, floor: number): boolean {
+  const ride = carOfRider(world, sim);
+  return !!ride && ride.car.state === 'doorsOpen' && ride.car.y === floor;
+}
+
+/** Take a caught thief off the car it stepped into, with its car call when nobody else wants that floor. */
+function offTheCar(world: World, sim: Sim): void {
+  const ride = carOfRider(world, sim);
+  sim.inCarId = null;
+  if (!ride) return;
+  const { car } = ride;
+  car.passengers = car.passengers.filter((id) => id !== sim.id);
+  const leg = sim.route[0];
+  if (!leg || leg.kind !== 'ride') return;
+  const stillWanted = car.passengers.some((id) => {
+    const other = world.sims.get(id)?.route[0];
+    return other !== undefined && other.kind === 'ride' && other.toFloor === leg.toFloor;
+  });
+  if (!stillWanted) car.calls.delete(leg.toFloor);
 }
 
 function theftCaught(world: World, event: TheftEvent, sim: Sim): void {
   const target = event.targetId === null ? undefined : world.rooms.get(event.targetId);
   const where = floorWords(event.floor ?? sim.pos.floor);
   const guardName = event.guardId === null ? 'A guard' : personName(world.seed, event.guardId);
+  offTheCar(world, sim);
   sim.state = 'gone';
   removeSim(world, sim.id);
   releaseGuard(world, event.guardId);

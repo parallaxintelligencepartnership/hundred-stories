@@ -600,7 +600,13 @@ function firstInvalidStat(stats: unknown): string | null {
   if (stats.waitsCounted !== undefined && (!isInteger(stats.waitsCounted) || stats.waitsCounted < 0)) return 'stats.waitsCounted';
   if (!isNumberTable(stats.tenantsLeftReasons)) return 'stats.tenantsLeftReasons';
   if (stats.badQuarterStreak !== undefined && (!isInteger(stats.badQuarterStreak) || stats.badQuarterStreak < 0)) return 'stats.badQuarterStreak';
-  if (stats.lastVip !== undefined && !isPlainObject(stats.lastVip)) return 'stats.lastVip';
+  if (stats.lastVip !== undefined) {
+    if (!isPlainObject(stats.lastVip)) return 'stats.lastVip';
+    // The suite's floor and id: optional, read by presence (older records have neither).
+    const { suiteFloor, suiteId } = stats.lastVip;
+    if (suiteFloor !== undefined && !isInteger(suiteFloor)) return 'stats.lastVip.suiteFloor';
+    if (suiteId !== undefined && !isInteger(suiteId)) return 'stats.lastVip.suiteId';
+  }
   if (stats.lastTheftAt !== undefined && !isFiniteNumber(stats.lastTheftAt)) return 'stats.lastTheftAt';
   return null;
 }

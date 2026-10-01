@@ -199,7 +199,9 @@ describe('the shop thief', () => {
   });
 
   it('with the office twenty floors away and one slow shaft, the thief escapes: cash lost and the shop left dirty', () => {
-    const world = tower({ top: 24, cars: 1, shopFloor: 2, officeFloor: 22 });
+    // Two cars: with one, the thief can only leave in the car bringing the guard down, and the
+    // guard stepping out at that door catches them (theft-race.test.ts).
+    const world = tower({ top: 24, cars: 2, shopFloor: 2, officeFloor: 22 });
     const shop = only(world, 'shop');
     bookTheft(world);
     const theft = runToActing(world);

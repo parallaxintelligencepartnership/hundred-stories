@@ -516,6 +516,20 @@ function freeSeatAndCar(world: World, sim: Sim, homeId: number): void {
   sim.inCarId = null;
 }
 
+/**
+ * Housekeepers standing in their own office: they go with it (the tenant loop in doDemolish
+ * removes them), so they never block its demolition, as guards and collectors never do.
+ * Tenants, guests and visitors inside any room still do.
+ */
+function ownStaffInside(world: World, room: Room): number {
+  let count = 0;
+  for (const id of room.tenants) {
+    const sim = world.sims.get(id);
+    if (sim && sim.kind === 'staff' && sim.inRoomId === room.id) count += 1;
+  }
+  return count;
+}
+
 /** Why a sold condo cannot be demolished. */
 export const CONDO_SOLD_REASON = 'This condo belongs to its owners now. It cannot be demolished.';
 
@@ -532,7 +546,7 @@ function doDemolish(world: World, roomId: number): CommandResult {
   }
   // A sold condo is its owners' home: demolishing it for the refund and selling it again was a money loop.
   if (room.kind === 'condo' && !room.vacant) return no(CONDO_SOLD_REASON);
-  if (room.occupancy > 0) return no('People are inside.');
+  if (room.occupancy - ownStaffInside(world, room) > 0) return no('People are inside.');
   const stranded = strandsSomething(world, { roomId: room.id });
   if (stranded) return stranded;
 

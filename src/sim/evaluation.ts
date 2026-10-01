@@ -2,10 +2,11 @@
 // decision that makes a tenant give up and leave. See docs/DESIGN.md section 7.
 // Every number comes from rules.ts; nothing here is inlined.
 
+import { letOffAtNextStop } from './elevators';
 import { EVAL, NOISE, RENT, ROOMS, takesRent } from './rules';
 import { isFollowed, recordBeat } from './story';
 import { log } from './world';
-import type { Id, Room, RoomKind, World } from './types';
+import type { Id, Room, RoomKind, Sim, World } from './types';
 
 const HOTEL_KINDS: readonly RoomKind[] = ['hotelSingle', 'hotelTwin', 'hotelSuite'];
 
@@ -162,16 +163,39 @@ function moveOut(world: World, room: Room): void {
       recordBeat(world.story, { code: 'room.vacated', minute: world.time.minute, simId: id, roomId: room.id, value: 1 });
       if (!followed) roomBeat = true;
     }
-    sim.state = 'leaving';
-    sim.leaveReason = reason;
     sim.homeRoomId = null;
-    sim.route = [];
+    leaveTheTower(world, sim, reason);
     world.stats.tenantsLeftReasons[reason] = (world.stats.tenantsLeftReasons[reason] ?? 0) + 1;
   }
   room.tenants = [];
   if (room.kind === 'office' || room.kind === 'condo') room.vacant = true;
   room.lowEvalSinceMinute = null;
   log(world, reason, 'warn', { roomId: room.id });
+}
+
+/**
+ * An evicted tenant heads out the way sendAway (people.ts) sends anyone: a rider stays aboard to
+ * the car's next stop and walks out from there, and a wait it was in is over. Written here with
+ * the elevator primitive, not by importing people.ts, which would close an import cycle
+ * (people -> economy -> evaluation). A tenant in a room leaves it on the next tick (runLeaving).
+ */
+function leaveTheTower(world: World, sim: Sim, reason: string): void {
+  sim.leaveReason = reason;
+  if (sim.inCarId !== null && letOffAtNextStop(world, sim)) {
+    sim.exiting = true;
+    return;
+  }
+  if (sim.inCarId !== null) {
+    // No stop left for this car to make: off it now, so no seat is left behind.
+    for (const shaft of world.shafts.values()) {
+      for (const car of shaft.cars) car.passengers = car.passengers.filter((id) => id !== sim.id);
+    }
+    sim.inCarId = null;
+  }
+  sim.state = 'leaving';
+  sim.route = [];
+  sim.waitStart = null;
+  delete sim.firstWaitStart;
 }
 
 /** Called hourly by tick.ts. Scores every room and moves fed up tenants out. */
