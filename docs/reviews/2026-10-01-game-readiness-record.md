@@ -34,27 +34,27 @@ Status words: confirmed, partially confirmed, already fixed, refuted, product im
 | G1 Stories and News | Confirmed, wider | News opens only from a 4 s toast; the Stories sheet is dead code; two sections both called Milestones | P3 |
 | G2 Warning counts | Confirmed | "8 problems in the tower" from lines 30 minutes old while the panel says "Nothing needs you right now." | P3 |
 | G3 VIP presentation | Confirmed | Booking and good ratings are red trouble cards; the result card lives only in News; an unreachable first suite is booked and rated poor | Sim part fixed in P2; presentation in P3 |
-| G4 Build panels and Menu | pending lane D | | P4 |
-| G5 Sheet mode on resize | pending lane D | | P4 |
-| G6 Pause button centering | pending lane D | | P4 |
-| G7 Clips and Save and exit | pending lane D | | P4 |
+| G4 Build panels and Menu | Confirmed at 900 px and wider | Measured in headless Chrome: a room, person or elevator card mounts at 1068,72 on 1440 px, its right edge on Menu's and 8 px below it, the same anchor as the Views dropdown; nothing opens Menu; phones and portrait tablets use bottom sheets | P4, card opens beside the selection (Matt) |
+| G5 Sheet mode on resize | Confirmed both ways | Resize across 900 px with a card open: looks like a sheet but no backdrop, Escape ignored, drag handle dead; the other way a floating card stays modal | P4 |
+| G6 Pause button centering | Confirmed | Icon and label 60 to 113 px left of center in every entry and Save state; two scoped CSS lines measure offset 0 at desktop and phone, Larger text on and off | P4 |
+| G7 Clips and Save and exit | Confirmed absent | No menu entry for either; app builds drop trailers/ and the PWA does not precache them, so clips are online only; no clip has an audio track | P4d; clip sound is a separate video package |
 | Staff: housekeeping | Confirmed useful when reachable | 50 checkouts, 50 cleans, no cockroaches; without it every room infested | Visibility in P3 |
 | Staff: guards | Theft response real; patrol alone changes nothing | 20 of 20 caught with an office, 0 of 20 without; one race where the guard arrives as the thief boards | Race fixed in P2; wording in P3 |
 | Staff: collectors | Measured: the rejected "inevitable backlog" claim is right in outcome above about 300 producing rooms | 230 to 335 units a day whatever the shafts; 34% of rooms piling up at 410 offices, 66% at 820, 77% at 1,107; top floors never visited | P2b |
 | Recycling center removal | Confirmed | Waste and dirt cleared at the next roll, upkeep gone, stars stay | P2b |
-| R1 GPU context recovery | pending lane D | | |
+| R1 GPU context recovery | Confirmed in software rendering; real GPU unverified | Forced context loss and restore: office wall pixels 69,479 to 1,675, no recovery at 8 s, no console error; far zoom unaffected | P4c |
 | R2 Save history growth | Growth confirmed and measured; not a near-term failure | 20 bytes a command, 28 a checkpoint; 0.2 to 0.8 MB after 90 hours | Checkpoint trim in P2b |
 | R3 IndexedDB connections | Partially confirmed | 21 opens, 0 closes in 10 saves; a stalled open hangs the boot (not mistaken for empty); real-browser frequency unmeasured | P1b |
 | R4 Native save durability | Partially confirmed | iOS library writes the live file with `atomically: false`, no previous-good copy; no corruption reproduced; Android library source not on this Mac | P1c, device check still owed |
-| R5 Feedback mailer | Verification gap | The live n8n workflow is not exposed to the session's n8n access; repo evidence only | Not blocking the browser release |
+| R5 Feedback mailer | Confirmed from the repo file; live n8n is a verification gap | The mailer reads the 100 oldest keys with no paging, has no error workflow, and a dead mail login ends green; the live workflow is not exposed to the session's n8n access | Not blocking the browser release; needs Matt or n8n access |
 | R6 Ship runs no tests | Confirmed | `scripts/ship.sh` and `npm run deploy` run no tests and no Worker typecheck | Closeout package |
 
 ## Packages
 
 | Package | Scope | Commit | Review | Status |
 |---|---|---|---|---|
-| P1a | Save before leaving: `leave` / `resumeAfterLeave`, import awaits the outgoing save, refused switches say why, leave card | `293492e` | in review | built |
-| P2 | Sim fixes F5 to F8, VIP suite and best rating, guard race | `3729ffd` | in review | built |
+| P1a | Save before leaving: `leave` / `resumeAfterLeave`, import awaits the outgoing save, refused switches say why, leave card | `293492e`, fix `10c7c60` | 0 CRITICAL, 1 IMPORTANT (fixed at `10c7c60`), 6 ADVISORY for the close batch | reviewed |
+| P2 | Sim fixes F5 to F8, VIP suite and best rating, guard race | `3729ffd` | 0 CRITICAL, 0 IMPORTANT, 6 ADVISORY for the close batch | reviewed |
 | P1b | Stale-window save refusal, IndexedDB connection reuse and open deadline | | | to do |
 | P1c | Native save file protocol (temp file, previous-good copy) | | | to do |
 | P2b | More recycling centers, longest-waiting first, waste without a center, checkpoint trim | | | to do |
@@ -64,7 +64,15 @@ Status words: confirmed, partially confirmed, already fixed, refuted, product im
 
 ## Verification log
 
-(filled as each step runs; every line names the commit it ran against)
+(every line names the commit it ran against)
+
+- `293492e` P1a review: the old code (97777fa) fails all five behaviors asserted through the old API (clock moved during the reload save, reload save resolved before a switch, friend tower dropped on import, reload after a refused write, silent second refused switch); protection files pass on the new code (save-read-failure 7, shell-audit 19, storage-seq 10, slots 27); typecheck clean.
+- `10c7c60` I1: `tests/ui/leave-card.test.ts` 9 passed; the new case fails with the fix commented out (clock frozen at 360).
+- `3729ffd` P2 review: six bench hashes unchanged (3b283dda d8f2c09e 9de7c3a7 b2d54ef5 98fe5e06 b9ea75da); the 0.6.12 loader opens a save with the new VIP suite fields and hashes it the same; seven test files 79 passed; reverting each fix in a scratch copy fails its tests.
+
+Review reports are under the session scratchpad `reviews/` (p1a-review.md, p2-review.md). Advisories carried to the close batch:
+- P1a: A1 double tap on Reload makes two cards; A2 a write that never settles holds the game with no word (closes with the P1b open deadline); A3 no test for pointer refusal, the per-slot queue order, or the wait for an in-flight write; A4 no UI test for the refused-switch and New tower notices; A5 the leave card can be pushed into a hidden pause menu; A6 Open a saved file is not refused during a leave.
+- P2: A1 the no-route set is rebuilt every tick; A2 a 0.6.12 save made in the first minutes of a party pays that party nothing once; A3 no test for the caught thief's car call; A4 the cannot-reach list has no UI caller and the old "Housekeeping will clean them out." line stands (P3b); A5 an evicted rider's old car call stays lit for one empty stop; A6 goal lines say "now" for the best VIP visit (P3c).
 
 ## Still open or unverified
 
