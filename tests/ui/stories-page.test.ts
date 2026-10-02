@@ -3,6 +3,7 @@
 // helicopter and the ransom, so a closed card no longer takes the player's only response; every
 // toast, the "and N more" line and the chip open the pause menu on the Stories page with the game
 // paused; first focus is never a button that spends; Show on the tower leaves the menu.
+import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EVENT_TEST_HOOKS, handleEventCommand, resetEventTestHooks, startBomb, tickEvents } from '../../src/sim/events';
 import { EVENTS, ROOMS } from '../../src/sim/rules';
@@ -429,5 +430,12 @@ describe('the folded warning toast and Tower problems', () => {
     expect(h.card()!.descendants()).toContain(now);
     // The office on floor 3 has no elevator: Tower problems' first button.
     expect(now?.textContent).toBe('Show the floor');
+  });
+});
+
+describe('alert cards while the pause menu is open', () => {
+  it('on a phone the cards but the update notice are hidden under .is-paused-menu', () => {
+    const css = readFileSync(new URL('../../src/ui/ui.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    expect(css).toMatch(/@media \(max-width: 720px\)\s*\{\s*\.hs-ui\.is-paused-menu \.hs-alerts > :not\(\.is-update\)\s*\{\s*display:\s*none;?\s*\}\s*\}/);
   });
 });

@@ -51,16 +51,29 @@ Status words: confirmed, partially confirmed, already fixed, refuted, product im
 
 ## Packages
 
-| Package | Scope | Commit | Review | Status |
+Every package was built by one agent in its own worktree, reviewed once by an independent reviewer at its commit, and fixed in one round. Findings and their closing commits are in `.itworks/REVIEWS.md` under "Checkpoint 2026-10-01".
+
+| Package | Scope | Commit | Review | Fix round |
 |---|---|---|---|---|
-| P1a | Save before leaving: `leave` / `resumeAfterLeave`, import awaits the outgoing save, refused switches say why, leave card | `293492e`, fix `10c7c60` | 0 CRITICAL, 1 IMPORTANT (fixed at `10c7c60`), 6 ADVISORY for the close batch | reviewed |
-| P2 | Sim fixes F5 to F8, VIP suite and best rating, guard race | `3729ffd` | 0 CRITICAL, 0 IMPORTANT, 6 ADVISORY for the close batch | reviewed |
-| P1b | Stale-window save refusal, IndexedDB connection reuse and open deadline | | | to do |
-| P1c | Native save file protocol (temp file, previous-good copy) | | | to do |
-| P2b | More recycling centers, longest-waiting first, waste without a center, checkpoint trim | | | to do |
-| P3 | One Stories page: incidents with their buttons, tower problems, VIP, following, today, milestones; toast and VIP cards | | | to do |
-| P4 | Panel ownership, resize, centered pause buttons, Clips, Save and exit with the exited screen | | | to do |
-| Closeout | Guide wording, ship script checks, advisories batch, full test run, capture run, records | | | to do |
+| P1a | Save before leaving: `leave` / `resumeAfterLeave`, import awaits the outgoing save, refused switches say why, leave card | `293492e` | 1 IMPORTANT, 6 ADVISORY | `10c7c60`, close batch |
+| P2 | Sim fixes F5 to F8, VIP suite and best rating, guard race | `3729ffd` | 6 ADVISORY | close batch |
+| P1b | Stale-window save refusal, one IndexedDB connection, 5 s open deadline | `a554a0a` | 2 IMPORTANT, 7 ADVISORY | `6536793` |
+| P3a | One Stories page, incident buttons, reminder chip, News removed | `9417e54` | 1 IMPORTANT, 12 ADVISORY | `40b04a2`, later packages, close batch |
+| P2b | Up to eight recycling centers, longest-waiting first, waste without a center, checkpoint trim | `afe00c3` | 2 IMPORTANT, 6 ADVISORY | `8afa423` |
+| P3b | Tower problems, staff cards | `2b022ce` | 2 IMPORTANT, 3 ADVISORY | `d45380d` |
+| P3c | VIP booking, arrival and result cards | `17c1452` | 2 IMPORTANT, 3 ADVISORY | `d45380d` |
+| P4a | Cards beside the selection, sheet mode on resize, centered pause buttons | `e69a212` | 1 IMPORTANT, 4 ADVISORY | `e5792ee` |
+| P4d | Clips page, Save and exit, exited screen | `3def16a` | 3 IMPORTANT, 4 ADVISORY | `e5792ee` |
+| R1 | Baked art rebuilt after a lost WebGL context | `462b486` | 3 ADVISORY | `8095520` |
+| P1c | Phone app saves: temp file, previous good copy, fallback to the direct write | `3ea18d4` | 1 CRITICAL, 2 IMPORTANT, 8 ADVISORY | `666bf45` |
+| Close batch | Leftover advisories, `scripts/verify.sh` and the ship gate | `b62be4f` | | |
+| Closeout | Review log, SHIPPED.md, MAP, npm audit, mailer file, capture scripts, two capture findings | `6df6a70`, `e06c641` and the commit after | sweep: 1 IMPORTANT (older, mailer), 5 ADVISORY | in the same commits |
+
+Measured results worth keeping (the scratchpad does not outlive the session):
+- Recycling, one center, dirty rooms at day 35, old order against the shipped rule: 246 offices 0 and 0; 280: 5 and 0; 300: 36 and 0; 350: 84 and 63; 410: 143 and 190; 600: 295 and 316; 820: 547 and 563. Two centers hold 350 and 410 at 0; eight held 1,107 at 0 in the first measurement.
+- Graphics restore on the store tower at the working zoom: office wall pixels 69,479 before, 1,676 after a restore on the old code, 69,479 after on the new; first frame after the restore identical to the frame before the loss.
+- Card placement at 1440 px: a room card stands 12 px from its selection and 68 px clear of Menu; pause menu entries measure centered (offset 0) at desktop and phone with Larger text on and off.
+- `towerProblems` takes about 0.5 ms on the large bench tower.
 
 ## Verification log
 
@@ -76,17 +89,11 @@ Review reports are under the session scratchpad `reviews/` (p1a-review.md, p2-re
 
 ## Still open or unverified
 
-(filled at closeout)
-
-## Rendered verification
-
-One run, on the final commit, from the repo root (Chrome at the default macOS path, or `CHROME=<path>`):
-
-```
-npx vite-node@6.0.0 scripts/make-readiness-fixtures.ts
-node scripts/make-readiness-shots.mjs
-```
-
-The first writes the saved towers the shots seed (built from the store tower with the sim's own ticks, commands and event starters) to `docs/reviews/readiness-2026-10-01/fixtures/`. The second builds the web bundle into a temp dir, serves it, and for each shot in its fixed list seeds the tower, reaches the state through the game's own controls, runs the DOM checks and writes the PNG. Output goes to `docs/reviews/readiness-2026-10-01/` (gitignored): `<shot>-<viewport>.png`, `report.txt` (one line per shot: OK, CHECK FAILED with the check, or NOT-CAPTURED with why) and `report.json`. It exits 1 when any check failed. `--checks-only` runs the same without PNGs.
-
-(results filled at closeout)
+- Feedback mailer (handoff R5, sweep IMPORTANT): the fix is in `deploy/n8n-feedback-mailer.json` with a test (a failed send stops with an error into the "Ops: n8n Mission Control" failure workflow; 1,000 keys a run). It is NOT on the live n8n workflow `YfrW6E7QCEWDR75I`. Matt, 2026-10-01: "just leave it for another time". The live store held 0 waiting messages on 2026-10-01.
+- Phone app saves: proven on a stand-in for the Capacitor file plugin only. Owed before the next app submission, on real builds: how Android reports its file listing and renames, a clean install, an upgrade from the 0.6.12 app, a force quit during a large save, a full-disk write, a cut-off save file.
+- Graphics restore: proven by a forced context loss under software WebGL only. A real GPU, an iPhone (app sent to the background) and an Android phone are unverified.
+- A VIP who gives up waiting could not be produced by ticking the game in review; that path was checked by reading the code.
+- No player telemetry exists, so whether any player ever hit the old save-loss paths is unknown.
+- Video sound (funny acted-out sounds on the three shorts, a longer trailer with voiceover, an American voice Matt picks by ear, not the Gus trailer voice): direction recorded in DECISIONS.md 2026-10-01, not started.
+- GitHub Dependabot alert 2 (glib, desktop shell only) still waits on Matt's dismissal.
+- Android was not built or run. Steam was out of scope. No store submission was made.

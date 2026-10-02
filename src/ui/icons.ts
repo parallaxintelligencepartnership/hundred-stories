@@ -31,6 +31,7 @@ export type IconName =
   | 'build'
   | 'lock'
   | 'views'
+  | 'clips'
   | 'structure'
   | 'home'
   | 'hotel'
@@ -74,6 +75,8 @@ const SYMBOLS: Record<IconName, string> = {
   help: `<circle cx="8" cy="8" r="6.25" ${LINE}/><path d="M6.25 6.25a1.75 1.75 0 1 1 2.5 1.6c-.5.25-.75.6-.75 1.15v.5M8 11.5v.25" ${LINE}/>`,
   // The speed pill: two bars, one triangle, two and three triangles.
   pause: `<path d="M5.5 3v10M10.5 3v10" ${LINE} stroke-width="2"/>`,
+  // Clips: a small screen with a play triangle.
+  clips: `<rect x="1.75" y="3" width="12.5" height="10" rx="2" ${LINE}/><path d="M6.5 5.75v4.5L10.5 8z" ${LINE}/>`,
   play: `<path d="M5 2.75v10.5L13 8z" ${LINE}/>`,
   fast: `<path d="M2 3.5v9L8 8zM8 3.5v9L14 8z" ${LINE}/>`,
   faster: `<path d="M1.25 4v8L5.5 8zM5.75 4v8L10 8zM10.25 4v8L14.5 8z" ${LINE}/>`,

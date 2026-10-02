@@ -2071,8 +2071,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     // refuses remote media, the site's Clips page in the system browser, as How to play does.
     entries.push(
       clipsOpenOutside()
-        ? { id: 'clips', label: CLIPS_TITLE, icon: 'views', kind: 'stay', title: 'The trailer and short clips, in your browser', run: () => openClipsOutside() }
-        : { id: 'clips', label: CLIPS_TITLE, icon: 'views', kind: 'page', title: 'The trailer and short clips', run: () => pauseMenu.pushPage(clipsPage()) },
+        ? { id: 'clips', label: CLIPS_TITLE, icon: 'clips', kind: 'stay', title: 'The trailer and short clips, in your browser', run: () => openClipsOutside() }
+        : { id: 'clips', label: CLIPS_TITLE, icon: 'clips', kind: 'page', title: 'The trailer and short clips', run: () => pauseMenu.pushPage(clipsPage()) },
     );
     // A phone's top bar is the pill alone (ui.css), so Views and Share live here instead.
     if (inSheetLayout()) {

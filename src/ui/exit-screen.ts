@@ -127,7 +127,7 @@ export function createExitScreen(options: ExitScreenOptions): ExitScreen {
     node.setAttribute('aria-describedby', titleId);
     const go = face('continue', CONTINUE_TOWER, 'play', () => options.onContinue());
     const outside = options.clipsOutside;
-    const clipsFace = face('clips', CLIPS_TITLE, 'views', () => (outside ? outside() : showClips()));
+    const clipsFace = face('clips', CLIPS_TITLE, 'clips', () => (outside ? outside() : showClips()));
     const third =
       options.third === 'newTower'
         ? face('newTower', EXIT_NEW_TOWER, 'structure', () => question())

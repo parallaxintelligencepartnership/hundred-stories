@@ -247,6 +247,16 @@ describe('Clips in the pause menu', () => {
     ui.destroy();
   });
 
+  it('the Clips entry does not wear the Views icon', () => {
+    const { root, ui } = mountMenu();
+    const iconOf = (id: string) => pauseEntry(root, id)!.descendants().find((n) => n.tagName.toLowerCase() === 'use')!.getAttribute('href');
+    expect(iconOf('clips')).toBeTruthy();
+    expect(iconOf('clips')).toBe(`#${iconOf('clips')!.replace(/^#/, '')}`);
+    expect(iconOf('clips')).toMatch(/clips$/);
+    expect(iconOf('clips')).not.toMatch(/views$/);
+    ui.destroy();
+  });
+
   it('Tab and the arrow keys reach each clip, and Space and Enter play and pause the one with focus', () => {
     const { root, ui } = mountMenu();
     choosePauseEntry(root, 'clips');

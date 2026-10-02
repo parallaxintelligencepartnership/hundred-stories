@@ -5135,6 +5135,14 @@ button.hs-news-toast {
   display: none;
 }
 
+@media (max-width: 720px) {
+  /* On a phone the alert stack stands over the pause card, so while the menu is open the cards
+     step aside: Stories holds the same rows and buttons. The update notice stays. */
+  .hs-ui.is-paused-menu .hs-alerts > :not(.is-update) {
+    display: none;
+  }
+}
+
 /* The VIP visit's cards (src/ui/vip-cards.ts, P3c): the booking, the guest in the lobby and the
    result, in the news look of the alert stack (an amber icon, red only for a visit that went
    badly, no stripe). The same result block sits in Stories' VIP visit section between visits.
