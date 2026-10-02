@@ -9,7 +9,7 @@ import type { ActiveEvent, Command, CommandResult, GuardResponse, Id, Room, Room
 import { personName, vipArrivalHour, vipPreference } from './identity';
 import { fireBurning, roomMiddle, sendAway, sendThiefOut, sendThiefTo, sendVipToSuite } from './people';
 import { ensureRouting, entrances, findRoute, isReachableFromLobby } from './routing';
-import { inWasteBacklog, rollWaste } from './recycling';
+import { centerRemoved, inWasteBacklog, rollWaste } from './recycling';
 import { dispatchGuard, releaseGuard, routeMinutes } from './security';
 import { isFollowed, recordBeat, type StoryBeat } from './story';
 import { debitLoss } from './economy';
@@ -139,6 +139,8 @@ function destroyRoom(world: World, room: Room, reason: string): void {
   evictInto(world, room, reason);
   setOnFire(world, room, false);
   removeRoom(world, room.id);
+  // A burned or bombed center stops existing the same way a demolished one does (build.ts).
+  if (room.kind === 'recycling') centerRemoved(world, room);
 }
 
 // ---------------------------------------------------------------- fire

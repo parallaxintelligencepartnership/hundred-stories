@@ -6,9 +6,9 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { applyCommand } from '../../src/sim/build';
-import { EVENT_TEST_HOOKS, resetEventTestHooks } from '../../src/sim/events';
+import { EVENT_TEST_HOOKS, resetEventTestHooks, startBomb, startFire } from '../../src/sim/events';
 import { centerSummary, collectorsOf, LAST_CENTER_GONE, workerTarget } from '../../src/sim/recycling';
-import { ROOMS, SHAFTS, WASTE } from '../../src/sim/rules';
+import { EVENTS, ROOMS, SHAFTS, WASTE } from '../../src/sim/rules';
 import { deserialize, hashWorld, serialize } from '../../src/sim/save';
 import { tick } from '../../src/sim/tick';
 import type { Command, Id, Room, Sim, World } from '../../src/sim/types';
@@ -183,6 +183,25 @@ describe('two centers', () => {
   });
 });
 
+describe('waste made today', () => {
+  it('counts all the rooms produced, the part full rooms had no space for as well', () => {
+    const world = tower([10]);
+    atOnDay(world, 2, 6, 0);
+    fillOffices(world, WASTE.roomCap); // every office full: nothing more fits
+    let produced = 0;
+    for (const room of offices(world)) {
+      const people = Math.max(room.wastePeak ?? 0, room.tenants.length);
+      if (people > 0) produced += Math.min(WASTE.dailyCap, Math.ceil(people / WASTE.perLoad));
+    }
+    expect(produced).toBeGreaterThan(0);
+    const before = totalWaste(world);
+    tick(world); // the 06:00 roll
+    expect(totalWaste(world)).toBe(before); // the rooms stay at the cap
+    expect(world.wasteToday?.made).toBe(produced);
+    expect(centerSummary(world, centers(world)[0] as Room).madeToday).toBe(produced);
+  });
+});
+
 describe('a tower that loses its last center', () => {
   it('piles waste and turns rooms dirty; a tower that never had one does not; a new center clears it over time', () => {
     const world = tower([10]);
@@ -223,6 +242,58 @@ describe('a tower that loses its last center', () => {
   }, 120_000);
 });
 
+/** Burn a room down: the fire starts in it and nobody puts it out, so it burns itself out. */
+function burnDown(world: World, room: Room): void {
+  EVENT_TEST_HOOKS.target.fire = room.id;
+  startFire(world);
+  expect(room.onFire).toBe(true);
+  for (let i = 0; i <= EVENTS.fire.burnOutMinutes + 1 && world.rooms.has(room.id); i++) tick(world);
+  expect(world.rooms.has(room.id)).toBe(false);
+}
+
+describe('a center a fire or a bomb destroys', () => {
+  it('a fire that takes the last center warns once, as a demolition does, and the waste piles on', () => {
+    const world = tower([10]);
+    atOnDay(world, 1, 20, 0); // off shift: the workers are in the center
+    const [center] = centers(world) as [Room];
+    burnDown(world, center);
+    expect(world.log.filter((l) => l.text === LAST_CENTER_GONE)).toHaveLength(1);
+    expect(world.hadRecycling).toBe(true);
+    expect(centers(world)).toHaveLength(0);
+    fillOffices(world, 5);
+    const before = totalWaste(world);
+    atOnDay(world, 6, 7, 0);
+    expect(totalWaste(world)).toBeGreaterThan(before);
+    expect(offices(world).some((r) => r.wasteBacklogSince != null && r.dirty)).toBe(true);
+    expect(simsOfKind(world, 'collector')).toHaveLength(0);
+    expect(world.log.filter((l) => l.text === LAST_CENTER_GONE)).toHaveLength(1);
+  }, 120_000);
+
+  it('a bomb that takes the last center warns once too', () => {
+    const world = tower([10]);
+    atOnDay(world, 1, 7, 0);
+    const [center] = centers(world) as [Room];
+    EVENT_TEST_HOOKS.target.bomb = center.id;
+    startBomb(world);
+    atOnDay(world, 1, 14, 0); // past the detonation
+    expect(world.rooms.has(center.id)).toBe(false);
+    expect(world.log.filter((l) => l.text === LAST_CENTER_GONE)).toHaveLength(1);
+    expect(world.hadRecycling).toBe(true);
+  });
+
+  it('a fire that takes one of two centers hands its unreachable floors to the other and does not warn', () => {
+    const world = tower([10, 200]);
+    atOnDay(world, 1, 20, 0);
+    const [a, b] = centers(world) as [Room, Room];
+    b.wasteUnreachable = [5];
+    burnDown(world, b);
+    expect(world.rooms.has(a.id)).toBe(true);
+    expect(a.wasteUnreachable).toContain(5);
+    expect(centerSummary(world, a).unreachableFloors).toContain(5);
+    expect(world.log.some((l) => l.text === LAST_CENTER_GONE)).toBe(false);
+  });
+});
+
 describe('the hadRecycling marker in a save', () => {
   it('survives save and load, and keeps the waste piling in the loaded tower', () => {
     const world = tower([10]);
@@ -254,6 +325,48 @@ describe('the hadRecycling marker in a save', () => {
     if (loaded.ok) expect(loaded.world.hadRecycling).toBe(true);
   });
 
+  it('an older save with leftover waste and no center loads as a tower that never had one', () => {
+    const world = tower([10]);
+    atOnDay(world, 1, 20, 0);
+    expect(applyCommand(world, { kind: 'demolish', roomId: (centers(world)[0] as Room).id })).toEqual({ ok: true });
+    fillOffices(world, 4);
+    const saved = JSON.parse(serialize(world)) as Record<string, unknown>;
+    delete saved.hadRecycling; // written before the marker existed
+    delete saved.wasteToday;
+    const loaded = deserialize(JSON.stringify(saved));
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) return;
+    const old = loaded.world;
+    expect(old.hadRecycling).toBeUndefined();
+    expect(totalWaste(old)).toBe(70 * 4);
+    atOnDay(old, 2, 7, 0); // the roll lets the leftover go
+    expect(totalWaste(old)).toBe(0);
+    atOnDay(old, 4, 7, 0); // and nothing piles after
+    expect(old.hadRecycling).toBeUndefined();
+    expect(old.wasteToday).toBeUndefined();
+    for (const room of old.rooms.values()) {
+      expect(room.waste).toBeUndefined();
+      expect(room.wasteBacklogSince).toBeUndefined();
+      expect(room.dirty).toBe(false);
+    }
+  });
+
+  it('an older save with leftover waste and a center standing gains the marker and keeps its waste', () => {
+    const world = tower([10]);
+    atOnDay(world, 1, 20, 0);
+    fillOffices(world, 4);
+    const saved = JSON.parse(serialize(world)) as Record<string, unknown>;
+    delete saved.hadRecycling;
+    delete saved.wasteToday;
+    const loaded = deserialize(JSON.stringify(saved));
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) return;
+    expect(loaded.world.hadRecycling).toBe(true);
+    expect(totalWaste(loaded.world)).toBe(70 * 4);
+    atOnDay(loaded.world, 2, 6, 1); // the roll adds to it rather than letting it go
+    expect(totalWaste(loaded.world)).toBeGreaterThan(70 * 4);
+  });
+
   it('a tower without it saves no new keys and hashes exactly as before; a bad marker is refused, bad counts are dropped', () => {
     const world = tower([]);
     atOnDay(world, 1, 7, 0);
@@ -281,6 +394,49 @@ describe('the hadRecycling marker in a save', () => {
       expect(kept.world.wasteToday).toBeUndefined();
       expect(hashWorld(kept.world)).toBe(hash);
     }
+  });
+});
+
+describe('a trip: the longest waiting room first, then the nearest while the cart has room', () => {
+  it('starts at the oldest room and fills up on its own floor before an older room elsewhere', () => {
+    const world = tower([10]);
+    atOnDay(world, 1, 8, 50); // before the shift: both workers wait in the center
+    for (const room of offices(world)) {
+      room.waste = 0;
+      room.wasteBacklogSince = null;
+      room.wasteCollectedAt = world.time.minute;
+    }
+    const at = (floor: number, x: number): Room => {
+      const room = offices(world).find((r) => r.floor === floor && r.x === x);
+      if (!room) throw new Error(`no office at ${floor}, ${x}`);
+      return room;
+    };
+    // The oldest room is on floor 8; every office on floor 3 waited longer than the other room on floor 8.
+    const oldest = at(8, 10);
+    oldest.waste = 3;
+    oldest.wasteBacklogSince = 100;
+    for (const room of offices(world).filter((r) => r.floor === 3)) {
+      room.waste = 3;
+      room.wasteBacklogSince = 200;
+    }
+    const sameFloor = at(8, 250);
+    sameFloor.waste = 3;
+    const seen = new Map<Id, Id[]>();
+    for (let i = 0; i < 240; i++) {
+      tick(world);
+      for (const sim of simsOfKind(world, 'collector')) {
+        const c = sim.collector;
+        if (!c || c.task !== 'toRoom' || c.roomId === null) continue;
+        const list = seen.get(sim.id) ?? [];
+        if (list[list.length - 1] !== c.roomId) list.push(c.roomId);
+        seen.set(sim.id, list);
+      }
+      if ([...seen.values()].some((list) => list[0] === oldest.id && list.length >= 2)) break;
+    }
+    const trip = [...seen.values()].find((list) => list[0] === oldest.id);
+    expect(trip).toBeDefined();
+    // Cart not full after the oldest room (3 of WASTE.workerCapacity): the next stop is on floor 8.
+    expect(trip?.[1]).toBe(sameFloor.id);
   });
 });
 

@@ -13,11 +13,13 @@
  * (WASTE.workersPerCenter, more as the tower grows), hired the tick after it goes up (and again
  * for an older save's center on load, from its id, so a replay stays equal) and removed with
  * it, as security.ts does for guards. All centers share one pool of rooms, and a room is claimed
- * by one worker at a time. On shift a worker takes the room that has waited longest (longest in
- * backlog, then longest since it was last emptied, by the day), the nearest only as the tie
- * break, walks there by the normal routes and elevators, collects, goes on while the load is
- * under WASTE.workerCapacity, then unloads at its own center. A room with no route is skipped
- * and its floor logged once a day. Off shift the worker waits in the center.
+ * by one worker at a time. On shift a worker starts each trip at the room that has waited
+ * longest (longest in backlog, then longest since it was last emptied, by the day; the nearest
+ * only as the tie break), so the top floors are not starved. While the cart has room it then
+ * fills up at the nearest rooms to where it stands, on its own floor first, so a trip does not
+ * wait for an elevator again for a room one floor away. Then it unloads at its own center. A
+ * room with no route is skipped and its floor logged once a day. Off shift the worker waits in
+ * the center.
  *
  * Nothing here draws from world.rng: every tie breaks by id.
  * A worker in the center does not count toward its occupancy and is not population.
@@ -29,7 +31,7 @@ import { clockOf, riderClassOf } from './types';
 import type { CollectorState, Id, Leg, Room, RoomKind, Sim, World } from './types';
 import { addSim, allocId, log, removeSim, roomsOfKind } from './world';
 
-/** Tie break weight only: one floor away counts as this many tiles when two rooms have waited alike. */
+/** One floor away counts as this many tiles in "nearest": between rooms that waited alike, and for the fill once the floor has none left. */
 const FLOOR_PREFERENCE_TILES = 10;
 
 const PRODUCERS = new Set<RoomKind>(WASTE.producers);
@@ -237,8 +239,11 @@ function compare(a: number, b: number): number {
 }
 
 /**
- * The room that has waited longest, among those with waste nobody else has claimed and a route;
- * nearest only when two have waited alike. True when the worker set off.
+ * Where to go next, among the rooms with waste nobody else has claimed and a route. An empty
+ * cart starts a trip: the room that has waited longest, the nearest only when two waited alike.
+ * A cart with room left fills up nearby: the nearest room on this floor, then the nearest
+ * anywhere (P2b review I1: when every stop went to the oldest room wherever it was, a
+ * one-center tower collected less). True when the worker set off.
  */
 function startNextRoom(world: World, sim: Sim, center: Room, c: CollectorState): boolean {
   const claimed = claimedRooms(world, sim);
@@ -251,9 +256,14 @@ function startNextRoom(world: World, sim: Sim, center: Room, c: CollectorState):
     candidates.push({ room, backlog, emptied, cost });
   }
   if (candidates.length === 0) return false;
-  candidates.sort(
-    (a, b) => compare(a.backlog, b.backlog) || compare(a.emptied, b.emptied) || a.cost - b.cost || a.room.id - b.room.id,
-  );
+  if (c.load > 0) {
+    const away = (room: Room): number => (room.floor === from.floor ? 0 : 1);
+    candidates.sort((a, b) => away(a.room) - away(b.room) || a.cost - b.cost || a.room.id - b.room.id);
+  } else {
+    candidates.sort(
+      (a, b) => compare(a.backlog, b.backlog) || compare(a.emptied, b.emptied) || a.cost - b.cost || a.room.id - b.room.id,
+    );
+  }
   const deadFloors = new Set<number>();
   for (const { room } of candidates) {
     if (deadFloors.has(room.floor)) continue;
@@ -461,9 +471,10 @@ export function rollWaste(world: World): WasteRoll {
     const people = Math.max(room.wastePeak ?? 0, room.tenants.length);
     if (people > 0 && !room.onFire) {
       const load = Math.min(WASTE.dailyCap, Math.ceil(people / WASTE.perLoad));
-      const before = room.waste ?? 0;
-      room.waste = Math.min(WASTE.roomCap, before + load);
-      made += room.waste - before;
+      // Made counts all a room produced, the part a full room had no space for as well, so the
+      // card shows the demand a shortage leaves behind rather than only what fit.
+      room.waste = Math.min(WASTE.roomCap, (room.waste ?? 0) + load);
+      made += load;
       wasteRooms += 1;
     }
     room.wastePeak = room.occupancy;
@@ -507,7 +518,8 @@ export function collectorStatus(world: World, sim: Sim): string {
 
 /**
  * One center's card. `workers` and `collectedHere` are this center's; the rest is the whole
- * tower: `madeToday` the units the 06:00 roll added, `collectedToday` the units every center has
+ * tower: `madeToday` the units the rooms produced at the 06:00 roll (a full room's overflow
+ * included), `collectedToday` the units every center has
  * brought in since, `centers` how many stand, and the floors any worker could not reach today.
  */
 export interface CenterSummary {
@@ -537,12 +549,13 @@ export function centerSummary(world: World, center: Room): CenterSummary {
   };
 }
 
-/** The warning when the last center is demolished: the waste goes on piling until one is back. */
+/** The warning when the last center is gone, however it went: the waste goes on piling until one is back. */
 export const LAST_CENTER_GONE =
   'The last recycling center is gone. Waste will pile up in the rooms and make them dirty until you build a new one.';
 
 /**
- * A center was just demolished (build.ts, after its workers went with it). The floors its
+ * A center just stopped existing: demolished (build.ts, after its workers went with it) or
+ * destroyed by a fire or a bomb (events.ts, after its workers were sent away). The floors its
  * workers could not reach today pass to the first center still standing, so the card and the
  * once a day log line stay right; with none left, one warning says the waste will pile up.
  */

@@ -290,9 +290,11 @@ export const THEFT = {
 };
 
 /**
- * Waste and its collection (src/sim/recycling.ts). Only while a recycling center stands: at the
- * 06:00 roll every room of a producing kind that anyone used since the last roll gains
- * min(dailyCap, ceil(people / perLoad)) units, up to roomCap. A room at or above backlogAt for
+ * Waste and its collection (src/sim/recycling.ts). Once the tower has had a recycling center,
+ * whether or not one stands now (a tower that never had one makes none): at the 06:00 roll
+ * every room of a producing kind that anyone used since the last roll gains
+ * min(dailyCap, ceil(people / perLoad)) units, up to roomCap. With no center standing nobody
+ * collects, so the rooms pile up into backlog until one is built (decision 2026-10-01). A room at or above backlogAt for
  * graceDays rolls in a row is in backlog: its dirty flag is held (EVAL.dirtyPenalty) until it is
  * emptied, and clears at the next roll after. Each center staffs workersPerCenter collectors
  * (more as the tower grows: see roomsPerWorker and maxWorkers),
