@@ -77,3 +77,16 @@ Review reports are under the session scratchpad `reviews/` (p1a-review.md, p2-re
 ## Still open or unverified
 
 (filled at closeout)
+
+## Rendered verification
+
+One run, on the final commit, from the repo root (Chrome at the default macOS path, or `CHROME=<path>`):
+
+```
+npx vite-node@6.0.0 scripts/make-readiness-fixtures.ts
+node scripts/make-readiness-shots.mjs
+```
+
+The first writes the saved towers the shots seed (built from the store tower with the sim's own ticks, commands and event starters) to `docs/reviews/readiness-2026-10-01/fixtures/`. The second builds the web bundle into a temp dir, serves it, and for each shot in its fixed list seeds the tower, reaches the state through the game's own controls, runs the DOM checks and writes the PNG. Output goes to `docs/reviews/readiness-2026-10-01/` (gitignored): `<shot>-<viewport>.png`, `report.txt` (one line per shot: OK, CHECK FAILED with the check, or NOT-CAPTURED with why) and `report.json`. It exits 1 when any check failed. `--checks-only` runs the same without PNGs.
+
+(results filled at closeout)
