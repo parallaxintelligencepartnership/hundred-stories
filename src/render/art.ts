@@ -149,6 +149,14 @@ export interface Art {
   /** Free every ghost texture: the placement ended, and a drag's spans should not stay baked. */
   dropGhosts?(): void;
   /**
+   * Free every baked structural texture (room shells, slabs, shafts, ghosts: the
+   * generateTexture bakes) so the next ask bakes it again. For a restored WebGL context: a
+   * render texture keeps no pixels of its own to upload again, so after a context loss each one
+   * draws blank until it is baked anew. Canvas backed textures upload again by themselves and
+   * are kept. Returns how many were freed.
+   */
+  resetBaked?(): number;
+  /**
    * False once the illustrated extras have failed (the renderer's guard): interior() then
    * returns an empty texture, and stairs and escalators draw from room() instead. Absent means on.
    */
@@ -1932,28 +1940,32 @@ export function createArt(renderer: Renderer, options: { createCanvas?: CanvasFa
   let noContextWarned = false;
   /** The ghost keys baked now, oldest first; at most GHOST_KEEP stay (ghost()). */
   const ghostKeys: string[] = [];
+  /** Every key bakeTarget has in the cache now, with its bytes: the render textures. */
+  const baked = new Map<string, number>();
 
-  /** Free one structural texture and take it off the counts. */
-  function freeStructural(key: string, w: number, h: number): void {
+  /**
+   * Free one structural texture and take it off the counts. The key leaves the cache and the
+   * baked list before the texture is destroyed, so no path can destroy it twice.
+   */
+  function freeStructural(key: string): void {
     const texture = cache.get(key);
-    if (!texture) return;
+    const bytes = baked.get(key);
+    if (!texture || bytes === undefined) return;
     cache.delete(key);
+    baked.delete(key);
     try {
       texture.destroy(true);
     } catch (error) {
       console.warn('render: freeing a texture failed', error);
     }
-    const bytes = Math.ceil(w * resolution) * Math.ceil(h * resolution) * 4;
     counts.structural.textures -= 1;
     counts.structural.bytes -= bytes;
     count(key, -bytes);
   }
 
-  /** Free a ghost key; its size is in the key (ghost:tiles:floors:ok). */
+  /** Free a ghost key. */
   function freeGhost(key: string): void {
-    const [, tiles, floors] = key.split(':');
-    const { width: w, height: h } = TEXTURE_SIZE.ghost(Number(tiles), Number(floors));
-    freeStructural(key, w, h);
+    freeStructural(key);
   }
 
   function bakeTarget(key: string, w: number, h: number, make: () => Container): Texture {
@@ -1968,10 +1980,12 @@ export function createArt(renderer: Renderer, options: { createCanvas?: CanvasFa
       textureSourceOptions: { scaleMode: TEXTURE_CLASS.structural.scaleMode },
     });
     target.destroy({ children: true });
+    const bytes = Math.ceil(w * resolution) * Math.ceil(h * resolution) * 4;
     cache.set(key, texture);
+    baked.set(key, bytes);
     counts.structural.textures += 1;
-    counts.structural.bytes += Math.ceil(w * resolution) * Math.ceil(h * resolution) * 4;
-    count(key, Math.ceil(w * resolution) * Math.ceil(h * resolution) * 4);
+    counts.structural.bytes += bytes;
+    count(key, bytes);
     return texture;
   }
 
@@ -2145,6 +2159,13 @@ export function createArt(renderer: Renderer, options: { createCanvas?: CanvasFa
     dropGhosts() {
       for (const key of ghostKeys) freeGhost(key);
       ghostKeys.length = 0;
+    },
+
+    resetBaked() {
+      const keys = [...baked.keys()];
+      for (const key of keys) freeStructural(key);
+      ghostKeys.length = 0;
+      return keys.length;
     },
 
     venue: venueTexture,

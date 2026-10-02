@@ -732,6 +732,7 @@ function guardArt(primary: Art, backup: Art): Art {
   if (p.vehicle) guarded.vehicle = extra('vehicle', p.vehicle);
   if (p.stats) guarded.stats = p.stats;
   if (p.dropGhosts) guarded.dropGhosts = p.dropGhosts;
+  if (p.resetBaked) guarded.resetBaked = p.resetBaked;
   guarded.extrasOn = () => !broken && !extrasBroken;
   return guarded;
 }
@@ -3000,6 +3001,53 @@ export async function createRenderer(
     curb.reset();
   }
 
+  /**
+   * The WebGL context came back after a loss (a phone backgrounded the app, the GPU process
+   * reset). Pixi has uploaded every canvas backed texture again, but a baked render texture
+   * (room shells, slabs, shafts, the ghost) kept no pixels to upload and now draws blank. Let go
+   * of the sprites that show them, free every bake, and have the next render build the static
+   * tower from the current world, as on the first pass: no build feedback, nothing animated.
+   * Venues, people, cars and the sky are canvas backed and stay as they are.
+   */
+  function rebuildBakedArt(): void {
+    // Build feedback holds room and slab nodes; land it before they go.
+    buildFx.clear();
+    for (const entry of roomSprites.values()) entry.node.destroy();
+    roomSprites.clear();
+    for (const entry of slabSprites.values()) entry.node.destroy();
+    slabSprites.clear();
+    for (const entry of shaftSprites.values()) for (const part of entry.parts) part.destroy();
+    shaftSprites.clear();
+    // drawOverlay asks for the ghost again on the next frame while a placement is on.
+    ghostSprite.texture = Texture.EMPTY;
+    art.resetBaked?.();
+    // As at boot: every window state baked now, so the next dusk swaps rather than bakes.
+    bakeRoomStates(art, lastWorld);
+    reconciledWorld = null;
+    reconciledVersion = -1;
+    lastLitState = -1;
+    reconciledLit = -1;
+    veilDirty = true;
+    blocksDirty = true;
+    facadeDirty = true;
+  }
+
+  // The canvas event, not a contextChange runner: Pixi's GlContextSystem added its own
+  // webglcontextrestored listener in app.init, before this one, and it emits contextChange (the
+  // GL textures and render targets dropped and rebuilt) synchronously, so by the time this runs
+  // Pixi's GL state is new. A runner would also fire at init. Pixi's webglcontextlost listener
+  // already calls preventDefault, which is what lets the browser restore at all. While the
+  // context is lost nothing here changes: the frame loop draws into a lost context, which WebGL
+  // ignores, and the sim, saving and the DOM do not touch the canvas.
+  const onContextRestored = (): void => {
+    try {
+      rebuildBakedArt();
+    } catch (error) {
+      console.warn('render: rebuilding the art after a context restore failed', error);
+    }
+  };
+  app.canvas.addEventListener('webglcontextrestored', onContextRestored);
+
   frameInitial();
 
   // The camera the ui holds. A move through it is the player's view, the same as a canvas drag,
@@ -3179,6 +3227,7 @@ export async function createRenderer(
       app.canvas.removeEventListener('pointercancel', onPointerCancel);
       app.canvas.removeEventListener('wheel', onWheel);
       app.canvas.removeEventListener('contextmenu', onContextMenu);
+      app.canvas.removeEventListener('webglcontextrestored', onContextRestored);
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
       window.removeEventListener('blur', onBlur);
