@@ -3005,24 +3005,14 @@ export async function createRenderer(
    * The WebGL context came back after a loss (a phone backgrounded the app, the GPU process
    * reset). Pixi has uploaded every canvas backed texture again, but a baked render texture
    * (room shells, slabs, shafts, the ghost) kept no pixels to upload and now draws blank. Let go
-   * of the sprites that show them, free every bake, and have the next render build the static
-   * tower from the current world, as on the first pass: no build feedback, nothing animated.
-   * Venues, people, cars and the sky are canvas backed and stay as they are.
+   * of the sprites that show them, free every bake, and build the static tower again from the
+   * current world here, as on the first pass: no build feedback, nothing animated. Built here
+   * rather than on the next render, so the first frame after the restore (Pixi's ticker may draw
+   * before the game's render) already has every shell, slab and shaft, and the far zoom facade
+   * reads each room's real window state. Venues, people, cars and the sky are canvas backed and
+   * stay as they are.
    */
-  function rebuildBakedArt(): void {
-    // Build feedback holds room and slab nodes; land it before they go.
-    buildFx.clear();
-    for (const entry of roomSprites.values()) entry.node.destroy();
-    roomSprites.clear();
-    for (const entry of slabSprites.values()) entry.node.destroy();
-    slabSprites.clear();
-    for (const entry of shaftSprites.values()) for (const part of entry.parts) part.destroy();
-    shaftSprites.clear();
-    // drawOverlay asks for the ghost again on the next frame while a placement is on.
-    ghostSprite.texture = Texture.EMPTY;
-    art.resetBaked?.();
-    // As at boot: every window state baked now, so the next dusk swaps rather than bakes.
-    bakeRoomStates(art, lastWorld);
+  function invalidateStaticTower(): void {
     reconciledWorld = null;
     reconciledVersion = -1;
     lastLitState = -1;
@@ -3030,6 +3020,33 @@ export async function createRenderer(
     veilDirty = true;
     blocksDirty = true;
     facadeDirty = true;
+  }
+  function rebuildBakedArt(): void {
+    // First, so whatever happens below the next render rebuilds the tower from the world.
+    invalidateStaticTower();
+    let rebuilt = false;
+    try {
+      // Build feedback holds room and slab nodes; land it before they go.
+      buildFx.clear();
+      for (const entry of roomSprites.values()) entry.node.destroy();
+      roomSprites.clear();
+      for (const entry of slabSprites.values()) entry.node.destroy();
+      slabSprites.clear();
+      for (const entry of shaftSprites.values()) for (const part of entry.parts) part.destroy();
+      shaftSprites.clear();
+      // drawOverlay asks for the ghost again on the next frame while a placement is on.
+      ghostSprite.texture = Texture.EMPTY;
+      art.resetBaked?.();
+      // As at boot: every window state baked now, so the next dusk swaps rather than bakes.
+      bakeRoomStates(art, lastWorld);
+      // reconciledWorld is null, so nothing is announced as newly built.
+      const minuteOfDay = clockOf(lastWorld.time.minute).minuteOfDay;
+      reconcileStaticTower(lastWorld, isNight(minuteOfDay), minuteOfDay);
+      rebuilt = true;
+    } finally {
+      // A throw part way: the next render rebuilds in full, never the window-only branch.
+      if (!rebuilt) invalidateStaticTower();
+    }
   }
 
   // The canvas event, not a contextChange runner: Pixi's GlContextSystem added its own

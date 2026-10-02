@@ -63,7 +63,7 @@ vi.mock('pixi.js', async (importOriginal) => {
 
 // Stub art with a generation: resetBaked starts a new one, as a real reset makes every bake new.
 // A texture's label is `${generation}#${key}`, so a test reads which bake a sprite shows.
-const bakes = vi.hoisted(() => ({ generation: 0, resets: 0 }));
+const bakes = vi.hoisted(() => ({ generation: 0, resets: 0, fail: false }));
 const textures = new Map<string, Texture>();
 function tex(key: string, baked = true): Texture {
   const label = baked ? `${bakes.generation}#${key}` : key;
@@ -79,6 +79,7 @@ const stubArt: Art = {
   sim: (kind, band, frame, outfit) => tex(`sim|${kind}|${band}|${frame}|${outfit ?? -1}`, false),
   ghost: (w, h, ok) => tex(`ghost|${w}|${h}|${ok}`),
   resetBaked: () => {
+    if (bakes.fail) throw new Error('reset failed');
     bakes.generation++;
     bakes.resets++;
     return 0;
@@ -201,6 +202,81 @@ describe('a restored WebGL context (R1)', () => {
     const shafts = baked(stage).filter((s) => s.texture.label!.includes('#shaft|'));
     expect([rooms.length, slabs.length, shafts.length]).toEqual([3, 3, 1]);
     expect(baked(stage).every((s) => s.texture.label!.startsWith('3#'))).toBe(true);
+  });
+
+  // R1 review ADV-1: the tower is rebuilt inside the restore handler, so the first frame after it
+  // (Pixi's ticker may draw before the game's render) has every shell, slab and shaft, each in the
+  // window state it had, by day and at night.
+  it.each([
+    ['noon', NOON],
+    ['22:00', 22 * 60],
+  ])('the restore itself puts the whole tower back, in the same window states, at %s', async (_, minute) => {
+    const world = tower();
+    world.time.minute = minute;
+    const { renderer, stage, fire } = await mount(world);
+    renderer.render(world, 1);
+    const keys = (gen: string): string[] =>
+      baked(stage)
+        .map((s) => s.texture.label!)
+        .filter((l) => !l.includes('#ghost|'))
+        .map((l) => {
+          expect(l.startsWith(gen)).toBe(true);
+          return l.slice(gen.length);
+        })
+        .sort();
+    const before = keys('0#');
+    expect(before.length).toBe(2 + 2 + 1);
+
+    fire('webglcontextrestored');
+    // No render yet: the stage as the very next frame would draw it.
+    expect(keys('1#')).toEqual(before);
+    // Pixi's ticker frame first, then the game's render: still one sprite per thing, all new.
+    for (const frame of apps[apps.length - 1]!.frames) frame();
+    renderer.render(world, 1);
+    expect(keys('1#')).toEqual(before);
+  });
+
+  // R1 review ADV-2: a throw part way through the handler still leaves the next render to build
+  // the tower from the world, not the window-only pass over an empty sprite table.
+  it('a throw inside the restore handler still has the next render build every room', async () => {
+    const world = tower();
+    const { renderer, stage, fire } = await mount(world);
+    renderer.render(world, 1);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    bakes.fail = true;
+    fire('webglcontextrestored');
+    bakes.fail = false;
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+    renderer.render(world, 1);
+    const rooms = baked(stage).filter((s) => s.texture.label!.includes('#room|'));
+    const slabs = baked(stage).filter((s) => s.texture.label!.includes('#slab|'));
+    const shafts = baked(stage).filter((s) => s.texture.label!.includes('#shaft|'));
+    expect([rooms.length, slabs.length, shafts.length]).toEqual([2, 2, 1]);
+  });
+
+  // R1 review ADV-3: build feedback running over a room when the context comes back is landed,
+  // not left playing its reveal over the rebuilt room.
+  it('a restore during a build effect clears its reveal covers', async () => {
+    const world = tower();
+    const { renderer, stage, fire } = await mount(world);
+    renderer.render(world, 1);
+    makeRoom(world, 'office', 4, 100);
+    markStructureChanged(world);
+    renderer.render(world, 1);
+    const reveals = (): Sprite[] => {
+      const out: Sprite[] = [];
+      const walk = (n: Container): void => {
+        if (n instanceof Sprite && !n.destroyed && n.texture === Texture.WHITE && n.tint === REVEAL_COLOUR) out.push(n);
+        for (const c of n.children) walk(c as Container);
+      };
+      walk(stage);
+      return out;
+    };
+    expect(reveals().length).toBeGreaterThan(0);
+    fire('webglcontextrestored');
+    renderer.render(world, 1);
+    expect(reveals()).toEqual([]);
   });
 
   it('takes its listener off in destroy', async () => {
