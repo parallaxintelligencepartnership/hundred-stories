@@ -204,7 +204,7 @@ describe('the VIP journey', () => {
     expect(lit).toBe(true);
     expect(world.stats.vipRating).toBe('poor');
     expect(world.stats.lastVip?.incident).toBe(true);
-    expect(vipBreakdown(world.stats.lastVip!).find((r) => r.label === 'Fire or bomb')?.value).toBe('Yes');
+    expect(vipBreakdown(world.stats.lastVip!).find((r) => r.label === 'Safety')?.value).toBe('A fire or bomb (poor)');
   });
 
   it('a suite demolished during the notice ends the visit with the reason and clears it', () => {

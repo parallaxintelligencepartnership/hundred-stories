@@ -162,7 +162,7 @@ describe('next star', () => {
     expect(four.needs).toEqual([
       { text: 'Population 5,100 of 5,000', met: true },
       { text: '1 hotel suite (1 built)', met: true },
-      { text: 'VIP rating fair or better (now none)', met: false },
+      { text: 'VIP rating fair or better (no visit yet)', met: false },
       { text: 'A recycling center', met: false },
       { text: 'A medical center', met: true },
     ]);

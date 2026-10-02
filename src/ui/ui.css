@@ -5117,3 +5117,101 @@ button.hs-news-toast {
 .hs-ui.is-exited .hs-news {
   display: none;
 }
+
+/* The VIP visit's cards (src/ui/vip-cards.ts, P3c): the booking, the guest in the lobby and the
+   result, in the news look of the alert stack (an amber icon, red only for a visit that went
+   badly, no stripe). The same result block sits in Stories' VIP visit section between visits.
+   Sizes come from the type scale, so Larger text grows them; nothing here moves. */
+.hs-vip-who {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 6px;
+}
+
+.hs-vip-portrait {
+  flex: 0 0 auto;
+  border-radius: 10px;
+}
+
+.hs-vip-who-words {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.hs-vip-name,
+.hs-vip-line {
+  margin: 0;
+  font-size: var(--size-12);
+  line-height: 1.35;
+}
+
+.hs-vip-name {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.hs-vip-line {
+  color: var(--ink-dim);
+}
+
+/* The rating is the headline: one word, in display type, amber for good or fair, red for poor. */
+.hs-vip-headline {
+  margin: 0;
+  font-size: var(--size-20);
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--amber-text);
+}
+
+.hs-vip-result.is-poor .hs-vip-headline {
+  color: var(--alert);
+}
+
+.hs-vip-reasons {
+  margin: 0 0 6px;
+  padding: 0;
+  list-style: none;
+}
+
+/* A reason row: the short label whole on the left, the value wrapping beside it on a phone. */
+.hs-vip-reason {
+  grid-template-columns: auto minmax(0, 1fr);
+  padding: 4px 0;
+}
+
+.hs-vip-reason .hs-row-label,
+.hs-vip-reason .hs-row-value {
+  font-size: var(--size-12);
+}
+
+.hs-vip-reason .hs-row-value {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.hs-vip-progress,
+.hs-vip-next {
+  margin: 0 0 4px;
+  font-size: var(--size-12);
+  color: var(--ink-dim);
+}
+
+.hs-vip-progress {
+  color: var(--ink);
+}
+
+/* The card's buttons: one row that wraps on a narrow phone, close under the words. */
+.hs-toast.is-vip .hs-actions {
+  margin: 6px 0 2px;
+}
+
+/* In Stories the result reads at the page's size. */
+.hs-vip .hs-vip-name,
+.hs-vip .hs-vip-line,
+.hs-vip .hs-vip-reason .hs-row-label,
+.hs-vip .hs-vip-reason .hs-row-value,
+.hs-vip .hs-vip-progress,
+.hs-vip .hs-vip-next {
+  font-size: var(--size-14);
+}

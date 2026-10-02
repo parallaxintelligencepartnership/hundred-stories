@@ -35,7 +35,7 @@ export const NOTIFY_LABEL: Record<NotifyKind, string> = {
 };
 
 export const NOTIFY_TIP: Record<NotifyKind, string> = {
-  alerts: 'A fire, a theft or a bomb in your tower',
+  alerts: 'A fire, a theft, a bomb, cockroaches or a VIP visit in your tower',
   daily: "A new Today's tower is ready",
   update: 'A new version of the game is ready',
 };

@@ -6,14 +6,14 @@ import './ui.css';
 
 import { createSound, writeSoundSettings } from '../audio/audio';
 import type { GameApi, LeaveResult, Placement, Speed, Tool } from '../game/api';
-import { LEAVE_NOT_SAVED } from '../game/game';
+import { DAILY_OVER_REASON, LEAVE_NOT_SAVED } from '../game/game';
 import { showLeaveCard } from './leave-card';
 import type { Renderer } from '../render/renderer';
 import { describeBeat, followSim, isFollowed, storyName, type StoryBeat } from '../sim/story';
 import type { Command, CommandResult, LogEntry, World } from '../sim/types';
 import { createIntroPanel, createSideCard, createStarToast, createTipToast } from './cards';
 import { unlocksText } from '../sim/chronicle';
-import { createAlertStack, type GameOverAction } from './alerts';
+import { createAlertStack, isVipArrivalLine, type GameOverAction } from './alerts';
 import { importSaveWithDialog, savePlatform } from '../game/storage';
 import { createDemoCapCard, isDemoCapEntry } from './demo';
 import { createFeedbackPanel } from './feedback';
@@ -553,6 +553,11 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     },
     gameOverActions,
     openStories: (target) => openStories(target),
+    // The VIP arrival card's See the guest and See the suite.
+    selectGuest: (simId) => ctx.select?.({ simId }),
+    centerOn: (floor, x) => ctx.centerOn?.(floor, x),
+    // A finished Today's tower refuses every command: its spend buttons say so, its chips go.
+    refusal: () => (game.getDaily?.()?.finished ? DAILY_OVER_REASON : null),
   });
   // The game over card's Open a saved file, off the desktop shell: a file input kept out of sight.
   const gameOverFile = el('input');
@@ -1752,7 +1757,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
       if (newsShowsAlert) {
         // An alert is its card. A notable line in the same batch still toasts beside it: the
         // quarter settle line is logged just before the debt warnings it explains.
-        const notable = log.slice(log.length - fresh).reverse().find((line) => line.level === 'info' && line.notable);
+        const notable = log.slice(log.length - fresh).reverse().find((line) => line.level === 'info' && line.notable && !isVipArrivalLine(line));
         if (notable) toastLayer.show(notable.text, { onTap: () => openStories(lineTarget(notable)), tapLabel: STORIES_TAP_LABEL });
         return;
       }
@@ -1784,10 +1789,11 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
         return;
       }
       // Routine info (built, rented, checked out, cleaned) goes to Stories only; a notable
-      // one (a VIP, a wedding) still toasts, even when a routine line landed after it.
+      // one (a VIP, a wedding) still toasts, even when a routine line landed after it. The VIP
+      // walking into the lobby is its own card (the alert stack), not a toast.
       const shown =
-        newest.level === 'info' && !newest.notable
-          ? log.slice(log.length - fresh).reverse().find((line) => line.level === 'info' && line.notable)
+        newest.level === 'info' && (!newest.notable || isVipArrivalLine(newest))
+          ? log.slice(log.length - fresh).reverse().find((line) => line.level === 'info' && line.notable && !isVipArrivalLine(line))
           : newest;
       if (!shown) return;
       // Only the sentence, in Stories' plain voice; Stories keeps when it happened.
@@ -1843,7 +1849,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
         alerts.onAlert(entry);
         // Hidden, the system says it too (when the player turned Alerts on); visible, the card is the notice.
         notifier?.alert(entry.text);
-      }
+      } else if (entry && isVipArrivalLine(entry)) alerts.onVipArrival(entry);
       if (entry && !demoCap.offered && isDemoCapEntry(entry)) demoCap.offer();
     }
     lastLogTotal = total;

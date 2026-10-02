@@ -8,7 +8,7 @@ import type { ActiveEvent, Room, VipVisitRecord, World } from '../../src/sim/typ
 import { createWorld } from '../../src/sim/world';
 import type { PanelContext } from '../../src/ui/panels';
 import { storiesBody } from '../../src/ui/stories';
-import { vipBreakdown, vipNextChance, vipView } from '../../src/ui/vip';
+import { VIP_RATED_ON, vipBreakdown, vipNextChance, vipView } from '../../src/ui/vip';
 import { atOnDay, buildTower, lobbyRun, onlyShaft, roomsMatching, runMinutes } from '../scenarios/helpers';
 import { FakeDom, type FakeElement } from './fake-dom';
 
@@ -40,14 +40,23 @@ beforeEach(() => {
 afterEach(() => resetEventTestHooks());
 
 describe('VIP card', () => {
-  it('names the guest and their preference while the visit is booked', () => {
+  it('names the guest, when they arrive in plain words, the suite, and what they like as character, not scoring', () => {
     const { world, visit } = bookedTower();
     const view = vipView(world);
-    expect(view?.lines[0]).toBe(`${personName(world.seed, visit.simId)}, VIP guest`);
-    expect(view?.lines[1]).toBe(`Cares most about ${visit.preference}`);
     // On the hour the VIP's identity picks, between 8:00 AM and 5:00 PM: 3:00 PM for this one.
     expect(vipArrivalHour(world.seed, visit.simId)).toBe(15);
-    expect(view?.lines[2]).toBe('Arrives at the lobby weekday 2, quarter 1, year 1 at 3:00 PM');
+    expect(view?.stage).toBe('booked');
+    expect(view?.lines).toEqual([
+      `${personName(world.seed, visit.simId)}, VIP guest`,
+      'Arrives tomorrow afternoon at 3:00 PM',
+      'Suite on floor 3',
+      `Likes: ${visit.preference}`,
+      VIP_RATED_ON,
+    ]);
+    expect(VIP_RATED_ON).toBe('Every VIP rates the same three things: the longest elevator wait, the suite and safety.');
+    // Past midnight the same arrival is this afternoon.
+    world.time.minute = 1440 + 60;
+    expect(vipView(world)?.lines[1]).toBe('Arrives this afternoon at 3:00 PM');
   });
 
   it('ticks the checklist live from the tower', () => {
@@ -115,11 +124,11 @@ describe('VIP card', () => {
     const rows = Object.fromEntries((view?.breakdown ?? []).map((r) => [r.label, r.value]));
     const last = world.stats.lastVip as VipVisitRecord;
     expect(rows['Longest wait']).toBe(`${last.longestWait === 1 ? '1 minute' : `${last.longestWait} minutes`} (${last.waitBand})`);
-    expect(rows['Suite clean']).toBe('Yes');
-    expect(rows['Fire or bomb']).toBe('No');
+    expect(rows['Suite']).toBe(`Floor 3, clean (${last.suiteBand})`);
+    expect(rows['Safety']).toBe('No fire or bomb (good)');
     expect(rows['Rating']).toBe(last.rating.charAt(0).toUpperCase() + last.rating.slice(1));
     expect(view?.nextChance).toBe(
-      'Next chance: weekday 1, quarter 2, year 1 at 6:00 AM. On the first day of each quarter at 6:00 AM, there is a 50% chance a VIP books a visit, if you have at least 3 stars and a clean, empty suite.',
+      'Next chance: tomorrow at 6:00 AM. On the first day of each quarter at 6:00 AM, there is a 50% chance a VIP books a visit, if you have at least 3 stars and a clean, empty suite.',
     );
   });
 
@@ -138,27 +147,32 @@ describe('VIP card', () => {
     };
     expect(vipBreakdown(record)).toEqual([
       { label: 'Longest wait', value: '12 minutes (poor)' },
-      { label: 'Suite clean', value: 'No' },
-      { label: 'Suite rating', value: 'Poor' },
-      { label: 'Fire or bomb', value: 'Yes' },
+      { label: 'Suite', value: 'Not clean (poor)' },
+      { label: 'Safety', value: 'A fire or bomb (poor)' },
       { label: 'Rating', value: 'Poor' },
     ]);
     expect(vipBreakdown({ ...record, reason: 'The VIP left: no suite was ready', suiteClean: null, incident: false, longestWait: 0 })).toEqual([
-      { label: 'Visit', value: 'The VIP left: no suite was ready' },
+      { label: 'Left early', value: 'No suite was ready' },
       { label: 'Longest wait', value: '0 minutes (good)' },
-      { label: 'Suite clean', value: 'Never reached' },
-      { label: 'Fire or bomb', value: 'No' },
+      { label: 'Suite', value: 'Never reached' },
+      { label: 'Safety', value: 'No fire or bomb (good)' },
       { label: 'Rating', value: 'Poor' },
     ]);
+    // A record that kept its suite names the floor; a clean suite rated low is fair.
+    expect(vipBreakdown({ ...record, suiteFloor: 12, suiteId: 4, suiteClean: true, suiteBand: 'fair' })[1]).toEqual({
+      label: 'Suite',
+      value: 'Floor 12, clean, but rated low (fair)',
+    });
     for (const row of vipBreakdown(record)) expect(row.value).not.toMatch(/[–—]/);
   });
 
-  it('says nothing below the VIP star, and names the rule from it', () => {
+  it('says nothing while there has never been a visit and none is booked, at any star; names the next chance in plain words', () => {
     const world = createWorld(1);
     expect(vipView(world)).toBeNull();
     world.stars = EVENTS.vip.minStar;
-    expect(vipView(world)?.lines).toEqual(['No VIP has visited yet']);
-    expect(vipNextChance(world)).toMatch(/^Next chance: weekday 1, quarter 2, year 1 at 6:00 AM\./);
+    expect(vipView(world)).toBeNull();
+    expect(vipNextChance(world)).toMatch(/^Next chance: in 3 days at 6:00 AM\./);
+    expect(vipNextChance(world)).not.toMatch(/weekday|quarter \d|year \d/i);
   });
 });
 

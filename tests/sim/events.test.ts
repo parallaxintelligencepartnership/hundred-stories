@@ -694,7 +694,7 @@ describe('VIP', () => {
     expect(sim?.state).toBe('outside');
     expect(suite.tenants).toEqual([sim?.id]);
     expect(world.log.at(-1)?.text).toBe(
-      `A VIP, ${personName(world.seed, visit.simId)}, is coming to the suite on floor 5 tomorrow. They care most about ${visit.preference}.`,
+      `A VIP, ${personName(world.seed, visit.simId)}, is coming to the suite on floor 5 tomorrow. They like ${visit.preference}. Every VIP rates the wait, the suite and safety.`,
     );
   });
 

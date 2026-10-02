@@ -15,16 +15,24 @@
 // reminder chip that opens Stories at it. The card itself never comes back. The helicopter and
 // ransom controls are built here once (helicopterControl, ransomControl) for the cards and for
 // the rows in Stories, so both follow one rule.
+//
+// The VIP visit (P3c) has its own cards in the news look (vip-cards.ts): the booking, the guest in
+// the lobby and the result, one at a time, each replacing the one before while it is still up.
+// They speak in a polite live region of their own: a visit is not an emergency. In a tower whose
+// commands are refused (a finished Today's tower) the chips go and the spend buttons, here and in
+// Stories, are off with the reason.
 
 import { FIRE_BURN_OUT_TEXT, FIRE_OUT_EMPTY_TEXT, helicopterCost } from '../sim/events';
 import { EVENTS } from '../sim/rules';
-import type { Command, CommandResult, Id, LogEntry, World } from '../sim/types';
+import type { ActiveEvent, Command, CommandResult, Id, LogEntry, World } from '../sim/types';
 import { formatMoney } from './format';
 import type { IconName } from './icons';
 import { button, el } from './panels';
 import { SAVED_NOTICE } from './save-button';
 import type { StoriesTarget } from './stories';
 import { toastIcon } from './toast';
+import { vipArrivedBody, vipBookedBody, vipResultBody, type VipCardActions, type VipCardBody } from './vip-cards';
+import { vipResult } from './vip';
 
 /** Cards shown at once; older ones fold into the "and N more" line. */
 export const ALERT_STACK_MAX = 3;
@@ -60,6 +68,23 @@ export interface AlertStackDeps {
   gameOverActions?(): readonly GameOverAction[];
   /** Open Stories at a section or incident: the "and N more" line and the reminder chips. */
   openStories?(target: StoriesTarget): void;
+  /** Select a person, so their card opens: the VIP arrival card's See the guest. */
+  selectGuest?(simId: Id): void;
+  /** Center the tower view on a place: the VIP arrival card's See the suite. */
+  centerOn?(floor: number, x: number): void;
+  /**
+   * Why every command is refused right now (a finished Today's tower), or null. Spend buttons go
+   * off with these words and the reminder chips go, so nothing invites a press that is refused.
+   */
+  refusal?(): string | null;
+}
+
+/** The refusal the alert stack last read for a world, shared with Stories' spend buttons. */
+const refusals = new WeakMap<object, string>();
+
+/** Why every command is refused in this world now, as the alert stack last heard it, or null. */
+export function commandsRefused(world: World): string | null {
+  return refusals.get(world) ?? null;
 }
 
 /** Is a security office on duty? One on fire is not, as the sim counts it. */
@@ -103,6 +128,9 @@ function spendControl(
     sync(world) {
       const now = rule(world);
       if (call.textContent !== now.label) call.textContent = now.label;
+      // A tower that refuses every command: off, with the reason it is refused.
+      const refused = commandsRefused(world);
+      if (refused !== null) now.refusal = refused;
       const short = now.refusal !== null;
       if (call.disabled !== short) call.disabled = short;
       if (call.classList.contains('is-secondary') !== now.secondary) call.classList.toggle('is-secondary', now.secondary);
@@ -184,6 +212,8 @@ export interface AlertStack {
    * on screen closes first, so a repeat shows fresh rather than stacking beside it.
    */
   notice(text: string, options?: { replace?: boolean }): void;
+  /** The VIP walked into the lobby (an info line): the arrival card. */
+  onVipArrival(entry: LogEntry): void;
   /** Bring the fire card in line with the world. Run after every drain of the log. */
   sync(): void;
   /** Escape: close the newest visible card. False when there is none. */
@@ -273,6 +303,20 @@ export function bombLineOf(entry: LogEntry): BombLine | null {
 }
 
 /** A cockroach line: they moved into a room, or spread to one. */
+/** Which VIP line this is, by the sim's wording in src/sim/events.ts: the booking or the result. */
+export function vipLineOf(entry: LogEntry): 'booked' | 'result' | null {
+  if (entry.level !== 'alert') return null;
+  const text = entry.text;
+  if (text.startsWith('A VIP, ') && text.includes(' is coming to the ')) return 'booked';
+  if (text.startsWith('The VIP checked out and rated the tower ') || text.startsWith('The VIP left: ')) return 'result';
+  return null;
+}
+
+/** The VIP walked into the lobby: the line its arrival card answers instead of a news toast. */
+export function isVipArrivalLine(entry: LogEntry): boolean {
+  return entry.level === 'info' && entry.text.startsWith('The VIP, ') && entry.text.includes(' walked into the lobby');
+}
+
 export function isRoachLine(entry: LogEntry): boolean {
   if (entry.level !== 'alert') return false;
   return entry.text.startsWith('Cockroaches moved into the ') || entry.text.startsWith('The cockroaches spread to the ');
@@ -323,8 +367,13 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
   // The folded cards' line: a tap opens Stories, where everything they said is kept.
   const more = button('', 'hs-toast-more', () => deps.openStories?.('needs'));
   more.title = 'Open Stories';
-  /** The reminder chips, fire then bomb: shown while the incident is live and its card is out of sight. */
+  /**
+   * The reminder chips, fire then bomb: made once per incident and updated in place, shown while
+   * the incident is live and its card is out of sight, hidden (not remade) while the card is back.
+   */
   const chips = new Map<'fire' | 'bomb', { node: HTMLButtonElement; words: HTMLElement }>();
+  /** The VIP visit's card on screen (booking, arrival or result): one at a time. */
+  let vipCard: { card: Card; body: VipCardBody } | null = null;
   let incident: FireIncident | null = null;
   /**
    * The bomb threat's card: the ransom line and its button (off while cash is short), then the
@@ -345,7 +394,12 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
   /** The game over card. Kept out of `cards`: nothing closes it, folds it or lets it linger. */
   let ending: { node: HTMLElement; key: string } | null = null;
 
-  function layout(): void {
+  /**
+   * Fold the oldest cards past ALERT_STACK_MAX. With `chips`, the reminder chips follow; a card
+   * being opened skips that (P3a A4): its incident is not assigned yet, so a chip made now would
+   * churn in and out of the live region. The sync after the drain brings the chips in line.
+   */
+  function layout(chipsToo = true): void {
     for (let i = cards.length - 1; i >= 0; i -= 1) if (cards[i]?.gone) cards.splice(i, 1);
     const hidden = Math.max(0, cards.length - ALERT_STACK_MAX);
     cards.forEach((card, i) => card.node.classList.toggle('is-collapsed', i < hidden));
@@ -354,14 +408,22 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
       more.setAttribute('aria-label', `and ${hidden} more. Open Stories`);
       if (more.parentNode !== host) host.prepend(more);
     } else more.remove();
-    syncChips();
+    if (chipsToo) syncChips();
     // The game over card stays first, above the fold line.
     if (ending && host.firstElementChild !== ending.node) host.prepend(ending.node);
   }
 
-  /** On screen and not folded: the player can see it and its button. */
+  /**
+   * In sight for the chip: on screen, and not folded under newer incident or alert cards. A fold
+   * that only notices cause lasts as long as a notice, so it raises no chip (P3a A12: the chip
+   * would blink for six seconds and go).
+   */
   function inSight(card: Card | null | undefined): boolean {
-    return !!card && !card.gone && !card.node.classList.contains('is-collapsed');
+    if (!card || card.gone) return false;
+    if (!card.node.classList.contains('is-collapsed')) return true;
+    const lasting = cards.filter((c) => !c.gone && c.notice === undefined);
+    const at = lasting.indexOf(card);
+    return at >= 0 && at >= lasting.length - ALERT_STACK_MAX;
   }
 
   /**
@@ -372,9 +434,12 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
   function syncChips(): void {
     const world = deps.getWorld();
     const events = world.events ?? [];
+    // A tower that refuses every command (a finished Today's tower) keeps no chip: its fire or
+    // bomb never ends, and Stories could only show buttons that are off (P3a A5).
+    const refused = commandsRefused(world) !== null;
     const fireEvent = events.find((e) => e.kind === 'fire');
     const fireWords =
-      fireEvent && fireEvent.kind === 'fire' && !inSight(incident && !incident.closed ? incident.card : null)
+      !refused && fireEvent && fireEvent.kind === 'fire'
         ? fireHeadline(
             fireEvent.roomIds.flatMap((id) => {
               const room = world.rooms?.get(id);
@@ -383,33 +448,46 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
             1,
           )
         : null;
-    const bombLive = events.some((e) => e.kind === 'bomb' && !e.found);
-    const bombWords = bombLive && !inSight(bomb && !bomb.closed ? bomb.card : null) ? bombReminder(world) : null;
+    const fireAway = !inSight(incident && !incident.closed ? incident.card : null);
+    const bombLive = !refused && events.some((e) => e.kind === 'bomb' && !e.found);
+    const bombWords = bombLive ? bombReminder(world) : null;
+    const bombAway = !inSight(bomb && !bomb.closed ? bomb.card : null);
     let moved = false;
-    for (const [kind, words, glyph] of [
-      ['fire', fireWords, 'fire'],
-      ['bomb', bombWords, 'alert'],
+    for (const [kind, words, away, glyph] of [
+      ['fire', fireWords, fireAway, 'fire'],
+      ['bomb', bombWords, bombAway, 'alert'],
     ] as const) {
       const held = chips.get(kind);
       if (words === null) {
+        // The incident is over: its chip goes for good.
         if (held) {
           held.node.remove();
           chips.delete(kind);
         }
         continue;
       }
+      if (!away) {
+        // The card is back in sight: the chip waits, hidden, for the rest of the incident.
+        if (held && !held.node.hidden) held.node.hidden = true;
+        continue;
+      }
       if (!held) {
         const node = button('', 'hs-toast-chip', () => deps.openStories?.(kind));
         node.dataset['incident'] = kind;
         node.title = 'Open Stories';
+        // A reminder of what the player already heard: polite, never the assertive alert again.
+        node.setAttribute('aria-live', 'polite');
         const text = el('span', 'hs-toast-chip-words', words);
         node.append(toastIcon(glyph, 'alert'), text);
         node.setAttribute('aria-label', `${words}. Open Stories`);
         chips.set(kind, { node, words: text });
         moved = true;
-      } else if (held.words.textContent !== words) {
-        held.words.textContent = words;
-        held.node.setAttribute('aria-label', `${words}. Open Stories`);
+      } else {
+        if (held.node.hidden) held.node.hidden = false;
+        if (held.words.textContent !== words) {
+          held.words.textContent = words;
+          held.node.setAttribute('aria-label', `${words}. Open Stories`);
+        }
       }
     }
     // Over the cards and under the fold line: put back in order only when out of it.
@@ -433,12 +511,13 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
         held.body = null;
       }
     }
+    if (vipCard?.card === card) vipCard = null;
     layout();
   }
 
   /**
    * A card with its icon (red for trouble, amber for a notice) and its close control; `body` is
-   * where the content goes.
+   * where the content goes. The chips wait for the sync after the drain (layout's note).
    */
   function open(className: string, glyph: IconName, tone: 'amber' | 'alert' = 'alert'): { card: Card; body: HTMLElement } {
     const node = el('div', className);
@@ -450,8 +529,61 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
     node.append(toastIcon(glyph, tone), shut, body);
     host.append(node);
     cards.push(card);
-    layout();
+    layout(false);
     return { card, body };
+  }
+
+  // ---------------------------------------------------------------- the VIP visit
+
+  const vipActions: VipCardActions = {
+    openStories: () => deps.openStories?.('vip'),
+    selectGuest: (simId) => deps.selectGuest?.(simId),
+    centerOn: (floor, x) => deps.centerOn?.(floor, x),
+  };
+
+  /**
+   * The visit's next card, in the news look: amber unless `trouble`, in a polite live region of
+   * its own inside the alert stack. The card before it, still up, gives way: the visit moved on.
+   */
+  function openVip(stage: 'booked' | 'arrived' | 'result', make: (world: World) => VipCardBody, trouble = false): void {
+    if (vipCard) close(vipCard.card);
+    const { card, body } = open(`hs-toast is-vip is-vip-${stage}`, 'hotel', trouble ? 'alert' : 'amber');
+    card.node.setAttribute('role', 'status');
+    card.node.setAttribute('aria-live', 'polite');
+    // The close control is the card's second child, after the icon (open).
+    card.node.children[1]?.setAttribute('aria-label', 'Close this card');
+    const made = make(deps.getWorld());
+    body.append(...made.nodes);
+    vipCard = { card, body: made };
+  }
+
+  type VipEvent = Extract<ActiveEvent, { kind: 'vip' }>;
+  const vipEventOf = (world: World, simId: Id | undefined): VipEvent | undefined =>
+    (world.events ?? []).find((e): e is VipEvent => e.kind === 'vip' && (simId === undefined || e.simId === simId));
+
+  /** The booking line: its card while the visit is still booked (a batch may hold its end too). */
+  function onVipBooked(entry: LogEntry): boolean {
+    const visit = vipEventOf(deps.getWorld(), entry.simId);
+    if (!visit) return false;
+    openVip('booked', (world) => vipBookedBody(world, visit, vipActions));
+    return true;
+  }
+
+  /** The result line: the saved record is this visit's (the line carries the guest's id). */
+  function onVipResult(entry: LogEntry): boolean {
+    const world = deps.getWorld();
+    const record = world.stats?.lastVip;
+    if (!record || entry.simId === undefined || record.simId !== entry.simId) return false;
+    const result = vipResult(world, record);
+    // Red only when the visit went badly: a poor rating, or the guest left early.
+    openVip('result', (now) => vipResultBody(now, result, vipActions), result.rating === 'poor' || result.leftEarly);
+    return true;
+  }
+
+  function onVipArrival(entry: LogEntry): void {
+    const visit = vipEventOf(deps.getWorld(), entry.simId);
+    if (!visit) return;
+    openVip('arrived', (world) => vipArrivedBody(world, visit, vipActions));
   }
 
   // ---------------------------------------------------------------- fire
@@ -490,7 +622,7 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
     const security = securityOnDuty(world);
     const affordable = world.cash >= cost;
     const headline = fire.closed ? fireOutText(fire.damaged ?? fire.rooms.size, fire.cost) : fireHeadline([...fire.floors], fire.rooms.size);
-    const key = `${headline}|${fire.closed}|${security}|${affordable}|${cost}`;
+    const key = `${headline}|${fire.closed}|${security}|${affordable}|${cost}|${commandsRefused(world) ?? ''}`;
     if (key === fire.shown) return;
     fire.shown = key;
     const parts: HTMLElement[] = [el('p', 'hs-toast-text', headline)];
@@ -534,6 +666,10 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
 
   function sync(): void {
     const world = deps.getWorld();
+    // Heard first, so the spend buttons and the chips below read it.
+    const refused = deps.refusal?.() ?? null;
+    if (refused === null) refusals.delete(world);
+    else refusals.set(world, refused);
     const event = (world.events ?? []).find((e) => e.kind === 'fire');
     if (event && event.kind === 'fire') {
       // A fire with no card yet (a save loaded mid fire): its first room names the incident.
@@ -549,6 +685,7 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
     syncRoaches(world, roachHeard);
     roachHeard = false;
     syncGameOver(world);
+    vipCard?.body.refresh(world);
     syncChips();
   }
 
@@ -714,6 +851,14 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
     // The game over card speaks for the tower from the minute the game ended.
     const over = deps.getWorld().gameOver ?? null;
     if (over && entry.minute >= over.at) return;
+    // The VIP's booking and result are news with cards of their own, not trouble.
+    const vipLine = vipLineOf(entry);
+    if (vipLine === 'booked') {
+      // A visit already over in the same batch leaves its result card to speak for it.
+      onVipBooked(entry);
+      return;
+    }
+    if (vipLine === 'result' && onVipResult(entry)) return;
     // Any other alert line stays until the player closes it.
     const { body } = open('hs-toast', 'alert');
     body.append(el('p', 'hs-toast-text', entry.text));
@@ -740,6 +885,7 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
     bomb = null;
     theft = null;
     roaches = null;
+    vipCard = null;
     roachHeard = false;
     ending?.node.remove();
     ending = null;
@@ -747,5 +893,5 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
     chips.clear();
   }
 
-  return { onAlert, notice, sync, dismissNewest, reset };
+  return { onAlert, onVipArrival, notice, sync, dismissNewest, reset };
 }

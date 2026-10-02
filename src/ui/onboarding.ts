@@ -260,7 +260,7 @@ export function goalsFor(world: GoalsWorld): Goals | null {
     const now = world.stats.vipRating;
     items.push({
       label: 'VIP rating',
-      value: now === 'none' ? `${capitalize(r.vipRating)} needed, no visit yet` : `${capitalize(r.vipRating)} needed, now ${now}`,
+      value: now === 'none' ? `${capitalize(r.vipRating)} needed, no visit yet` : `${capitalize(r.vipRating)} needed, best so far ${now}`,
       done: VIP_ORDER[now] >= VIP_ORDER[r.vipRating],
     });
   }

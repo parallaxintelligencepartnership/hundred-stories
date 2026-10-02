@@ -440,7 +440,7 @@ export function startVip(world: World): void {
   const name = personName(world.seed, sim.id);
   log(
     world,
-    `A VIP, ${name}, is coming to the ${describe(suite)} tomorrow. They care most about ${preference}.`,
+    `A VIP, ${name}, is coming to the ${describe(suite)} tomorrow. They like ${preference}. Every VIP rates the wait, the suite and safety.`,
     'alert',
     { roomId: suite.id, simId: sim.id },
   );

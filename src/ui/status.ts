@@ -144,7 +144,7 @@ export function nextStarNeeds(world: StarWorld): NextStar {
   if (r.vipRating !== undefined) {
     const now = world.stats?.vipRating ?? 'none';
     needs.push({
-      text: `VIP rating ${VIP_WORDS[r.vipRating]} or better (now ${VIP_WORDS[now]})`,
+      text: `VIP rating ${VIP_WORDS[r.vipRating]} or better (${now === 'none' ? 'no visit yet' : `best so far ${VIP_WORDS[now]}`})`,
       met: VIP_ORDER[now] >= VIP_ORDER[r.vipRating],
     });
   }

@@ -140,7 +140,7 @@ describe('goals', () => {
     expect(goals?.items).toEqual([
       { label: 'Population', value: '5,200 of 5,000', done: true },
       { label: 'Hotel suites', value: '1 of 1', done: true },
-      { label: 'VIP rating', value: 'Fair needed, now poor', done: false },
+      { label: 'VIP rating', value: 'Fair needed, best so far poor', done: false },
       { label: 'Recycling center', value: 'Not built', done: false },
       { label: 'Medical center', value: 'Built', done: true },
     ]);

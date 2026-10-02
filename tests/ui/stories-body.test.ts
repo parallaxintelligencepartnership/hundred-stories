@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { handleEventCommand } from '../../src/sim/events';
 import { recordBeat } from '../../src/sim/story';
 import { EVENTS, ROOMS } from '../../src/sim/rules';
-import type { ActiveEvent, Command, Room, RoomKind, World } from '../../src/sim/types';
+import type { ActiveEvent, Command, Room, RoomKind, VipVisitRecord, World } from '../../src/sim/types';
 import { addRoom, allocId, createWorld, log } from '../../src/sim/world';
 import type { PanelContext } from '../../src/ui/panels';
 import { OPEN_ELEVATOR, SHOW_FLOOR, towerProblems } from '../../src/ui/problems';
@@ -50,6 +50,12 @@ function room(world: World, kind: RoomKind, floor: number, x: number, extra: Par
 }
 
 const has = (n: FakeElement, c: string): boolean => n.className.split(/\s+/).includes(c);
+
+/** A finished visit as the sim saves it. */
+const LAST_VIP: VipVisitRecord = {
+  simId: 77, minute: 0, rating: 'fair', preference: 'a quiet floor', longestWait: 5, waitBand: 'fair',
+  suiteClean: true, suiteBand: 'good', incident: false, reason: null,
+};
 
 function mount(world: World, extra: Partial<PanelContext> = {}) {
   const centered: { floor: number; x: number }[] = [];
@@ -119,6 +125,7 @@ describe('Stories: sections', () => {
   it('lists every section in order once each has something, with one Milestones section', () => {
     const world = createWorld(1);
     world.stars = EVENTS.vip.minStar;
+    world.stats.lastVip = LAST_VIP;
     room(world, 'hotelSingle', 7, 60, { infested: true });
     const home = room(world, 'office', 3, 100);
     world.sims.set(9999, { id: 9999, kind: 'worker', homeRoomId: home.id, pos: { floor: 3, x: 104 }, inCarId: null, inRoomId: home.id, route: [], state: 'inRoom', stress: 0, waitStart: null, schedule: [], nextScheduleIndex: 0, stayUntil: null, wallet: 0, leaveReason: null } as never);
@@ -383,17 +390,20 @@ describe('Stories: the VIP visit', () => {
   it('has its own section between visits, after Needs you now, with the next chance', () => {
     const world = createWorld(1);
     world.stars = EVENTS.vip.minStar;
+    world.stats.lastVip = LAST_VIP;
     const s = mount(world);
     const vip = s.sectionOf('VIP visit');
     expect(has(vip, 'hs-vip')).toBe(true);
-    expect(vip.textContent).toContain('Next chance');
+    expect(vip.textContent).toContain('A new VIP may book in 3 days at 6:00 AM.');
     expect(s.sectionOf('Needs you now').descendants().some((n) => has(n, 'hs-vip'))).toBe(false);
     expect(s.shownTitles().slice(0, 2)).toEqual(['Needs you now', 'VIP visit']);
   });
 
-  it('is left out below the VIP star with no visit yet', () => {
-    const s = mount(createWorld(1));
-    expect(s.shownTitles()).not.toContain('VIP visit');
+  it('is left out while there has never been a visit and none is booked, below the VIP star or at it', () => {
+    const world = createWorld(1);
+    expect(mount(world).shownTitles()).not.toContain('VIP visit');
+    world.stars = EVENTS.vip.minStar;
+    expect(mount(world).shownTitles()).not.toContain('VIP visit');
   });
 });
 
