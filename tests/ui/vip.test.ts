@@ -6,7 +6,8 @@ import { EVENTS } from '../../src/sim/rules';
 import { tick } from '../../src/sim/tick';
 import type { ActiveEvent, Room, VipVisitRecord, World } from '../../src/sim/types';
 import { createWorld } from '../../src/sim/world';
-import { createLogPanel, type PanelContext } from '../../src/ui/panels';
+import type { PanelContext } from '../../src/ui/panels';
+import { storiesBody } from '../../src/ui/stories';
 import { vipBreakdown, vipNextChance, vipView } from '../../src/ui/vip';
 import { atOnDay, buildTower, lobbyRun, onlyShaft, roomsMatching, runMinutes } from '../scenarios/helpers';
 import { FakeDom, type FakeElement } from './fake-dom';
@@ -161,7 +162,7 @@ describe('VIP card', () => {
   });
 });
 
-describe('VIP card in News', () => {
+describe('VIP card in Stories', () => {
   let dom: FakeDom;
   let uninstall: () => void;
   beforeEach(() => {
@@ -180,17 +181,21 @@ describe('VIP card in News', () => {
 
   it('shows the checklist above the log and updates a tick on refresh', () => {
     const { world, suite } = bookedTower();
-    const panel = createLogPanel({ world } as never, ctx) as unknown as FakeElement;
+    const body = storiesBody({ world } as never, ctx);
+    const panel = body.node as unknown as FakeElement;
     const card = () => panel.descendants().find((n) => n.className.includes('hs-vip'));
     const doneLabels = () =>
       (card()?.descendants() ?? []).filter((n) => n.className === 'hs-row hs-goal is-done').map((n) => n.children[0]?.textContent);
     expect(card()).toBeDefined();
+    // Above the log: the VIP visit comes before Today.
+    const titles = panel.descendants().filter((n) => n.className === 'hs-section-title').map((n) => n.textContent);
+    expect(titles.indexOf('VIP visit')).toBeLessThan(titles.indexOf('Today'));
     expect(doneLabels()).toContain('The suite is clean');
     suite.dirty = true;
-    (panel as unknown as { refresh(): void }).refresh();
+    body.refresh();
     expect(doneLabels()).not.toContain('The suite is clean');
     dom.created = 0;
-    (panel as unknown as { refresh(): void }).refresh();
+    body.refresh();
     expect(dom.created).toBe(0);
   });
 });

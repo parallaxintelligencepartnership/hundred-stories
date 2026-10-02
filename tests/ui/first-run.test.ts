@@ -463,7 +463,7 @@ describe('news toasts and story lines', () => {
     }
   });
 
-  it('opens News from a news toast', () => {
+  it('opens Stories from a news toast, as a page in the pause menu', () => {
     const game = stubGame();
     addRoom(game, { kind: 'lobby', floor: 1, x: 180, width: 20 });
     const { root } = mount(game);
@@ -472,10 +472,15 @@ describe('news toasts and story lines', () => {
     game.notify();
     const toast = byClass(root, 'hs-news-toast')[0] as FakeElement;
     expect(toast.tagName).toBe('BUTTON');
-    expect(toast.title).toBe('Open the news');
-    // Only the sentence, in the News panel's plain voice: no clock stamp before it.
+    expect(toast.title).toBe('Open Stories');
+    // Only the sentence, in Stories' plain voice: no clock stamp before it.
     expect(toast.children.map((c) => c.className)).toEqual(['hs-toast-words']);
     click(toast);
-    expect(root.descendants().some((n) => n.className === 'hs-panel-title-text' && n.textContent === 'News')).toBe(true);
+    const card = root.descendants().find((n) => n.className.split(/\s+/).includes('hs-pause-card'));
+    expect(card?.getAttribute('data-page')).toBe('stories');
+    expect(card?.descendants().find((n) => n.className.includes('hs-pause-title'))?.textContent).toBe('Stories');
+    // The wedding is kept under Today.
+    expect(card?.textContent).toContain('A wedding has started in the cathedral on floor 1.');
+    expect(root.descendants().some((n) => n.className === 'hs-panel-title-text' && /news/i.test(n.textContent))).toBe(false);
   });
 });

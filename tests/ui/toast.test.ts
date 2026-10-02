@@ -4,7 +4,8 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NEWS_TOAST_MAX, NEWS_TOAST_MS, TOAST_FADE_MS, createToasts, type Toasts } from '../../src/ui/toast';
-import { createLogPanel, createStoriesPanel, type PanelContext } from '../../src/ui/panels';
+import { createFinancesPanel, type PanelContext } from '../../src/ui/panels';
+import { storiesBody } from '../../src/ui/stories';
 import { createWorld } from '../../src/sim/world';
 import { FakeDom, type FakeElement } from './fake-dom';
 
@@ -152,24 +153,29 @@ describe('the look', () => {
   });
 });
 
-// The News sheet once carried the toast region's class, whose rule sets pointer-events none,
+// The old News sheet once carried the toast region's class, whose rule sets pointer-events none,
 // an absolute position and a transform: every tap fell through the sheet and Close never closed it.
-describe('the News sheet and the toasts', () => {
+// That sheet is gone (Stories is a page in the pause card since 2026-10-01); the rule still holds
+// for the Stories body and for a sheet that remains.
+describe('Stories, the sheets and the toasts', () => {
   const css = readFileSync(new URL('../../src/ui/ui.css', import.meta.url), 'utf8');
   const panelCtx: PanelContext = { apply: () => ({ ok: true }) as never, notice: () => {}, close: () => {}, reducedMotion: false, setReducedMotion: () => {} };
-  // A real world: the News panel reads rooms, events and money for Needs you now.
+  // A real world: Stories reads rooms, events and money for Needs you now.
   const game = { world: createWorld(1) } as never;
   const classesOf = (n: unknown): string[] => (n as FakeElement).className.split(/\s+/).filter(Boolean);
-  const sheetClasses = (): string[] => [
-    ...new Set([...classesOf(createLogPanel(game, panelCtx)), ...classesOf(createStoriesPanel(game, panelCtx))]),
-  ];
+  /** Every class on the Stories body and everything in it. */
+  const storiesClasses = (): string[] => {
+    const node = storiesBody(game, panelCtx).node as unknown as FakeElement;
+    return [...new Set([node, ...node.descendants()].flatMap(classesOf))];
+  };
+  const sheetClasses = (): string[] => [...new Set([...classesOf(createFinancesPanel(game, panelCtx)), ...storiesClasses()])];
 
-  it('the News panel and the toast region share no class', () => {
-    const panel = classesOf(createLogPanel(game, panelCtx));
-    expect(panel).toContain('hs-sheet');
+  it('the Stories body and the toast region share no class', () => {
+    const body = storiesClasses();
+    expect(body).toContain('hs-stories');
     const region = classesOf(toasts.news);
     expect(region.length).toBeGreaterThan(0);
-    expect(panel.filter((c) => region.includes(c))).toEqual([]);
+    expect(body.filter((c) => region.includes(c))).toEqual([]);
   });
 
   it('no ui.css rule on a class a sheet carries sets pointer-events none', () => {

@@ -143,7 +143,11 @@ export interface PauseMenu {
   isShown(): boolean;
   /** Did opening it pause the game (the plate reads Paused)? */
   paused(): boolean;
-  open(): void;
+  /**
+   * Open. With a page, the menu opens straight on it (Stories from a toast): Back goes to the root
+   * with the entry of the same id selected.
+   */
+  open(page?: PausePage): void;
   /** Close, and put back the speed the game had before it opened. */
   close(options?: { restoreFocus?: boolean }): void;
   /**
@@ -591,7 +595,7 @@ export function createPauseMenu(options: PauseMenuOptions): PauseMenu {
     card.classList.toggle('is-running', state.textContent === MENU_WORD);
   }
 
-  function openMenu(): void {
+  function openMenu(page?: PausePage): void {
     if (open) return;
     opens += 1;
     prior = options.getSpeed();
@@ -603,9 +607,11 @@ export function createPauseMenu(options: PauseMenuOptions): PauseMenu {
     paintPlace();
     paint();
     options.host.append(node);
-    select(0, true);
+    const entry = page ? buttons.findIndex((item) => item.dataset['entry'] === page.id) : -1;
+    select(Math.max(0, entry), !page);
     syncMore();
     options.cue?.('menu.open');
+    if (page) pushPage(page, buttons[entry]);
     options.changed?.();
   }
 

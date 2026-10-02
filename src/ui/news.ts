@@ -1,24 +1,25 @@
-// What the News panel shows, as plain data: the open matters the player can act on (derived
-// from the world on every refresh, never from the log) and the log split into today, yesterday
-// and earlier. The panel in panels.ts turns these into elements and rebuilds only on a new key.
+// What Stories shows (src/ui/stories.ts), as plain data: the open matters the player can act on
+// (derived from the world on every refresh, never from the log) and the log split into today,
+// yesterday and earlier. The page turns these into elements and rebuilds only on a new key.
 
 import { hourWords, nextSettleWords } from '../sim/economy';
 import { ECONOMY } from '../sim/rules';
 import type { LogEntry, Room, World } from '../sim/types';
-import { fireHeadline, roachHeadline, SECURITY_RESPONDING } from './alerts';
+import { fireHeadline, roachHeadline, SECURITY_RESPONDING, SECURITY_SEARCHING, theftHeadline } from './alerts';
 import { formatFloor, formatMoney } from './format';
+
+/** The kinds of open matter, in the order they are listed. */
+export type NeedKind = 'fire' | 'bomb' | 'theft' | 'roaches' | 'money';
 
 /** One line under Needs you now. A line with a place centers the camera there when tapped. */
 export interface NeedLine {
-  kind: 'fire' | 'bomb' | 'roaches' | 'money';
+  kind: NeedKind;
   text: string;
   at?: { floor: number; x: number };
 }
 
 export const NEEDS_EMPTY = 'Nothing needs you right now.';
-export const NEWS_EMPTY = 'Nothing has happened yet.';
 export const TODAY_EMPTY = 'Nothing yet today.';
-export const MILESTONES_EMPTY = 'Your first milestone is coming.';
 
 const MINUTES_PER_DAY = 1440;
 
@@ -36,8 +37,8 @@ function hasRoom(world: World, kind: Room['kind'], usable = false): boolean {
 }
 
 /**
- * The open matters, most urgent first: a fire, a bomb threat, cockroaches, money. The VIP card
- * is not a line: the panel shows it under these while a visit is on (see vipView).
+ * The open matters, most urgent first: a fire, a bomb threat, a theft under way, cockroaches,
+ * money. The VIP visit is not a line: Stories gives it a section of its own (see vipView).
  */
 export function needsYou(world: World): NeedLine[] {
   const out: NeedLine[] = [];
@@ -63,9 +64,17 @@ export function needsYou(world: World): NeedLine[] {
     const where = at ? `Bomb threat on ${onFloor(at.floor)}` : 'Bomb threat';
     const ransom = formatMoney(bomb.ransom);
     const text = security
-      ? `${where}. Wait for security to find it, or pay the ${ransom} ransom.`
+      ? `${where}. ${SECURITY_SEARCHING}`
       : `${where}, no security. Pay the ${ransom} ransom, or build a security office to find it before ${hourWords(bomb.detonateAt % MINUTES_PER_DAY)}.`;
     out.push({ kind: 'bomb', text, ...(at ? { at } : {}) });
+  }
+
+  // A theft that has begun (the thief at the target), as its alert card says it.
+  const theft = events.find((e) => e.kind === 'theft' && (e.phase === 'acting' || e.phase === 'leaving'));
+  if (theft && theft.kind === 'theft') {
+    const target = theft.targetId !== null ? world.rooms.get(theft.targetId) : undefined;
+    const at = target ? middleOf(target) : undefined;
+    out.push({ kind: 'theft', text: `${theftHeadline(theft.floor ?? target?.floor ?? 1, theft.guardId !== null)}.`, ...(at ? { at } : {}) });
   }
 
   // Not yet treated: still infested. A housekeeper's clean is the treatment and clears the flag.

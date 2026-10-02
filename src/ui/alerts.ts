@@ -9,6 +9,12 @@
 //
 // The sim logs one line per burning room and has no incident id, so the incident is derived here
 // from the log lines (their text and roomId) and from the fire event in world.events.
+//
+// Stories (Matt, 2026-10-01): the "and N more" line is a button that opens Stories, and a live
+// fire or bomb whose card is out of sight (closed, or folded under newer cards) leaves a small
+// reminder chip that opens Stories at it. The card itself never comes back. The helicopter and
+// ransom controls are built here once (helicopterControl, ransomControl) for the cards and for
+// the rows in Stories, so both follow one rule.
 
 import { FIRE_BURN_OUT_TEXT, FIRE_OUT_EMPTY_TEXT, helicopterCost } from '../sim/events';
 import { EVENTS } from '../sim/rules';
@@ -17,6 +23,7 @@ import { formatMoney } from './format';
 import type { IconName } from './icons';
 import { button, el } from './panels';
 import { SAVED_NOTICE } from './save-button';
+import type { StoriesTarget } from './stories';
 import { toastIcon } from './toast';
 
 /** Cards shown at once; older ones fold into the "and N more" line. */
@@ -28,7 +35,11 @@ export const FIRE_OUT_LINGER_MS = 8000;
 /** Real milliseconds a notice stays up. */
 export const NOTICE_LINGER_MS = 6000;
 
-export const SECURITY_RESPONDING = 'Security is on the way.';
+/**
+ * The fire's line while a security office is on duty. No guard walks to a fire: the office puts
+ * it out on a fixed timer (src/sim/events.ts tickFire, securityPutOutMinutes), so the line says that.
+ */
+export const SECURITY_RESPONDING = 'Security is putting it out.';
 export const SECURITY_LESSON = 'A security office puts fires out on its own.';
 /**
  * The bomb card's line while the tower has a security office on duty. True at any height the
@@ -47,6 +58,103 @@ export interface AlertStackDeps {
   later(fn: () => void, ms: number): void;
   /** The ways on from a tower the bank took, as the menu offers them. None when omitted. */
   gameOverActions?(): readonly GameOverAction[];
+  /** Open Stories at a section or incident: the "and N more" line and the reminder chips. */
+  openStories?(target: StoriesTarget): void;
+}
+
+/** Is a security office on duty? One on fire is not, as the sim counts it. */
+export function securityOnDuty(world: World): boolean {
+  for (const room of world.rooms?.values() ?? []) if (room.kind === 'security' && !room.onFire) return true;
+  return false;
+}
+
+/**
+ * A response that spends money (the helicopter, the ransom): its button, then the refusal line,
+ * empty and hidden while the cash covers it. Built once and kept current by sync, so a button with
+ * focus stays the same button. The button carries data-command and data-spend: nothing ever puts
+ * first focus on it, and it acts on one deliberate press.
+ */
+export interface SpendControl {
+  /** The row with the button, then the refusal line, in the order they go in. */
+  nodes: HTMLElement[];
+  button: HTMLButtonElement;
+  /** Bring the price, the disabled state and the reason in line with the world. */
+  sync(world: World): void;
+}
+
+function spendControl(
+  label: string,
+  command: Command,
+  apply: (cmd: Command) => unknown,
+  rule: (world: World) => { label: string; refusal: string | null; secondary: boolean },
+): SpendControl {
+  const call = button(label, 'hs-btn', () => {
+    apply(command);
+  });
+  call.dataset['command'] = command.kind;
+  call.dataset['spend'] = 'true';
+  const row = el('div', 'hs-actions');
+  row.append(call);
+  const note = el('p', 'hs-toast-note');
+  note.hidden = true;
+  return {
+    nodes: [row, note],
+    button: call,
+    sync(world) {
+      const now = rule(world);
+      if (call.textContent !== now.label) call.textContent = now.label;
+      const short = now.refusal !== null;
+      if (call.disabled !== short) call.disabled = short;
+      if (call.classList.contains('is-secondary') !== now.secondary) call.classList.toggle('is-secondary', now.secondary);
+      const words = now.refusal ?? '';
+      if (note.textContent !== words) note.textContent = words;
+      if (note.hidden !== !short) note.hidden = !short;
+    },
+  };
+}
+
+/** What a helicopter costs now: the flight and the clearing bill for every room burning, as the sim takes it. */
+export function helicopterPrice(world: World): number {
+  const event = (world.events ?? []).find((e) => e.kind === 'fire');
+  return event && event.kind === 'fire' ? helicopterCost(world, event) : EVENTS.fire.helicopterCost;
+}
+
+/** The ransom asked now, from the threat itself. */
+export function ransomPrice(world: World): number {
+  const event = (world.events ?? []).find((e) => e.kind === 'bomb');
+  return event && event.kind === 'bomb' ? event.ransom : EVENTS.bomb.ransom;
+}
+
+/** Call a helicopter, with its live price; off with the reason while the cash is short. The sim allows it with or without security. */
+export function helicopterControl(apply: (cmd: Command) => unknown): SpendControl {
+  return spendControl('Call a helicopter', { kind: 'fire.callHelicopter' }, apply, (world) => {
+    const cost = helicopterPrice(world);
+    return {
+      label: `Call a helicopter (${formatMoney(cost)})`,
+      refusal: world.cash >= cost ? null : `Not enough cash. A firefighting helicopter costs ${formatMoney(cost)}.`,
+      secondary: false,
+    };
+  });
+}
+
+/** Pay ransom, with the amount; off with the reason while the cash is short, and secondary while security searches. */
+export function ransomControl(apply: (cmd: Command) => unknown): SpendControl {
+  return spendControl('Pay ransom', { kind: 'bomb.pay' }, apply, (world) => {
+    const ransom = ransomPrice(world);
+    return {
+      label: `Pay ransom (${formatMoney(ransom)})`,
+      refusal: world.cash >= ransom ? null : `Not enough cash. The ransom is ${formatMoney(ransom)}.`,
+      secondary: securityOnDuty(world),
+    };
+  });
+}
+
+/** The reminder chip's words for a live incident: where it is, in a few words. */
+export function bombReminder(world: World): string {
+  const event = (world.events ?? []).find((e) => e.kind === 'bomb' && !e.found);
+  if (!event || event.kind !== 'bomb') return 'Bomb threat';
+  const floor = world.rooms?.get(event.roomId)?.floor ?? event.floor;
+  return floor === undefined ? 'Bomb threat' : `Bomb threat on ${placeName(floor)}`;
 }
 
 /** One button on the game over card: a new tower, back to My tower, or open a saved file. */
@@ -212,7 +320,11 @@ interface FireIncident {
 export function createAlertStack(deps: AlertStackDeps): AlertStack {
   const { host } = deps;
   const cards: Card[] = [];
-  const more = el('p', 'hs-toast-more');
+  // The folded cards' line: a tap opens Stories, where everything they said is kept.
+  const more = button('', 'hs-toast-more', () => deps.openStories?.('needs'));
+  more.title = 'Open Stories';
+  /** The reminder chips, fire then bomb: shown while the incident is live and its card is out of sight. */
+  const chips = new Map<'fire' | 'bomb', { node: HTMLButtonElement; words: HTMLElement }>();
   let incident: FireIncident | null = null;
   /**
    * The bomb threat's card: the ransom line and its button (off while cash is short), then the
@@ -223,8 +335,7 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
     card: Card | null;
     body: HTMLElement | null;
     closed: boolean;
-    pay: HTMLButtonElement;
-    short: HTMLElement;
+    pay: SpendControl;
     searching: HTMLElement;
   } | null = null;
   /** The theft's card: the response, then the outcome. */
@@ -240,9 +351,75 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
     cards.forEach((card, i) => card.node.classList.toggle('is-collapsed', i < hidden));
     if (hidden > 0) {
       more.textContent = `and ${hidden} more`;
+      more.setAttribute('aria-label', `and ${hidden} more. Open Stories`);
       if (more.parentNode !== host) host.prepend(more);
     } else more.remove();
+    syncChips();
     // The game over card stays first, above the fold line.
+    if (ending && host.firstElementChild !== ending.node) host.prepend(ending.node);
+  }
+
+  /** On screen and not folded: the player can see it and its button. */
+  function inSight(card: Card | null | undefined): boolean {
+    return !!card && !card.gone && !card.node.classList.contains('is-collapsed');
+  }
+
+  /**
+   * A live fire or bomb with no card in sight (closed, or folded under newer ones) keeps a chip:
+   * the red icon and a few words, and a tap opens Stories at it. It goes when the incident ends;
+   * the card is never made again. The chips sit over the fold line, under the game over card.
+   */
+  function syncChips(): void {
+    const world = deps.getWorld();
+    const events = world.events ?? [];
+    const fireEvent = events.find((e) => e.kind === 'fire');
+    const fireWords =
+      fireEvent && fireEvent.kind === 'fire' && !inSight(incident && !incident.closed ? incident.card : null)
+        ? fireHeadline(
+            fireEvent.roomIds.flatMap((id) => {
+              const room = world.rooms?.get(id);
+              return room ? [room.floor] : [];
+            }),
+            1,
+          )
+        : null;
+    const bombLive = events.some((e) => e.kind === 'bomb' && !e.found);
+    const bombWords = bombLive && !inSight(bomb && !bomb.closed ? bomb.card : null) ? bombReminder(world) : null;
+    let moved = false;
+    for (const [kind, words, glyph] of [
+      ['fire', fireWords, 'fire'],
+      ['bomb', bombWords, 'alert'],
+    ] as const) {
+      const held = chips.get(kind);
+      if (words === null) {
+        if (held) {
+          held.node.remove();
+          chips.delete(kind);
+        }
+        continue;
+      }
+      if (!held) {
+        const node = button('', 'hs-toast-chip', () => deps.openStories?.(kind));
+        node.dataset['incident'] = kind;
+        node.title = 'Open Stories';
+        const text = el('span', 'hs-toast-chip-words', words);
+        node.append(toastIcon(glyph, 'alert'), text);
+        node.setAttribute('aria-label', `${words}. Open Stories`);
+        chips.set(kind, { node, words: text });
+        moved = true;
+      } else if (held.words.textContent !== words) {
+        held.words.textContent = words;
+        held.node.setAttribute('aria-label', `${words}. Open Stories`);
+      }
+    }
+    // Over the cards and under the fold line: put back in order only when out of it.
+    const shownChips = (['fire', 'bomb'] as const).flatMap((kind) => {
+      const held = chips.get(kind);
+      return held ? [held.node] : [];
+    });
+    const head = [...(more.parentNode === host ? [more] : []), ...shownChips];
+    const firsts = Array.from(host.children).filter((n) => n !== ending?.node);
+    if (moved || head.some((node, i) => firsts[i] !== node)) host.prepend(...head);
     if (ending && host.firstElementChild !== ending.node) host.prepend(ending.node);
   }
 
@@ -279,11 +456,6 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
 
   // ---------------------------------------------------------------- fire
 
-  function securityOnDuty(world: World): boolean {
-    for (const room of world.rooms.values()) if (room.kind === 'security' && !room.onFire) return true;
-    return false;
-  }
-
   function addRoom(fire: FireIncident, roomId: Id | undefined, text: string): void {
     if (roomId !== undefined) fire.rooms.add(roomId);
     const room = roomId !== undefined ? deps.getWorld().rooms.get(roomId) : undefined;
@@ -314,8 +486,7 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
     if (!body) return;
     const world = deps.getWorld();
     // The full charge, flight and clearing bill for every room burning, as the sim will take it.
-    const event = (world.events ?? []).find((e) => e.kind === 'fire');
-    const cost = event && event.kind === 'fire' ? helicopterCost(world, event) : EVENTS.fire.helicopterCost;
+    const cost = helicopterPrice(world);
     const security = securityOnDuty(world);
     const affordable = world.cash >= cost;
     const headline = fire.closed ? fireOutText(fire.damaged ?? fire.rooms.size, fire.cost) : fireHeadline([...fire.floors], fire.rooms.size);
@@ -326,17 +497,9 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
     if (!fire.closed) {
       if (security) parts.push(el('p', 'hs-toast-note', SECURITY_RESPONDING));
       // The sim lets the player call the helicopter with or without security on duty.
-      const call = button(`Call a helicopter (${formatMoney(cost)})`, 'hs-btn', () => {
-        deps.apply({ kind: 'fire.callHelicopter' });
-      });
-      call.dataset['command'] = 'fire.callHelicopter';
-      const row = el('div', 'hs-actions');
-      row.append(call);
-      parts.push(row);
-      if (!affordable) {
-        call.disabled = true;
-        parts.push(el('p', 'hs-toast-note', `Not enough cash. A firefighting helicopter costs ${formatMoney(cost)}.`));
-      }
+      const call = helicopterControl(deps.apply);
+      call.sync(world);
+      parts.push(...call.nodes.filter((node) => !node.hidden));
       if (!security) parts.push(el('p', 'hs-toast-note', FIRE_BURN_OUT_TEXT), el('p', 'hs-toast-note', SECURITY_LESSON));
     }
     body.replaceChildren(...parts);
@@ -386,6 +549,7 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
     syncRoaches(world, roachHeard);
     roachHeard = false;
     syncGameOver(world);
+    syncChips();
   }
 
   // ---------------------------------------------------------------- game over
@@ -427,36 +591,22 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
   function startBomb(text: string): void {
     if (bomb && !bomb.closed) endBomb(null);
     const { card, body } = open('hs-toast is-bomb', 'alert');
-    const pay = button('Pay ransom', 'hs-btn', () => {
-      deps.apply({ kind: 'bomb.pay' });
-    });
-    pay.dataset['command'] = 'bomb.pay';
-    const row = el('div', 'hs-actions');
-    row.append(pay);
-    const short = el('p', 'hs-toast-note');
-    short.hidden = true;
+    const pay = ransomControl(deps.apply);
     const searching = el('p', 'hs-toast-note');
     searching.hidden = true;
-    body.append(el('p', 'hs-toast-text', text), searching, row, short);
-    bomb = { card, body, closed: false, pay, short, searching };
+    body.append(el('p', 'hs-toast-text', text), searching, ...pay.nodes);
+    bomb = { card, body, closed: false, pay, searching };
     renderRansom(deps.getWorld());
   }
 
   /** Like the helicopter: Pay ransom is off, with the reason, while the tower cannot afford it. */
   function renderRansom(world: World): void {
     if (!bomb || bomb.closed) return;
-    const event = (world.events ?? []).find((e) => e.kind === 'bomb');
-    const ransom = event && event.kind === 'bomb' ? event.ransom : EVENTS.bomb.ransom;
-    const short = world.cash < ransom;
-    if (bomb.pay.disabled !== short) bomb.pay.disabled = short;
+    bomb.pay.sync(world);
     const security = securityOnDuty(world);
     const searchLine = security ? SECURITY_SEARCHING : '';
     if (bomb.searching.textContent !== searchLine) bomb.searching.textContent = searchLine;
     if (bomb.searching.hidden !== !security) bomb.searching.hidden = !security;
-    bomb.pay.classList.toggle('is-secondary', security);
-    const note = short ? `Not enough cash. The ransom is ${formatMoney(ransom)}.` : '';
-    if (bomb.short.textContent !== note) bomb.short.textContent = note;
-    if (bomb.short.hidden !== !short) bomb.short.hidden = !short;
   }
 
   /** The threat ended: the button goes, the outcome shows, and the card leaves after a while. */
@@ -593,6 +743,8 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
     roachHeard = false;
     ending?.node.remove();
     ending = null;
+    for (const chip of chips.values()) chip.node.remove();
+    chips.clear();
   }
 
   return { onAlert, notice, sync, dismissNewest, reset };

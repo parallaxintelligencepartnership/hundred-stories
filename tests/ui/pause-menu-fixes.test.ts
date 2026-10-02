@@ -538,7 +538,10 @@ describe('the first-run hint and the night speed chip', () => {
 });
 
 describe('the P4 and P6 review advisories (closed 2026-09-29)', () => {
-  it('a tap on a news toast over the menu closes the menu, the speed given back, and opens News (P4 A3)', () => {
+  // Reversed 2026-10-01 (Matt: Stories is one page in the pause card, and a toast tap opens the
+  // menu on it with the game paused): a toast over the open menu no longer closes it and gives the
+  // speed back (the P4 A3 rule); it turns the menu to Stories and the game stays paused.
+  it('a tap on a news toast over the menu turns the menu to Stories, the game still paused (was P4 A3)', () => {
     const ui = mount({ speed: 2 });
     ui.open();
     expect(ui.card()).toBeDefined();
@@ -549,9 +552,13 @@ describe('the P4 and P6 review advisories (closed 2026-09-29)', () => {
     const toast = ui.root.descendants().find((n) => has(n, 'hs-news-toast'));
     expect(toast).toBeDefined();
     click(toast!);
-    expect(ui.card()).toBeUndefined();
-    expect(ui.state.speed).toBe(2);
-    expect(ui.root.descendants().some((n) => has(n, 'hs-panel-title-text') && n.textContent === 'News')).toBe(true);
+    expect(ui.card()).toBeDefined();
+    expect(ui.card()!.getAttribute('data-page')).toBe('stories');
+    expect(ui.state.speed).toBe(0);
+    expect(ui.card()!.descendants().find((n) => has(n, 'hs-pause-state'))?.textContent).toBe('Paused');
+    // No sheet opened behind it, and nothing says News.
+    expect(ui.root.descendants().some((n) => has(n, 'hs-sheet'))).toBe(false);
+    expect(ui.card()!.textContent).not.toMatch(/\bnews\b/i);
   });
 
   it('Escape with only the game-over card up does not open the menu over it (P4 A4)', () => {

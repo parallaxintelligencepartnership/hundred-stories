@@ -8,7 +8,8 @@ import { recomputeStars } from '../../src/sim/stars';
 import { CHRONICLE_LINE_CAP, createStoryState, followSim, recordBeat, sanitizeStory, storyName, STORY_FOLLOWED_CAP } from '../../src/sim/story';
 import type { Room, RoomKind, World } from '../../src/sim/types';
 import { allocId, createWorld } from '../../src/sim/world';
-import { createChroniclePanel, createRecapPanel, createStoriesPanel, type PanelContext } from '../../src/ui/panels';
+import { createChroniclePanel, createRecapPanel, type PanelContext } from '../../src/ui/panels';
+import { storiesBody } from '../../src/ui/stories';
 // Imported with the file, not inside the star card test: ui.ts's module graph takes seconds to
 // load on a busy run, and a load inside the test counted against its 5 s timeout.
 import { createUi } from '../../src/ui/ui';
@@ -121,13 +122,13 @@ describe('milestone recap', () => {
     ]);
   });
 
-  it('is reopenable from the stories panel once a milestone is on record', () => {
+  it('is reopenable from Stories once a milestone is on record', () => {
     const world = createWorld(24);
     const { ctx, opened } = context();
-    const before = createStoriesPanel({ world } as never, ctx);
+    const before = storiesBody({ world } as never, ctx).node;
     expect(buttonsNamed(before, 'Last milestone')).toHaveLength(0);
     recordBeat(world.story, { code: 'star.gained', minute: 100, value: 2 });
-    const after = createStoriesPanel({ world } as never, ctx);
+    const after = storiesBody({ world } as never, ctx).node;
     press(buttonsNamed(after, 'Last milestone')[0]);
     expect(opened).toEqual(['recap']);
     expect(buttonsNamed(after, 'Tower chronicle')).toHaveLength(0);
@@ -301,11 +302,11 @@ describe('chronicle panel and export', () => {
     expect(blob.size).toBeGreaterThan(0);
   });
 
-  it('is reopenable from the stories panel whenever it exists', () => {
+  it('is reopenable from Stories whenever it exists', () => {
     const { world } = nearlyTower(42);
     recomputeStars(world);
     const { ctx, opened } = context();
-    const panel = createStoriesPanel({ world } as never, ctx);
+    const panel = storiesBody({ world } as never, ctx).node;
     press(buttonsNamed(panel, 'Tower chronicle')[0]);
     press(buttonsNamed(panel, 'Last milestone')[0]);
     expect(opened).toEqual(['chronicle', 'recap']);

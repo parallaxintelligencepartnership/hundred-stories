@@ -1,5 +1,5 @@
 // The chrome around the tower: the floating top bar, directory board palette, query panel,
-// finances, log, settings, and the toasts that carry the news. It talks to the game through GameApi only.
+// finances, settings, Stories, and the toasts that carry the news. It talks to the game through GameApi only.
 // Nothing here touches the document until createUi runs, so the module imports cleanly in tests.
 
 import './ui.css';
@@ -46,12 +46,10 @@ import {
   button,
   createChroniclePanel,
   createFinancesPanel,
-  createLogPanel,
   createQueryPanel,
   controlsBody,
   createRecapPanel,
   createSharePanel,
-  createStoriesPanel,
   el,
   exportSave,
   freshStart,
@@ -61,8 +59,8 @@ import {
   readGlassClear,
   settingsBody,
   shareBody,
-  storiesBody,
 } from './panels';
+import { storiesBody, type StoriesBody, type StoriesTarget } from './stories';
 import type { PanelBody, PanelContext, PanelElement } from './panels';
 import { GROUPS, applyRowState, buildPalette, paintThumbnail, sameTool, toolRowState } from './palette';
 import { hasTextField, isFormField, keyAction, stepSpeed } from './keys';
@@ -99,12 +97,14 @@ export interface UiOptions {
   reload?: () => void;
 }
 
-type PanelKind = 'none' | 'finances' | 'log' | 'share' | 'intro' | 'stories' | 'recap' | 'chronicle' | 'daily' | 'feedback';
+type PanelKind = 'none' | 'finances' | 'share' | 'intro' | 'recap' | 'chronicle' | 'daily' | 'feedback';
 
 /** Real milliseconds the star card stays up unless closed first. */
 export const STAR_CARD_LINGER_MS = 20_000;
 /** A followed person's story line becomes a news toast at most this often, in real time. */
 export const STORY_TOAST_GAP_MS = 30_000;
+/** What a tap on a news toast does, for the tooltip and a screen reader. */
+export const STORIES_TAP_LABEL = 'Open Stories';
 /** Give-up lines ("Gave up waiting for an elevator...") fold into one toast at most this often. */
 export const GIVE_UP_TOAST_GAP_MS = 20_000;
 const GIVE_UP_PREFIX = 'Gave up waiting for an elevator';
@@ -545,6 +545,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
       timers.add(timer);
     },
     gameOverActions,
+    openStories: (target) => openStories(target),
   });
   // The game over card's Open a saved file, off the desktop shell: a file input kept out of sight.
   const gameOverFile = el('input');
@@ -746,9 +747,6 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     sound,
     openIntro() {
       setPanel('intro');
-    },
-    openStories() {
-      setPanel('stories');
     },
     openRecap() {
       setPanel('recap');
@@ -1534,9 +1532,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
           })
         : panelKind === 'finances'
         ? createFinancesPanel(game, ctx)
-        : panelKind === 'log'
-          ? createLogPanel(game, ctx)
-          : panelKind === 'share'
+        : panelKind === 'share'
               ? createSharePanel(game, renderer, ctx, shareWords ?? undefined)
               : panelKind === 'daily'
                 ? createDailyPanel(game, ctx, {
@@ -1555,9 +1551,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
                       });
                     },
                   })
-              : panelKind === 'stories'
-                ? createStoriesPanel(game, ctx)
-                : panelKind === 'recap'
+              : panelKind === 'recap'
                   ? createRecapPanel(game, ctx)
                   : panelKind === 'chronicle'
                     ? createChroniclePanel(game, ctx)
@@ -1656,7 +1650,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
       newsShowsAlert = newest.level === 'alert';
       // The first look is the tower as loaded: its old lines are history, not news.
       if (first) return;
-      // Watching: the News panel keeps the line; no toast rises over the tower (alerts still do).
+      // Watching: Stories keeps the line; no toast rises over the tower (alerts still do).
       if (shell.classList.contains(WATCH_CLASS)) {
         // Nor do they pile up for the first toast after the chrome comes back.
         warns = 0;
@@ -1667,12 +1661,12 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
         // An alert is its card. A notable line in the same batch still toasts beside it: the
         // quarter settle line is logged just before the debt warnings it explains.
         const notable = log.slice(log.length - fresh).reverse().find((line) => line.level === 'info' && line.notable);
-        if (notable) toastLayer.show(notable.text, { onTap: openLog, tapLabel: 'Open the news' });
+        if (notable) toastLayer.show(notable.text, { onTap: () => openStories(lineTarget(notable)), tapLabel: STORIES_TAP_LABEL });
         return;
       }
       if (newestNoticed) return;
       // A full tower logs warnings in bursts (give-ups, move-outs, people with no way out): one
-      // folded toast now and then, not one each. The News panel keeps every line.
+      // folded toast now and then, not one each. Stories keeps every line.
       if (newest.level === 'warn' && !acting) {
         const at = performance.now();
         if (at - giveUpShownAt < GIVE_UP_TOAST_GAP_MS) return;
@@ -1686,8 +1680,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
             ? newest.text
             : onlyGiveUps
               ? `${count} people gave up waiting for an elevator.`
-              : `${count} problems in the tower. Tap for the news.`;
-        toastLayer.show(text, { onTap: openLog, tapLabel: 'Open the news' });
+              : `${count} problems in the tower. Tap to open Stories.`;
+        toastLayer.show(text, { onTap: () => openStories('today'), tapLabel: STORIES_TAP_LABEL });
         return;
       }
       // A refusal of the player's own command is said as a notice where they acted.
@@ -1697,15 +1691,15 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
         lastNoticeText = '';
         return;
       }
-      // Routine info (built, rented, checked out, cleaned) goes to the News panel only; a notable
+      // Routine info (built, rented, checked out, cleaned) goes to Stories only; a notable
       // one (a VIP, a wedding) still toasts, even when a routine line landed after it.
       const shown =
         newest.level === 'info' && !newest.notable
           ? log.slice(log.length - fresh).reverse().find((line) => line.level === 'info' && line.notable)
           : newest;
       if (!shown) return;
-      // Only the sentence, in the News panel's plain voice; the panel keeps when it happened.
-      toastLayer.show(shown.text, { onTap: openLog, tapLabel: 'Open the news' });
+      // Only the sentence, in Stories' plain voice; Stories keeps when it happened.
+      toastLayer.show(shown.text, { onTap: () => openStories(lineTarget(shown)), tapLabel: STORIES_TAP_LABEL });
       return;
     }
     if (!beat || newsShowsAlert || beat.simId === undefined) return;
@@ -1715,13 +1709,14 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     storyShownAt = now;
     toastLayer.show(`${storyName(world, beat.simId)}: ${describeBeat(beat, world)}`, {
       className: 'is-story',
-      onTap: openLog,
-      tapLabel: 'Open the news',
+      onTap: () => openStories('following'),
+      tapLabel: STORIES_TAP_LABEL,
     });
   }
 
-  function openLog(): void {
-    openPanelFromToast('log');
+  /** Where a toast's line is kept in Stories: the VIP visit for a VIP line, else Today. */
+  function lineTarget(line: LogEntry): StoriesTarget {
+    return /\bVIP\b/.test(line.text) ? 'vip' : 'today';
   }
 
   /** The newest beat about a followed person since the news last looked, or null. */
@@ -1792,13 +1787,14 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     return panelKind === 'none' && mountedPanel === null && !view.isOpen() && build.sheet() === 'closed' && !game.world.gameOver;
   }
 
-  function openPauseMenu(): void {
+  /** `page`: open straight on it (Stories from a toast). */
+  function openPauseMenu(page?: PausePage): void {
     if (pauseMenu.isOpen()) return;
     if (view.isOpen()) view.close();
     const sheet = build.sheet();
     if (sheet === 'row' || sheet === 'full') build.close();
     if (panelKind !== 'none') setPanel('none');
-    pauseMenu.open();
+    pauseMenu.open(page);
     update();
   }
 
@@ -1887,8 +1883,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
       label: 'Stories',
       icon: 'population',
       kind: 'page',
-      title: 'The people you follow and the latest from around the tower',
-      run: () => pauseMenu.pushPage(storiesPage()),
+      title: 'What needs you, the people you follow and the latest from around the tower',
+      run: () => showStories(storiesPage(), undefined),
     });
     // A phone's top bar is the pill alone (ui.css), so Views and Share live here instead.
     if (inSheetLayout()) {
@@ -1933,6 +1929,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
    */
   const pageCtx: PanelContext = Object.assign(Object.create(ctx) as PanelContext, {
     close: () => void pauseMenu.popPage(),
+    // Stories' Show on the tower: out of the menu, so the place is in sight.
+    centerOn: (floor: number, x: number) => leaveMenu(() => ctx.centerOn?.(floor, x)),
     select: (sel: Parameters<NonNullable<PanelContext['select']>>[0]) => leaveMenu(() => ctx.select?.(sel)),
     openIntro: () => pauseMenu.stepAside(() => ctx.openIntro?.()),
     openFeedback: () => pauseMenu.stepAside(() => ctx.openFeedback?.()),
@@ -1962,8 +1960,11 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     return { id: 'controls', title: 'Controls', build: () => controlsBody() };
   }
 
-  function storiesPage(): PausePage {
-    let body: PanelBody | null = null;
+  /** The Stories page, and its body once built, so a later toast can aim the page on show. */
+  type StoriesPage = PausePage & { body(): StoriesBody | null };
+
+  function storiesPage(): StoriesPage {
+    let body: StoriesBody | null = null;
     return {
       id: 'stories',
       title: 'Stories',
@@ -1971,8 +1972,46 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
         body = storiesBody(game, pageCtx);
         return body.node;
       },
-      refresh: () => body?.refresh?.(),
+      refresh: () => body?.refresh(),
+      dispose: () => body?.dispose?.(),
+      body: () => body,
     };
+  }
+
+  /**
+   * Stories is on show: bring the target into view and put focus on its first control that does
+   * not spend money, or on Back. Never on Call a helicopter or Pay ransom: those take a press of
+   * their own.
+   */
+  function showStories(page: StoriesPage, target: StoriesTarget | undefined, push = true): void {
+    if (push) pauseMenu.pushPage(page);
+    pauseMenu.settle(page.body()?.aim(target) ?? null);
+  }
+
+  /**
+   * The one way into Stories from outside the menu (Matt, 2026-10-01): every news toast, the folded
+   * warning toast, the alert stack's "and N more" and reminder chips, and an alert notification.
+   * The pause menu opens straight on the Stories page, so the game pauses; with the menu already
+   * open on another page Stories goes over it, and on Stories itself the page turns to the target.
+   */
+  function openStories(target?: StoriesTarget): void {
+    if (destroyed) return;
+    // A card a page opened over the menu (Send feedback, the intro) gives way to it.
+    if (pauseMenu.isOpen() && !pauseMenu.isShown()) {
+      setPanel('none');
+      pauseMenu.show();
+    }
+    const onShow = pauseMenu.page();
+    if (onShow?.id === 'stories' && 'body' in onShow) {
+      showStories(onShow as StoriesPage, target, false);
+    } else if (pauseMenu.isOpen()) {
+      showStories(storiesPage(), target);
+    } else {
+      const page = storiesPage();
+      openPauseMenu(page);
+      showStories(page, target, false);
+    }
+    update();
   }
 
   /** `words`: a message and link of its own (Today's tower's result shares its score). */
@@ -2036,10 +2075,10 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   }
 
   /**
-   * A tap on something over the dimmed tower (the star card's Stories, a news toast, a
-   * notification) that opens a panel: toasts sit above the pause menu's scrim, so with the menu
-   * on screen it closes first, the speed given back, as its own Stories entry does, and the panel
-   * opens. Before, the panel waited unseen behind the menu (P4 review A3).
+   * A tap on something over the dimmed tower that opens a panel (the star card's Stories so far):
+   * toasts sit above the pause menu's scrim, so with the menu on screen it closes first, the speed
+   * given back, and the panel opens. Before, the panel waited unseen behind the menu (P4 review
+   * A3). Stories itself is a page in the menu (openStories).
    */
   function openPanelFromToast(kind: PanelKind): void {
     if (pauseMenu.isShown()) pauseMenu.close({ restoreFocus: false });
@@ -2350,11 +2389,10 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     }
   }
 
-  // A tap on a notification brought the game forward; an alert's also opens the news.
+  // A tap on a notification brought the game forward; an alert's also opens Stories at what needs you.
   notifier?.onTap((kind) => {
     if (destroyed || kind !== 'alerts') return;
-    openPanelFromToast('log');
-    update();
+    openStories('needs');
   });
 
   /**

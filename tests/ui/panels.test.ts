@@ -1,6 +1,8 @@
-// The log and room panels on a fake DOM: what a refresh builds, and what it leaves alone.
+// The log (Stories' Today, since 2026-10-01) and room panels on a fake DOM: what a refresh builds,
+// and what it leaves alone.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createFinancesPanel, createLogPanel, createQueryPanel, el, settingsBody, financeLists, nextSettleMinute, nextSettleTitle, type PanelContext } from '../../src/ui/panels';
+import { storiesBody } from '../../src/ui/stories';
+import { createFinancesPanel, createQueryPanel, el, settingsBody, financeLists, nextSettleMinute, nextSettleTitle, type PanelContext } from '../../src/ui/panels';
 import { onQuarterStart, quarterForecast } from '../../src/sim/economy';
 import type { Sound } from '../../src/audio/audio';
 import { RENT } from '../../src/sim/rules';
@@ -54,6 +56,12 @@ function logGame(): {
 
 const node = (panel: unknown): FakeElement => panel as FakeElement;
 
+/** Stories' body (src/ui/stories.ts), the pause menu page that took over the News sheet's log: its node, with refresh on it. */
+function storiesPanel(game: never, c: PanelContext): FakeElement & { refresh?: () => void } {
+  const body = storiesBody(game, c);
+  return Object.assign(body.node as unknown as FakeElement, { refresh: body.refresh });
+}
+
 /** The Today section, which holds the log (Needs you now comes before it). */
 const todayOf = (panel: unknown): FakeElement | undefined =>
   node(panel)
@@ -84,26 +92,26 @@ const tap = (target: FakeElement): void => {
   for (const fn of target.listeners.get('click') ?? []) fn({});
 };
 
-describe('News panel', () => {
-  it('is called News', () => {
-    const { game } = logGame();
-    const panel = node(createLogPanel(game, ctx));
-    const title = panel.descendants().find((n) => n.className === 'hs-panel-title-text');
-    expect(title?.textContent).toBe('News');
-    expect(panel.textContent).not.toMatch(/event log/i);
+describe('Stories: the log, under Today', () => {
+  it('is a page body, not a sheet, and never says News or event log', () => {
+    const { game, push } = logGame();
+    push(3);
+    const panel = storiesPanel(game, ctx);
+    expect(panel.descendants().some((n) => n.className === 'hs-panel-title-text')).toBe(false);
+    expect(panel.textContent).not.toMatch(/event log|\bnews\b/i);
   });
 
   it('shows the newest ten lines, newest first', () => {
     const { game, push } = logGame();
     push(25);
-    const list = listOf(createLogPanel(game, ctx));
+    const list = listOf(storiesPanel(game, ctx));
     expect(texts(list)).toEqual(['line 24', 'line 23', 'line 22', 'line 21', 'line 20', 'line 19', 'line 18', 'line 17', 'line 16', 'line 15']);
   });
 
   it('puts a new line on top and keeps ten', () => {
     const { game, push } = logGame();
     push(12);
-    const panel = createLogPanel(game, ctx);
+    const panel = storiesPanel(game, ctx);
     push(2);
     panel.refresh?.();
     const list = listOf(panel);
@@ -119,7 +127,7 @@ describe('News panel', () => {
     push(1, 3 * 1440 + 7 * 60); // five hours ago
     push(1, 3 * 1440 + 11 * 60); // an hour ago
     push(1, 3 * 1440 + 11 * 60 + 50); // ten minutes ago
-    const panel = createLogPanel(game, ctx);
+    const panel = storiesPanel(game, ctx);
     // Earlier days sit under Yesterday and Earlier in the Today section, shown once Show older is tapped.
     expect(times(listOf(panel))).toEqual(['just now', 'an hour ago', '5 hours ago']);
     tap(showOlder(panel)!);
@@ -137,7 +145,7 @@ describe('News panel', () => {
     push(3, 1995, 'alert');
     world.log.push({ minute: 1999, text: 'A tenant moved in.', level: 'info', roomId: 42, simId: 77 });
     world.logTotal += 1;
-    const list = listOf(createLogPanel(game, ctx));
+    const list = listOf(storiesPanel(game, ctx));
     for (const li of list.children) {
       expect(li.textContent).not.toMatch(/\b(info|warn|alert)\b|\d{1,2}:\d{2}|weekday|weekend|42|77|#/i);
     }
@@ -147,7 +155,7 @@ describe('News panel', () => {
   it('Show older reveals the next fifty, and goes away when there is no more', () => {
     const { game, push } = logGame();
     push(70);
-    const panel = createLogPanel(game, ctx);
+    const panel = storiesPanel(game, ctx);
     const older = showOlder(panel);
     expect(older).toBeDefined();
     tap(older as FakeElement);
@@ -163,13 +171,13 @@ describe('News panel', () => {
   it('has no Show older when ten lines or fewer', () => {
     const { game, push } = logGame();
     push(10);
-    expect(showOlder(createLogPanel(game, ctx))?.hidden ?? true).toBe(true);
+    expect(showOlder(storiesPanel(game, ctx))?.hidden ?? true).toBe(true);
   });
 
   it('a refresh with no new line and no change of time builds nothing', () => {
     const { game, push } = logGame();
     push(30);
-    const panel = createLogPanel(game, ctx);
+    const panel = storiesPanel(game, ctx);
     dom.created = 0;
     panel.refresh?.();
     expect(dom.created).toBe(0);
@@ -178,16 +186,16 @@ describe('News panel', () => {
   it('rebuilds from the log when a load swaps it for another world', () => {
     const { game, world, push } = logGame();
     push(10);
-    const panel = createLogPanel(game, ctx);
+    const panel = storiesPanel(game, ctx);
     world.log = [{ minute: 0, text: 'loaded', level: 'info' }];
     world.logTotal = 12;
     panel.refresh?.();
     expect(texts(listOf(panel))).toEqual(['loaded']);
   });
 
-  it('says so when nothing has happened yet', () => {
+  it('leaves Today out while nothing has happened yet', () => {
     const { game } = logGame();
-    expect(texts(listOf(createLogPanel(game, ctx)))).toEqual(['Nothing has happened yet.']);
+    expect(todayOf(storiesPanel(game, ctx))?.hidden).toBe(true);
   });
 });
 
@@ -293,7 +301,6 @@ describe('panel header', () => {
   };
 
   it('gives every panel the same header: a section icon, the title, and Close', () => {
-    const { game } = logGame();
     const room = {
       world: {
         rooms: new Map([[1, { id: 1, kind: 'office', floor: 2, height: 1, eval: 0.5, tenants: [], occupancy: 0, vacant: true, rent: RENT.default }]]),
@@ -302,7 +309,6 @@ describe('panel header', () => {
       },
     } as never;
     const cases: [unknown, string, string][] = [
-      [createLogPanel(game, ctx), 'News', 'log'],
       [createQueryPanel(room, { roomId: 1 }, ctx), 'Office', 'room'],
       [createQueryPanel(room, { roomId: 99 }, ctx), 'Nothing selected', 'query'],
     ];

@@ -1,7 +1,7 @@
 // Info lines stop toasting (Matt, 2026-09-26): hotel check-outs and housekeeping are 'info' and
 // used to rise as one toast each, flooding the screen. Now only an info line marked notable (a
 // VIP arriving or checking in, a wedding starting or ending) toasts; every other info line goes
-// to the News panel only. Warn lines still fold into one toast per 20 s; alerts are cards.
+// to Stories only. Warn lines still fold into one toast per 20 s; alerts are cards.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { onQuarterStart } from '../../src/sim/economy';
 import { startWedding } from '../../src/sim/events';
@@ -63,7 +63,7 @@ const toasts = (root: FakeElement): string[] =>
     .map((n) => n.textContent);
 
 describe('news toasts', () => {
-  it('a plain info line (check-out, housekeeping, built) makes no toast; the News log keeps it', () => {
+  it('a plain info line (check-out, housekeeping, built) makes no toast; Stories keeps it', () => {
     const { world, notify, root } = mountWorld();
     log(world, 'A guest checked out of the hotel room on floor 3.', 'info');
     notify();
@@ -138,7 +138,7 @@ describe('news toasts', () => {
     now += GIVE_UP_TOAST_GAP_MS;
     log(world, 'Gave up waiting for an elevator on floor 5.', 'warn');
     notify();
-    expect(toasts(root)).toEqual(['2 problems in the tower. Tap for the news.']);
+    expect(toasts(root)).toEqual(['2 problems in the tower. Tap to open Stories.']);
   });
 
   it('warnings logged while Watch hides the chrome do not swell the first toast after (audit 2026-09-28, E1 S6)', () => {

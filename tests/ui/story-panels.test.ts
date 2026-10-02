@@ -1,4 +1,4 @@
-// The person card, room occupants and the stories panel, on a fake DOM.
+// The person card, room occupants and the Stories body (the pause menu's page), on a fake DOM.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ROOMS } from '../../src/sim/rules';
 import { followSim, recordBeat, storyName, STORY_FOLLOWED_CAP } from '../../src/sim/story';
@@ -7,11 +7,11 @@ import { addRoom, addSim, allocId, createWorld } from '../../src/sim/world';
 import {
   createQueryPanel,
   el, settingsBody,
-  createStoriesPanel,
   FOLLOW_LIMIT_TEXT,
   type PanelContext,
   type Selection,
 } from '../../src/ui/panels';
+import { storiesBody } from '../../src/ui/stories';
 import { FakeDom, type FakeElement } from './fake-dom';
 
 /** Settings as the pause menu's Settings page holds them (settingsBody; the old sheet is gone). */
@@ -29,8 +29,8 @@ beforeEach(() => {
 });
 afterEach(() => uninstall());
 
-function context(): { ctx: PanelContext; notices: string[]; selected: Selection[]; stories: number } {
-  const out = { notices: [] as string[], selected: [] as Selection[], stories: 0 };
+function context(): { ctx: PanelContext; notices: string[]; selected: Selection[] } {
+  const out = { notices: [] as string[], selected: [] as Selection[] };
   const ctx: PanelContext = {
     apply: () => ({ ok: true }) as never,
     notice: (text) => out.notices.push(text),
@@ -38,11 +38,8 @@ function context(): { ctx: PanelContext; notices: string[]; selected: Selection[
     reducedMotion: false,
     setReducedMotion: () => {},
     select: (sel) => out.selected.push(sel),
-    openStories: () => {
-      out.stories += 1;
-    },
   };
-  return { ctx, ...out, get stories() { return out.stories; } } as never;
+  return { ctx, ...out };
 }
 
 function office(world: World, floor = 12): Room {
@@ -156,7 +153,6 @@ describe('stories', () => {
     const saves = lists.find((list) => list.children.some((b) => b.textContent === 'Save to a file'));
     expect(rows(saves)).toEqual(['Save now', 'Go back to last save', 'Save to a file', 'Open a saved file']);
     expect(buttonsNamed(panel, 'Stories')).toEqual([]);
-    expect(c.stories).toBe(0);
   });
 
   it('lists the followed people with their latest line, and the last tower beats', () => {
@@ -166,7 +162,7 @@ describe('stories', () => {
     followSim(world.story, sim.id);
     recordBeat(world.story, { code: 'wait.long', minute: 500, simId: sim.id, roomId: home.id, value: 8 });
     for (let i = 0; i < 20; i++) recordBeat(world.story, { code: 'star.gained', minute: 600 + i, value: 2 });
-    const panel = createStoriesPanel({ world } as never, context().ctx);
+    const panel = storiesBody({ world } as never, context().ctx).node;
     const text = node(panel).textContent;
     expect(text).toContain(storyName(world, sim.id));
     expect(text.toLowerCase()).toContain('eight minutes');

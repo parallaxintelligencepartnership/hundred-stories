@@ -172,7 +172,7 @@ describe('guide page', () => {
   it('covers what shipped with the stories: following, the VIP checklist, the thief, waste, the chronicle and the music slider', () => {
     const text = flat(guide);
     expect(text).toContain('Choose Follow on the card to keep up with someone. You can follow eight people at a time.');
-    expect(text).toContain('The Stories panel, opened from the menu, lists the people you follow');
+    expect(text).toContain('Stories, in the menu, lists the people you follow');
     expect(text).toContain('The weather can change every six hours: clear, cloudy, rain or storm.');
     expect(text).toContain('Weather stays outside. It never changes how the tower runs');
     expect(text).toContain('a suite ready for them, the suite clean, an elevator that stops at the suite floor, and no fire or bomb in the tower.');

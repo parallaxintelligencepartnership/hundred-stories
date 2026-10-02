@@ -308,7 +308,8 @@ describe('the bomb card', () => {
     h.notify();
     const card = bombCards(h.root)[0]!;
     expect(bombCards(h.root)).toHaveLength(1);
-    expect(buttonOf(card, 'bomb.pay')?.textContent).toBe('Pay ransom');
+    // The amount on the button, as the helicopter shows its price (one rule with Stories, 2026-10-01).
+    expect(buttonOf(card, 'bomb.pay')?.textContent).toBe('Pay ransom ($500,000)');
     click(buttonOf(card, 'bomb.pay')!);
     expect(h.applied).toEqual([{ kind: 'bomb.pay' }]);
     expect(bombCards(h.root)).toHaveLength(1);
@@ -328,7 +329,7 @@ describe('the bomb card', () => {
     h.notify();
     const card = bombCards(h.root)[0]!;
     const pay = buttonOf(card, 'bomb.pay');
-    expect(pay?.textContent).toBe('Pay ransom');
+    expect(pay?.textContent).toBe('Pay ransom ($500,000)');
     expect(pay?.disabled).toBe(true);
     expect(card.textContent).toContain('Not enough cash. The ransom is $500,000.');
     world.cash = EVENTS.bomb.ransom;

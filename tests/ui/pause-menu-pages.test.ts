@@ -284,7 +284,8 @@ describe('Stories and Share, pages too', () => {
     expect(ui.plateTitle()).toBe('Stories');
     const titles = ui.page()!.descendants().filter((n) => has(n, 'hs-section-title')).map((n) => n.textContent);
     expect(titles).toEqual(expect.arrayContaining(['Following', 'Around the tower']));
-    // No controls on it yet: focus waits on Back.
+    // Opened from the menu with no place to go to, focus waits on Back: never on a button that
+    // spends (Call a helicopter, Pay ransom), whatever the page holds.
     expect(dom.activeElement).toBe(ui.back());
   });
 

@@ -25,7 +25,6 @@ import { evaluateRoom } from '../sim/evaluation';
 export { nextSettleMinute } from '../sim/economy';
 import { ECONOMY, EVAL, LIMITS, RENT, ROOMS, SHAFTS, takesRent, WASTE } from '../sim/rules';
 import {
-  describeBeat,
   followSim,
   goalLine,
   isFollowed,
@@ -33,7 +32,6 @@ import {
   storyName,
   STORY_FOLLOWED_CAP,
   unfollowSim,
-  type StoryBeat,
 } from '../sim/story';
 import { milestoneRecap, NO_STORIES_YET } from '../sim/chronicle';
 import { centerSummary, producesWaste, recyclingCenters, wasteDayStart } from '../sim/recycling';
@@ -44,9 +42,7 @@ import type {
   Command,
   CommandResult,
   Id,
-  LogEntry,
   LossKind,
-  Milestone,
   Room,
   RoomKind,
   Shaft,
@@ -68,10 +64,7 @@ import {
 } from './format';
 import { icon, type IconName } from './icons';
 import { othersWaitLonger, RIDER_CHOICES, RIDER_ICON, RIDER_LABEL, RIDER_WARNING, RIDER_NOTE, type RiderSetting } from './riders';
-import { isPhoneWidth } from './build';
 import { createSheet, type Sheet } from './sheet';
-import { vipView, vipViewKey, type VipView } from './vip';
-import { MILESTONES_EMPTY, needsKey, needsYou, NEEDS_EMPTY, newsDays, NEWS_EMPTY, TODAY_EMPTY } from './news';
 import { chevron, controlsDevice, currentDeviceEnv, fillControlsPage } from './controls';
 import { getFlag, PREF_KEYS, setFlag } from './prefs';
 import { setSoundOn } from './sound-toggle';
@@ -102,11 +95,9 @@ export interface PanelContext {
   sound?: Sound;
   /** Show the intro again, from Help in the settings panel. */
   openIntro?: () => void;
-  /** Open the stories panel, from its button beside Save and Export. */
-  openStories?: () => void;
-  /** Open the last milestone's recap, from the star card and the stories panel. */
+  /** Open the last milestone's recap, from the star card and Stories. */
   openRecap?: () => void;
-  /** Open the tower chronicle, from the stories panel. */
+  /** Open the tower chronicle, from Stories. */
   openChronicle?: () => void;
   /** Open today's tower in its own slot, from the settings panel. */
   openDaily?: () => void;
@@ -130,7 +121,10 @@ export interface PanelContext {
    * the part of the ui that shows it (larger text, the color-blind views) to follow at once.
    */
   setDisplay?: (name: DisplaySwitch, on: boolean) => void;
-  /** Center the tower view on a tile, from a News line with a place. Absent where there is no camera. */
+  /**
+   * Center the tower view on a tile, from a Stories row's Show on the tower. On the pause menu's
+   * page it leaves the menu first. Absent where there is no camera.
+   */
   centerOn?: (floor: number, x: number) => void;
   /** The web's notifications (src/ui/notify.ts); none in the native shells, so no section there. */
   notifications?: Pick<Notifier, 'isOn' | 'turnOn' | 'turnOff'>;
@@ -155,8 +149,6 @@ export const FOLLOW_LIMIT_TEXT = followLimitText(STORY_FOLLOWED_CAP);
 
 /** How many names the room panel lists. */
 export const OCCUPANTS_SHOWN = 8;
-/** How many tower beats the stories panel lists. */
-export const STORIES_TOWER_LINES = 12;
 
 /** The long form of the rules, one page away. */
 export const HOW_TO_PLAY_HREF = '/how-to-play/';
@@ -250,7 +242,7 @@ function moneyRow(label: string, value: string): HTMLDivElement {
   return node;
 }
 
-function section(title: string): HTMLDivElement {
+export function section(title: string): HTMLDivElement {
   const node = el('div', 'hs-section');
   node.append(el('h3', 'hs-section-title', title));
   return node;
@@ -559,7 +551,7 @@ function collectionRows(game: GameApi, center: Room): { nodes: HTMLDivElement[];
  * Rewrite a list of lines only when the words changed, so a refresh that changes nothing
  * builds nothing.
  */
-function setLines(list: HTMLElement, lines: readonly string[], tag: 'p' | 'li', className: string): void {
+export function setLines(list: HTMLElement, lines: readonly string[], tag: 'p' | 'li', className: string): void {
   const key = lines.join('\n');
   if (list.dataset['lines'] === key) return;
   list.dataset['lines'] = key;
@@ -1223,296 +1215,6 @@ export function createFinancesPanel(game: GameApi, ctx: PanelContext): PanelElem
   refresh();
   panel.refresh = refresh;
   return panel;
-}
-
-// ------------------------------------------------------------- news panel
-
-/** News shows this many of today's newest lines at first, newest on top. */
-export const NEWS_LINES = 10;
-/** Each tap on Show older adds this many more. */
-export const NEWS_OLDER_STEP = 50;
-
-/**
- * When a line happened, in words, from the game clock: "just now", "an hour ago", "5 hours ago",
- * "yesterday", "3 days ago". Days are the game's calendar days, so last night is yesterday.
- */
-export function newsTime(now: number, minute: number): string {
-  const ago = Math.max(0, Math.floor(now) - Math.floor(minute));
-  if (ago < 60) return 'just now';
-  if (ago < 120) return 'an hour ago';
-  const days = Math.floor(Math.max(0, now) / 1440) - Math.floor(Math.max(0, minute) / 1440);
-  if (days <= 0 || ago < 6 * 60) return `${Math.floor(ago / 60)} hours ago`;
-  if (days === 1) return 'yesterday';
-  return `${days} days ago`;
-}
-
-/**
- * News, in three sections. Needs you now: the open matters the player can act on, derived from
- * the world on every refresh (a fire, a bomb threat, cockroaches, money, a VIP visit under way),
- * each with a place centering the camera there when tapped. Today: the log lines of the current
- * game day, newest first, with when each happened in words; Show older adds fifty at a time and
- * reveals earlier days under Yesterday and Earlier. Milestones: the tower's firsts, saved on the
- * world (src/sim/milestones.ts), newest first. Each section rebuilds only when its own key moves.
- */
-export function createLogPanel(game: GameApi, ctx: PanelContext): PanelElement {
-  const { panel, body } = panelShell('News', 'log', ctx);
-  panel.classList.add('hs-news-panel');
-
-  const needs = section('Needs you now');
-  needs.classList.add('hs-needs');
-  const needList = el('ul', 'hs-log-list');
-  needs.append(needList);
-
-  const today = section('Today');
-  const todayList = el('ul', 'hs-log-list');
-  const yesterdayTitle = el('h4', 'hs-news-day', 'Yesterday');
-  const yesterdayList = el('ul', 'hs-log-list');
-  const earlierTitle = el('h4', 'hs-news-day', 'Earlier');
-  const earlierList = el('ul', 'hs-log-list');
-  for (const node of [yesterdayTitle, yesterdayList, earlierTitle, earlierList]) node.hidden = true;
-  let limit = NEWS_LINES;
-  let olderOpen = false;
-  const older = button('Show older', 'hs-news-older', () => {
-    limit = olderOpen ? limit + NEWS_OLDER_STEP : NEWS_LINES + NEWS_OLDER_STEP;
-    olderOpen = true;
-    refresh();
-  });
-  older.hidden = true;
-  today.append(todayList, yesterdayTitle, yesterdayList, earlierTitle, earlierList, older);
-
-  const milestones = section('Milestones');
-  const milestoneList = el('ul', 'hs-log-list');
-  milestones.append(milestoneList);
-  body.append(needs, today, milestones);
-
-  /** The time span of each line on show, with the minute it stands for, so the words move with the clock. */
-  let logStamps: { node: HTMLElement; minute: number }[] = [];
-  let milestoneStamps: { node: HTMLElement; minute: number }[] = [];
-  const item = (text: string, minute: number, now: number, level: LogEntry['level'], stamps: typeof logStamps): HTMLLIElement => {
-    const node = el('li', `hs-log-item is-${level}`);
-    const time = el('span', 'hs-log-time', newsTime(now, minute));
-    node.append(el('span', 'hs-log-text', text), time);
-    stamps.push({ node: time, minute });
-    return node;
-  };
-  const empty = (text: string): HTMLLIElement => el('li', 'hs-log-item is-empty', text);
-
-  const goTo = (at: { floor: number; x: number }): void => {
-    ctx.centerOn?.(at.floor, at.x);
-    // On a phone the sheet covers the middle of the view: step aside so the place is in sight.
-    if (isPhoneWidth(typeof window === 'undefined' ? undefined : (window as { innerWidth?: number }).innerWidth)) ctx.close();
-  };
-
-  let vipNode: HTMLDivElement | null = null;
-  let shownNeeds: string | null = null;
-  const refreshNeeds = (world: World): void => {
-    const lines = needsYou(world);
-    // During a visit the VIP card is something to act on; between visits (the last rating and
-    // the next chance) it closes the Milestones section. It shows in one place only.
-    const visiting = (world.events ?? []).some((e) => e.kind === 'vip');
-    const card = vipView(world);
-    const view = visiting ? card : null;
-    const key = `${needsKey(lines)}@${visiting ? 1 : 0}@${vipViewKey(card)}`;
-    if (key === shownNeeds) return;
-    shownNeeds = key;
-    const items = lines.map((line) => {
-      const node = el('li', `hs-log-item hs-need is-${line.kind}`);
-      const at = line.at;
-      if (at) {
-        const go = button(line.text, 'hs-need-go', () => goTo(at));
-        go.title = 'Show on the tower';
-        node.append(go);
-      } else node.append(el('span', 'hs-log-text', line.text));
-      return node;
-    });
-    needList.replaceChildren(...(items.length === 0 && !view ? [empty(NEEDS_EMPTY)] : items));
-    needList.hidden = items.length === 0 && view !== null;
-    // The VIP card, while a visit is on: its checklist is something to act on before the stay.
-    vipNode?.remove();
-    vipNode = card ? vipCard(card) : null;
-    if (vipNode) (visiting ? needs : milestones).append(vipNode);
-  };
-
-  /** What the day lists were built from: the log array, and a key of its total, the limit and the day. */
-  let shownLog: readonly LogEntry[] | null = null;
-  let shownKey = '';
-  const refreshLog = (world: World, now: number): boolean => {
-    const log = world.log ?? [];
-    const key = `${world.logTotal}:${limit}:${olderOpen ? 1 : 0}:${Math.floor(Math.max(0, now) / 1440)}`;
-    if (shownLog === log && key === shownKey) return false;
-    shownLog = log;
-    shownKey = key;
-    logStamps = [];
-    const days = newsDays(log, now, limit, olderOpen);
-    const lines = (entries: LogEntry[]) => entries.map((e) => item(e.text, e.minute, now, e.level, logStamps));
-    todayList.replaceChildren(...(days.today.length > 0 ? lines(days.today) : [empty(log.length === 0 ? NEWS_EMPTY : TODAY_EMPTY)]));
-    yesterdayList.replaceChildren(...lines(days.yesterday));
-    earlierList.replaceChildren(...lines(days.earlier));
-    yesterdayTitle.hidden = yesterdayList.hidden = days.yesterday.length === 0;
-    earlierTitle.hidden = earlierList.hidden = days.earlier.length === 0;
-    older.hidden = !days.more;
-    return true;
-  };
-
-  let shownMilestones: readonly Milestone[] | null = null;
-  let shownMilestoneCount = -1;
-  const refreshMilestones = (world: World, now: number): boolean => {
-    const list = world.milestones ?? [];
-    if (list === shownMilestones && list.length === shownMilestoneCount) return false;
-    shownMilestones = list;
-    shownMilestoneCount = list.length;
-    milestoneStamps = [];
-    milestoneList.replaceChildren(
-      ...(list.length === 0
-        ? [empty(MILESTONES_EMPTY)]
-        : [...list].reverse().map((m) => item(m.text, m.minute, now, 'info', milestoneStamps))),
-    );
-    return true;
-  };
-
-  const refresh = (): void => {
-    const world = game.world;
-    const now = world.time?.minute ?? 0;
-    refreshNeeds(world);
-    const logBuilt = refreshLog(world, now);
-    const milestonesBuilt = refreshMilestones(world, now);
-    // Nothing new: only the words for when move on with the clock.
-    for (const stamps of [logBuilt ? [] : logStamps, milestonesBuilt ? [] : milestoneStamps]) {
-      for (const stamp of stamps) {
-        const words = newsTime(now, stamp.minute);
-        if (stamp.node.textContent !== words) stamp.node.textContent = words;
-      }
-    }
-  };
-  refresh();
-  panel.refresh = refresh;
-  return panel;
-}
-
-/** The VIP visit: who, what they care about, the preparation ticks or the last rating, and the next chance. */
-function vipCard(view: VipView): HTMLDivElement {
-  const node = section('VIP visit');
-  node.classList.add('hs-vip');
-  for (const line of view.lines) node.append(el('p', 'hs-story-line', line));
-  const rows = view.checklist
-    ? view.checklist.map((check) => ({ label: check.label, value: check.done ? 'Ready' : 'Not yet', done: check.done }))
-    : (view.breakdown ?? []).map((r) => ({ label: r.label, value: r.value, done: false }));
-  if (rows.length > 0) {
-    const list = el('ul', 'hs-goals');
-    for (const r of rows) {
-      const item = el('li', r.done ? 'hs-row hs-goal is-done' : 'hs-row hs-goal');
-      item.append(el('span', 'hs-row-label', r.label), el('span', 'hs-row-value', r.value));
-      list.append(item);
-    }
-    node.append(list);
-  }
-  if (view.nextChance) node.append(el('p', 'hs-note', view.nextChance));
-  return node;
-}
-
-// ---------------------------------------------------------- stories panel
-
-/** A beat as the tower list shows it: a person's line carries their name. */
-function towerBeatText(game: GameApi, beat: StoryBeat): string {
-  const line = describeBeat(beat, game.world);
-  const personal = beat.code === 'wait.long' || beat.code === 'trip.arrived' || beat.code === 'trip.gaveUp' || beat.code === 'room.vacated';
-  return personal && beat.simId !== undefined ? `${storyName(game.world, beat.simId)}: ${line}` : line;
-}
-
-/**
- * The people being followed, each with their latest line, and the last few beats from around
- * the tower. Built from the recorded beats when the panel opens and when they change.
- */
-export function createStoriesPanel(game: GameApi, ctx: PanelContext): PanelElement {
-  const { panel, body } = panelShell('Stories', 'population', ctx);
-  const stories = storiesBody(game, ctx);
-  body.append(stories.node);
-  if (stories.refresh) panel.refresh = stories.refresh;
-  return panel;
-}
-
-/** The Stories body, for the sheet (a person, a news toast, the star card) or the pause menu's page. */
-export function storiesBody(game: GameApi, ctx: PanelContext): PanelBody {
-  const node = el('div', 'hs-stories');
-  const following = section('Following');
-  const followList = el('div', 'hs-occupants');
-  following.append(followList);
-  const tower = section('Around the tower');
-  const towerList = el('ul', 'hs-story-chapter');
-  tower.append(towerList);
-  const milestones = section('Milestones');
-  const milestoneActions = el('div', 'hs-actions');
-  milestones.append(milestoneActions);
-  node.append(following, tower, milestones);
-
-  let followKey = '';
-  /** The row at this place in the Following list, as the control focus lands on: the person, or a gone one's Unfollow. */
-  const rowControl = (index: number): HTMLElement | null => {
-    const row = index >= 0 ? (followList.children[index] as HTMLElement | undefined) : undefined;
-    if (!row) return null;
-    if (row.tagName === 'BUTTON') return (row as HTMLButtonElement).disabled ? null : row;
-    const kids = Array.from(row.children) as HTMLElement[];
-    return kids.find((kid) => kid.tagName === 'BUTTON' && !(kid as HTMLButtonElement).disabled) ?? null;
-  };
-  const refresh = (): void => {
-    const world = game.world;
-    const story = world.story;
-    const rows = story.followed.map((id) => {
-      const sim = world.sims.get(id);
-      const thread = story.threads[id] ?? [];
-      const last = thread[thread.length - 1];
-      const line = last ? describeBeat(last, world) : sim ? `${goalLine(world, sim)}.` : 'Left the tower.';
-      return { id, name: storyName(world, id), line, here: sim !== undefined };
-    });
-    const key = rows.map((r) => `${r.id}:${r.line}:${r.here ? 1 : 0}`).join('|');
-    if (key !== followKey) {
-      followKey = key;
-      if (rows.length === 0) {
-        followList.replaceChildren(el('p', 'hs-note', 'Nobody yet. Open a person and choose Follow.'));
-      } else {
-        followList.replaceChildren(
-          ...rows.map((r, index) => {
-            const item = button('', 'hs-occupant', () => {
-              if (r.here) ctx.select?.({ simId: r.id });
-            });
-            item.disabled = !r.here;
-            item.replaceChildren(el('span', 'hs-occupant-name', r.name), el('span', 'hs-occupant-goal', r.line));
-            if (r.here) return item;
-            // Someone who left keeps their place until the player lets it go.
-            const wrap = el('div', 'hs-occupant-gone');
-            const release = button('Unfollow', 'hs-btn', () => {
-              unfollowSim(game.world.story, r.id);
-              refresh();
-              // Focus stays in the list: the row that took this one's place, else the one before.
-              const next = rowControl(index) ?? rowControl(index - 1);
-              if (ctx.rowsChanged) ctx.rowsChanged(next);
-              else next?.focus?.();
-            });
-            release.setAttribute('aria-label', `Unfollow ${r.name}`);
-            wrap.append(item, release);
-            return wrap;
-          }),
-        );
-      }
-    }
-    const lines = story.recent.slice(-STORIES_TOWER_LINES).map((beat) => towerBeatText(game, beat));
-    setLines(towerList, lines.length > 0 ? lines : ['Nothing recorded yet.'], 'li', 'hs-story-item');
-
-    // Reopen the last milestone and the chronicle, whenever the record holds them.
-    const hasRecap = ctx.openRecap !== undefined && story.recent.some((beat) => beat.code === 'star.gained');
-    const hasChronicle = ctx.openChronicle !== undefined && story.chronicle !== null && story.chronicle !== undefined;
-    const milestoneKey = `${hasRecap ? 1 : 0}${hasChronicle ? 1 : 0}`;
-    if (milestoneActions.dataset['key'] !== milestoneKey) {
-      milestoneActions.dataset['key'] = milestoneKey;
-      const actions: HTMLElement[] = [];
-      if (hasRecap) actions.push(button('Last milestone', 'hs-btn', () => ctx.openRecap?.()));
-      if (hasChronicle) actions.push(button('Tower chronicle', 'hs-btn', () => ctx.openChronicle?.()));
-      milestoneActions.replaceChildren(...actions);
-      milestones.hidden = actions.length === 0;
-    }
-  };
-  refresh();
-  return { node, refresh };
 }
 
 // ------------------------------------------------ milestone recap and chronicle

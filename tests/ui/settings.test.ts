@@ -43,7 +43,6 @@ function context(over: Partial<PanelContext> = {}): PanelContext & { motion: boo
     setDisplay: (name, on) => display.push(`${name}:${on}`),
     openIntro: () => {},
     openDaily: () => {},
-    openStories: () => {},
     motion,
     display,
     ...over,

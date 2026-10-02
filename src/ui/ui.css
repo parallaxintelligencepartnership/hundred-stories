@@ -2952,14 +2952,54 @@ button.hs-news-toast {
   display: none;
 }
 
+/* A button since 2026-10-01: a tap opens Stories, where the folded cards' words are kept. */
 .hs-toast-more {
   margin: 0;
+  min-height: var(--touch);
   padding: 4px 12px;
   background: var(--surface);
+  border: 0;
   border-radius: var(--radius-pill);
   box-shadow: var(--shadow-1);
+  color: var(--ink);
+  font: inherit;
   font-size: var(--size-12);
+  text-align: left;
+  cursor: pointer;
   pointer-events: auto;
+}
+
+/* The reminder of a live fire or bomb whose card is out of sight: the red icon and a few words,
+   a tap opens Stories at it. A small pill at the stack's edge, no stripe (DECISIONS 2026-09-30). */
+.hs-toast-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-end;
+  max-width: 100%;
+  min-height: var(--touch);
+  margin: 0;
+  padding: 4px 14px 4px 10px;
+  background: var(--surface);
+  border: 0;
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-1);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--size-14);
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.hs-toast-chip-words {
+  min-width: 0;
+}
+
+.hs-toast-more:hover,
+.hs-toast-chip:hover {
+  color: var(--amber-text);
 }
 
 .hs-toast-text {
