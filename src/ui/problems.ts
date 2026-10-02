@@ -12,11 +12,12 @@
 import { floorWaits, hallQueues } from '../render/overlays';
 import { averageTenantStress, noisyNeighborsOf } from '../sim/evaluation';
 import { dirtyHotelRooms, hotelRoomsHousekeepingCannotReach } from '../sim/people';
-import { centerSummary, inWasteBacklog, recyclingCenters } from '../sim/recycling';
+import { centerSummary, floorsCollectorsCannotReach, inWasteBacklog, recyclingCenters } from '../sim/recycling';
 import { findRoute, isReachableFromLobby } from '../sim/routing';
 import { EVAL, RENT, ROOMS, takesRent, TOWER_WIDTH } from '../sim/rules';
 import type { Id, Room, RoomKind, World } from '../sim/types';
 import { groundLobby, LONG_WAIT_MINUTES, roomsOfKind, roomsOnFloor, shaftsOnFloor } from '../sim/world';
+import { formatCount } from './format';
 
 /** The kinds of problem, in the order Stories lists them. */
 export type ProblemKind =
@@ -91,15 +92,15 @@ export function floorList(floors: readonly number[]): string {
 }
 
 function people(n: number): string {
-  return n === 1 ? '1 person' : `${n} people`;
+  return n === 1 ? '1 person' : `${formatCount(n)} people`;
 }
 
 function rooms(n: number, what = 'room'): string {
-  return n === 1 ? `1 ${what}` : `${n} ${what}s`;
+  return n === 1 ? `1 ${what}` : `${formatCount(n)} ${what}s`;
 }
 
 function minutes(n: number): string {
-  return n === 1 ? '1 minute' : `${n} minutes`;
+  return n === 1 ? '1 minute' : `${formatCount(n)} minutes`;
 }
 
 function label(kind: RoomKind): string {
@@ -211,7 +212,7 @@ function waitProblems(world: World): TowerProblem[] {
       floors: rest.map((f) => f.floor).sort((a, b) => a - b),
       count,
       minutes: worst.waited,
-      text: `And ${rest.length} more floors where people have waited over ${minutes(LONG_WAIT_MINUTES)}, the worst on ${floorName(worst.floor)}.`,
+      text: `And ${formatCount(rest.length)} more floors where people have waited over ${minutes(LONG_WAIT_MINUTES)}, the worst on ${floorName(worst.floor)}.`,
       actions: [showFloor(world, worst.floor)],
     };
   };
@@ -306,7 +307,7 @@ function noWayInProblems(world: World): TowerProblem[] {
     key: 'noWayIn:more',
     floors: [...rest],
     count: rest.reduce((n, f) => n + (byFloor.get(f)?.length ?? 0), 0),
-    text: `And ${rest.length} more floors with rooms nobody can get to, starting at ${floorName(rest[0] as number)}.`,
+    text: `And ${formatCount(rest.length)} more floors with rooms nobody can get to, starting at ${floorName(rest[0] as number)}.`,
     actions: [showFloor(world, rest[0] as number)],
   });
   return capped(floors, one, more);
@@ -320,6 +321,34 @@ export function housekeepingReaches(world: World, room: Room): boolean {
     (office) =>
       findRoute(world, middle(office), middle(room), { staff: true, riderClass: 'hotel' }) !== null,
   );
+}
+
+const HOTEL: ReadonlySet<RoomKind> = new Set<RoomKind>(['hotelSingle', 'hotelTwin', 'hotelSuite']);
+
+/**
+ * The hotel rooms, clean or not, this one housekeeping office has no route to, lowest floor first:
+ * what its card says it cannot reach. A floor turns on the floor alone, so one route per floor.
+ */
+export function hotelRoomsOfficeCannotReach(world: World, office: Room): Room[] {
+  const byFloor = new Map<number, boolean>();
+  const out: Room[] = [];
+  for (const room of world.rooms.values()) {
+    if (!HOTEL.has(room.kind)) continue;
+    let reached = byFloor.get(room.floor);
+    if (reached === undefined) {
+      reached = findRoute(world, middle(office), middle(room), { staff: true, riderClass: 'hotel' }) !== null;
+      byFloor.set(room.floor, reached);
+    }
+    if (!reached) out.push(room);
+  }
+  return out.sort((a, b) => a.floor - b.floor || a.id - b.id);
+}
+
+/** "None", or "2 hotel rooms on floors 3 and 4": the housekeeping card's Cannot reach row. */
+export function officeCannotReachWords(world: World, office: Room): string {
+  const cut = hotelRoomsOfficeCannotReach(world, office);
+  if (cut.length === 0) return 'None';
+  return `${rooms(cut.length, 'hotel room')} on ${floorList([...new Set(cut.map((r) => r.floor))])}`;
 }
 
 function housekeepingProblems(world: World): TowerProblem[] {
@@ -378,12 +407,14 @@ function wasteProblems(world: World): TowerProblem[] {
   }
   const out: TowerProblem[] = [];
   const sum = centerSummary(world, centers[0] as Room);
-  const cutFloors = new Set(sum.unreachableFloors);
+  // Worked out now from the workers' own routes, not the day's record of failed trips, so the
+  // row goes the moment the player gives the collectors a way and comes the moment one is cut.
+  const cutFloors = new Set(floorsCollectorsCannotReach(world));
   if (cutFloors.size > 0) {
     const floors = [...cutFloors].sort((a, b) => a - b);
     const stuck = backlog.filter((r) => cutFloors.has(r.floor)).length;
     const piling = stuck > 0 ? ` Waste is piling up in ${rooms(stuck)} there.` : '';
-    const center = centers.find((c) => (c.wasteUnreachable ?? []).length > 0) ?? (centers[0] as Room);
+    const center = centers[0] as Room;
     out.push({
       kind: 'wasteReach',
       key: 'wasteReach',
@@ -400,7 +431,7 @@ function wasteProblems(world: World): TowerProblem[] {
     const atMost = centers.length >= (ROOMS.recycling.maxCount ?? Number.POSITIVE_INFINITY);
     const made = sum.madeToday;
     const took = sum.collectedToday;
-    const units = (n: number): string => (n === 1 ? '1 unit' : `${n} units`);
+    const units = (n: number): string => (n === 1 ? '1 unit' : `${formatCount(n)} units`);
     const tally = made > 0 || took > 0 ? ` Today the tower made ${units(made)} of waste and the collectors took ${units(took)}.` : '';
     const fix =
       took > 0 && took >= made
@@ -459,7 +490,7 @@ function moveOutProblems(world: World): TowerProblem[] {
     key: 'moveOut:more',
     floors: [...new Set(rest.map((r) => r.floor))].sort((a, b) => a - b),
     count: rest.length,
-    text: `And ${rest.length} more rooms whose people will move out unless their rating gets better.`,
+    text: `And ${formatCount(rest.length)} more rooms whose people will move out unless their rating gets better.`,
     actions: [showRoom(rest[0] as Room)],
   });
   return capped(counting, one, more);
@@ -467,7 +498,10 @@ function moveOutProblems(world: World): TowerProblem[] {
 
 // ------------------------------------------------------------------ all of it
 
-/** Every problem true in the tower right now, in the order Stories lists them. */
+/**
+ * Every problem true in the tower right now, in the order Stories lists them. The folded warning
+ * toast (ui.ts) counts this once, when it shows: a snapshot by design; the page counts again when opened.
+ */
 export function towerProblems(world: World): TowerProblem[] {
   return [
     ...waitProblems(world),

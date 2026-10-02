@@ -4,8 +4,9 @@
 
 import { hourWords, nextSettleWords } from '../sim/economy';
 import { ECONOMY } from '../sim/rules';
+import { inWasteBacklog } from '../sim/recycling';
 import type { LogEntry, Room, World } from '../sim/types';
-import { fireHeadline, roachHeadline, SECURITY_RESPONDING, SECURITY_SEARCHING, theftHeadline } from './alerts';
+import { commandsRefused, fireHeadline, roachHeadline, SECURITY_RESPONDING, SECURITY_SEARCHING, theftHeadline } from './alerts';
 import { formatFloor, formatMoney } from './format';
 import { floorList, housekeepingReaches } from './problems';
 
@@ -39,13 +40,21 @@ function hasRoom(world: World, kind: Room['kind'], usable = false): boolean {
 
 /**
  * What happens to the cockroaches, as it is: housekeeping cleans them out only when it can get to
- * the rooms. No office: build one. Some rooms out of its reach: which floors.
+ * the rooms, and not while uncollected trash holds a room dirty (people.ts dirtyHotelRooms skips
+ * those until the collectors empty them). No office: build one. Some rooms out of its reach: which
+ * floors. Some held by trash: which floors wait for the collectors.
  */
 export function roachHelp(world: World, infested: readonly Room[]): string {
   if (!hasRoom(world, 'housekeeping')) return 'There is no housekeeping. Build a housekeeping office to clean them out.';
-  const cut = [...new Set(infested.filter((room) => !housekeepingReaches(world, room)).map((room) => room.floor))].sort((a, b) => a - b);
-  if (cut.length === 0) return 'Housekeeping will clean them out.';
-  return `Housekeeping cannot get to ${floorList(cut)}. Give it an elevator there to clean them out.`;
+  const floorsOf = (rooms: readonly Room[]): number[] => [...new Set(rooms.map((room) => room.floor))].sort((a, b) => a - b);
+  const reached = infested.filter((room) => housekeepingReaches(world, room));
+  const cut = floorsOf(infested.filter((room) => !reached.includes(room)));
+  const held = floorsOf(reached.filter((room) => inWasteBacklog(room)));
+  if (cut.length === 0 && held.length === 0) return 'Housekeeping will clean them out.';
+  const out: string[] = [];
+  if (cut.length > 0) out.push(`Housekeeping cannot get to ${floorList(cut)}. Give it an elevator there to clean them out.`);
+  if (held.length > 0) out.push(`Housekeeping cannot clean the rooms on ${floorList(held)} until the waste collectors take their trash away.`);
+  return out.join(' ');
 }
 
 /**
@@ -58,14 +67,20 @@ export function needsYou(world: World): NeedLine[] {
   // A security office on fire is not on duty, as the alert cards count it.
   const security = hasRoom(world, 'security', true);
 
+  // A finished Today's tower: the clock has stopped, so nothing will happen to a fire or a bomb.
+  // The off spend button under the line gives the reason (the tower is over).
+  const over = commandsRefused(world) !== null;
+
   const fire = events.find((e) => e.kind === 'fire');
   if (fire && fire.kind === 'fire') {
     const rooms = fire.roomIds.map((id) => world.rooms.get(id)).filter((r): r is Room => r !== undefined);
     const floors = rooms.map((r) => r.floor);
     const headline = fireHeadline(floors, rooms.length);
-    const text = security
-      ? `${headline}. ${SECURITY_RESPONDING}`
-      : `${headline}, no security. Call a helicopter or let it burn out.`;
+    const text = over
+      ? `${headline}.`
+      : security
+        ? `${headline}. ${SECURITY_RESPONDING}`
+        : `${headline}, no security. Call a helicopter or let it burn out.`;
     out.push({ kind: 'fire', text, ...(rooms[0] ? { at: middleOf(rooms[0]) } : {}) });
   }
 
@@ -75,9 +90,11 @@ export function needsYou(world: World): NeedLine[] {
     const at = room ? middleOf(room) : bomb.floor !== undefined && bomb.x !== undefined ? { floor: bomb.floor, x: bomb.x } : undefined;
     const where = at ? `Bomb threat on ${onFloor(at.floor)}` : 'Bomb threat';
     const ransom = formatMoney(bomb.ransom);
-    const text = security
-      ? `${where}. ${SECURITY_SEARCHING}`
-      : `${where}, no security. Pay the ${ransom} ransom, or build a security office to find it before ${hourWords(bomb.detonateAt % MINUTES_PER_DAY)}.`;
+    const text = over
+      ? `${where}.`
+      : security
+        ? `${where}. ${SECURITY_SEARCHING}`
+        : `${where}, no security. Pay the ${ransom} ransom, or build a security office to find it before ${hourWords(bomb.detonateAt % MINUTES_PER_DAY)}.`;
     out.push({ kind: 'bomb', text, ...(at ? { at } : {}) });
   }
 

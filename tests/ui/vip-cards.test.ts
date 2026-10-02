@@ -9,16 +9,17 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DAILY_OVER_REASON } from '../../src/game/game';
-import { EVENT_TEST_HOOKS, handleEventCommand, resetEventTestHooks, tickEvents } from '../../src/sim/events';
+import { EVENT_TEST_HOOKS, FIRE_BURN_OUT_TEXT, handleEventCommand, resetEventTestHooks, tickEvents } from '../../src/sim/events';
 import { personName } from '../../src/sim/identity';
 import { EVENTS, ROOMS } from '../../src/sim/rules';
 import { deserialize, serialize } from '../../src/sim/save';
 import type { ActiveEvent, Command, CommandResult, LogEntry, Room, RoomKind, Star, VipVisitRecord, World } from '../../src/sim/types';
 import { addRoom, allocId, createWorld, log } from '../../src/sim/world';
-import { createAlertStack, type AlertStack } from '../../src/ui/alerts';
+import { createAlertStack, SECURITY_LESSON, SECURITY_RESPONDING, SECURITY_SEARCHING, type AlertStack } from '../../src/ui/alerts';
 import type { PanelContext } from '../../src/ui/panels';
 import { storiesBody } from '../../src/ui/stories';
 import { createUi } from '../../src/ui/ui';
+import { formatClock } from '../../src/ui/format';
 import { vipBreakdown } from '../../src/ui/vip';
 import { VIP_BOOKED_HEADLINE, VIP_HERE_HEADLINE, VIP_OPEN_STORIES, VIP_SEE_CHECKLIST, VIP_SEE_GUEST, VIP_SEE_SUITE } from '../../src/ui/vip-cards';
 import { buildTower, lobbyRun, runMinutes } from '../scenarios/helpers';
@@ -191,6 +192,21 @@ describe('the booking card', () => {
     expect(section.textContent).toContain('Every VIP rates the same three things: the longest elevator wait, the suite and safety.');
   });
 
+  it('on the day of arrival says this afternoon, never tomorrow, read again as the clock moves', () => {
+    const world = bookedTower();
+    const stack = directStack(world);
+    runMinutes(world, 1);
+    stack.drain();
+    const card = stack.host.children.find((n) => has(n, 'is-vip-booked'))!;
+    expect(textsIn(card, 'hs-vip-line')[0]).toBe('Arrives tomorrow afternoon at 3:00 PM.');
+    // The morning of the arrival, the same card.
+    while (world.time.minute < 1440 + 9 * 60) runMinutes(world, 30);
+    stack.drain();
+    expect(stack.host.children.find((n) => has(n, 'is-vip-booked'))).toBe(card);
+    expect(textsIn(card, 'hs-vip-line')[0]).toBe('Arrives this afternoon at 3:00 PM.');
+    expect(card.textContent).not.toContain('tomorrow');
+  });
+
   it('closes on its close control and does not come back', () => {
     const h = mount(bookedTower());
     h.runUntil(() => visitOf(h.world) !== undefined);
@@ -220,6 +236,19 @@ describe('the arrival card', () => {
     expect(h.selected).toEqual([{ simId: visit.simId }]);
     h.runUntil(() => visitOf(h.world)?.phase === 'stay');
     expect(h.newsToasts().some((t) => t.startsWith('The VIP checked into the'))).toBe(true);
+  });
+
+  it('keeps its line true through the stay: heading up, then staying in the suite, then checked out (P3c A1)', () => {
+    const h = mount(bookedTower());
+    h.runUntil(() => visitOf(h.world)?.phase === 'route');
+    const [card] = h.vipCards();
+    expect(textsIn(card!, 'hs-vip-line')).toEqual(['Heading up to the suite on floor 3.']);
+    h.runUntil(() => visitOf(h.world)?.phase === 'stay');
+    expect(h.vipCards()).toEqual([card]);
+    expect(textsIn(card!, 'hs-vip-line')).toEqual([`Staying in the suite on floor 3 until ${formatClock(visitOf(h.world)!.leavesAt)}.`]);
+    expect(card!.textContent).not.toContain('Heading up');
+    h.runUntil(() => visitOf(h.world)?.phase === 'checkout' || h.world.stats.lastVip !== undefined);
+    if (visitOf(h.world)?.phase === 'checkout') expect(textsIn(card!, 'hs-vip-line')).toEqual(['Checked out and on the way out of the tower.']);
   });
 
   it('See the suite centers the view on the suite', () => {
@@ -353,7 +382,41 @@ describe('the result card', () => {
     const h = mount(createWorld(5));
     const card = rated(h, { rating: 'good', longestWait: 1, waitBand: 'good' }, 'good', 4);
     expect(textsIn(card, 'hs-vip-headline')).toEqual(['Good']);
-    expect(textsIn(card, 'hs-vip-progress')).toEqual(['Your tower already has 4 stars, so the VIP rating already counted.']);
+    expect(textsIn(card, 'hs-vip-progress')).toEqual(['Your tower has 4 stars or more, so the VIP rating already counted.']);
+  });
+
+  it('in a tower with 5 stars: the progress line is still true (P3c A2)', () => {
+    const h = mount(createWorld(5));
+    const card = rated(h, { rating: 'good', longestWait: 1, waitBand: 'good' }, 'good', 5);
+    expect(textsIn(card, 'hs-vip-progress')).toEqual(['Your tower has 4 stars or more, so the VIP rating already counted.']);
+    expect(card.textContent).not.toContain('already has 4 stars');
+  });
+
+  it('left open for days: the next chance is said from now each time, and goes once a new visit is booked (P3c I1)', () => {
+    const h = mount(createWorld(5));
+    // 1:30 AM, the night before the quarter's first morning.
+    h.world.time.minute = 2 * 1440 + 90;
+    const card = rated(h, { rating: 'fair' }, 'fair', 3);
+    const next = (): string[] => card.descendants().filter((n) => has(n, 'hs-vip-next') && !n.hidden).map((n) => n.textContent);
+    expect(next()).toEqual(['A new VIP may book tomorrow at 6:00 AM.']);
+    h.world.time.minute += 1440;
+    h.notify();
+    expect(next()).toEqual(['A new VIP may book today at 6:00 AM.']);
+    // The roll came and nobody booked: the next one is the next quarter's.
+    h.world.time.minute += 6 * 60;
+    h.notify();
+    expect(next()).toEqual(['A new VIP may book in 3 days at 6:00 AM.']);
+    h.world.time.minute += 2 * 1440;
+    h.notify();
+    expect(next()).toEqual(['A new VIP may book tomorrow at 6:00 AM.']);
+    // A new visit is booked while the card is still up: no line about the next one.
+    h.world.events.push({
+      kind: 'vip', simId: 777, arrivesAt: h.world.time.minute + 1440, leavesAt: h.world.time.minute + 2000, score: 0, suiteId: null,
+      phase: 'notice', preference: 'a quiet floor', longestWait: 0, waitingSince: null, checkInClean: null, checkInEval: null, incident: false,
+    });
+    h.notify();
+    expect(next()).toEqual([]);
+    expect(card.textContent).not.toContain('A new VIP may book');
   });
 
   it('an old record without the suite fields renders, the suite simply not named', () => {
@@ -509,6 +572,42 @@ describe('the reminder chip', () => {
     const inPage = h.pageCard()!.descendants().find((n) => n.tagName === 'BUTTON' && n.dataset['command'] === 'fire.callHelicopter')!;
     expect(inPage.disabled).toBe(true);
     expect(h.pageCard()!.textContent).toContain(DAILY_OVER_REASON);
+    expect(h.pageCard()!.textContent).not.toContain('let it burn out');
     expect(h.applied).toEqual([]);
+  });
+
+  it("in a finished Today's tower the fire card says only that the tower is over, with or without security (P3c A3)", () => {
+    for (const security of [false, true]) {
+      const world = fireTower();
+      if (security) place(world, 'security', 2, 100 + 3 * ROOMS.office.width);
+      const finished = mount(world, { getSlot: () => 'daily', getDaily: () => ({ date: '2026-10-01', twist: { name: '', line: '' }, endMinute: 0, finished: true }) });
+      world.time.minute = 6 * 60;
+      tickEvents(world);
+      finished.notify();
+      const card = finished.fireCards()[0]!;
+      expect(card.textContent).toContain(DAILY_OVER_REASON);
+      expect(card.textContent).not.toContain(SECURITY_RESPONDING);
+      expect(card.textContent).not.toContain(FIRE_BURN_OUT_TEXT);
+      expect(card.textContent).not.toContain(SECURITY_LESSON);
+    }
+  });
+
+  it("in a finished Today's tower the bomb card does not say security is searching (P3c A3)", () => {
+    const world = fireTower();
+    world.stars = 3;
+    place(world, 'security', 2, 100 + 3 * ROOMS.office.width);
+    EVENT_TEST_HOOKS.chance = { fire: 0, bomb: 1, vip: 0 };
+    const over = { value: null as string | null };
+    const stack = directStack(world, { refusal: () => over.value });
+    world.time.minute = 6 * 60;
+    tickEvents(world);
+    stack.drain();
+    const card = stack.host.children.find((n) => has(n, 'is-bomb'))!;
+    expect(card.descendants().filter((n) => !n.hidden).map((n) => n.textContent)).toContain(SECURITY_SEARCHING);
+    over.value = DAILY_OVER_REASON;
+    stack.drain();
+    const shown = card.descendants().filter((n) => n.tagName === 'P' && !n.hidden).map((n) => n.textContent);
+    expect(shown).not.toContain(SECURITY_SEARCHING);
+    expect(shown).toContain(DAILY_OVER_REASON);
   });
 });

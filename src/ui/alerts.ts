@@ -626,13 +626,16 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
     if (key === fire.shown) return;
     fire.shown = key;
     const parts: HTMLElement[] = [el('p', 'hs-toast-text', headline)];
+    // A finished Today's tower: the clock has stopped, so nobody puts it out and it does not burn
+    // out. The off button's reason (the tower is over) is the only line (P3c review A3).
+    const over = commandsRefused(world) !== null;
     if (!fire.closed) {
-      if (security) parts.push(el('p', 'hs-toast-note', SECURITY_RESPONDING));
+      if (security && !over) parts.push(el('p', 'hs-toast-note', SECURITY_RESPONDING));
       // The sim lets the player call the helicopter with or without security on duty.
       const call = helicopterControl(deps.apply);
       call.sync(world);
       parts.push(...call.nodes.filter((node) => !node.hidden));
-      if (!security) parts.push(el('p', 'hs-toast-note', FIRE_BURN_OUT_TEXT), el('p', 'hs-toast-note', SECURITY_LESSON));
+      if (!security && !over) parts.push(el('p', 'hs-toast-note', FIRE_BURN_OUT_TEXT), el('p', 'hs-toast-note', SECURITY_LESSON));
     }
     body.replaceChildren(...parts);
   }
@@ -740,7 +743,9 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
   function renderRansom(world: World): void {
     if (!bomb || bomb.closed) return;
     bomb.pay.sync(world);
-    const security = securityOnDuty(world);
+    // In a finished Today's tower the clock has stopped and nobody searches: the off button's
+    // reason (the tower is over) says so, and the search line goes (P3c review A3).
+    const security = securityOnDuty(world) && commandsRefused(world) === null;
     const searchLine = security ? SECURITY_SEARCHING : '';
     if (bomb.searching.textContent !== searchLine) bomb.searching.textContent = searchLine;
     if (bomb.searching.hidden !== !security) bomb.searching.hidden = !security;

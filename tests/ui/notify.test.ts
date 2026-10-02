@@ -9,6 +9,7 @@ import {
   NOTIFY_BLOCKED,
   NOTIFY_NO_API,
   NOTIFY_NOT_ALLOWED,
+  NOTIFY_TIP,
   UPDATE_TEXT,
   createAlertGate,
   createNotifier,
@@ -455,6 +456,14 @@ describe('the Notifications settings', () => {
       const control = panel.descendants().find((n) => n.id === `hs-notify-${kind}`)!;
       expect([control.getAttribute('role'), control.getAttribute('aria-checked')]).toEqual(['switch', 'false']);
     }
+  });
+
+  it('the Alerts switch says what it covers without a list of kinds, so a money alert is not left out (P3c I2)', () => {
+    expect(NOTIFY_TIP.alerts).toBe('Something big happens in your tower, like a fire or a VIP visit');
+    // Every alert line notifies (the bank's warnings and debt too), so the words name examples, never all.
+    expect(NOTIFY_TIP.alerts).not.toMatch(/ or cockroaches| or a VIP visit in/);
+    const panel = settings({ notifications: stubNotifications(null).notifications });
+    expect(panel.descendants().some((n) => n.title === NOTIFY_TIP.alerts)).toBe(true);
   });
 
   it('a switch the browser refuses goes back off with the reason under it', async () => {

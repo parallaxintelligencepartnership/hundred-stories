@@ -161,6 +161,24 @@ export function vipSuiteLine(world: VipWorld, visit: VipEvent): string {
   return suite ? `Suite on ${floorText(suite.floor)}` : 'No suite is ready';
 }
 
+/**
+ * The arrival card's line, kept true as the visit moves on: heading up, staying, checked out.
+ * The card refreshes it from the live visit, so it never says "heading up" through the stay.
+ */
+export function vipArrivedLine(world: VipWorld, visit: VipEvent): string {
+  const suite = suiteOf(world, visit);
+  const where = suite ? `the suite on ${floorText(suite.floor)}` : 'the suite';
+  switch (visit.phase) {
+    case 'notice':
+    case 'route':
+      return `Heading up to ${where}`;
+    case 'stay':
+      return `Staying in ${where} until ${formatClock(visit.leavesAt)}`;
+    case 'checkout':
+      return 'Checked out and on the way out of the tower';
+  }
+}
+
 function statusLine(world: VipWorld, visit: VipEvent): string {
   const suite = suiteOf(world, visit);
   const where = suite ? `the suite on ${floorText(suite.floor)}` : 'the suite';
@@ -222,8 +240,12 @@ function nextRoll(now: number): { day: string; clock: string } {
   return { day: days <= 0 ? 'today' : days === 1 ? 'tomorrow' : `in ${days} days`, clock: formatClock(clockOf(next).minuteOfDay) };
 }
 
-/** The short line on the departure card: when a new VIP may book. */
+/**
+ * The short line on the departure card: when a new VIP may book, from now (the same roll
+ * vipNextChance names). Empty while a visit is booked or under way: the next one is already here.
+ */
 export function vipNextWhen(world: VipWorld): string {
+  if (activeVisit(world)) return '';
   const { day, clock } = nextRoll(world.time.minute);
   return `A new VIP may book ${day} at ${clock}.`;
 }
@@ -261,7 +283,8 @@ export function vipProgress(world: VipWorld): string {
   const rule = vipStar();
   if (!rule) return '';
   const stars = `${rule.star} stars`;
-  if ((world.stars ?? 1) >= rule.star) return `Your tower already has ${stars}, so the VIP rating already counted.`;
+  // True at that star and every one above it (P3c review A2: a 5 star tower was told it had 4).
+  if ((world.stars ?? 1) >= rule.star) return `Your tower has ${stars} or more, so the VIP rating already counted.`;
   const ask = `A ${RATING_WORD[rule.need]} or better visit is needed for ${stars}.`;
   const best = world.stats?.vipRating ?? 'none';
   if (best === 'none') return `${ask} No visit has been rated yet.`;

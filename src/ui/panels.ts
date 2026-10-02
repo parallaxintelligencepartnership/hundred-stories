@@ -36,7 +36,7 @@ import {
 import { milestoneRecap, NO_STORIES_YET } from '../sim/chronicle';
 import { centerSummary, producesWaste, recyclingCenters, wasteDayStart } from '../sim/recycling';
 import { coverageText } from '../sim/security';
-import { dirtyHotelRooms, HOUSEKEEPING_END_MINUTE, hotelRoomsHousekeepingCannotReach } from '../sim/people';
+import { dirtyHotelRooms, HOUSEKEEPING_END_MINUTE } from '../sim/people';
 import { carRangeOf, clockOf, spanTop } from '../sim/types';
 import type {
   Car,
@@ -65,6 +65,7 @@ import {
 } from './format';
 import { icon, type IconName } from './icons';
 import { othersWaitLonger, RIDER_CHOICES, RIDER_ICON, RIDER_LABEL, RIDER_WARNING, RIDER_NOTE, type RiderSetting } from './riders';
+import { officeCannotReachWords } from './problems';
 import { createSheet, type Sheet } from './sheet';
 import { chevron, controlsDevice, currentDeviceEnv, fillControlsPage } from './controls';
 import { getFlag, PREF_KEYS, setFlag } from './prefs';
@@ -374,7 +375,7 @@ function roomPanel(roomId: Id, game: GameApi, ctx: PanelContext): PanelElement {
   const occupants = section(isSecurity ? 'Guards' : isRecycling ? 'Workers' : isHousekeeping ? 'Housekeepers' : 'Who is here');
   const coverage = isSecurity ? row('Patrol covers', coverageText(game.world, room)) : null;
   if (coverage) occupants.append(coverage, el('p', 'hs-note', SECURITY_WORK));
-  const cleaning = isHousekeeping ? housekeepingRows(game) : null;
+  const cleaning = isHousekeeping ? housekeepingRows(game, room) : null;
   if (cleaning) occupants.append(...cleaning.nodes);
   const collection = isRecycling ? collectionRows(game, room) : null;
   if (collection) occupants.append(...collection.nodes);
@@ -565,24 +566,26 @@ export const SECURITY_WORK =
   'Guards go to a theft when one is reported. Fires and bomb threats are dealt with from this office, even when no guard can get there.';
 
 /**
- * A housekeeping office's rows: the hotel rooms waiting for a clean, the floors of any it cannot
- * reach, and the hours it cleans, read from the rules. Always the same rows, refreshed in place.
+ * A housekeeping office's rows: the hotel rooms waiting for a clean, the hotel rooms this office
+ * has no route to whatever their state (so a cut off office says so before any room is dirty),
+ * and the hours it cleans, read from the rules. Always the same rows, refreshed in place.
  */
-export function housekeepingLines(world: World): [string, string][] {
-  const cut = [...new Set(hotelRoomsHousekeepingCannotReach(world).map((r) => r.floor))].sort((a, b) => a - b);
+export function housekeepingLines(world: World, office: Room): [string, string][] {
   return [
     ['Rooms to clean', formatCount(dirtyHotelRooms(world).length)],
-    ['Cannot reach', cut.length === 0 ? 'None' : `${cut.length === 1 ? 'Floor' : 'Floors'} ${cut.map(floorWord).join(', ')}`],
+    ['Cannot reach', officeCannotReachWords(world, office)],
     ['Cleaning hours', `${hourWords(SCHEDULES.housekeeping.start)} to ${hourWords(HOUSEKEEPING_END_MINUTE)}`],
   ];
 }
 
-function housekeepingRows(game: GameApi): { nodes: HTMLDivElement[]; refresh(): void } {
-  const nodes = housekeepingLines(game.world).map(([label, value]) => row(label, value));
+function housekeepingRows(game: GameApi, office: Room): { nodes: HTMLDivElement[]; refresh(): void } {
+  const nodes = housekeepingLines(game.world, office).map(([label, value]) => row(label, value));
   return {
     nodes,
     refresh() {
-      housekeepingLines(game.world).forEach(([, value], i) => setRowValue(nodes[i] as HTMLDivElement, value));
+      const now = game.world.rooms.get(office.id);
+      if (!now) return;
+      housekeepingLines(game.world, now).forEach(([, value], i) => setRowValue(nodes[i] as HTMLDivElement, value));
     },
   };
 }

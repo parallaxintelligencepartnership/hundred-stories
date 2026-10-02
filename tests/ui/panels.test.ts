@@ -606,18 +606,34 @@ describe('staff cards', () => {
     const titles = panel.descendants().filter((n) => n.className === 'hs-section-title').map((n) => n.textContent);
     expect(titles).toContain('Housekeepers');
     expect(rowValue(panel, 'Rooms to clean')).toBe('0');
-    expect(rowValue(panel, 'Cannot reach')).toBe('None');
+    // Cut off: every hotel room is out of reach, clean or not (P3b review I2: it said None).
+    expect(rowValue(panel, 'Cannot reach')).toBe('3 hotel rooms on floors 2, 3 and 4');
     expect(rowValue(panel, 'Cleaning hours')).toBe(`${hourWords(SCHEDULES.housekeeping.start)} to ${hourWords(HOUSEKEEPING_END_MINUTE)}`);
     expect(rowValue(panel, 'Cleaning hours')).toBe('10 AM to 8 PM');
     for (const r of world.rooms.values()) if (r.kind === 'hotelSingle' && r.floor >= 3) r.dirty = true;
     panel.refresh?.();
     expect(rowValue(panel, 'Rooms to clean')).toBe('2');
-    expect(rowValue(panel, 'Cannot reach')).toBe('Floors 3, 4');
+    expect(rowValue(panel, 'Cannot reach')).toBe('3 hotel rooms on floors 2, 3 and 4');
     // A service elevator to basement 1: every room in reach.
     build(world, [{ kind: 'shaft.build', shaft: 'service', x: 60, floorMin: -1, floorMax: 4 }]);
     panel.refresh?.();
     expect(rowValue(panel, 'Cannot reach')).toBe('None');
     expect(rowValue(panel, 'Rooms to clean')).toBe('2');
+  });
+
+  it('the housekeeping card of a partly cut off office names the clean rooms it cannot reach too', () => {
+    const world = hotel();
+    build(world, [{ kind: 'shaft.build', shaft: 'service', x: 60, floorMin: -1, floorMax: 4 }]);
+    for (const shaft of world.shafts.values()) build(world, [{ kind: 'shaft.setStop', shaftId: shaft.id, floor: 4, stops: false }]);
+    const office = [...world.rooms.values()].find((r) => r.kind === 'housekeeping')!;
+    const panel = createQueryPanel({ world } as never, { roomId: office.id }, ctx()) as unknown as FakeElement & { refresh?: () => void };
+    // No room is dirty, and the one on floor 4 is still out of reach.
+    expect(rowValue(panel, 'Rooms to clean')).toBe('0');
+    expect(rowValue(panel, 'Cannot reach')).toBe('1 hotel room on floor 4');
+    const service = [...world.shafts.values()].find((s) => s.x === 60)!;
+    build(world, [{ kind: 'shaft.setStop', shaftId: service.id, floor: 4, stops: true }]);
+    panel.refresh?.();
+    expect(rowValue(panel, 'Cannot reach')).toBe('None');
   });
 
   it('the security card says what guards do, true to the rules', () => {

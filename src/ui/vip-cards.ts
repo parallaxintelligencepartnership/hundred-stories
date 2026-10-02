@@ -7,7 +7,7 @@ import { drawPortrait, personLookCode, type Ctx2D } from '../render/figure';
 import { personName } from '../sim/identity';
 import type { ActiveEvent, Id, World } from '../sim/types';
 import { button, el } from './panels';
-import { vipArrivalLine, vipSuiteLine, type VipResult } from './vip';
+import { vipArrivalLine, vipArrivedLine, vipNextWhen, vipProgress, vipSuiteLine, type VipResult } from './vip';
 
 type VipEvent = Extract<ActiveEvent, { kind: 'vip' }>;
 
@@ -67,9 +67,13 @@ export function vipWho(seed: number, simId: Id, lines: readonly (string | HTMLEl
 /**
  * A finished visit, laid out once for the departure card and for Stories: the rating as the
  * headline, who it was and how it ended, the reasons as short rows, what it means for the star,
- * and when a new VIP may book.
+ * and when a new VIP may book (hidden when there is no such line: a visit is already booked).
  */
 export function vipResultBlock(seed: number, result: VipResult): HTMLDivElement {
+  return resultParts(seed, result).node;
+}
+
+function resultParts(seed: number, result: VipResult): { node: HTMLDivElement; progress: HTMLElement; next: HTMLElement } {
   const node = el('div', `hs-vip-result is-${result.rating}`);
   node.dataset['rating'] = result.rating;
   const headline = el('p', 'hs-vip-headline', result.headline);
@@ -79,14 +83,11 @@ export function vipResultBlock(seed: number, result: VipResult): HTMLDivElement 
     item.append(el('span', 'hs-row-label', row.label), el('span', 'hs-row-value', row.value));
     reasons.append(item);
   }
-  node.append(
-    headline,
-    vipWho(seed, result.simId, [result.outcome]),
-    reasons,
-    el('p', 'hs-vip-progress', result.progress),
-    el('p', 'hs-vip-next', result.next),
-  );
-  return node;
+  const progress = el('p', 'hs-vip-progress', result.progress);
+  const next = el('p', 'hs-vip-next', result.next);
+  next.hidden = result.next === '';
+  node.append(headline, vipWho(seed, result.simId, [result.outcome]), reasons, progress, next);
+  return { node, progress, next };
 }
 
 function actionRow(...buttons: HTMLButtonElement[]): HTMLDivElement {
@@ -118,15 +119,18 @@ export function vipBookedBody(world: World, visit: VipEvent, actions: VipCardAct
   };
 }
 
-/** The guest in the lobby: who, where they are heading, and a look at the guest or the suite. */
+/** The guest in the lobby: who, where the visit stands now, and a look at the guest or the suite. */
 export function vipArrivedBody(world: World, visit: VipEvent, actions: VipCardActions): VipCardBody {
   const room = visit.suiteId === null ? undefined : world.rooms.get(visit.suiteId);
-  const heading = room ? `Heading up to the suite on ${room.floor < 0 ? `floor B${-room.floor}` : `floor ${room.floor}`}.` : 'Heading up to the suite.';
+  const where = el('p', 'hs-vip-line');
   const guest = button(VIP_SEE_GUEST, 'hs-btn', () => actions.selectGuest(visit.simId));
   const suite = button(VIP_SEE_SUITE, 'hs-btn', () => {
     if (room) actions.centerOn(room.floor, room.x + Math.floor(room.width / 2));
   });
   const refresh = (now: World): void => {
+    // The visit as it is now: heading up, staying, or checked out (P3c review A1).
+    const live = (now.events ?? []).find((e): e is VipEvent => e.kind === 'vip' && e.simId === visit.simId) ?? visit;
+    setText(where, `${vipArrivedLine(now, live)}.`);
     const here = now.sims?.has(visit.simId) ?? false;
     if (guest.disabled !== !here) guest.disabled = !here;
     const standing = room !== undefined && (now.rooms?.has(room.id) ?? false);
@@ -134,15 +138,27 @@ export function vipArrivedBody(world: World, visit: VipEvent, actions: VipCardAc
   };
   refresh(world);
   return {
-    nodes: [el('p', 'hs-toast-text', VIP_HERE_HEADLINE), vipWho(world.seed, visit.simId, [heading]), actionRow(guest, suite)],
+    nodes: [el('p', 'hs-toast-text', VIP_HERE_HEADLINE), vipWho(world.seed, visit.simId, [where]), actionRow(guest, suite)],
     refresh,
   };
 }
 
-/** The visit ended: the result block and the way to Stories, where it stays. */
+/**
+ * The visit ended: the result block and the way to Stories, where it stays. The card stays up
+ * until closed, so what it says about time is read again on every refresh (P3c review I1): the
+ * next booking from now, gone once a new visit is booked, and the star line from the tower now.
+ */
 export function vipResultBody(world: World, result: VipResult, actions: VipCardActions): VipCardBody {
+  const parts = resultParts(world.seed, result);
+  const refresh = (now: World): void => {
+    setText(parts.progress, vipProgress(now));
+    const next = vipNextWhen(now);
+    setText(parts.next, next);
+    if (parts.next.hidden !== (next === '')) parts.next.hidden = next === '';
+  };
+  refresh(world);
   return {
-    nodes: [vipResultBlock(world.seed, result), actionRow(button(VIP_OPEN_STORIES, 'hs-btn', () => actions.openStories()))],
-    refresh: () => {},
+    nodes: [parts.node, actionRow(button(VIP_OPEN_STORIES, 'hs-btn', () => actions.openStories()))],
+    refresh,
   };
 }

@@ -549,6 +549,32 @@ export function centerSummary(world: World, center: Room): CenterSummary {
   };
 }
 
+/**
+ * The floors with a waste-producing room that no center's workers can get to right now, lowest
+ * first: a live answer from the routes the workers themselves take (a collector's staff route,
+ * from each center's own tile), not the day's record in `wasteUnreachable`, which only a worker's
+ * failed trip writes and only the 06:00 roll clears. A floor turns on the floor alone, so one
+ * route per center and floor; the route search is cached per starting floor. Pure: it changes
+ * nothing, and the workers never read it.
+ */
+export function floorsCollectorsCannotReach(world: World): number[] {
+  const centers = recyclingCenters(world);
+  if (centers.length === 0) return [];
+  const floors = new Map<number, number>();
+  for (const room of world.rooms.values()) {
+    if (PRODUCERS.has(room.kind) && !floors.has(room.floor)) floors.set(room.floor, roomCenter(room));
+  }
+  const opts = { staff: true, riderClass: riderClassOf('collector') };
+  const out: number[] = [];
+  for (const [floor, x] of floors) {
+    const reached = centers.some(
+      (center) => findRoute(world, { floor: center.floor, x: roomCenter(center) }, { floor, x }, opts) !== null,
+    );
+    if (!reached) out.push(floor);
+  }
+  return out.sort((a, b) => a - b);
+}
+
 /** The warning when the last center is gone, however it went: the waste goes on piling until one is back. */
 export const LAST_CENTER_GONE =
   'The last recycling center is gone. Waste will pile up in the rooms and make them dirty until you build a new one.';

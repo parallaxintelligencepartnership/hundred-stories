@@ -118,6 +118,14 @@ describe('tower problems: people who gave up', () => {
     tickMany(world, 61);
     expect(ofKind(world, 'gaveUp')).toEqual([]);
   });
+
+  it('writes a large count with thousands separators, as the rest of the game does', () => {
+    const world = rich(createWorld(4));
+    buildTower(world, [...lobbyRun(90, 200), { kind: 'shaft.build', shaft: 'standard', x: 150, floorMin: 1, floorMax: 8 }, ...buildRow('office', 2, [100])]);
+    atOnDay(world, 1, 2, 0);
+    for (let i = 0; i < 1956; i++) log(world, 'Gave up waiting for an elevator on floor 6.', 'warn', { simId: i });
+    expect(ofKind(world, 'gaveUp')[0]?.text).toBe('1,956 people gave up waiting for an elevator in the last hour, on floor 6. More cars or another elevator would help.');
+  });
 });
 
 describe('tower problems: no way in', () => {
@@ -238,7 +246,10 @@ describe('tower problems: waste', () => {
     expect(ofKind(world, 'wasteReach')).toEqual([]);
     const [behind] = ofKind(world, 'wasteBehind') as [TowerProblem];
     expect(behind.count).toBe(5);
-    expect(behind.text).toBe('Waste is piling up in 5 rooms, the oldest on floor 2. If this keeps up, build another recycling center.');
+    // Made counts what full rooms could not hold too (8afa423), so the tally is there from the roll.
+    expect(behind.text).toBe(
+      'Waste is piling up in 5 rooms, the oldest on floor 2. Today the tower made 5 units of waste and the collectors took 0 units. If this keeps up, build another recycling center.',
+    );
     // Through the shift the card's numbers come in: made today against collected today.
     atOnDay(world, 4, 18, 0);
     expect(ofKind(world, 'wasteBehind')[0]?.text).toMatch(/^Waste is piling up in 5 rooms, the oldest on floor 2\. Today the tower made \d+ units? of waste and the collectors took \d+ units?\. /);
@@ -247,6 +258,28 @@ describe('tower problems: waste', () => {
     atOnDay(world, 5, 7, 0);
     expect(ofKind(world, 'wasteBehind')).toEqual([]);
     expect(towerProblems(world)).toEqual([]);
+  });
+
+  it('is true now: a stop fixed after the shift clears the row at once, and a stop cut after the shift raises it at once', () => {
+    const world = tower();
+    const shaftId = onlyShaft(world).id;
+    atOnDay(world, 1, 7, 0);
+    // Cut before the shift: the row is there at once, before any worker has tried a trip.
+    expect(applyCommand(world, { kind: 'shaft.setStop', shaftId, floor: -2, stops: false }).ok).toBe(true);
+    expect(ofKind(world, 'wasteReach')[0]?.floors).toEqual([2, 3, 4, 5, 6]);
+    atOnDay(world, 1, 12, 0);
+    expect(ofKind(world, 'wasteReach')).toHaveLength(1);
+    // Fixed after the shift, when no worker will go out to find out: gone at once.
+    atOnDay(world, 1, 17, 30);
+    expect(applyCommand(world, { kind: 'shaft.setStop', shaftId, floor: -2, stops: true }).ok).toBe(true);
+    expect(ofKind(world, 'wasteReach')).toEqual([]);
+    atOnDay(world, 1, 23, 0);
+    expect(ofKind(world, 'wasteReach')).toEqual([]);
+    // Cut after the next day's shift: there at once, not only after the next trip fails.
+    atOnDay(world, 2, 17, 30);
+    expect(applyCommand(world, { kind: 'shaft.setStop', shaftId, floor: -2, stops: false }).ok).toBe(true);
+    const [cut] = ofKind(world, 'wasteReach') as [TowerProblem];
+    expect(cut.text).toBe('The waste collectors cannot get to floors 2, 3, 4, 5 and 6. Give the recycling center a way to those floors.');
   });
 
   it('a tower that lost its recycling center is told to build one, with the rooms piling up; gone when one is back', () => {

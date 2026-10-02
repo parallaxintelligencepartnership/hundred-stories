@@ -520,6 +520,17 @@ describe('Stories: the cockroach row says what will really happen', () => {
   it('housekeeping that can get there: it will clean them out', () => {
     expect(mount(roaches('reach')).lines('Needs you now')).toEqual(['Cockroaches on floors 3 to 4, 2 rooms. Housekeeping will clean them out.']);
   });
+
+  it('housekeeping that can get there but trash holds a room dirty: says the trash has to go first', () => {
+    const world = roaches('reach');
+    const held = [...world.rooms.values()].find((r) => r.kind === 'hotelSingle' && r.floor === 4)!;
+    held.waste = 7;
+    held.wasteBacklogSince = world.time.minute;
+    held.dirty = true;
+    expect(mount(world).lines('Needs you now')).toEqual([
+      'Cockroaches on floors 3 to 4, 2 rooms. Housekeeping cannot clean the rooms on floor 4 until the waste collectors take their trash away.',
+    ]);
+  });
 });
 
 describe('Stories: focus after a spend (P3a A1)', () => {
