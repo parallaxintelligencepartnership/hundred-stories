@@ -389,3 +389,13 @@ describe('Stories: the VIP visit', () => {
     expect(s.shownTitles()).not.toContain('VIP visit');
   });
 });
+
+describe('hs-face hidden', () => {
+  it('a hidden face button stays hidden: the [hidden] rule follows the display: flex rule', () => {
+    const css = readFileSync(new URL('../../src/ui/ui.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    const face = css.indexOf('.hs-ui .hs-face {');
+    const hidden = css.search(/\.hs-ui \.hs-face\[hidden\]\s*\{\s*display:\s*none;?\s*\}/);
+    expect(face).toBeGreaterThan(-1);
+    expect(hidden).toBeGreaterThan(face);
+  });
+});

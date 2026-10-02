@@ -4459,6 +4459,10 @@ button.hs-news-toast {
     background-color 80ms var(--ease-standard);
 }
 
+.hs-ui .hs-face[hidden] {
+  display: none;
+}
+
 .hs-ui .hs-face:is(.is-selected, [aria-checked='true'], [aria-pressed='true']) {
   background: var(--amber);
   color: var(--on-amber);

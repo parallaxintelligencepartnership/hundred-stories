@@ -99,7 +99,7 @@ function mkGame(opts: { speed?: number; slot?: string; refusePause?: boolean; to
     select() {},
     exportSave: () => '',
     save,
-    newGame: (n: number) => calls.push(`newGame:${n}`),
+    newGame: (n: number) => (calls.push(`newGame:${n}`), Promise.resolve({ ok: true })),
     openDaily: async () => {
       calls.push('openDaily');
     },
