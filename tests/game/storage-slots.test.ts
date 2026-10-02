@@ -33,6 +33,8 @@ function fakeLocalStorage(): Storage & { data: Map<string, string> } {
   };
 }
 
+const missing = (): Error => Object.assign(new Error('file does not exist.'), { code: 'OS-PLUG-FILE-0008' });
+
 function fakeFiles(): FileSlotFs & { files: Map<string, string> } {
   const files = new Map<string, string>();
   return {
@@ -43,8 +45,21 @@ function fakeFiles(): FileSlotFs & { files: Map<string, string> } {
     },
     async readFile({ path }) {
       const data = files.get(path);
-      if (data === undefined) throw new Error('no file');
+      if (data === undefined) throw missing();
       return { data };
+    },
+    async stat({ path }) {
+      if (!files.has(path)) throw missing();
+      return {};
+    },
+    async rename({ from, to }) {
+      const data = files.get(from);
+      if (data === undefined) throw missing();
+      files.delete(from);
+      files.set(to, data);
+    },
+    async deleteFile({ path }) {
+      if (!files.delete(path)) throw missing();
     },
   };
 }
@@ -97,11 +112,11 @@ describe('named save slots', () => {
 
   it('phone: one file per slot in the app data directory', async () => {
     const fs = fakeFiles();
-    await createFileStorage(fs).writeSave('mine');
-    await createFileStorage(fs, 'daily').writeSave('daily');
-    await createFileStorage(fs, 'friend').writeSave('friend');
-    expect(Object.fromEntries(fs.files)).toEqual({ 'autosave.json': 'mine', 'daily.json': 'daily', 'friend.json': 'friend' });
-    expect(await createFileStorage(fs, 'daily').readSave()).toBe('daily');
+    await createFileStorage(fs).writeSave('"mine"');
+    await createFileStorage(fs, 'daily').writeSave('"daily"');
+    await createFileStorage(fs, 'friend').writeSave('"friend"');
+    expect(Object.fromEntries(fs.files)).toEqual({ 'autosave.json': '"mine"', 'daily.json': '"daily"', 'friend.json': '"friend"' });
+    expect(await createFileStorage(fs, 'daily').readSave()).toBe('"daily"');
   });
 
   it('desktop: one file per slot, each through its own temporary file', async () => {

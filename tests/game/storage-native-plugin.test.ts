@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from 'vitest';
 const files = vi.hoisted(() => new Map<string, string>());
 
 vi.mock('@capacitor/filesystem', () => {
+  const missing = (): Error => Object.assign(new Error('File does not exist.'), { code: 'OS-PLUG-FILE-0008' });
   const methods: Record<string, (o: { path: string; directory: string; data?: string }) => Promise<unknown>> = {
     writeFile: async ({ path, directory, data }) => {
       files.set(`${directory}/${path}`, data ?? '');
@@ -15,8 +16,22 @@ vi.mock('@capacitor/filesystem', () => {
     },
     readFile: async ({ path, directory }) => {
       const data = files.get(`${directory}/${path}`);
-      if (data === undefined) throw new Error('File does not exist.');
+      if (data === undefined) throw missing();
       return { data };
+    },
+    stat: async ({ path, directory }) => {
+      if (!files.has(`${directory}/${path}`)) throw missing();
+      return {};
+    },
+    rename: async (o) => {
+      const { from, to, directory } = o as unknown as { from: string; to: string; directory: string };
+      const data = files.get(`${directory}/${from}`);
+      if (data === undefined) throw missing();
+      files.delete(`${directory}/${from}`);
+      files.set(`${directory}/${to}`, data);
+    },
+    deleteFile: async ({ path, directory }) => {
+      if (!files.delete(`${directory}/${path}`)) throw missing();
     },
   };
   // Like registerPlugin's proxy: any other property (then included) is a native call that never settles.

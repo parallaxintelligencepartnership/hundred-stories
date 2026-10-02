@@ -60,7 +60,17 @@ function capacitorFs(): FileSlotFs & { used: boolean } {
     },
     async readFile() {
       fs.used = true;
-      return { data: 'capacitor' };
+      return { data: '"capacitor"' };
+    },
+    async stat() {
+      fs.used = true;
+      return {};
+    },
+    async rename() {
+      fs.used = true;
+    },
+    async deleteFile() {
+      fs.used = true;
     },
   };
   return fs;
@@ -116,7 +126,7 @@ describe('selectStorage order: Tauri, then Capacitor, then the browser', () => {
     const loadTauriFs = vi.fn(async () => stubTauriFs());
     const cap = capacitorFs();
     const slot = selectStorage({ global: nativeCapacitor, loadTauriFs, loadFs: async () => cap });
-    expect(await slot.readSave()).toBe('capacitor');
+    expect(await slot.readSave()).toBe('"capacitor"');
     expect(loadTauriFs).not.toHaveBeenCalled();
   });
 

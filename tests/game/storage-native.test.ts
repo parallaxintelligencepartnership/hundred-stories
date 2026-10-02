@@ -5,10 +5,10 @@ import { describe, expect, it } from 'vitest';
 import { createFileStorage, isNativePlatform, selectStorage, shareSave, FILE_SLOT_NAME, EXPORT_FILE_NAME, type FileSlotFs } from '../../src/game/storage';
 
 interface Call {
-  op: 'write' | 'read';
+  op: 'write' | 'read' | 'stat' | 'rename' | 'delete';
   path: string;
   directory: string;
-  encoding: string;
+  encoding?: string;
 }
 
 type StubFs = FileSlotFs & {
@@ -17,11 +17,30 @@ type StubFs = FileSlotFs & {
   writeFile(options: { path: string; data: string; directory: string; encoding: string }): Promise<{ uri: string }>;
 };
 
-/** An in memory Filesystem keyed by directory and path; readFile rejects a missing file like the plugin does. */
+/** The plugin's missing-file error on iOS and Android. */
+const missing = (path: string) => Object.assign(new Error(`file at '${path}' does not exist.`), { code: 'OS-PLUG-FILE-0008' });
+
+/** An in memory Filesystem keyed by directory and path; a missing file rejects like the plugin does. */
 function stubFs(): StubFs {
   const files = new Map<string, string>();
   const calls: Call[] = [];
   return {
+    async stat({ path, directory }) {
+      calls.push({ op: 'stat', path, directory });
+      if (!files.has(`${directory}/${path}`)) throw missing(path);
+      return {};
+    },
+    async rename({ from, to, directory, toDirectory }) {
+      calls.push({ op: 'rename', path: `${from} -> ${to}`, directory });
+      const data = files.get(`${directory}/${from}`);
+      if (data === undefined) throw missing(from);
+      files.delete(`${directory}/${from}`);
+      files.set(`${toDirectory}/${to}`, data);
+    },
+    async deleteFile({ path, directory }) {
+      calls.push({ op: 'delete', path, directory });
+      if (!files.delete(`${directory}/${path}`)) throw missing(path);
+    },
     files,
     calls,
     async writeFile({ path, data, directory, encoding }) {
@@ -80,7 +99,7 @@ describe('selectStorage', () => {
 });
 
 describe('the Filesystem slot', () => {
-  it('round trips a save through one file, autosave.json, in the app data directory as utf8', async () => {
+  it('round trips a save through autosave.json in the app data directory as utf8, written by way of autosave.json.tmp', async () => {
     const fs = stubFs();
     const slot = createFileStorage(fs);
     const text = JSON.stringify({ version: 9, tower: 'x'.repeat(4096) });
@@ -88,16 +107,24 @@ describe('the Filesystem slot', () => {
     expect(await slot.readSave()).toBe(text);
     expect(fs.files.size).toBe(1);
     expect(fs.calls.map((c) => [c.op, c.path, c.directory, c.encoding])).toEqual([
-      ['write', 'autosave.json', 'DATA', 'utf8'],
+      ['stat', 'autosave.json', 'DATA', undefined],
+      ['rename', 'autosave.json.tmp -> autosave.json', 'DATA', undefined],
+      ['write', 'autosave.json.tmp', 'DATA', 'utf8'],
+      ['delete', 'autosave.json.bak', 'DATA', undefined],
+      ['rename', 'autosave.json -> autosave.json.bak', 'DATA', undefined],
+      ['rename', 'autosave.json.tmp -> autosave.json', 'DATA', undefined],
+      ['read', 'autosave.json.tmp', 'DATA', 'utf8'],
       ['read', 'autosave.json', 'DATA', 'utf8'],
     ]);
   });
 
-  it('keeps the newest save only', async () => {
-    const slot = createFileStorage(stubFs());
-    await slot.writeSave('first');
-    await slot.writeSave('second');
-    expect(await slot.readSave()).toBe('second');
+  it('reads the newest save, keeping the one before it as autosave.json.bak', async () => {
+    const fs = stubFs();
+    const slot = createFileStorage(fs);
+    await slot.writeSave('{"n":"first"}');
+    await slot.writeSave('{"n":"second"}');
+    expect(await slot.readSave()).toBe('{"n":"second"}');
+    expect(fs.files.get('DATA/autosave.json.bak')).toBe('{"n":"first"}');
   });
 
   it('reads null on first launch, when the file does not exist', async () => {
@@ -106,8 +133,8 @@ describe('the Filesystem slot', () => {
 
   it('accepts the plugin as a promise, the way boot loads it lazily', async () => {
     const slot = createFileStorage(Promise.resolve(stubFs()));
-    await slot.writeSave('lazy');
-    expect(await slot.readSave()).toBe('lazy');
+    await slot.writeSave('"lazy"');
+    expect(await slot.readSave()).toBe('"lazy"');
   });
 
   it('refuses to write in plain English when the device refuses', async () => {
@@ -120,8 +147,8 @@ describe('the Filesystem slot', () => {
 
   it('reads a Blob result as text', async () => {
     const fs = stubFs();
-    fs.readFile = async () => ({ data: new Blob(['from a blob']) });
-    expect(await createFileStorage(fs).readSave()).toBe('from a blob');
+    fs.readFile = async () => ({ data: new Blob(['"from a blob"']) });
+    expect(await createFileStorage(fs).readSave()).toBe('"from a blob"');
   });
 });
 

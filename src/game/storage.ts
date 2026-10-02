@@ -6,7 +6,8 @@
 // In the browser: IndexedDB first, localStorage as the fallback, both wrapped so a
 // private window never throws. In the iOS and Android shells: one file, autosave.json, in the
 // app data directory through Capacitor Filesystem (saves run 0.7 to 3.3 MB, past what
-// Preferences is comfortable with on iOS). In the desktop shell for Steam (Tauri): the same one
+// Preferences is comfortable with on iOS), written through a .tmp file with the save before it kept
+// as .bak (createFileStorage). In the desktop shell for Steam (Tauri): the same one
 // file in the app data directory through the Tauri fs plugin. The backend is chosen at boot:
 // Tauri first (window.__TAURI__ or the Tauri internals global), then
 // Capacitor.isNativePlatform(), then the browser.
@@ -620,10 +621,21 @@ export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): 
   return { writeSave, readSave };
 }
 
-/** The slice of @capacitor/filesystem the file slot uses, so a test can hand in a stub. */
+/**
+ * The slice of @capacitor/filesystem the file slot uses, so a test can hand in a stub. Every call
+ * rejects with the plugin's `{ code, message }` error; a missing file is code OS-PLUG-FILE-0008
+ * ("'<method>' failed because file at '<path>' does not exist.") on iOS and Android alike: readFile,
+ * stat, deleteFile and rename (for a missing source) all say it that way (FilesystemError.swift,
+ * FilesystemErrors.kt in node_modules/@capacitor/filesystem). Any other code is a real failure.
+ */
 export interface FileSlotFs {
   writeFile(options: { path: string; data: string; directory: string; encoding: string }): Promise<unknown>;
   readFile(options: { path: string; directory: string; encoding: string }): Promise<{ data: string | Blob }>;
+  /** Resolves when the file exists; rejects with the missing code when it does not. */
+  stat(options: { path: string; directory: string }): Promise<unknown>;
+  /** Moves `from` to `to` in the same directory. Never called with an existing `to` (see createFileStorage). */
+  rename(options: { from: string; to: string; directory: string; toDirectory: string }): Promise<unknown>;
+  deleteFile(options: { path: string; directory: string }): Promise<unknown>;
 }
 
 export const FILE_SLOT_NAME = SLOT_FILES.mine;
@@ -633,33 +645,115 @@ const DATA_DIRECTORY = 'DATA';
 const UTF8 = 'utf8';
 const DEVICE_REFUSED_REASON = 'This device would not let the game save.';
 
+const BACKUP_SUFFIX = '.bak';
+
+/** Runs a file step where a missing file is fine (nothing to delete or move); anything else throws. */
+async function unlessMissing(step: () => Promise<unknown>): Promise<void> {
+  try {
+    await step();
+  } catch (e) {
+    if (!isMissingFile(e)) throw e;
+  }
+}
+
+/** A file that is there, not empty and parses as JSON: a whole save. */
+function isWhole(text: string): boolean {
+  if (!text) return false;
+  try {
+    JSON.parse(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
- * The native save slot: one file in the app data directory, the same interface as the browser
- * slot. `fs` may be a promise so the plugin can be loaded lazily on first use.
+ * The native save slot: one file per slot in the app data directory (X = autosave.json,
+ * daily.json or friend.json), the same interface as the browser slot. `fs` may be a promise so the
+ * plugin can be loaded lazily on first use. The phone shells are one process each (one WebView,
+ * one JS context), so the browser slot's guard against another window is not needed here and the
+ * write options are ignored.
+ *
+ * The plugin's writeFile is not atomic on iOS (a killed app or a full disk leaves a cut-off file)
+ * and its rename deletes an existing destination before moving, so a save never writes or renames
+ * onto the live file:
+ *   1. If X is missing but X.tmp is there (a save killed between its two renames), X.tmp is moved
+ *      to X first, so the newest copy is not overwritten by this save's step 2.
+ *   2. Write the new text to X.tmp.
+ *   3. Delete X.bak if there is one, 4. rename X to X.bak if X exists, 5. rename X.tmp to X.
+ * A failure at any step rejects the save. Until step 2 has finished, X (or X.bak) is untouched; from
+ * then on X.tmp is a whole copy until it becomes X, so there is always a whole copy on disk. A
+ * successful save leaves exactly X and X.bak (the save before it): leftovers are taken up here,
+ * never by a read. An install that only has X (from before this) saves the same way.
  */
 export function createFileStorage(fs: FileSlotFs | Promise<FileSlotFs>, slot: SlotName = 'mine'): SaveStorage {
-  const opts = { path: SLOT_FILES[slot], directory: DATA_DIRECTORY, encoding: UTF8 };
+  const file = SLOT_FILES[slot];
+  const temp = file + TEMP_SUFFIX;
+  const backup = file + BACKUP_SUFFIX;
+  const at = (path: string) => ({ path, directory: DATA_DIRECTORY });
+  const move = (from: string, to: string) => ({ from, to, directory: DATA_DIRECTORY, toDirectory: DATA_DIRECTORY });
+  // Writes of this slot run one after another, in call order: two at once (an autosave and Save
+  // now) would share the one .tmp file.
+  let queue: Promise<void> = Promise.resolve();
 
-  async function writeSave(text: string): Promise<void> {
+  function writeSave(text: string): Promise<void> {
+    const run = queue.then(() => writeNow(text));
+    queue = run.catch(() => {});
+    return run;
+  }
+
+  async function writeNow(text: string): Promise<void> {
     try {
-      await (await fs).writeFile({ ...opts, data: text });
+      const f = await fs;
+      let liveMissing = false;
+      try {
+        await f.stat(at(file));
+      } catch (e) {
+        if (!isMissingFile(e)) throw e;
+        liveMissing = true;
+      }
+      if (liveMissing) await unlessMissing(() => f.rename(move(temp, file)));
+      await f.writeFile({ ...at(temp), encoding: UTF8, data: text });
+      await unlessMissing(() => f.deleteFile(at(backup)));
+      await unlessMissing(() => f.rename(move(file, backup)));
+      await f.rename(move(temp, file));
     } catch {
       throw new Error(DEVICE_REFUSED_REASON);
     }
   }
 
+  // Read order: X.tmp, then X, then X.bak, the first that is whole. Why X.tmp first:
+  // - killed while writing X.tmp: X.tmp is cut off (does not parse), X is the newest whole save;
+  // - killed after deleting X.bak, or between the renames, or inside the last rename: X.tmp is a
+  //   whole copy newer than X (X may be gone), so it must win;
+  // - a whole X.tmp is never older than X: every save that finishes renames it away.
+  // X.bak is the save before X, read only when X.tmp and X are both missing or cut off.
+  const ORDER = [temp, file, backup];
+
   async function readSave(): Promise<string | null> {
-    try {
-      const { data } = await (await fs).readFile(opts);
-      // With an encoding the plugin always returns a string; a Blob only comes back without one.
-      const text = typeof data === 'string' ? data : await data.text();
-      return text ? text : null;
-    } catch (e) {
-      // No file yet (first launch) reads as no save, same as an empty browser slot. Any other
-      // failure is not "no save": the file may hold a tower this read could not get at.
-      if (isMissingFile(e)) return null;
+    const f = await Promise.resolve(fs).catch((e: unknown) => {
       throw new SaveReadError(e);
+    });
+    let found: unknown = null;
+    for (const path of ORDER) {
+      let text: string;
+      try {
+        const { data } = await f.readFile({ ...at(path), encoding: UTF8 });
+        // With an encoding the plugin always returns a string; a Blob only comes back without one.
+        text = typeof data === 'string' ? data : await data.text();
+      } catch (e) {
+        if (isMissingFile(e)) continue;
+        // Not "missing" and not read: this file may hold the newest tower, so an older copy is
+        // not taken in its place. A read failure, never "no save".
+        throw new SaveReadError(e);
+      }
+      if (isWhole(text)) return text;
+      found ??= new Error(`${path} is ${text ? 'cut off' : 'empty'}`);
     }
+    // None there at all: a first launch or a slot never used, same as an empty browser slot.
+    // Files there but none whole: the slot holds a tower this read could not get at.
+    if (found === null) return null;
+    throw new SaveReadError(found);
   }
 
   return { writeSave, readSave };
@@ -698,6 +792,9 @@ async function loadCapacitorFs(): Promise<FileSlotFs> {
   return {
     writeFile: (options) => Filesystem.writeFile(options as Parameters<typeof Filesystem.writeFile>[0]),
     readFile: (options) => Filesystem.readFile(options as Parameters<typeof Filesystem.readFile>[0]),
+    stat: (options) => Filesystem.stat(options as Parameters<typeof Filesystem.stat>[0]),
+    rename: (options) => Filesystem.rename(options as Parameters<typeof Filesystem.rename>[0]),
+    deleteFile: (options) => Filesystem.deleteFile(options as Parameters<typeof Filesystem.deleteFile>[0]),
   };
 }
 

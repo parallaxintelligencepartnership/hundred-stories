@@ -188,6 +188,9 @@ describe('the shell slots tell a failed read from a missing file (probe-rd A2)',
   });
   const cap = (fail: unknown): FileSlotFs => ({
     writeFile: async () => ({}),
+    stat: async () => ({}),
+    rename: async () => ({}),
+    deleteFile: async () => ({}),
     readFile: async () => {
       throw fail;
     },
