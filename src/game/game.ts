@@ -34,6 +34,7 @@ import {
   writeDailyRecord,
   writeSave,
   writeSlot,
+  type ReadReceipt,
   type SlotName,
 } from './storage';
 import {
@@ -353,6 +354,17 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
   let standIn = true;
   // The failed-save notice goes out once per session (for the saves the player did not ask for).
   let notSavingShown = false;
+  // Slots another window saved after this page read them: a save here was refused with a conflict
+  // (storage's SaveConflictError). Until the page reloads, the slot is read again and put in hand,
+  // or its tower is replaced on purpose (New tower, an opened file, a forced save), the game's own
+  // saves of it stop: each would only be refused again.
+  const stale = new Set<SlotName>();
+  // The conflict card is owed to the player (takeSaveConflict): set by a refused save the ui did
+  // not already answer, taken by the ui once the page is visible.
+  let conflictOwed = false;
+  // A tower that replaces what its slot holds on purpose (an opened file, New tower): its saves
+  // skip the check for another window until one of them lands.
+  let replacing: { name: SlotName; world: World } | null = null;
   // Leaving the tower (Reload into a new version, Save and exit): leaves still writing, and the
   // hold one that went through keeps until the page goes or the player stays (resumeAfterLeave).
   // While either is set nothing changes the tower: no tick, no command, no tap on the view.
@@ -561,10 +573,11 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     // Going away, save what moved: a hidden tab may never come back.
     if (time.hidden()) saveNow();
     // Coming back, start the clock from now: the frame loop must not earn the hidden gap again,
-    // nor run a backlog the hidden timer left.
+    // nor run a backlog the hidden timer left. A conflict met while hidden is said now.
     else {
       last = time.now();
       resetClock();
+      if (conflictOwed) notify();
     }
   }
 
@@ -591,7 +604,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
    * save that runs after a switch still writes the tower it was meant for, where it belongs.
    */
   function saveWhenIdle(): void {
-    if (holds > 0) return;
+    if (holds > 0 || stale.has(slot)) return;
     if (autosaveInFlight) {
       // A write already started may have taken the tower before this change. Remember the ask
       // and save once more when it settles; any number of asks meanwhile make one follow-up.
@@ -622,7 +635,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
 
   /** Save now, fire and forget, if the tower moved: the page is hiding or closing. */
   function saveNow(): void {
-    if (!dirty || holds > 0) return;
+    if (!dirty || holds > 0 || stale.has(slot)) return;
     cancelScheduledSave();
     void saveWorld('background');
   }
@@ -634,6 +647,33 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     logEvent(world, NOT_SAVING_NOTICE, 'warn');
     drainEvents();
     notify();
+  }
+
+  /**
+   * A save of `name` was refused: another window saved it after this page read it. The game's own
+   * saves of it stop (stale). The first refusal in a stale slot says so in the log, once, and owes
+   * the player the conflict card; a save the player asked for (Save now, a switch) owes it every
+   * time. `answered`: the caller shows the card itself (GameApi.leave's caller).
+   */
+  function saveConflict(name: SlotName, kind: 'player' | 'quiet' | 'background' | 'leave', answered: boolean): void {
+    const first = !stale.has(name);
+    stale.add(name);
+    if (name !== slot) return; // that tower is no longer in hand
+    cancelScheduledSave();
+    const own = kind === 'quiet' || kind === 'background';
+    if (own && !first) return;
+    if (own) {
+      logEvent(world, LEAVE_CONFLICT, 'warn');
+      drainEvents();
+    }
+    if (!answered) conflictOwed = true;
+    notify();
+  }
+
+  /** The slot's tower is the newest again (read and put in hand, or replaced on purpose). */
+  function endStale(name: SlotName): void {
+    stale.delete(name);
+    if (name === slot) conflictOwed = false;
   }
 
   /** Save now. `force` (Save anyway over a held save, New tower) replaces whatever the slot holds. */
@@ -649,24 +689,38 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
    * per session. 'leave' is the save made to leave the tower (leaveSteps): its caller says why
    * every time, so it adds no line of its own. A held My tower (an unreadable save the player has
    * not replaced) is never written by any save but the player's. A write another window has
-   * overtaken (storage's SaveConflictError, by name) comes back with `conflict`.
+   * overtaken (storage's SaveConflictError, by name) comes back with `conflict` (saveConflict);
+   * after one, the game's own saves of that slot write nothing. `answered`: see saveConflict.
    */
-  async function saveWorld(kind: 'player' | 'quiet' | 'background' | 'leave', name: SlotName = slot, w: World = world, force = false): Promise<SaveResult> {
+  async function saveWorld(
+    kind: 'player' | 'quiet' | 'background' | 'leave',
+    name: SlotName = slot,
+    w: World = world,
+    force = false,
+    answered = false,
+  ): Promise<SaveResult> {
     if (kind !== 'player' && name === 'mine' && mineHeld) return { ok: true };
     if (unread.has(name)) return kind === 'player' ? { ok: false, reason: READ_FAILED_NOTICE } : { ok: true };
+    const forced = force || (replacing !== null && replacing.name === name && replacing.world === w);
+    if ((kind === 'quiet' || kind === 'background') && stale.has(name) && !forced) return { ok: false, reason: LEAVE_CONFLICT, conflict: true };
     const at = edits;
     try {
       markCheckpoint(w); // the hash here lets a replay find where it drifted
-      await writeTo(name, serialize(w), force);
+      await writeTo(name, serialize(w), forced);
       if (w === world && edits === at) dirty = false;
+      if (forced) {
+        if (replacing?.world === w) replacing = null;
+        if (w === world && name === slot) endStale(name);
+      }
       if (kind === 'player') {
         logEvent(world, 'Game saved.', 'info');
         notify();
       }
       return { ok: true };
     } catch (e) {
-      if (kind === 'quiet' || kind === 'background') noteSaveFailed();
-      else if (kind === 'leave') console.warn('The save to leave the tower did not go through', e);
+      if (isConflict(e)) saveConflict(name, kind, answered);
+      else if (kind === 'quiet' || kind === 'background') noteSaveFailed();
+      if (kind === 'leave') console.warn('The save to leave the tower did not go through', e);
       const reason = e instanceof Error ? e.message : 'Could not save.';
       return isConflict(e) ? { ok: false, reason, conflict: true } : { ok: false, reason };
     }
@@ -691,23 +745,36 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     return run;
   }
 
-  function readFrom(name: SlotName): Promise<string | null> {
-    return name === 'mine' ? readSave() : readSlot(name);
+  /** A slot's text. `receipt`: see storage's ReadReceipt; the read counts only once adopted. */
+  function readFrom(name: SlotName, receipt: ReadReceipt = {}): Promise<string | null> {
+    return name === 'mine' ? readSave(receipt) : readSlot(name, receipt);
   }
 
   /**
    * A slot's text, null when nothing is stored, or failed when the store could not be read. A
    * read that works lifts the slot's protection: its caller puts that slot's own tower in hand.
+   * The caller adopts the read (adoptRead) only when it does.
    */
-  async function tryRead(name: SlotName): Promise<{ failed: false; text: string | null } | { failed: true }> {
+  async function tryRead(name: SlotName): Promise<{ failed: false; text: string | null; receipt: ReadReceipt } | { failed: true }> {
+    const receipt: ReadReceipt = {};
     try {
-      const text = await readFrom(name);
+      const text = await readFrom(name, receipt);
       unread.delete(name);
-      return { failed: false, text };
+      return { failed: false, text, receipt };
     } catch (e) {
       console.warn('The save could not be read', e);
       return { failed: true };
     }
+  }
+
+  /**
+   * The tower a read found is put in hand, or replaces its slot on purpose after that read: the
+   * read becomes the slot's base for storage's check for another window, and the slot is not
+   * stale any more. A read whose tower is not put in hand is never adopted.
+   */
+  function adoptRead(name: SlotName, receipt: ReadReceipt): void {
+    receipt.adopt?.();
+    endStale(name);
   }
 
   /** A slot's save could not be read: protect it and tell the player. */
@@ -779,13 +846,13 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
    * save or load, nor for a stand-in: a held My tower (`unsaved: 'held'`) or a slot that could
    * not be read (`unsaved: 'unread'`) is never written by a save the player did not ask for.
    */
-  async function leaveSteps(): Promise<LeaveResult> {
+  async function leaveSteps(answered = false): Promise<LeaveResult> {
     cancelScheduledSave();
     await writeQueues.get(slot);
     if (slot === 'mine' && mineHeld) return { ok: true, wrote: false, unsaved: 'held' };
     if (unread.has(slot)) return { ok: true, wrote: false, unsaved: 'unread' };
     if (!dirty) return { ok: true, wrote: false };
-    const res = await saveWorld('leave', slot, world);
+    const res = await saveWorld('leave', slot, world, false, answered);
     if (res.ok) return { ok: true, wrote: true };
     return res.conflict ? { ok: false, reason: LEAVE_CONFLICT, conflict: true } : { ok: false, reason: LEAVE_NOT_SAVED };
   }
@@ -800,7 +867,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     leaving++;
     cancelScheduledSave();
     const done = switchChain
-      .then(leaveSteps)
+      .then(() => leaveSteps(true)) // its caller shows the leave card, a conflict's too
       .catch((e: unknown): LeaveResult => {
         console.warn('The save to leave the tower did not go through', e);
         return { ok: false, reason: LEAVE_NOT_SAVED };
@@ -840,13 +907,17 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
   }
 
   /** A slot's save as a world, with the text when it is there but does not read. */
-  async function readWorld(name: SlotName): Promise<{ world: World | null; text: string | null; reason: string; failed: boolean }> {
+  async function readWorld(
+    name: SlotName,
+  ): Promise<{ world: World | null; text: string | null; reason: string; failed: boolean; receipt: ReadReceipt }> {
     const read = await tryRead(name);
-    if (read.failed) return { world: null, text: null, reason: READ_FAILED_NOTICE, failed: true };
-    const text = read.text;
-    if (!text) return { world: null, text: null, reason: '', failed: false };
+    if (read.failed) return { world: null, text: null, reason: READ_FAILED_NOTICE, failed: true, receipt: {} };
+    const { text, receipt } = read;
+    if (!text) return { world: null, text: null, reason: '', failed: false, receipt };
     const res = openSaveText(text);
-    return res.ok ? { world: res.world, text, reason: '', failed: false } : { world: null, text, reason: res.reason, failed: false };
+    return res.ok
+      ? { world: res.world, text, reason: '', failed: false, receipt }
+      : { world: null, text, reason: res.reason, failed: false, receipt };
   }
 
   /**
@@ -1340,6 +1411,11 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     saveHeld() {
       return slot === 'mine' && mineHeld;
     },
+    takeSaveConflict(): LeaveResult | null {
+      if (!conflictOwed || time.hidden()) return null;
+      conflictOwed = false;
+      return { ok: false, reason: LEAVE_CONFLICT, conflict: true };
+    },
     save() {
       // The player pressed Save, so this one logs; in a held My tower it is also the player
       // choosing the new tower over the save that would not open. An idle autosave not yet
@@ -1359,6 +1435,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
       const text = read.text;
       if (!text) {
         standIn = false; // the slot is empty: the tower in hand is now its tower
+        adoptRead(name, read.receipt);
         return { ok: false, reason: 'There is no saved game yet.' };
       }
       const res = openSaveText(text);
@@ -1372,6 +1449,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
         return { ok: false, reason: res.reason };
       }
       swapWorld(res.world); // what is in hand is what the slot holds
+      adoptRead(name, read.receipt);
       if (name === 'mine') mineHeld = false;
       notify();
       return { ok: true };
@@ -1401,6 +1479,10 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
           startSpeed();
         }
         swapWorld(opened);
+        // An opened file replaces My tower on purpose, whatever another window saved there: its
+        // first save that lands is forced, from every boot.
+        replacing = { name: 'mine', world: opened };
+        endStale('mine');
         markDirty(); // an opened file is not in the slot until the next save
         if (slot === 'mine') mineHeld = false; // the player chose this tower over a held save
         notify();
@@ -1439,6 +1521,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
           if (opening === 'clock-back' && saved && savedDate !== null && !dailyFinished(saved)) {
             takeSlot('daily');
             swapWorld(saved);
+            adoptRead('daily', read.receipt);
             speed = 0;
             lockStays = false;
             dailyChoice = { savedDate, today, yesterday: false, ahead: false, locked: opening };
@@ -1461,6 +1544,8 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
           readFailed('daily');
           return { ok: true };
         }
+        // Today's tower opens from what this read found: kept, or replaced on purpose by a fresh one.
+        adoptRead('daily', read.receipt);
         if (opening === 'fresh' || !saved || savedDate === null) {
           await beginToday(today);
           return { ok: true };
@@ -1550,9 +1635,13 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
         if (read.failed) {
           freshTower(friendSeed);
           readFailed('friend');
-        } else if (saved && saved.seed === friendSeed) swapWorld(saved);
-        else {
+        } else if (saved && saved.seed === friendSeed) {
+          swapWorld(saved);
+          adoptRead('friend', read.receipt);
+        } else {
+          // Another link starts over: the slot is replaced on purpose, after this read.
           freshTower(friendSeed);
+          adoptRead('friend', read.receipt);
           await saveWorld('quiet');
         }
         startSpeed();
@@ -1570,6 +1659,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
           readFailed('mine');
         } else if (read.world) {
           swapWorld(read.world);
+          adoptRead('mine', read.receipt);
           mineHeld = false;
         } else {
           freshTower(time.freshSeed());
@@ -1577,6 +1667,7 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
           if (read.text !== null) keepUnreadable(read.text, read.reason);
           else {
             mineHeld = false; // nothing there any more to keep
+            adoptRead('mine', read.receipt);
             await saveWorld('quiet');
           }
         }
@@ -1605,7 +1696,10 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
       renderer?.camera.reset();
       notify();
       // The autosave slot must not resurrect the old tower on the next reload: the save is
-      // awaited, and a failure says so (the old tower is still the one stored).
+      // awaited, and a failure says so (the old tower is still the one stored). It replaces the
+      // slot on purpose, so a later save of it is forced too until one lands.
+      replacing = { name: slot, world };
+      endStale(slot);
       return playerSave(true).then((res): CommandResult => (res.ok ? res : { ok: false, reason: NEW_TOWER_NOT_SAVED }));
     },
     setReducedMotion(on) {

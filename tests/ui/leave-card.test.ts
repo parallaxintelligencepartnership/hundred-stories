@@ -269,6 +269,74 @@ describe('a stand-in asks before the page goes', () => {
   });
 });
 
+describe("a save another window overtook shows the conflict card, with no leave behind it", () => {
+  /** A real game on fake stores whose tab can be hidden, with My tower read and saved once. */
+  async function staleGame() {
+    const idb = fakeIdb();
+    vi.stubGlobal('localStorage', fakeLocalStorage().store);
+    vi.stubGlobal('indexedDB', idb.factory);
+    const view = { hidden: false };
+    const game = createGame(11, { ...handClock().opts, hidden: () => view.hidden });
+    await game.load();
+    game.apply({ kind: 'build', room: 'lobby', floor: 1, x: 150 });
+    expect(await game.save()).toEqual({ ok: true });
+    // Another window saves My tower: the number in IndexedDB passes this page's.
+    idb.data.set('autosave:seq', Number(idb.data.get('autosave:seq')) + 1000);
+    return { game, view };
+  }
+
+  /** A background save: pausing with an unsaved change saves in the next idle slot. */
+  async function backgroundSave(game: ReturnType<typeof createGame>, x: number): Promise<void> {
+    game.setSpeed(1);
+    game.apply({ kind: 'build', room: 'lobby', floor: 1, x });
+    game.setSpeed(0);
+    await settle();
+  }
+
+  it('the first background conflict shows it once; a later one shows nothing; a pressed Save shows it again', async () => {
+    const { game } = await staleGame();
+    const { order, root, ui } = mount(game);
+    await backgroundSave(game, 60);
+    expect(plateTitle(root)).toBe(LEAVE_CONFLICT_TITLE);
+    expect(answerWords(root)).toEqual([OPEN_NEWER, SAVE_THIS_TO_FILE, KEEP_PLAYING]);
+    expect(dom.activeElement?.dataset['answer']).toBe('stay');
+    click(answer(root, 'stay'));
+    expect(leaveBody(root)).toBeUndefined();
+
+    await backgroundSave(game, 61);
+    expect(leaveBody(root)).toBeUndefined();
+
+    expect(await game.save()).toMatchObject({ ok: false, conflict: true });
+    expect(plateTitle(root)).toBe(LEAVE_CONFLICT_TITLE);
+    click(answer(root, 'newer'));
+    expect(order).toEqual(['reload']);
+    ui.destroy();
+  });
+
+  it('a conflict while the page is hidden shows the card when it is visible again', async () => {
+    const { game, view } = await staleGame();
+    const { root, ui } = mount(game);
+    const doc = globalThis.document as unknown as Record<string, unknown>;
+    const win = globalThis.window as unknown as Record<string, unknown>;
+    const docListeners = new Map<string, () => void>();
+    doc['addEventListener'] = (type: string, fn: () => void) => docListeners.set(type, fn);
+    doc['removeEventListener'] = (type: string) => docListeners.delete(type);
+    win['setInterval'] = () => 1;
+    win['clearInterval'] = () => {};
+    game.start();
+    game.apply({ kind: 'build', room: 'lobby', floor: 1, x: 60 });
+    view.hidden = true;
+    docListeners.get('visibilitychange')?.(); // going away saves, and the save is refused
+    await settle();
+    expect(leaveBody(root)).toBeUndefined();
+    view.hidden = false;
+    docListeners.get('visibilitychange')?.();
+    expect(plateTitle(root)).toBe(LEAVE_CONFLICT_TITLE);
+    game.stop();
+    ui.destroy();
+  });
+});
+
 describe('the leave card on its own', () => {
   function menuOn() {
     const host = dom.createElement('div');

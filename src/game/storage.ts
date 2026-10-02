@@ -59,11 +59,21 @@ export interface WriteOptions {
   force?: boolean;
 }
 
+/**
+ * Handed to readSave by a caller that decides later whether the tower it read is put in hand (the
+ * game: a read whose save does not open, or a peek, leaves the tower in hand as it was). readSave
+ * fills in `adopt`; calling it makes this read the slot's base for the stale-window check. A read
+ * with no receipt is adopted at once. Only the browser slot fills it in.
+ */
+export interface ReadReceipt {
+  adopt?: () => void;
+}
+
 export interface SaveStorage {
   /** Rejects with a SaveConflictError when another window saved the slot after this page read it. */
   writeSave(text: string, options?: WriteOptions): Promise<void>;
   /** The slot's text, null when nothing is stored. Throws a SaveReadError when the store could not be read. */
-  readSave(): Promise<string | null>;
+  readSave(receipt?: ReadReceipt): Promise<string | null>;
 }
 
 /**
@@ -249,8 +259,10 @@ const lastSeq = new Map<string, number>();
 const learnedSeq = new Set<string>();
 
 // The stale-window guard (compare and swap). Per slot key: the number of the copy this page last
-// read (set by readSave from the copy it returned, advanced after each good write), and every
-// number this page wrote. A write finds the slot's number in the store; one newer than this
+// read and put in hand (set by readSave from the copy it returned, when that read is adopted, and
+// advanced after each good write), and every number this page wrote: a number counts as written
+// only once its write landed (the transaction completed, or the localStorage copy was set), never
+// when it was claimed, so a save that failed leaves nothing another window could reuse. A write finds the slot's number in the store; one newer than this
 // page's base that this page did not write came from another window, and the write is refused
 // with a SaveConflictError. A slot this page never read (no base) is written without the check:
 // this page holds no tower from it that could be stale (an opened file into My tower after a
@@ -337,7 +349,8 @@ export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): 
   /**
    * The next number, one more than the highest in either store or in memory. `fromDb` is the
    * IndexedDB number when this write could read it, else null. Synchronous from reading lastSeq to
-   * setting it, so two writes at once still get two numbers. The number is this page's from here.
+   * setting it, so two writes at once still get two numbers. The number counts as this page's only
+   * once its write lands (landed()).
    */
   function nextSeq(fromDb: number | null): number {
     let found = readLocalSeq();
@@ -352,8 +365,21 @@ export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): 
     }
     const seq = Math.max(found, lastSeq.get(KEY) ?? 0) + 1;
     lastSeq.set(KEY, seq);
-    ownSet(KEY).add(seq);
     return seq;
+  }
+
+  /** A write of this number landed: from now on a store holding it holds this page's save. */
+  function landed(seq: number): void {
+    ownSet(KEY).add(seq);
+  }
+
+  /** The device record alone (0 with none). */
+  function readHigh(): number {
+    try {
+      return stampOf(deps.localStorage?.getItem(localHighKey));
+    } catch {
+      return 0;
+    }
   }
 
   /** Records a number a read saw, so later writes on this page count on from it. */
@@ -427,7 +453,10 @@ export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): 
         store.put(seq, idbSeqKey);
       };
       req.onerror = () => reject(req.error ?? new Error('read failed'));
-      tx.oncomplete = () => resolve(seq);
+      tx.oncomplete = () => {
+        landed(seq);
+        resolve(seq);
+      };
       tx.onerror = () => reject(tx.error ?? new Error('write failed'));
       // A quota failure at commit can abort with no error event. Without this the write
       // never settles, and every later save and slot switch waits on it for the session.
@@ -470,6 +499,7 @@ export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): 
       // check through these keys too.
       deps.localStorage.setItem(localStampKey, String(stamp));
       deps.localStorage.setItem(localSeqKey, String(seq));
+      landed(seq);
       recordHigh(seq);
       markPresent();
     } catch {
@@ -520,7 +550,14 @@ export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): 
     }
   }
 
-  async function readSave(): Promise<string | null> {
+  async function readSave(receipt?: ReadReceipt): Promise<string | null> {
+    if (receipt) delete receipt.adopt;
+    // The device record before either store is read. A number it already holds is no save made
+    // after this read: when the read saw every store and took a lower copy, the record is left from
+    // a store since cleared (IndexedDB gone or wiped, localStorage kept), never another window's
+    // newer save, and it must not lock this page's saves. A write landing after this moment raises
+    // the record above the base and is still caught.
+    const highBefore = readHigh();
     let fromDb: StampedText | null = null;
     if (deps.indexedDB) {
       try {
@@ -537,7 +574,8 @@ export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): 
         const local = readLocal();
         if (local) {
           sawSeq(local.seq);
-          return took(local);
+          // IndexedDB was not read, so the record may be its newer save: not counted.
+          return took(local, 0, receipt);
         }
         const stalled = e instanceof SaveReadError && e.cause instanceof OpenDeadlineError;
         // Read as empty only on a first visit, and with no base: the guard then checks nothing,
@@ -553,20 +591,29 @@ export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): 
       // Older than IndexedDB (left by a build before copies were dropped): it would only load on
       // a later boot where IndexedDB will not open, as a stale tower.
       dropLocalCopy();
-      return took(fromDb);
+      return took(fromDb, highBefore, receipt);
     }
     if (fromDb && fromLocal) {
       // A copy with no number was written by a build before sequence numbers, so any numbered
       // copy is newer. The stamp decides only between equal numbers (two copies without one).
-      if (fromLocal.seq !== fromDb.seq) return took(fromLocal.seq > fromDb.seq ? fromLocal : fromDb);
-      return took(fromLocal.stamp > fromDb.stamp ? fromLocal : fromDb);
+      if (fromLocal.seq !== fromDb.seq) return took(fromLocal.seq > fromDb.seq ? fromLocal : fromDb, highBefore, receipt);
+      return took(fromLocal.stamp > fromDb.stamp ? fromLocal : fromDb, highBefore, receipt);
     }
-    return took(fromDb ?? fromLocal);
+    return took(fromDb ?? fromLocal, highBefore, receipt);
   }
 
-  /** The copy readSave returns, or none: its number is this page's base for the guard. */
-  function took(copy: StampedText | null): string | null {
-    baseSeq.set(KEY, copy?.seq ?? 0);
+  /**
+   * The copy readSave returns, or none. Its number (or the device record read before it, when
+   * that is higher: see readSave) is this page's base for the guard once the read is adopted: at
+   * once with no receipt, else when the caller calls receipt.adopt.
+   */
+  function took(copy: StampedText | null, highBefore: number, receipt: ReadReceipt | undefined): string | null {
+    const base = Math.max(copy?.seq ?? 0, highBefore);
+    const adopt = (): void => {
+      baseSeq.set(KEY, base);
+    };
+    if (receipt) receipt.adopt = adopt;
+    else adopt();
     return copy?.text ?? null;
   }
 
@@ -666,7 +713,7 @@ export function selectStorage(deps: SelectDeps = {}, slot: SlotName = 'mine'): S
   if (platform === 'capacitor') return createFileStorage((deps.loadFs ?? loadCapacitorFs)(), slot);
   return {
     writeSave: (text: string, options?: WriteOptions) => createStorage(globalDeps(), slot).writeSave(text, options),
-    readSave: () => createStorage(globalDeps(), slot).readSave(),
+    readSave: (receipt?: ReadReceipt) => createStorage(globalDeps(), slot).readSave(receipt),
   };
 }
 
@@ -930,15 +977,15 @@ function active(slot: SlotName): SaveStorage {
 /** My tower, the original slot. */
 export const storage: SaveStorage = {
   writeSave: (text: string, options?: WriteOptions) => active('mine').writeSave(text, options),
-  readSave: () => active('mine').readSave(),
+  readSave: (receipt?: ReadReceipt) => active('mine').readSave(receipt),
 };
 
 export const writeSave = (text: string, options?: WriteOptions): Promise<void> => storage.writeSave(text, options);
-export const readSave = (): Promise<string | null> => storage.readSave();
+export const readSave = (receipt?: ReadReceipt): Promise<string | null> => storage.readSave(receipt);
 
 /** Any slot by name. The game writes My tower through writeSave and the other two through this. */
 export const writeSlot = (slot: SlotName, text: string, options?: WriteOptions): Promise<void> => active(slot).writeSave(text, options);
-export const readSlot = (slot: SlotName): Promise<string | null> => active(slot).readSave();
+export const readSlot = (slot: SlotName, receipt?: ReadReceipt): Promise<string | null> => active(slot).readSave(receipt);
 
 const UNREADABLE_KEY = 'hs.save.unreadable';
 const DAILY_KEPT_KEY = 'hs.save.daily-kept';

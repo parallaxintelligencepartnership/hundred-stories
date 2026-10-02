@@ -2439,6 +2439,14 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     });
   }
 
+  // A save refused because another window saved this tower after this page opened it
+  // (GameApi.takeSaveConflict): the leave card's conflict answers, with no leave to hold or resume.
+  game.subscribe(() => {
+    const owed = destroyed ? null : (game.takeSaveConflict?.() ?? null);
+    if (!owed || pauseMenu.page()?.id === 'leave') return; // a leave card up already answers it
+    showLeaveCard({ menu: pauseMenu, result: owed, retry: async () => owed, proceed: () => reload(), stay: () => {}, saveFile: (text) => exportSave(text, pageCtx), game });
+  });
+
   return {
     update,
     updateReady,

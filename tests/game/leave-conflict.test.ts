@@ -1,6 +1,7 @@
-// A write another window overtook (F3) reaches the player as a conflict. storage.ts does not raise
-// SaveConflictError yet (another package adds it), so My tower's write is made to throw one here,
-// by name, exactly as the game knows it; the rest of storage is the real module.
+// A write another window overtook (F3) reaches the player as a conflict. storage.ts raises
+// SaveConflictError itself (tests/game/storage-conflict.test.ts drives it with two pages); here My
+// tower's write is made to throw one on demand, by name, exactly as the game knows it, so the
+// game's side is tested alone. The rest of storage is the real module, write options included.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const conflict = vi.hoisted(() => ({ on: false }));
@@ -9,8 +10,8 @@ vi.mock('../../src/game/storage', async (importOriginal) => {
   const real = await importOriginal<typeof import('../../src/game/storage')>();
   return {
     ...real,
-    writeSave: (text: string): Promise<void> => {
-      if (!conflict.on) return real.writeSave(text);
+    writeSave: (text: string, options?: import('../../src/game/storage').WriteOptions): Promise<void> => {
+      if (!conflict.on) return real.writeSave(text, options);
       const error = new Error('A newer save is in another window.');
       error.name = 'SaveConflictError';
       return Promise.reject(error);

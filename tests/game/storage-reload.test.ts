@@ -28,7 +28,7 @@ type Mode = 'ok' | 'openFails' | 'txThrows' | 'putFails';
 /** An IndexedDB whose steps settle in a later task, like a browser's. */
 function fakeIdb() {
   const data = new Map<string, unknown>();
-  const ctl = { mode: 'ok' as Mode, data };
+  const ctl = { mode: 'ok' as Mode, data, dbs: [] as Record<string, unknown>[] };
   const lost = (): DOMException =>
     new DOMException('Connection to Indexed Database server lost. Refresh the page to try again', 'UnknownError');
   const later = (f: () => void): void => void setTimeout(f, 0);
@@ -41,7 +41,7 @@ function fakeIdb() {
         later(() => fire('onerror'));
         return req;
       }
-      req.result = {
+      const db: Record<string, unknown> = {
         transaction: () => {
           if (ctl.mode === 'txThrows') throw lost();
           const failing = ctl.mode === 'putFails';
@@ -75,6 +75,8 @@ function fakeIdb() {
           return tx;
         },
       };
+      ctl.dbs.push(db);
+      req.result = db;
       later(() => fire('onsuccess'));
       return req;
     },
@@ -103,8 +105,12 @@ describe('S1: IndexedDB stops answering after a good boot read', () => {
       m = await reload();
       expect(await slot().readSave()).toBe('{"minute":3000}');
       ctl.mode = mode;
+      // The page keeps one connection: for the open to fail, the browser must close it first.
+      if (mode === 'openFails') (ctl.dbs.at(-1)?.['onclose'] as (() => void) | undefined)?.();
       await slot().writeSave('{"minute":4000}');
       await slot().writeSave('{"minute":9000}');
+      // Both saves made during the outage went to the fallback copy.
+      expect(ls.getItem('hundred-stories:autosave')).toBe('{"minute":9000}');
       ctl.mode = 'ok';
       m = await reload();
       expect(await slot().readSave()).toBe('{"minute":9000}');

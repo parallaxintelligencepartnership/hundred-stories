@@ -165,6 +165,15 @@ export interface GameApi {
    */
   saveHeld(): boolean;
   /**
+   * A save was refused because another window saved this tower after this page opened it, and
+   * the player is owed the leave card's conflict answers (Open the newer tower, Save this one to a
+   * file, Keep playing). Hands back that result once, then null; null while the page is hidden
+   * (the game notifies when it is visible again). Owed by the first such refusal of the game's own
+   * saves, and by every one of a save the player asked for, except a leave (its caller shows the
+   * card). Optional: a stand-in game has none.
+   */
+  takeSaveConflict?(): LeaveResult | null;
+  /**
    * Save the tower in hand before the page goes (Reload into a new version, Save and exit), and
    * say how that went. From the call on the clock holds and every command and tap on the tower is
    * refused, so nothing changes after the save is taken; a tower switch in flight is waited for
