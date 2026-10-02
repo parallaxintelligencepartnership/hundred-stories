@@ -1068,3 +1068,7 @@ Scope: closeout sweep, 666bf45, five lens runbooks + history audit. Not covered:
 Per lens: history audit run and clean. security-auth, real-data, testing and dependency-vetting: no finding beyond the lines above. llm-security: not applicable. Rollback: the 0.6.13 save loads and runs on the 0.6.12 sim and back, storage keys match both ways, Cloudflare b999d042 is listed and live. The damaged phone save comparison (P1c C1) was re-run at 666bf45 and takes the 0.6.12 path. Audit current: 0.6.13 is the fifth ship since 2026-09-28; the sixth makes it due.
 
 Carried, unchanged: GitHub Dependabot alert 2 (glib 0.18.5), line 727, waiting on Matt's dismissal.
+
+Full suite at 62897db (the shipped tree, stamped by scripts/verify.sh): 249 files, 3113 passed, 2 skipped; typecheck clean. The first full run at 0cf86d5 failed 7 tests in 6 files: one regression (the save-conflict hook was a second game subscription never released on destroy, from 6536793, fixed @62897db) and six tests behind decided changes, updated @62897db. Capture run at e06c641: 39 shots, 38 OK, 1 check not measurable by the script; two findings from the pictures (alert cards over the Stories page on a phone, Clips sharing the Views icon) fixed @0cf86d5. Shipped as 0.6.13, tag ship-2026-10-01, Cloudflare 2d46f5f0-b571-4457-8375-0eac239c50bd.
+
+Open after this ship: the feedback mailer line above (the repo file is fixed @6df6a70; not applied to the live n8n workflow; Matt 2026-10-01: "just leave it for another time") and the carried glib alert.

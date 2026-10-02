@@ -87,6 +87,13 @@ Review reports are under the session scratchpad `reviews/` (p1a-review.md, p2-re
 - P1a: A1 double tap on Reload makes two cards; A2 a write that never settles holds the game with no word (closes with the P1b open deadline); A3 no test for pointer refusal, the per-slot queue order, or the wait for an in-flight write; A4 no UI test for the refused-switch and New tower notices; A5 the leave card can be pushed into a hidden pause menu; A6 Open a saved file is not refused during a leave.
 - P2: A1 the no-route set is rebuilt every tick; A2 a 0.6.12 save made in the first minutes of a party pays that party nothing once; A3 no test for the caught thief's car call; A4 the cannot-reach list has no UI caller and the old "Housekeeping will clean them out." line stands (P3b); A5 an evicted rider's old car call stays lit for one empty stop; A6 goal lines say "now" for the best VIP visit (P3c).
 
+## Ship
+
+- Verified tree `ad000e8f` at `62897db`: `sh scripts/verify.sh`, 249 test files, 3113 passed, 2 skipped, typecheck clean. The first full run (at `0cf86d5`) failed 7 tests in 6 files that no package had run against the merged result: one real regression (a second game subscription for the save-conflict card, never released on destroy) and six tests behind decided changes. All fixed at `62897db`.
+- Shipped 2026-10-01 as 0.6.13: main fast-forwarded to `62897db`, release commit `04916a0`, tag `ship-2026-10-01`, Cloudflare version `2d46f5f0-b571-4457-8375-0eac239c50bd`, pushed to origin and the GitHub mirror by `scripts/ship.sh`.
+- Live after the deploy: the five security headers present; `/`, `/play/`, `/clips/`, `/how-to-play/`, `/privacy/` 200; `/nope` 404; http to https 301; `POST /api/feedback` with an empty body 400 from the Worker; a byte range on `/trailers/the-wait.mp4` 206; the live `/play/` page is byte for byte the built one; the game mounts in headless Chrome under the live policy (canvas and UI present, no refused content, no console errors).
+- Rollback target: tag `ship-2026-09-30` (0.6.12), Cloudflare `b999d042-2e77-4a47-a721-6a08e2c82f63`; a 0.6.13 save loads on 0.6.12.
+
 ## Still open or unverified
 
 - Feedback mailer (handoff R5, sweep IMPORTANT): the fix is in `deploy/n8n-feedback-mailer.json` with a test (a failed send stops with an error into the "Ops: n8n Mission Control" failure workflow; 1,000 keys a run). It is NOT on the live n8n workflow `YfrW6E7QCEWDR75I`. Matt, 2026-10-01: "just leave it for another time". The live store held 0 waiting messages on 2026-10-01.
