@@ -486,6 +486,12 @@ export interface Sound {
   /** True once an AudioContext exists; for the tests and the settings panel. */
   readonly hasContext: boolean;
   setEnabled(on: boolean): void;
+  /**
+   * Quiet for a while without touching the saved setting (the exited screen): true goes silent as
+   * Sound off does, false gives the score back if Sound is on. The context is suspended, never
+   * closed, and nothing is written, so a game closed meanwhile opens with Sound as it was.
+   */
+  silence?(quiet: boolean): void;
   setEffects(level: number): void;
   setAmbient(level: number): void;
   setMusic?(level: number): void;
@@ -557,6 +563,9 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
   const isHidden = deps.hidden ?? (() => typeof document !== 'undefined' && document.hidden === true);
 
   let gestured = false;
+  // Quiet without the setting changing (silence): the score acts as if Sound were off.
+  let hushed = false;
+  const audible = (): boolean => settings.on && !hushed;
   // The context was suspended because the page went hidden (not because sound was turned off).
   // iOS keeps a page's audio session, and so every other app's audio, held while it runs.
   let dozing = false;
@@ -642,14 +651,14 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
 
   const onGesture = (): void => {
     gestured = true;
-    if (settings.on) wake();
+    if (audible()) wake();
   };
   target?.addEventListener('pointerdown', onGesture, true);
   target?.addEventListener('keydown', onGesture, true);
 
   /** Resumes a suspended context; suspends it again if sound went off or the page hid meanwhile. */
   function resumeGuarded(resuming: AudioContextLike): void {
-    void resuming.resume().then(() => { if (!settings.on || dozing || destroyed) suspendGuarded(resuming); }).catch(() => {});
+    void resuming.resume().then(() => { if (!audible() || dozing || destroyed) suspendGuarded(resuming); }).catch(() => {});
   }
 
   /**
@@ -659,7 +668,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
    */
   function suspendGuarded(suspending: AudioContextLike): void {
     void suspending.suspend().then(() => {
-      if (settings.on && !dozing && !destroyed && gestured && suspending === ctx && suspending.state === 'suspended') resumeGuarded(suspending);
+      if (audible() && !dozing && !destroyed && gestured && suspending === ctx && suspending.state === 'suspended') resumeGuarded(suspending);
     }).catch(() => {});
   }
 
@@ -672,7 +681,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
   const onPageShown = (): void => {
     if (!dozing) return;
     dozing = false;
-    if (!settings.on || !gestured || !ctx || ctx.state !== 'suspended') return;
+    if (!audible() || !gestured || !ctx || ctx.state !== 'suspended') return;
     // Only the context wakes: smoothing, chapter and mute automation stay as they were. The mood
     // eases from now, not from the moment the page hid.
     lastMoodMs = now();
@@ -684,7 +693,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
   pageWindow?.addEventListener('pageshow', onPageShown);
 
   function wake(): void {
-    if (!gestured || !settings.on) return;
+    if (!gestured || !audible()) return;
     if (!ctx) {
       try {
         ctx = makeContext();
@@ -1096,7 +1105,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
     nextBar = Math.ceil(ctx.currentTime / barSeconds) * barSeconds;
     nextBarIndex = 0;
     const schedule = () => {
-      if (!ctx || !musicBus || !settings.on) return;
+      if (!ctx || !musicBus || !audible()) return;
       checkWorld();
       advanceMood();
       while (nextBar < ctx.currentTime + LOOKAHEAD_SECONDS) {
@@ -1238,7 +1247,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
   /** The bed exists only while sound is on and the ambient slider is above zero. */
   function syncBed(): void {
     if (!ctx || !ambientBus) return;
-    if (settings.on && settings.ambient > 0) {
+    if (audible() && settings.ambient > 0) {
       if (!bed) {
         bed = createBed(ctx, ambientBus);
         lastMinuteOfDay = -1;
@@ -1272,9 +1281,15 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
       if (on) { if (ctx && master) master.gain.setValueAtTime(1, ctx.currentTime); wake(); }
       else sleep();
     },
+    silence(quiet) {
+      if (hushed === quiet || destroyed) return;
+      hushed = quiet;
+      if (quiet) sleep();
+      else if (settings.on) { if (ctx && master) master.gain.setValueAtTime(1, ctx.currentTime); wake(); }
+    },
     cue(name) {
       // Sound off, or no gesture yet: nothing is built and nothing plays.
-      if (destroyed || !settings.on || dozing) return;
+      if (destroyed || !audible() || dozing) return;
       playNamedCue(name);
     },
     setEffects(level) {
@@ -1290,7 +1305,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
         if (tapeLfo) { tapeLfo.stop(); tapeLfo = null; }
         if (tensionOsc) { tensionOsc.stop(); tensionOsc = null; tensionGain = null; }
         layerMix.clear(); activeVoices = [];
-      } else if (settings.on) startTape();
+      } else if (audible()) startTape();
       writeSoundSettings(settings, store);
       if (ctx && musicBus) musicBus.gain.setTargetAtTime(musicLevel(easedMood.tension), ctx.currentTime, 0.05);
     },
@@ -1325,7 +1340,7 @@ export function createSound(game: SoundGame, depsIn: SoundDeps = {}): Sound {
         if (weatherLfo) { weatherLfo.stop(); weatherLfo = null; }
         weatherGain?.disconnect(); weatherGain = null; weatherKind = 'clear';
       }
-      if (settings.on) { syncBed(); syncWeather(); }
+      if (audible()) { syncBed(); syncWeather(); }
     },
     destroy() {
       destroyed = true;

@@ -12,8 +12,14 @@
 //   Clips page in the system browser instead, the way How to play does (panels.ts).
 //
 // A player that cannot play (an error, a stall with nothing loaded, or no connection) is swapped
-// for one plain line and a Try again button; the other clips are left as they are. Nothing is
-// written to the console. The clips have no sound, and nothing here says they do.
+// for one plain line and a Try again button; the other clips are left as they are. The line says
+// the clip needs a connection when the device is offline or the network failed, and only that it
+// could not play otherwise (a missing file, a file the browser cannot read). Nothing is written to
+// the console. The clips have no sound, and nothing here says they do.
+//
+// Keys and the controller: each player is in the Tab order (tabindex 0, which the menus' focus
+// helper counts), so Tab, the arrow keys and the d-pad reach it; Enter, Space and the
+// controller's A play or pause it (toggleClip), and Left and Right stay the player's own.
 
 import { savePlatform, type SavePlatform } from '../game/storage';
 import { icon } from './icons';
@@ -38,8 +44,10 @@ export const SITE_ORIGIN = 'https://hundredstories.xyz';
 /** The site's Clips page, opened in the system browser where the game cannot play the clips. */
 export const CLIPS_URL = `${SITE_ORIGIN}/clips/`;
 
-/** The line in place of a player that could not play. */
+/** The line in place of a player that could not play: offline, or the network failed. */
 export const CLIP_OFFLINE_TEXT = 'This clip needs a connection.';
+/** The line in place of a player that could not play for any other reason. */
+export const CLIP_FAILED_TEXT = 'This clip could not play.';
 export const CLIP_RETRY = 'Try again';
 /** The page's title, and the menu entry's word. */
 export const CLIPS_TITLE = 'Clips';
@@ -79,8 +87,31 @@ export interface ClipsBodyOptions {
 /** The media calls a player answers, each optional so a test's tree can stand in. */
 interface Player {
   pause?(): void;
+  play?(): Promise<void> | void;
   load?(): void;
   readyState?: number;
+  paused?: boolean;
+  error?: { code?: number } | null;
+}
+
+/** MediaError.MEDIA_ERR_NETWORK: the file stopped coming. */
+const MEDIA_ERR_NETWORK = 2;
+
+/**
+ * Enter, Space or the controller's A on a clip: play it, or pause it while it plays. True when
+ * `target` is one of the clips' players (and the key is spent), false for anything else.
+ */
+export function toggleClip(target: unknown): boolean {
+  const node = target as (Player & { tagName?: string; classList?: { contains(name: string): boolean } }) | null;
+  if (!node || String(node.tagName ?? '').toUpperCase() !== 'VIDEO' || !node.classList?.contains('hs-clip-video')) return false;
+  if (node.paused === false) {
+    node.pause?.();
+    return true;
+  }
+  // A refused start (no file, no connection) shows on the player's own error; nothing to say here.
+  const started = node.play?.();
+  if (started && typeof (started as Promise<void>).catch === 'function') (started as Promise<void>).catch(() => {});
+  return true;
 }
 
 function defaultOnline(): boolean {
@@ -131,11 +162,11 @@ export function clipsBody(options: ClipsBodyOptions = {}): ClipsBody {
     slot.video = null;
   }
 
-  /** The line and Try again, in the player's place. */
-  function fail(slot: Slot): void {
+  /** The line and Try again, in the player's place: `network` when the connection is to blame. */
+  function fail(slot: Slot, network: boolean): void {
     if (disposed) return;
     release(slot);
-    const line = el('p', 'hs-clip-line', CLIP_OFFLINE_TEXT);
+    const line = el('p', 'hs-clip-line', network || !online() ? CLIP_OFFLINE_TEXT : CLIP_FAILED_TEXT);
     const retry = el('button', 'hs-face hs-clip-retry');
     retry.type = 'button';
     retry.append(icon('reload', 'hs-icon hs-face-icon') as unknown as HTMLElement, el('span', 'hs-face-word', CLIP_RETRY));
@@ -156,7 +187,7 @@ export function clipsBody(options: ClipsBodyOptions = {}): ClipsBody {
   /** A player in the slot, or the line when the device is offline. */
   function play(slot: Slot): void {
     if (!online()) {
-      fail(slot);
+      fail(slot, true);
       return;
     }
     slot.frame.classList.remove('is-failed');
@@ -169,26 +200,29 @@ export function clipsBody(options: ClipsBodyOptions = {}): ClipsBody {
     video.setAttribute('poster', poster);
     video.setAttribute('src', src);
     video.setAttribute('aria-label', slot.clip.title);
+    // In the Tab order, so the keys and the d-pad reach it (focusablesIn counts tabindex).
+    video.setAttribute('tabindex', '0');
     const player = video as HTMLVideoElement & Player;
-    const failNow = (): void => fail(slot);
+    // The browser's error says whether the file stopped coming (the network) or could not be read.
+    const failNow = (): void => fail(slot, player.error?.code === MEDIA_ERR_NETWORK);
     const onPlay = (): void => {
       // One at a time: starting this one pauses every other.
       for (const other of slots) if (other !== slot) (other.video as (HTMLVideoElement & Player) | null)?.pause?.();
       if (!online()) {
-        fail(slot);
+        fail(slot, true);
         return;
       }
-      // A press that brings no picture in time is a stall.
+      // A press that brings no picture in time is a stall: the connection, as far as anyone can tell.
       clearTimer(slot);
       slot.timer = setTimeout(() => {
         slot.timer = null;
-        if ((player.readyState ?? 0) < 2) fail(slot);
+        if ((player.readyState ?? 0) < 2) fail(slot, true);
       }, CLIP_STALL_MS);
     };
     const onData = (): void => clearTimer(slot);
     // The browser gave up fetching with nothing in hand.
     const onStalled = (): void => {
-      if ((player.readyState ?? 0) === 0) fail(slot);
+      if ((player.readyState ?? 0) === 0) fail(slot, true);
     };
     video.addEventListener('error', failNow);
     video.addEventListener('play', onPlay);

@@ -8,6 +8,24 @@ import type { Box } from './layout';
 /** The space between the selection's ring and the card beside it. */
 export const CARD_ANCHOR_GAP = 12;
 
+/**
+ * How many placement frames a new card waits for its selection's ring. The renderer draws the
+ * new ring on its next frame; a selection still not drawn after these (off screen, or a person
+ * the frame leaves out) gives the card the fixed spot of a card not about the tower (right side,
+ * below the round buttons), never the spot of the card before it.
+ */
+export const CARD_RING_WAIT_FRAMES = 4;
+
+/**
+ * A card about something that moves by itself (a person) is placed once, beside where it was
+ * when the card opened, and then stays put: its walking, a pan or a zoom never move it, so its
+ * buttons never slide under the pointer (owner ruling 2026-10-01, P4a review A1). Rooms and
+ * elevators do not move, so their cards follow them through pans and zooms.
+ */
+export function cardStaysPut(selection: { roomId?: number; simId?: number; shaftId?: number } | null | undefined): boolean {
+  return selection?.simId !== undefined;
+}
+
 /** A rectangle on screen, in the shell's css px. */
 export interface ScreenRect {
   x: number;

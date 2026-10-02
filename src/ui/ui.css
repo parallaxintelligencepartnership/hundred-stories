@@ -3401,6 +3401,12 @@ button.hs-news-toast {
   display: none;
 }
 
+/* Where it would cover the card beside the selection, the preview is out of sight (hover.ts
+   hoverCovers). Hidden, not removed, so its measured size stays good. */
+.hs-hover-card.is-covering {
+  visibility: hidden;
+}
+
 .hs-hover-title {
   margin: 0 0 4px;
   font-size: var(--size-14);
@@ -4200,6 +4206,12 @@ button.hs-news-toast {
   white-space: nowrap;
 }
 
+/* Save and exit while its save runs: the word says Saving (ui.ts showExitBusy) and the pointer
+   shows the wait, so a slow save does not look stuck. */
+.hs-ui .hs-pause-item[data-entry='exit'][aria-busy='true'] {
+  cursor: progress;
+}
+
 /* Larger text on a 390 by 844 phone in the app: nine 60 px entries, the plate and the card's
    padding come to 738.5 px against 739 px inside the notch and the home bar, so the list and the
    plate give back 20 px and no entry sits on the edge. */
@@ -4982,6 +4994,11 @@ button.hs-news-toast {
   height: 100%;
   object-fit: contain;
   background: #000;
+}
+
+/* A player reached by Tab, the arrows or the d-pad: the ring inside the frame, which clips. */
+.hs-ui .hs-clip-video:focus-visible {
+  outline-offset: -3px;
 }
 
 .hs-clip-frame.is-failed {

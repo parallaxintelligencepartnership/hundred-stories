@@ -131,6 +131,23 @@ export function hoverCardBox(frame: {
   return { left: Math.round(left), top: Math.round(Math.max(topLimit, top)) };
 }
 
+/** A card's box on screen, in the shell's css px. */
+export interface KeepOutBox {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+/**
+ * Would the preview at `at` cover the card standing beside the selection? Then it stays hidden
+ * while it would (P4a review A4): the full card is never under the preview.
+ */
+export function hoverCovers(at: { left: number; top: number }, card: Box, keepOut: KeepOutBox | null): boolean {
+  if (!keepOut) return false;
+  return at.left < keepOut.right && at.left + card.width > keepOut.left && at.top < keepOut.bottom && at.top + card.height > keepOut.top;
+}
+
 // ------------------------------------------------------------------- DOM
 
 export interface HoverCard {
@@ -154,13 +171,15 @@ function setText(node: Element, text: string): void {
 /**
  * The card, appended to the ui shell by the caller. It listens to the pointer on the window
  * for where to sit and for which kind of pointer is in use. `keepOutRight` is the left edge of
- * the card open on the right, if any, so the preview never sits under it.
+ * the card open on the right, if any, so the preview never sits under it. `keepOutBox` is the
+ * card standing beside a selection, if any: while the preview would cover it, it stays hidden.
  */
 export function createHoverCard(
   shell: HTMLElement,
   game: GameApi,
   chrome: () => { top: number; bottom: number },
   keepOutRight: () => number | null = () => null,
+  keepOutBox: () => KeepOutBox | null = () => null,
 ): HoverCard {
   const node = h('div', 'hs-hover-card is-hidden');
   node.setAttribute('role', 'status');
@@ -256,9 +275,11 @@ export function createHoverCard(
       cardSize = { width: box.width, height: box.height };
     }
     const at = hoverCardBox({ point, card: cardSize, view: viewSize, chrome: chrome(), keepOutRight: keepOutRight() });
-    const key = `${at.left},${at.top}`;
+    const covers = hoverCovers(at, cardSize, keepOutBox());
+    const key = `${at.left},${at.top},${covers ? 1 : 0}`;
     if (key === placedKey) return;
     placedKey = key;
+    node.classList.toggle('is-covering', covers);
     node.style.left = `${at.left}px`;
     node.style.top = `${at.top}px`;
   }

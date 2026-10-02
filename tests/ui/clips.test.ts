@@ -3,6 +3,7 @@
 // play, and everything paused and let go when the page goes.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  CLIP_FAILED_TEXT,
   CLIP_OFFLINE_TEXT,
   CLIP_RETRY,
   CLIP_STALL_MS,
@@ -31,15 +32,41 @@ const hasClass = (node: FakeElement, name: string): boolean => node.className.sp
 const fire = (node: FakeElement, type: string): void => (node.listeners.get(type) ?? []).forEach((f) => f({ target: node }));
 const videosIn = (node: FakeElement): FakeElement[] => node.descendants().filter((n) => n.tagName === 'VIDEO');
 
-/** A fake video that counts pause and load, and can say how much it has. */
-function asPlayer(video: FakeElement): { pauses: number; loads: number } {
-  const counts = { pauses: 0, loads: 0 };
+/** A fake video that counts pause, play and load, and can say how much it has and whether it plays. */
+function asPlayer(video: FakeElement): { pauses: number; loads: number; plays: number } {
+  const counts = { pauses: 0, loads: 0, plays: 0 };
+  const player = video as FakeElement & { paused: boolean };
   Object.assign(video, {
-    pause: () => (counts.pauses += 1),
+    pause: () => {
+      counts.pauses += 1;
+      player.paused = true;
+    },
+    play: () => {
+      counts.plays += 1;
+      player.paused = false;
+      return Promise.resolve();
+    },
     load: () => (counts.loads += 1),
     readyState: 0,
+    paused: true,
   });
   return counts;
+}
+
+function key(name: string, extra: Record<string, unknown> = {}) {
+  const event = {
+    key: name,
+    code: name === ' ' ? 'Space' : name,
+    target: dom.activeElement ?? dom.body,
+    defaultPrevented: false,
+    preventDefault() {
+      this.defaultPrevented = true;
+    },
+    stopImmediatePropagation() {},
+    ...extra,
+  };
+  dom.fireWindow('keydown', event);
+  return event;
 }
 
 describe('the clips body', () => {
@@ -94,7 +121,7 @@ describe('the clips body', () => {
     fire(videos[2]!, 'error');
     const frames = root.descendants().filter((n) => hasClass(n, 'hs-clip-frame'));
     expect(hasClass(frames[2]!, 'is-failed')).toBe(true);
-    expect(frames[2]!.textContent).toContain(CLIP_OFFLINE_TEXT);
+    expect(frames[2]!.textContent).toContain(CLIP_FAILED_TEXT);
     expect(videosIn(frames[2]!)).toHaveLength(0);
     expect(videosIn(root)).toHaveLength(3);
     const retry = frames[2]!.descendants().find((n) => hasClass(n, 'hs-clip-retry'))!;
@@ -102,6 +129,30 @@ describe('the clips body', () => {
     fire(retry, 'click');
     expect(videosIn(frames[2]!)).toHaveLength(1);
     expect(hasClass(frames[2]!, 'is-failed')).toBe(false);
+  });
+
+  it('the line says a connection is needed only when it is: offline or the network failed; else it could not play', () => {
+    expect(CLIP_OFFLINE_TEXT).toBe('This clip needs a connection.');
+    expect(CLIP_FAILED_TEXT).toBe('This clip could not play.');
+    const root = clipsBody({ platform: 'web', online: () => true }).node as unknown as FakeElement;
+    const videos = videosIn(root);
+    videos.forEach(asPlayer);
+    Object.assign(videos[0]!, { error: { code: 2 } }); // MEDIA_ERR_NETWORK: the file stopped coming
+    Object.assign(videos[1]!, { error: { code: 4 } }); // MEDIA_ERR_SRC_NOT_SUPPORTED: a missing or unreadable file
+    Object.assign(videos[2]!, { error: { code: 3 } }); // MEDIA_ERR_DECODE
+    for (const v of videos.slice(0, 3)) fire(v, 'error');
+    const lines = root.descendants().filter((n) => hasClass(n, 'hs-clip-line')).map((n) => n.textContent);
+    expect(lines).toEqual([CLIP_OFFLINE_TEXT, CLIP_FAILED_TEXT, CLIP_FAILED_TEXT]);
+    // Both keep Try again.
+    expect(root.descendants().filter((n) => hasClass(n, 'hs-clip-retry'))).toHaveLength(3);
+    // Offline when the error lands: the connection line, whatever the error.
+    let online = true;
+    const other = clipsBody({ platform: 'web', online: () => online }).node as unknown as FakeElement;
+    const first = videosIn(other)[0]!;
+    asPlayer(first);
+    online = false;
+    fire(first, 'error');
+    expect(other.descendants().find((n) => hasClass(n, 'hs-clip-line'))?.textContent).toBe(CLIP_OFFLINE_TEXT);
   });
 
   it('offline: each player is the line; a stall with no data after a press is the line too', () => {
@@ -193,6 +244,36 @@ describe('Clips in the pause menu', () => {
     expect(counts.every((c) => c.pauses === 1)).toBe(true);
     expect(videos.every((v) => v.getAttribute('src') === null)).toBe(true);
     expect(pauseEntry(root, 'clips')).toBeDefined();
+    ui.destroy();
+  });
+
+  it('Tab and the arrow keys reach each clip, and Space and Enter play and pause the one with focus', () => {
+    const { root, ui } = mountMenu();
+    choosePauseEntry(root, 'clips');
+    const card = root.descendants().find((n) => hasClass(n, 'hs-pause-card'))!;
+    const videos = videosIn(card);
+    const counts = videos.map(asPlayer);
+    expect(videos.every((v) => v.getAttribute('tabindex') === '0')).toBe(true);
+    // The page opens on its first control: the first clip.
+    expect(dom.activeElement).toBe(videos[0]);
+    key('Tab');
+    expect(dom.activeElement).toBe(videos[1]);
+    key('ArrowDown');
+    expect(dom.activeElement).toBe(videos[2]);
+    key('ArrowDown');
+    expect(dom.activeElement).toBe(videos[3]);
+    key('ArrowUp');
+    key('Tab', { shiftKey: true });
+    expect(dom.activeElement).toBe(videos[1]);
+    // Space plays the clip with focus, Enter pauses it; the menu does not take the key.
+    expect(key(' ').defaultPrevented).toBe(true);
+    expect(counts[1]!.plays).toBe(1);
+    expect(key('Enter').defaultPrevented).toBe(true);
+    expect(counts[1]!.pauses).toBe(1);
+    expect(card.dataset['page'] ?? card.getAttribute('data-page')).toBe('clips');
+    // Left and Right stay the player's own (seeking): not taken, not prevented.
+    expect(key('ArrowRight').defaultPrevented).toBe(false);
+    expect(dom.activeElement).toBe(videos[1]);
     ui.destroy();
   });
 

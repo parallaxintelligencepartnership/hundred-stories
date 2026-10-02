@@ -260,6 +260,27 @@ describe('hover card on the fake DOM', () => {
     card.destroy();
   });
 
+  it('never covers the card standing beside a selection: out of sight while it would (A4)', () => {
+    const { world, shaft } = shaftWorld();
+    const game = fakeGame(world);
+    const shell = dom.createElement('div');
+    shell.className = 'hs-ui';
+    let box: { left: number; top: number; right: number; bottom: number } | null = null;
+    const card = createHoverCard(shell as never, game.api, () => ({ top: 56, bottom: 28 }), () => null, () => box);
+    const node = card.node as unknown as FakeElement;
+    game.state.hover = { floor: 3, x: shaft.x };
+    move(600, 300);
+    expect(node.classList.contains('is-covering')).toBe(false); // no card open
+    box = { left: 620, top: 132, right: 980, bottom: 700 };
+    move(601, 300);
+    expect(node.classList.contains('is-hidden')).toBe(false);
+    expect(node.classList.contains('is-covering')).toBe(true);
+    move(100, 300); // clear of it again: shown
+    expect(node.classList.contains('is-covering')).toBe(false);
+    expect(node.style['left']).toBe('116px');
+    card.destroy();
+  });
+
   it('in the shell, keeps clear of an open card on a wide screen', () => {
     const { world, shaft } = shaftWorld();
     const win = (globalThis as unknown as { window: { innerWidth?: number } }).window;

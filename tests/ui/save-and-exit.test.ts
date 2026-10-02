@@ -8,9 +8,13 @@ import { SAVE_PRESENT_KEY } from '../../src/game/storage';
 import { createUi } from '../../src/ui/ui';
 import { LEAVE_WITHOUT_SAVING } from '../../src/ui/leave-card';
 import { NEW_TOWER_QUESTION } from '../../src/ui/pause-menu';
+import { readSoundSettings } from '../../src/audio/audio';
+import { CLIPS_URL } from '../../src/ui/clips';
 import {
   CONTINUE_TOWER,
   EXIT_LOGO_ALT,
+  EXIT_SAVING_WORD,
+  EXIT_WORD,
   EXIT_SAVED_NOTE,
   EXIT_SAVED_TEXT,
   EXIT_UNSAVED_TEXT,
@@ -106,9 +110,15 @@ describe('Save and exit with a store that works', () => {
     const open = idb.hold();
     saveAndExit();
     await settle();
-    // Busy while the save runs, and no screen yet.
+    // Busy while the save runs, and saying so, and no screen yet.
     expect(pauseEntry(root, 'exit')?.getAttribute('aria-busy')).toBe('true');
+    expect(pauseEntry(root, 'exit')?.textContent).toBe(EXIT_SAVING_WORD);
     expect(exitNode(root)).toBeUndefined();
+    // Still busy a while later, for the whole save: a slow save does not look stuck.
+    await settle();
+    await settle();
+    expect(pauseEntry(root, 'exit')?.getAttribute('aria-busy')).toBe('true');
+    expect(pauseEntry(root, 'exit')?.textContent).toBe(EXIT_SAVING_WORD);
     open();
     await settle();
     const minute = game.world.time.minute;
@@ -222,6 +232,120 @@ describe('Save and exit with a store that works', () => {
     expect(dom.activeElement?.dataset['exit']).toBe('clips');
     ui.destroy();
   });
+
+  it('with a room card open: the card is not under the screen, Continue tower has focus, Enter continues and the card comes back', async () => {
+    vi.stubGlobal('localStorage', fakeLocalStorage().store);
+    const { game } = gameOn();
+    game.apply({ kind: 'build', room: 'lobby', floor: 1, x: 150 });
+    const roomId = [...game.world.rooms.keys()][0]!;
+    const { root, ui, saveAndExit } = mount(game);
+    game.select({ roomId });
+    ui.update();
+    const sheets = (): FakeElement[] => root.descendants().filter((n) => hasClass(n, 'hs-sheet'));
+    expect(sheets()).toHaveLength(1);
+    saveAndExit();
+    await settle();
+    expect(exitNode(root)).toBeDefined();
+    expect(sheets()).toHaveLength(0);
+    expect(dom.activeElement?.dataset['exit']).toBe('continue');
+    ui.update(); // a game step while exited mounts nothing under it
+    expect(sheets()).toHaveLength(0);
+    expect(dom.activeElement?.dataset['exit']).toBe('continue');
+    // Enter is left to the browser, which presses the button with focus: Continue tower.
+    const enter = key('Enter');
+    expect(enter.defaultPrevented).toBe(false);
+    click(dom.activeElement!);
+    expect(exitNode(root)).toBeUndefined();
+    expect(sheets()).toHaveLength(1);
+    ui.destroy();
+  });
+
+  it('on the Clips view, Tab and the arrow keys reach each clip, and Space and Enter play and pause it', async () => {
+    vi.stubGlobal('localStorage', fakeLocalStorage().store);
+    const { game } = gameOn();
+    const { root, ui, saveAndExit } = mount(game);
+    saveAndExit();
+    await settle();
+    click(exitFace(root, 'clips'));
+    const videos = (exitNode(root)?.descendants() ?? []).filter((n) => n.tagName === 'VIDEO');
+    const plays = videos.map((v) => {
+      const count = { plays: 0, pauses: 0 };
+      const player = v as FakeElement & { paused: boolean };
+      Object.assign(v, {
+        paused: true,
+        play: () => ((count.plays += 1), (player.paused = false), Promise.resolve()),
+        pause: () => ((count.pauses += 1), (player.paused = true)),
+        load: () => {},
+      });
+      return count;
+    });
+    expect(hasClass(dom.activeElement!, 'hs-exit-back')).toBe(true);
+    key('Tab');
+    expect(dom.activeElement).toBe(videos[0]);
+    key('ArrowDown');
+    expect(dom.activeElement).toBe(videos[1]);
+    key('Tab');
+    key('ArrowDown');
+    expect(dom.activeElement).toBe(videos[3]);
+    key('ArrowUp');
+    expect(dom.activeElement).toBe(videos[2]);
+    expect(key(' ').defaultPrevented).toBe(true);
+    expect(plays[2]).toEqual({ plays: 1, pauses: 0 });
+    expect(key('Enter').defaultPrevented).toBe(true);
+    expect(plays[2]).toEqual({ plays: 1, pauses: 1 });
+    expect(exitNode(root)?.dataset['view']).toBe('clips');
+    ui.destroy();
+  });
+
+  it('in the desktop shell, Clips opens the site\'s Clips page in the browser and the screen stays', async () => {
+    vi.stubGlobal('localStorage', fakeLocalStorage().store);
+    vi.stubGlobal('__TAURI_INTERNALS__', {});
+    const opened: string[] = [];
+    (globalThis as unknown as { window: Record<string, unknown> }).window['open'] = (url: string) => opened.push(url);
+    const { game } = gameOn();
+    const { root, ui, saveAndExit } = mount(game);
+    saveAndExit();
+    await settle();
+    click(exitFace(root, 'clips'));
+    expect(opened).toEqual([CLIPS_URL]);
+    expect(exitNode(root)?.dataset['view']).toBe('main');
+    expect((exitNode(root)?.descendants() ?? []).some((n) => n.tagName === 'VIDEO')).toBe(false);
+    ui.destroy();
+  });
+
+  for (const on of [true, false]) {
+    it(`Sound ${on ? 'on' : 'off'}: the stored setting is never written across exit, Continue, and a reload from the screen`, async () => {
+      vi.stubGlobal('localStorage', fakeLocalStorage().store);
+      const store = (globalThis as unknown as { window: { localStorage: Storage } }).window.localStorage;
+      store.setItem('hs.sound', on ? 'true' : 'false');
+      const writes: string[] = [];
+      const setItem = store.setItem.bind(store);
+      store.setItem = (k: string, v: string) => {
+        if (k === 'hs.sound') writes.push(v);
+        setItem(k, v);
+      };
+      const { game } = gameOn();
+      const { order, root, ui, saveAndExit } = mount(game);
+      saveAndExit();
+      await settle();
+      expect(exitNode(root)).toBeDefined();
+      expect(store.getItem('hs.sound')).toBe(on ? 'true' : 'false');
+      click(exitFace(root, 'continue'));
+      expect(store.getItem('hs.sound')).toBe(on ? 'true' : 'false');
+      const button = root.descendants().find((n) => hasClass(n, 'hs-sound-btn'))!;
+      expect(button.getAttribute('aria-pressed')).toBe(on ? 'true' : 'false');
+      // Out again, then the update notice's reload: the next launch reads Sound as it was.
+      saveAndExit();
+      await settle();
+      ui.updateReady();
+      click(root.descendants().find((n) => hasClass(n, 'is-update') && !hasClass(n, 'is-leaving'))!);
+      await settle();
+      expect(order).toEqual(['reload']);
+      expect(readSoundSettings(store).on).toBe(on);
+      expect(writes).toEqual([]);
+      ui.destroy();
+    });
+  }
 
   it('the update notice still reloads from the exited screen, without the leave card', async () => {
     vi.stubGlobal('localStorage', fakeLocalStorage().store);

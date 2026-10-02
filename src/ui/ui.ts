@@ -4,7 +4,7 @@
 
 import './ui.css';
 
-import { createSound, writeSoundSettings } from '../audio/audio';
+import { createSound } from '../audio/audio';
 import type { GameApi, LeaveResult, Placement, Speed, Tool } from '../game/api';
 import { DAILY_OVER_REASON, LEAVE_NOT_SAVED } from '../game/game';
 import { showLeaveCard } from './leave-card';
@@ -41,7 +41,7 @@ import { createIconSheet, icon, type IconName } from './icons';
 import { chromeInsets, createViewChipRow, isSheetLayout, placementBoxes, viewChipMeets, viewInsets } from './layout';
 import { createToasts } from './toast';
 import type { Box } from './layout';
-import { anchorCard, cardMaxHeight, type CardBounds } from './card-anchor';
+import { anchorCard, CARD_RING_WAIT_FRAMES, cardMaxHeight, cardStaysPut, type CardBounds } from './card-anchor';
 import {
   applyGlassClear,
   button,
@@ -84,8 +84,8 @@ import { createSoundToggle } from './sound-toggle';
 import { createSaveAction, createSaveButton, SAVE_TIP, SAVE_WORD, type SaveAction, type SaveQuestion } from './save-button';
 import { createPauseMenu, NEW_TOWER_NO, NEW_TOWER_QUESTION, NEW_TOWER_YES, type PauseEntry, type PausePage } from './pause-menu';
 import { UPDATE_TEXT, type Notifier } from './notify';
-import { clipsBody, clipsOpenOutside, CLIPS_TITLE, openClipsOutside, type ClipsBody } from './clips';
-import { createExitScreen, type ExitScreen } from './exit-screen';
+import { clipsBody, clipsOpenOutside, CLIPS_TITLE, openClipsOutside, toggleClip, type ClipsBody } from './clips';
+import { createExitScreen, EXIT_SAVING_WORD, EXIT_WORD, type ExitScreen } from './exit-screen';
 
 export interface Ui {
   destroy(): void;
@@ -213,12 +213,11 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   let mountedKey = '';
   let lastLogTotal = 0;
   let destroyed = false;
-  // Save and exit (saveAndExit): the exited screen while it is up, whether Sound was on when it
-  // went up (it comes back on with Continue tower), and a leave in flight from the menu entry.
+  // Save and exit (saveAndExit): the exited screen while it is up, and a leave in flight from the
+  // menu entry (its entry busy and saying so for the whole save).
   let exitScreen: ExitScreen | null = null;
-  let exitSoundWasOn = false;
   let exitInFlight = false;
-  let exitEntry: { setBusy(busy: boolean): void } | null = null;
+  let exitEntry: { setBusy(busy: boolean): void; setWord(text: string): void } | null = null;
   /** The band the chrome covers, so the chip and the bar stay out from under it. */
   let chromeBand = { top: 0, bottom: 0 };
   /** The band the camera frames the tower in: only the top bar, the tower is full bleed. */
@@ -241,15 +240,26 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   let cardEdge: number | null = null;
   /**
    * A room, person or elevator card at SHEET_CARD_MIN_WIDTH and wider stands beside its selection
-   * (anchorCard) and follows it on the placement loop's frames. The area it may use and its size
+   * (anchorCard) and follows it on the placement loop's frames; a person's card is placed once and
+   * stays put (cardStaysPut). The area it may use and its size
    * are measured once and kept until something can change them (a resize, the chrome or the dock
    * moving, the card's own size); where it last stood is kept for a selection off screen.
    */
   let cardBounds: CardBounds | null = null;
+  /** The rows cardBounds was measured under (cardRowsKey). */
+  let cardRows = '';
   let cardBox: Box | null = null;
   let cardDock: 'left' | 'right' = 'left';
   let cardPlace: { left: number; top: number } | null = null;
   let cardPlacedKey = '';
+  /** The open card is about a person: placed once, then it stays put (cardStaysPut). */
+  let cardStill = false;
+  /** The open card has had its own place: beside its ring, or the fixed spot after the wait. */
+  let cardSettled = false;
+  /** Placement frames the open card has waited for its ring (CARD_RING_WAIT_FRAMES). */
+  let cardWait = 0;
+  /** The open card still stands where the card before it stood, until its own ring is drawn. */
+  let cardCarried = false;
   const cardSizeWatch =
     typeof ResizeObserver === 'undefined'
       ? null
@@ -644,7 +654,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
 
   // The hover card: a preview of the shaft or room under the pointer, or under the tap. It
   // keeps out from under the card open on the right.
-  const hoverCard = createHoverCard(shell, game, () => chromeBand, openCardLeft);
+  const hoverCard = createHoverCard(shell, game, () => chromeBand, openCardLeft, anchoredCardBox);
   shell.append(hoverCard.node);
 
   // Smart hiding: after 2 s idle the Watch and Sound words fold to the icon (ui.css), and any
@@ -1367,13 +1377,25 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     const node = mountedPanel?.sheet?.node as HTMLElement | undefined;
     const width = viewportWidth();
     if (!mountedPanel || !node || width === undefined || width < SHEET_CARD_MIN_WIDTH) return null;
-    // A card beside its selection is not on the right edge; the preview keeps only to the view.
-    if (mountedKey.startsWith('query:')) return null;
+    // A card beside its selection is not on the right edge: the preview keeps off its box
+    // instead (anchoredCardBox). One on the fixed spot (no ring drawn) is kept to, as any card.
+    if (mountedKey.startsWith('query:') && node.classList.contains('is-anchored')) return null;
     if (cardEdge === null) {
       const view = viewSize ?? sizeOf(shell);
       cardEdge = cardLeft(view.width, sizeOf(node).width);
     }
     return cardEdge;
+  }
+
+  /**
+   * The card standing beside its selection, from where it was last put and its kept size (no
+   * layout read), for the hover card to keep off. Null while no card is anchored.
+   */
+  function anchoredCardBox(): { left: number; top: number; right: number; bottom: number } | null {
+    const node = anchoredCard();
+    if (!node || !cardPlace || !cardBox || !node.classList.contains('is-anchored')) return null;
+    const height = cardBounds ? Math.min(cardBox.height, cardMaxHeight(cardBounds)) : cardBox.height;
+    return { left: cardPlace.left, top: cardPlace.top, right: cardPlace.left + cardBox.width, bottom: cardPlace.top + height };
   }
 
   /**
@@ -1514,11 +1536,28 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
    * Null while nothing is laid out.
    */
   function measureCardBounds(): CardBounds | null {
+    cardRows = cardRowsKey();
+    return measureCardBox();
+  }
+
+  /**
+   * What decides the rows the card stays below, read off classes only (no layout): the view chip
+   * and the hint up or not, and the rows ui.css gives them. A change measures the bounds again.
+   */
+  function cardRowsKey(): string {
+    const on = (node: HTMLElement, name: string): string => (node.classList.contains(name) ? '1' : '0');
+    return `${on(view.chip, 'is-hidden')}${on(hint, 'is-hidden')}${on(shell, 'is-view-low')}${on(shell, 'is-hint-under')}${on(shell, 'is-hint-low')}`;
+  }
+
+  function measureCardBox(): CardBounds | null {
     const shellBox = shell.getBoundingClientRect();
     if (!(shellBox.width > 0 && shellBox.height > 0)) return null;
     const laidOut = (r: { width: number; height: number }): boolean => r.width > 0 && r.height > 0;
     const bar = top.getBoundingClientRect();
-    const rows = [bar, ...[saveButton.button, soundToggle.button, watchToggle.button, view.button, shareButton, menuButton].map((n) => n.getBoundingClientRect())].filter(laidOut);
+    // The view chip and the first-run hint, while up, take a row under the round buttons (ui.css
+    // is-view-low, is-hint-under): the card stays below them too, so it never covers their close.
+    const below = [view.chip, hint].filter((n) => !n.classList.contains('is-hidden'));
+    const rows = [bar, ...[saveButton.button, soundToggle.button, watchToggle.button, view.button, shareButton, menuButton, ...below].map((n) => n.getBoundingClientRect())].filter(laidOut);
     const rowBottom = rows.reduce((at, r) => Math.max(at, r.bottom - shellBox.top), 0);
     const barShown = laidOut(bar);
     let left = barShown ? Math.max(0, bar.left - shellBox.left) : CARD_EDGE;
@@ -1547,8 +1586,13 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
       if (node.classList.contains('is-anchored')) node.classList.remove('is-anchored');
       cardPlace = null;
       cardPlacedKey = '';
+      // Wide again, the card is placed afresh beside its selection, a person's card too.
+      cardSettled = false;
+      cardWait = 0;
+      cardCarried = false;
       return false;
     }
+    if (cardBounds && cardRowsKey() !== cardRows) cardBounds = null; // the chip or the hint came or went
     if (!cardBounds) {
       cardBounds = measureCardBounds();
       if (!cardBounds) return true; // not laid out yet: next frame
@@ -1560,7 +1604,10 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
       if (!(box.width > 0)) return true;
       cardBox = box;
     }
-    const selection = typeof renderer.selectionScreenRect === 'function' ? renderer.selectionScreenRect() : null;
+    // A person's card, once placed, no longer reads the ring: it stays where it was put, only
+    // kept inside the bounds (a resize, the chrome moving).
+    const ring = typeof renderer.selectionScreenRect === 'function' ? renderer.selectionScreenRect() : null;
+    const selection = cardStill && cardSettled ? null : ring;
     const at = anchorCard({
       selection,
       card: cardBox,
@@ -1569,7 +1616,27 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
       dock: cardDock,
       previous: cardPlace,
     });
-    if (!at) return true; // no ring drawn yet (or never, for a person the frame leaves out): the fixed spot
+    if (!at || at.side === 'kept') {
+      // No ring of its own yet. Past the wait, a card still on the last card's spot goes to the
+      // fixed spot instead (ui.css, without is-anchored); a ring drawn later still places a room's.
+      if (!cardSettled && ++cardWait >= CARD_RING_WAIT_FRAMES) {
+        cardSettled = true;
+        if (cardCarried) {
+          cardCarried = false;
+          cardPlace = null;
+          cardPlacedKey = '';
+          node.classList.remove('is-anchored');
+          node.removeAttribute('data-side');
+          return true;
+        }
+      }
+      if (!at) return true;
+      // A person's card that stands where it was put writes nothing.
+      if (cardStill && cardPlace && at.left === cardPlace.left && at.top === cardPlace.top) return true;
+    } else {
+      cardSettled = true;
+      cardCarried = false;
+    }
     const key = `${at.left},${at.top},${at.side}`;
     if (key === cardPlacedKey) return true;
     cardPlacedKey = key;
@@ -1596,7 +1663,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     pauseMenu.refresh();
     const selection = game.getSelection();
     // While the menu is on screen no card stands beside it; the one it covered comes back after.
-    const key = pauseMenu.isShown()
+    // The exited screen too: no card waits under it to take focus; Continue tower brings it back.
+    const key = pauseMenu.isShown() || exitScreen
       ? ''
       : panelKind !== 'none'
         ? `panel:${panelKind}${panelKind === 'daily' ? `:${dailyKey()}` : ''}`
@@ -1670,7 +1738,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     // A card with its own first control (the feedback card's text box) takes focus there; Menu
     // stays the place focus goes back to when it closes.
     panel.initialFocus?.focus?.();
-    if (key.startsWith('query:')) keepSelectionClear(panel.sheet?.node as HTMLElement | undefined);
+    if (key.startsWith('query:')) keepSelectionClear(panel.sheet?.node as HTMLElement | undefined, selection);
   }
 
   /**
@@ -1680,16 +1748,21 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
    * has to move. The renderer draws the new ring on its next frame; until then the card keeps
    * its fixed spot under the round buttons. A phone's bottom sheet needs none of it.
    */
-  function keepSelectionClear(node: HTMLElement | undefined): void {
+  function keepSelectionClear(node: HTMLElement | undefined, selection: Parameters<typeof cardStaysPut>[0]): void {
     const carried = cardPlace;
     cardBox = null;
     cardPlace = null;
     cardPlacedKey = '';
+    cardStill = cardStaysPut(selection);
+    cardSettled = false;
+    cardWait = 0;
+    cardCarried = false;
     cardSizeWatch?.disconnect();
     if (!node) return;
     cardSizeWatch?.observe(node);
     // Another selection while a card stood beside the last one: the new card starts where that
     // one stood and moves to its own selection once the ring is drawn, rather than from the corner.
+    // A ring not drawn within CARD_RING_WAIT_FRAMES sends it to the fixed spot (placeAnchoredCard).
     const width = viewportWidth();
     if (carried && cardBounds && width !== undefined && width >= SHEET_CARD_MIN_WIDTH) {
       node.style.setProperty('--card-max-h', `${cardMaxHeight(cardBounds)}px`);
@@ -1697,6 +1770,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
       node.style.setProperty('--card-top', `${carried.top}px`);
       node.classList.add('is-anchored');
       cardPlace = carried;
+      cardCarried = true;
       cardPlacedKey = `${carried.left},${carried.top},kept`;
       node.setAttribute('data-side', 'kept');
     } else if (cardBounds) {
@@ -2020,12 +2094,12 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
       // Saves the tower in hand, then the exited screen; busy while the save runs, as Save is.
       {
         id: 'exit',
-        label: 'Save and exit',
+        label: EXIT_WORD,
         icon: 'close',
         kind: 'stay',
         bind(item) {
           exitEntry = item;
-          item.setBusy(exitInFlight);
+          showExitBusy();
         },
         run: () => void saveAndExit(),
       },
@@ -2061,7 +2135,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   async function saveAndExit(): Promise<void> {
     if (destroyed || exitInFlight || exitScreen) return;
     exitInFlight = true;
-    exitEntry?.setBusy(true);
+    showExitBusy();
     let last: LeaveResult = { ok: false, reason: LEAVE_NOT_SAVED };
     let savedAnyway = false;
     const leave = async (): Promise<LeaveResult> => {
@@ -2070,7 +2144,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     };
     const first = await leave();
     exitInFlight = false;
-    exitEntry?.setBusy(false);
+    showExitBusy();
     if (destroyed) return;
     if (first.ok && !first.unsaved) {
       showExitScreen(true);
@@ -2104,18 +2178,26 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   }
 
   /**
+   * The Save and exit entry while its save runs: busy, and its word says so, so a slow save never
+   * looks stuck. A save in flight is not called off: it holds the clock and the input so nothing
+   * changes after its snapshot (by design).
+   */
+  function showExitBusy(): void {
+    exitEntry?.setBusy(exitInFlight);
+    exitEntry?.setWord(exitInFlight ? EXIT_SAVING_WORD : EXIT_WORD);
+  }
+
+  /**
    * The exited screen (exit-screen.ts) over everything. The leave's hold stays (the clock stopped,
    * nothing to build, so nothing to save in the background); the menu stays open out of sight so
-   * Continue tower gives back the speed from before it opened; the score goes quiet, its saved
-   * setting left on so a game closed from here opens with Sound as the player had it.
+   * Continue tower gives back the speed from before it opened; the score goes quiet without its
+   * saved setting being touched (sound.silence), so a game closed from here opens with Sound as the
+   * player had it. A card that was open stays closed under it (refreshPanel), so focus is the
+   * screen's: Continue tower.
    */
   function showExitScreen(saved: boolean): void {
     if (destroyed || exitScreen) return;
-    exitSoundWasOn = sound.settings.on;
-    if (exitSoundWasOn) {
-      sound.setEnabled(false);
-      writeSoundSettings({ ...sound.settings, on: true });
-    }
+    sound.silence?.(true);
     if (!pauseMenu.isOpen()) openPauseMenu();
     if (panelKind !== 'none') setPanel('none');
     const inMine = (game.getSlot?.() ?? 'mine') === 'mine';
@@ -2129,10 +2211,13 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
         if (inMine) startNewTower();
         else openMyTower();
       },
+      // The desktop shell cannot play the clips: the site's Clips page, as the menu entry opens.
+      ...(clipsOpenOutside() ? { clipsOutside: () => openClipsOutside() } : {}),
     });
     shell.classList.add('is-exited');
     pauseMenu.stepAside(() => {});
     update();
+    exitScreen?.focusFirst();
   }
 
   /** Off the exited screen and back to the tower: the hold let go, the speed and Sound given back. */
@@ -2144,8 +2229,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     shell.classList.remove('is-exited');
     game.resumeAfterLeave();
     pauseMenu.close();
-    if (exitSoundWasOn) sound.setEnabled(true);
-    exitSoundWasOn = false;
+    sound.silence?.(false);
     update();
   }
 
@@ -2407,6 +2491,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
           focusablesIn(menu)[0]?.focus?.();
           return;
         }
+        // A clip with focus plays or pauses, as Enter and Space do.
+        if (active && menu && menu.contains(active) && toggleClip(active)) return;
         if (active && active !== shell && shell.contains(active) && typeof active.click === 'function') {
           active.click();
           return;
@@ -2588,9 +2674,11 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
       event.stopImmediatePropagation?.();
       return;
     }
-    // A clip with focus on the Clips page keeps the player's own keys: Space and Enter play or
-    // pause, Left and Right seek. Up, Down, Tab and Escape stay the menu's.
+    // A clip with focus on the Clips page: Space and Enter play or pause it (toggleClip, the
+    // same as the controller's A), Left and Right stay the player's own (seeking). Up, Down, Tab
+    // and Escape stay the menu's, so they move on to the next clip.
     if (pauseMenu.isShown() && pauseMenu.page()?.id === 'clips' && videoKey(event)) {
+      if ((event.key === ' ' || event.key === 'Enter') && toggleClip(event.target)) event.preventDefault();
       event.stopImmediatePropagation?.();
       return;
     }

@@ -8,6 +8,7 @@ import { createCamera } from '../../src/render/camera';
 import { ROOMS } from '../../src/sim/rules';
 import type { Room, World } from '../../src/sim/types';
 import { addRoom, allocId, createWorld } from '../../src/sim/world';
+import { CARD_RING_WAIT_FRAMES } from '../../src/ui/card-anchor';
 import { cardLeft, createUi } from '../../src/ui/ui';
 import { FakeDom, FakeElement } from './fake-dom';
 
@@ -20,6 +21,8 @@ const LAYOUT: [string, Rect][] = [
   ['hs-palette', { left: 12, top: 72, width: 56, height: 388 }],
   ['hs-toasts', { left: 848, top: 788, width: 340, height: 0 }],
   ['hs-sheet', { left: 828, top: 132, width: 360, height: 500 }],
+  // The view chip, when a Views layer is on, in the row under the round buttons (is-view-low).
+  ['hs-view-chip', { left: 400, top: 132, width: 400, height: 40 }],
 ];
 
 let dom: FakeDom;
@@ -58,11 +61,13 @@ describe('a card beside its selection, in the shell', () => {
     return room;
   }
 
-  function mount(innerWidth: number, rect: { x: number; y: number; w: number; h: number } | null) {
+  type Sel = null | { roomId?: number; simId?: number; shaftId?: number };
+  function mount(innerWidth: number, rect: { x: number; y: number; w: number; h: number } | null, pick?: (room: Room) => Sel) {
     const win = (globalThis as unknown as { window: { innerWidth?: number } }).window;
     win.innerWidth = innerWidth;
     const world = createWorld(3);
     const room = office(world);
+    const picked = { selection: (pick ? pick(room) : { roomId: room.id }) as Sel };
     const eased: number[] = [];
     const camera = createCamera();
     camera.x = 500;
@@ -85,7 +90,7 @@ describe('a card beside its selection, in the shell', () => {
       setTool: () => {},
       getPlacement: () => null,
       getPlacementRect: () => null,
-      getSelection: () => ({ roomId: room.id }),
+      getSelection: () => picked.selection,
       setChrome: () => {},
       setReducedMotion: () => {},
       getSlot: () => 'mine',
@@ -94,8 +99,72 @@ describe('a card beside its selection, in the shell', () => {
     const ui = createUi(root as never, api, renderer as never);
     ui.update();
     const card = (): FakeElement => root.descendants().find((n) => n.className.split(/\s+/).includes('hs-sheet'))!;
-    return { renderer, eased, ui, card, win };
+    return { renderer, eased, ui, card, win, root, room, picked };
   }
+
+  const place = (card: FakeElement): string[] => [card.style['--card-left']!, card.style['--card-top']!];
+
+  it('a person card is placed once beside the person and stays put while they walk and the view pans; a room card still follows', () => {
+    const { renderer, card, ui, picked, room } = mount(1200, null, () => ({ simId: 9 }));
+    renderer.box = { x: 300, y: 200, w: 12, h: 24 };
+    dom.runFrame();
+    expect(card().classList.contains('is-anchored')).toBe(true);
+    expect(place(card())).toEqual([`${300 + 12 + 12}px`, '200px']);
+    // The person walks, the camera pans and zooms: the card keeps its rectangle, every frame.
+    for (const box of [{ x: 340, y: 200, w: 12, h: 24 }, { x: 600, y: 420, w: 12, h: 24 }, { x: 900, y: 300, w: 24, h: 48 }, null]) {
+      renderer.box = box;
+      dom.runFrame();
+      expect(place(card())).toEqual(['324px', '200px']);
+      expect(card().classList.contains('is-anchored')).toBe(true);
+    }
+    // Opened again: placed afresh beside where the person is now.
+    picked.selection = null;
+    ui.update();
+    picked.selection = { simId: 9 };
+    ui.update();
+    renderer.box = { x: 500, y: 250, w: 12, h: 24 };
+    dom.runFrame();
+    expect(place(card())).toEqual([`${500 + 12 + 12}px`, '250px']);
+    // A room's card follows its room through a pan.
+    picked.selection = { roomId: room.id };
+    ui.update();
+    renderer.box = { x: 300, y: 200, w: 60, h: 40 };
+    dom.runFrame();
+    expect(place(card())).toEqual(['372px', '200px']);
+    renderer.box = { x: 340, y: 260, w: 60, h: 40 };
+    dom.runFrame();
+    expect(place(card())).toEqual(['412px', '260px']);
+  });
+
+  it('a selection whose ring is never drawn gets the fixed spot, not the last card\'s', () => {
+    const { renderer, card, ui, picked } = mount(1200, { x: 300, y: 200, w: 60, h: 40 });
+    dom.runFrame();
+    expect(card().classList.contains('is-anchored')).toBe(true);
+    // A person picked from a list, outside the frame's sample: no ring, ever.
+    picked.selection = { simId: 9 };
+    renderer.box = null;
+    ui.update();
+    for (let i = 0; i < CARD_RING_WAIT_FRAMES; i += 1) dom.runFrame();
+    expect(card().classList.contains('is-anchored')).toBe(false);
+    expect(card().getAttribute('data-side')).toBeNull();
+    // And a person's card on the fixed spot stays there when the person comes into view.
+    renderer.box = { x: 300, y: 200, w: 12, h: 24 };
+    dom.runFrame();
+    expect(card().classList.contains('is-anchored')).toBe(false);
+  });
+
+  it('stays below the view chip while a Views layer is on', () => {
+    const { renderer, card, root } = mount(1200, { x: 300, y: 100, w: 60, h: 40 });
+    const chip = root.descendants().find((n) => n.className.split(/\s+/).includes('hs-view-chip'))!;
+    dom.runFrame();
+    expect(card().style['--card-top']).toBe('132px'); // the chip is off: below the round buttons
+    chip.classList.remove('is-hidden');
+    renderer.box = { x: 300, y: 101, w: 60, h: 40 };
+    dom.runFrame();
+    // The chip ends at 172: the card's top limit is 8 below it, and its height shrinks to match.
+    expect(card().style['--card-top']).toBe('180px');
+    expect(card().style['--card-max-h']).toBe(`${788 - 180}px`);
+  });
 
   it('stands right of the ring once it is drawn, below the round buttons, and never eases the view', () => {
     const { renderer, eased, card } = mount(1200, null);
