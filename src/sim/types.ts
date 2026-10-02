@@ -454,6 +454,19 @@ export interface World {
    * hash alike, so a tower without roaches hashes as before.
    */
   roachLastSpread?: number | null;
+  /**
+   * True once the tower has had a recycling center (src/sim/recycling.ts): from then on waste
+   * keeps piling at the 06:00 roll even while no center stands. Set when a center is built and
+   * when a loaded tower has one. Saved and hashed as an optional field read by presence; absent
+   * and false hash alike, so a tower that never had a center hashes as before.
+   */
+  hadRecycling?: boolean;
+  /**
+   * The tower's waste since the last 06:00 roll: units the roll added and units the collectors
+   * brought in since. Absent until a roll that accrues waste. Display only (the center card):
+   * saved as an optional field, never hashed.
+   */
+  wasteToday?: { made: number; collected: number };
   stats: Stats;
   floorIndex: FloorIndex;
   routingDirty: boolean;

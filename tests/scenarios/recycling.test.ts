@@ -1,6 +1,6 @@
 /**
- * Waste and its collection. Rooms gather one number of waste a day, only while a recycling
- * center stands; two named workers from the center collect it by the normal routes and
+ * Waste and its collection. Rooms gather one number of waste a day once the tower has had a
+ * recycling center; two named workers from the center collect it by the normal routes and
  * elevators and unload at the center; a room nobody reaches for two days goes into backlog
  * and takes the dirty penalty until it is emptied, then clears at the next roll.
  */
@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { applyCommand } from '../../src/sim/build';
 import { EVENT_TEST_HOOKS, resetEventTestHooks } from '../../src/sim/events';
 import { personIdentity } from '../../src/sim/identity';
-import { centerSummary, collectorStatus } from '../../src/sim/recycling';
+import { centerSummary, collectorStatus, LAST_CENTER_GONE } from '../../src/sim/recycling';
 import { WASTE } from '../../src/sim/rules';
 import { deserialize, hashWorld, serialize } from '../../src/sim/save';
 import { personCard } from '../../src/sim/story';
@@ -140,9 +140,12 @@ describe('collection workers', () => {
       expect(sim.inRoomId).toBe(c.id);
       expect(collectorStatus(world, sim)).toBe('In the center');
     }
-    expect(centerSummary(world, c)).toEqual({ workers: 2, collectedToday: 9, backlogRooms: 0, unreachableFloors: [] });
+    const made = world.wasteToday?.made ?? -1;
+    expect(made).toBeGreaterThanOrEqual(0);
+    expect(centerSummary(world, c)).toEqual({ workers: 2, centers: 1, madeToday: made, collectedToday: 9, collectedHere: 9, backlogRooms: 0, unreachableFloors: [] });
     expect(collectionLines(world, c)).toEqual([
       ['Workers', '2 (grows with the tower)'],
+      ['Waste made today', made === 1 ? '1 unit' : `${made} units`],
       ['Collected today', '9 units'],
       ['Rooms piling up', '0'],
       ['Cannot reach', 'None'],
@@ -174,7 +177,7 @@ describe('collection workers', () => {
     atOnDay(world, 1, 11, 0);
     expect(officeOn(world, 4).waste).toBe(5);
     expect(logCount(world, 'The waste collectors could not reach floor 4.')).toBe(1);
-    expect(collectionLines(world, c)[3]).toEqual(['Cannot reach', 'Floor 4']);
+    expect(collectionLines(world, c)[4]).toEqual(['Cannot reach', 'Floor 4']);
     for (const sim of collectors(world)) expect(sim.inRoomId).toBe(c.id);
 
     // The player adds the stop: the next look finds the way.
@@ -237,7 +240,7 @@ describe('backlog', () => {
     expect(hotel.dirty).toBe(true);
   });
 
-  it('demolishing the center lets every backlog go at the next roll', () => {
+  it('demolishing the last center keeps every backlog and the waste goes on piling (decision 2026-10-01)', () => {
     const world = tower({ center: true });
     setStop(world, -2, false);
     atOnDay(world, 1, 6, 1);
@@ -247,9 +250,13 @@ describe('backlog', () => {
     expect(room.dirty).toBe(true);
     atOnDay(world, 3, 20, 0);
     expect(applyCommand(world, { kind: 'demolish', roomId: center(world).id })).toEqual({ ok: true });
+    expect(logCount(world, LAST_CENTER_GONE)).toBe(1);
+    expect(world.log.find((l) => l.text === LAST_CENTER_GONE)?.level).toBe('warn');
     atOnDay(world, 4, 6, 1);
-    expect(room.dirty).toBe(false);
-    expect(room.waste).toBeUndefined();
+    expect(room.dirty).toBe(true);
+    expect(room.wasteBacklogSince).not.toBeNull();
+    expect(room.waste).toBe(WASTE.roomCap);
+    expect(logCount(world, LAST_CENTER_GONE)).toBe(1);
   });
 });
 

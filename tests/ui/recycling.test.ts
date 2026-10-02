@@ -120,3 +120,41 @@ describe('a room’s waste line', () => {
     expect(panel.textContent).not.toMatch(/—/);
   });
 });
+
+// Decision 2026-10-01: several centers, made today against collected today, and waste that goes
+// on piling once the last center is gone.
+describe('made against collected, and several centers', () => {
+  it('shows the tower’s waste made today against collected today, and this center’s share when there are two', () => {
+    const world = tower(true);
+    atOnDay(world, 1, 7, 0);
+    const first = center(world);
+    const panel = panelFor(world, first);
+    const made = world.wasteToday?.made ?? -1;
+    expect(made).toBeGreaterThan(0);
+    expect(rowValue(panel, 'Waste made today')).toBe(made === 1 ? '1 unit' : `${made} units`);
+    expect(rowValue(panel, 'Collected today')).toBe('0 units');
+
+    // A second center: the collected row adds this center's share once anything is collected.
+    expect(applyCommand(world, { kind: 'build', room: 'recycling', floor: -2, x: 40 }).ok).toBe(true);
+    atOnDay(world, 1, 16, 0);
+    panel.refresh?.();
+    const all = world.wasteToday?.collected ?? 0;
+    expect(all).toBeGreaterThan(0);
+    const here = first.wasteCollectedToday ?? 0;
+    expect(rowValue(panel, 'Collected today')).toBe(`${all === 1 ? '1 unit' : `${all} units`}, ${here} of them here`);
+    const text = panel.textContent;
+    expect(text).not.toMatch(/—|–| - /);
+    expect(text).not.toMatch(/day \d/i);
+  });
+
+  it('keeps the waste line once the last center is gone, and never shows one in a tower that never had a center', () => {
+    const world = tower(true);
+    atOnDay(world, 1, 7, 0);
+    expect(applyCommand(world, { kind: 'demolish', roomId: center(world).id }).ok).toBe(true);
+    atOnDay(world, 2, 7, 0);
+    expect(wasteLine(world, office(world, 3))).toMatch(/^Waste: \d of 9/);
+    const never = tower(false);
+    atOnDay(never, 2, 7, 0);
+    expect(wasteLine(never, office(never, 3))).toBeNull();
+  });
+});

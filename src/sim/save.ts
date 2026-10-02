@@ -63,6 +63,10 @@ export const SAVE_VERSION = 5;
  * those builds rebuilt it as after a load: the timer starts again at the next 06:00 roll.
  * Format 5 with the optional milestones list (the News panel's Milestones): read by presence
  * like the roach timer, so no new format number; a save without it loads with an empty list.
+ * Format 5 with the optional hadRecycling marker and wasteToday counts (2026-10-01, several
+ * recycling centers): read by presence, written only when set. A save without the marker gets it
+ * on load when a center stands. A build that does not know them ignores both, and loads a tower
+ * with several centers as it is (0.6.12 checked: no count limit in its loader).
  */
 const READABLE_VERSIONS = [1, 2, 3, 4, 5];
 
@@ -134,6 +138,8 @@ interface SaveData {
   story?: unknown; // absent before v4; checked by sanitizeStory, never a reason to refuse
   buildLog?: SavedBuildLog; // absent before v5; checked by buildLogFromSave, never a reason to refuse
   milestones?: unknown; // optional in format 5; checked by sanitizeMilestones, never a reason to refuse
+  hadRecycling?: boolean; // optional in format 5: written only once the tower has had a recycling center
+  wasteToday?: unknown; // optional in format 5: the center card's numbers, checked by wasteTodayFromSave, never a reason to refuse
 }
 
 function shaftToSave(shaft: Shaft): SaveShaft {
@@ -195,6 +201,10 @@ function buildSaveData(world: World): SaveData {
     story: world.story,
     buildLog: buildLogToSave(world),
     milestones: world.milestones,
+    // Optional, written only when set, so a tower that never
+    // had a recycling center writes the same bytes as before.
+    ...(world.hadRecycling ? { hadRecycling: true } : {}),
+    ...(world.wasteToday ? { wasteToday: { made: world.wasteToday.made, collected: world.wasteToday.collected } } : {}),
   };
 }
 
@@ -290,6 +300,7 @@ function firstInvalidField(d: SaveData): string | null {
   if (d.quarterStartCash != null && !isFiniteNumber(d.quarterStartCash)) return 'quarterStartCash';
   if (d.dayStartPopulation != null && !isFiniteNumber(d.dayStartPopulation)) return 'dayStartPopulation';
   if (d.roachLastSpread != null && (!isInteger(d.roachLastSpread) || d.roachLastSpread < 0)) return 'roachLastSpread';
+  if (d.hadRecycling !== undefined && typeof d.hadRecycling !== 'boolean') return 'hadRecycling';
   // An empty object stopped the clock with a blank reason card.
   if (d.gameOver !== null) {
     const over = d.gameOver as unknown as Record<string, unknown>;
@@ -789,6 +800,11 @@ export function deserialize(text: string): { ok: true; world: World } | { ok: fa
     world.roachLastSpread = parsed.roachLastSpread ?? null;
     // Read by presence too: a save from before milestones loads with none.
     world.milestones = sanitizeMilestones(parsed.milestones);
+    // Read by presence: a tower that has had a recycling center keeps piling waste without one.
+    // A save from before the marker that has a center standing gets it now.
+    if (parsed.hadRecycling === true || parsed.rooms.some((room) => room.kind === 'recycling')) world.hadRecycling = true;
+    const wasteToday = wasteTodayFromSave(parsed.wasteToday);
+    if (wasteToday) world.wasteToday = wasteToday;
     // A star once earned is never taken away (DECISIONS 2026-09-29). A save written while stars
     // could fall may hold a rating under a star it already earned: it loads at that star, silently
     // (no beat, no log line), and the save format is unchanged.
@@ -806,6 +822,14 @@ export function deserialize(text: string): { ok: true; world: World } | { ok: fa
   } catch {
     return { ok: false, reason: NOT_A_SAVE_REASON };
   }
+}
+
+/** The center card's numbers from a save, or undefined when absent or not two whole counts. */
+function wasteTodayFromSave(raw: unknown): World['wasteToday'] {
+  if (!isPlainObject(raw)) return undefined;
+  const { made, collected } = raw;
+  if (!isInteger(made) || made < 0 || !isInteger(collected) || collected < 0) return undefined;
+  return { made, collected };
 }
 
 // Recursively sort object keys so the hash does not depend on property insertion order.
@@ -944,6 +968,7 @@ function simForHash(sim: Sim) {
 // quarterStartCash and dayStartPopulation are the status bar's display baselines: nothing in
 // the sim reads them, so they are saved but not hashed, and the bench hashes stay put.
 // story is presentation state (src/sim/story.ts): saved from v4, never read by the tick.
+// wasteToday is the recycling center card's made and collected counts: saved, never read by the tick.
 // milestones is a record the tick appends to and reads only to keep each kind once: saved,
 // not hashed, so the pinned scenario and bench hashes stay put.
 // The build log (saved from v5) is not a World key at all: it is held beside the world in
@@ -960,7 +985,8 @@ type UnhashedWorldKey =
   | 'quarterStartCash'
   | 'dayStartPopulation'
   | 'story'
-  | 'milestones';
+  | 'milestones'
+  | 'wasteToday';
 type HashedWorldKey = Exclude<keyof World, UnhashedWorldKey> | 'minute' | 'rngState';
 
 function byId<T extends { id: number }>(items: Iterable<T>): T[] {
@@ -984,6 +1010,8 @@ export function hashWorld(world: World): string {
     // null and absent hash alike (undefined drops out of the JSON), so a tower that never had
     // cockroaches, or has none now, hashes exactly as before 0.5.0 added the optional timer.
     roachLastSpread: world.roachLastSpread ?? undefined,
+    // false and absent hash alike, so a tower that never had a recycling center hashes as before.
+    hadRecycling: world.hadRecycling ? true : undefined,
     stats: world.stats,
     gameOver: world.gameOver,
   } satisfies Record<HashedWorldKey | 'version', unknown>;

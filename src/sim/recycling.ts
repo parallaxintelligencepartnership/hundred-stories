@@ -1,21 +1,25 @@
 /**
  * Waste and the people who collect it.
  *
- * Waste is one number per room, never one item per piece of trash. It accrues only while a
- * recycling center stands, at the 06:00 roll: a room anyone used since the last roll gains
+ * Waste is one number per room, never one item per piece of trash. It accrues at the 06:00 roll
+ * once the tower has had a recycling center (world.hadRecycling), and keeps accruing while none
+ * stands (decision 2026-10-01): a room anyone used since the last roll gains
  * min(WASTE.dailyCap, ceil(people / WASTE.perLoad)) units, up to WASTE.roomCap. A room at or
  * above WASTE.backlogAt for WASTE.graceDays rolls in a row is in backlog: its dirty flag is
  * held (the same EVAL.dirtyPenalty an uncleaned hotel room takes) until a collector empties
- * it, and lets go at the next roll after.
+ * it, and lets go at the next roll after. A tower that never had a center holds none.
  *
- * Every center staffs WASTE.workersPerCenter collectors, hired the tick after it goes up (and
- * again for an older save's center on load, from its id, so a replay stays equal) and removed
- * with it, as security.ts does for guards. On shift a worker takes the nearest room with waste
- * the other is not already after, walks there by the normal routes and elevators, collects,
- * goes on while the load is under WASTE.workerCapacity, then unloads at the center. A room with
- * no route is skipped and its floor logged once a day. Off shift the worker waits in the center.
+ * A tower may have up to ROOMS.recycling.maxCount centers. Each staffs its own collectors
+ * (WASTE.workersPerCenter, more as the tower grows), hired the tick after it goes up (and again
+ * for an older save's center on load, from its id, so a replay stays equal) and removed with
+ * it, as security.ts does for guards. All centers share one pool of rooms, and a room is claimed
+ * by one worker at a time. On shift a worker takes the room that has waited longest (longest in
+ * backlog, then longest since it was last emptied, by the day), the nearest only as the tie
+ * break, walks there by the normal routes and elevators, collects, goes on while the load is
+ * under WASTE.workerCapacity, then unloads at its own center. A room with no route is skipped
+ * and its floor logged once a day. Off shift the worker waits in the center.
  *
- * Nothing here draws from world.rng: rooms are taken nearest first and every tie breaks by id.
+ * Nothing here draws from world.rng: every tie breaks by id.
  * A worker in the center does not count toward its occupancy and is not population.
  */
 
@@ -25,7 +29,7 @@ import { clockOf, riderClassOf } from './types';
 import type { CollectorState, Id, Leg, Room, RoomKind, Sim, World } from './types';
 import { addSim, allocId, log, removeSim, roomsOfKind } from './world';
 
-/** Preference weight only: one floor away counts as this many tiles when picking the nearest room. */
+/** Tie break weight only: one floor away counts as this many tiles when two rooms have waited alike. */
 const FLOOR_PREFERENCE_TILES = 10;
 
 const PRODUCERS = new Set<RoomKind>(WASTE.producers);
@@ -215,18 +219,41 @@ function noteReachable(world: World, floor: number): void {
   }
 }
 
-/** The nearest room with waste nobody else has claimed, that has a route. True when the worker set off. */
+/**
+ * How long a room's waste has waited, as two sort keys (smaller waited longer): the minute it
+ * went into backlog (none sorts after every backlog), then the 06:00 roll that began the day it
+ * was last emptied (never sorts first). By the day, so rooms emptied the same day tie and the
+ * nearest goes first among them.
+ */
+function waitKeys(room: Room): [number, number] {
+  const backlog = room.wasteBacklogSince ?? Number.POSITIVE_INFINITY;
+  const emptied = room.wasteCollectedAt === undefined ? Number.NEGATIVE_INFINITY : wasteDayStart(room.wasteCollectedAt);
+  return [backlog, emptied];
+}
+
+/** Infinity minus Infinity is NaN, so the wait keys are compared, never subtracted. */
+function compare(a: number, b: number): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/**
+ * The room that has waited longest, among those with waste nobody else has claimed and a route;
+ * nearest only when two have waited alike. True when the worker set off.
+ */
 function startNextRoom(world: World, sim: Sim, center: Room, c: CollectorState): boolean {
   const claimed = claimedRooms(world, sim);
   const from = sim.pos;
-  const candidates: { room: Room; cost: number }[] = [];
+  const candidates: { room: Room; backlog: number; emptied: number; cost: number }[] = [];
   for (const room of world.rooms.values()) {
     if (!((room.waste ?? 0) > 0) || room.onFire || claimed.has(room.id)) continue;
+    const [backlog, emptied] = waitKeys(room);
     const cost = Math.abs(room.floor - from.floor) * FLOOR_PREFERENCE_TILES + Math.abs(roomCenter(room) - from.x);
-    candidates.push({ room, cost });
+    candidates.push({ room, backlog, emptied, cost });
   }
   if (candidates.length === 0) return false;
-  candidates.sort((a, b) => a.cost - b.cost || a.room.id - b.room.id);
+  candidates.sort(
+    (a, b) => compare(a.backlog, b.backlog) || compare(a.emptied, b.emptied) || a.cost - b.cost || a.room.id - b.room.id,
+  );
   const deadFloors = new Set<number>();
   for (const { room } of candidates) {
     if (deadFloors.has(room.floor)) continue;
@@ -262,6 +289,9 @@ function collect(world: World, center: Room, c: CollectorState): void {
   room.wasteCollectedAt = world.time.minute;
   c.load += take;
   center.wasteCollectedToday = (center.wasteCollectedToday ?? 0) + take;
+  const today = world.wasteToday ?? { made: 0, collected: 0 };
+  today.collected += take;
+  world.wasteToday = today;
 }
 
 /** One worker's minute: only when standing still does the worker choose what to do next. */
@@ -337,6 +367,7 @@ function samplePeaks(world: World): void {
 export function runCollectors(world: World): void {
   const centers = recyclingCenters(world);
   if (centers.length === 0) return;
+  world.hadRecycling = true; // the build and the loader set it too; this covers a center added any other way
   for (const center of centers) staffCenter(world, center);
   samplePeaks(world);
   for (const center of centers) {
@@ -399,15 +430,16 @@ export interface WasteRoll {
 
 /**
  * The 06:00 roll (events.ts calls it after the theft tidy, which records the story beats).
- * Without a center nothing accrues and any waste left from a demolished one is let go, so a
- * tower without a center carries no sanitation penalty and a tower that never had one is
- * untouched.
+ * A tower that has had a center accrues whether or not one stands now: without one nobody
+ * collects, so the rooms pile up and go into backlog (decision 2026-10-01). A tower that never
+ * had one accrues nothing; any waste on it (only from a save written before the marker, when
+ * demolishing the center wiped it at this roll) is let go, so that tower is untouched.
  */
 export function rollWaste(world: World): WasteRoll {
   const out: WasteRoll = { backlog: [], cleared: [] };
   const centers = recyclingCenters(world);
   const rooms = [...world.rooms.values()].sort((a, b) => a.id - b.id);
-  if (centers.length === 0) {
+  if (centers.length === 0 && !world.hadRecycling) {
     for (const room of rooms) if (hasWasteState(room)) clearWasteState(room);
     return out;
   }
@@ -417,6 +449,7 @@ export function rollWaste(world: World): WasteRoll {
     center.wasteUnreachable = [];
   }
   let wasteRooms = 0;
+  let made = 0;
   for (const room of rooms) {
     if (!PRODUCERS.has(room.kind)) continue;
     if (room.wasteBacklogSince != null && !((room.waste ?? 0) > 0)) {
@@ -428,7 +461,9 @@ export function rollWaste(world: World): WasteRoll {
     const people = Math.max(room.wastePeak ?? 0, room.tenants.length);
     if (people > 0 && !room.onFire) {
       const load = Math.min(WASTE.dailyCap, Math.ceil(people / WASTE.perLoad));
-      room.waste = Math.min(WASTE.roomCap, (room.waste ?? 0) + load);
+      const before = room.waste ?? 0;
+      room.waste = Math.min(WASTE.roomCap, before + load);
+      made += room.waste - before;
       wasteRooms += 1;
     }
     room.wastePeak = room.occupancy;
@@ -440,7 +475,9 @@ export function rollWaste(world: World): WasteRoll {
     }
     if (room.wasteBacklogSince != null) holdDirty(room);
   }
+  world.wasteToday = { made, collected: 0 };
   // Collection grows with the tower: the next tick hires up to the count, and the extra go now.
+  // Every center sizes its own crew from the whole tower, by the same rule as a lone center.
   const workers = workersFor(wasteRooms);
   for (const center of centers) {
     center.wasteWorkers = workers;
@@ -468,9 +505,17 @@ export function collectorStatus(world: World, sim: Sim): string {
   return 'In the center';
 }
 
+/**
+ * One center's card. `workers` and `collectedHere` are this center's; the rest is the whole
+ * tower: `madeToday` the units the 06:00 roll added, `collectedToday` the units every center has
+ * brought in since, `centers` how many stand, and the floors any worker could not reach today.
+ */
 export interface CenterSummary {
   workers: number;
+  centers: number;
+  madeToday: number;
   collectedToday: number;
+  collectedHere: number;
   backlogRooms: number;
   unreachableFloors: number[];
 }
@@ -478,10 +523,37 @@ export interface CenterSummary {
 export function centerSummary(world: World, center: Room): CenterSummary {
   let backlogRooms = 0;
   for (const room of world.rooms.values()) if (room.wasteBacklogSince != null) backlogRooms += 1;
+  const centers = recyclingCenters(world);
+  const unreachable = new Set<number>();
+  for (const other of centers) for (const floor of other.wasteUnreachable ?? []) unreachable.add(floor);
   return {
     workers: workerTarget(center),
-    collectedToday: center.wasteCollectedToday ?? 0,
+    centers: centers.length,
+    madeToday: world.wasteToday?.made ?? 0,
+    collectedToday: world.wasteToday?.collected ?? 0,
+    collectedHere: center.wasteCollectedToday ?? 0,
     backlogRooms,
-    unreachableFloors: [...(center.wasteUnreachable ?? [])],
+    unreachableFloors: [...unreachable].sort((a, b) => a - b),
   };
+}
+
+/** The warning when the last center is demolished: the waste goes on piling until one is back. */
+export const LAST_CENTER_GONE =
+  'The last recycling center is gone. Waste will pile up in the rooms and make them dirty until you build a new one.';
+
+/**
+ * A center was just demolished (build.ts, after its workers went with it). The floors its
+ * workers could not reach today pass to the first center still standing, so the card and the
+ * once a day log line stay right; with none left, one warning says the waste will pile up.
+ */
+export function centerRemoved(world: World, gone: Room): void {
+  const first = recyclingCenters(world)[0];
+  if (!first) {
+    log(world, LAST_CENTER_GONE, 'warn');
+    return;
+  }
+  const floors = gone.wasteUnreachable ?? [];
+  if (floors.length === 0) return;
+  const merged = new Set([...(first.wasteUnreachable ?? []), ...floors]);
+  first.wasteUnreachable = [...merged].sort((a, b) => a - b);
 }

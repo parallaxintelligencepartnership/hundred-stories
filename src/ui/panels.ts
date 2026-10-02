@@ -509,12 +509,13 @@ function backlogDayText(now: number, since: number): string {
 }
 
 /**
- * A producing room's waste line, or null while the tower has no recycling center:
+ * A producing room's waste line, or null while the tower has never had a recycling center
+ * (one that lost its last center keeps piling, so it keeps the line):
  * "Waste: 4 of 9, collected today", "Waste: 7 of 9, piling up since weekday 2",
  * "Waste: 2 of 9, waiting to be picked up".
  */
 export function wasteLine(world: World, room: Room): string | null {
-  if (!producesWaste(room.kind) || recyclingCenters(world).length === 0) return null;
+  if (!producesWaste(room.kind) || (recyclingCenters(world).length === 0 && !world.hadRecycling)) return null;
   const head = `Waste: ${room.waste ?? 0} of ${WASTE.roomCap}`;
   if (room.wasteBacklogSince != null) return `${head}, piling up since ${backlogDayText(world.time.minute, room.wasteBacklogSince)}`;
   if (room.wasteCollectedAt !== undefined && room.wasteCollectedAt >= wasteDayStart(world.time.minute)) return `${head}, collected today`;
@@ -522,14 +523,20 @@ export function wasteLine(world: World, room: Room): string | null {
   return head;
 }
 
-/** The recycling center's rows: units collected today, rooms in backlog, floors the workers cannot reach. */
+/**
+ * The recycling center's rows: the tower's waste made today against collected today (with this
+ * center's share when there are several), rooms in backlog, floors the workers cannot reach.
+ * Always the same rows, so the card refreshes them in place.
+ */
 export function collectionLines(world: World, center: Room): [string, string][] {
   const sum = centerSummary(world, center);
-  const units = sum.collectedToday === 1 ? '1 unit' : `${formatCount(sum.collectedToday)} units`;
+  const unitText = (n: number): string => (n === 1 ? '1 unit' : `${formatCount(n)} units`);
+  const collected = sum.centers > 1 && sum.collectedToday > 0 ?`${unitText(sum.collectedToday)}, ${formatCount(sum.collectedHere)} of them here` : unitText(sum.collectedToday);
   const floors = sum.unreachableFloors;
   return [
     ['Workers', `${formatCount(sum.workers)} (grows with the tower)`],
-    ['Collected today', units],
+    ['Waste made today', unitText(sum.madeToday)],
+    ['Collected today', collected],
     ['Rooms piling up', formatCount(sum.backlogRooms)],
     ['Cannot reach', floors.length === 0 ? 'None' : `${floors.length === 1 ? 'Floor' : 'Floors'} ${floors.map(floorWord).join(', ')}`],
   ];

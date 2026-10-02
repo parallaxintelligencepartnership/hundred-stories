@@ -5,6 +5,7 @@ import { spend } from './economy';
 import { stopOffRefusal } from './elevators';
 import { handleEventCommand } from './events';
 import { noteMetroBuilt } from './milestones';
+import { centerRemoved } from './recycling';
 import { isFollowed, recordBeat } from './story';
 import {
   DEMO_CAP_REASON,
@@ -481,6 +482,8 @@ function doBuild(world: World, kind: RoomKind, floor: number, x: number): Comman
   const name = rule.label.toLowerCase();
   log(world, `Built ${article(name)} ${name} on ${floorName(floor)}.`, 'info', { roomId: room.id });
   if (kind === 'metro') noteMetroBuilt(world);
+  // From now on waste piles up even while no center stands (recycling.ts rollWaste).
+  if (kind === 'recycling') world.hadRecycling = true;
   return OK;
 }
 
@@ -574,6 +577,7 @@ function doDemolish(world: World, roomId: number): CommandResult {
 
   const name = ROOMS[room.kind].label.toLowerCase();
   log(world, `Demolished the ${name} on ${floorName(room.floor)}. ${money(refund)} back.`);
+  if (room.kind === 'recycling') centerRemoved(world, room);
   return OK;
 }
 

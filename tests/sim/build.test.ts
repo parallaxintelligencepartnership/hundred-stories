@@ -333,13 +333,15 @@ describe('build: overlap and support', () => {
 describe('build: counts and limits', () => {
   it('refuses more rooms than maxCount allows', () => {
     const world = makeWorld(8_000_000, 3);
-    expect(ROOMS.recycling.maxCount).toBe(1);
+    // Several recycling centers may stand, up to eight (decision 2026-10-01).
+    expect(ROOMS.recycling.maxCount).toBe(8);
     lobby(world);
     expect(build(world, 'parkingSpace', -1, 100)).toEqual(OK);
-    expect(build(world, 'recycling', -2, 10)).toEqual(OK);
-    const result = canBuild(world, 'recycling', -2, 60);
+    for (const x of [10, 40, 70, 110, 140, 170, 200, 230]) expect(build(world, 'recycling', -2, x)).toEqual(OK);
+    const result = canBuild(world, 'recycling', -2, 260);
     expect(result.ok).toBe(false);
-    expect(reasonOf(result)).toContain('only one recycling center');
+    expect(reasonOf(result)).toContain('only 8 recycling centers');
+    expect(world.hadRecycling).toBe(true);
   });
 
   it('refuses more shafts than maxShafts allows', () => {
@@ -1126,11 +1128,11 @@ describe('refusal wording: plurals (audit A S7)', () => {
     push(canBuild(world, 'escalator', -3, 0));
     push(canBuildShaft(world, 'standard', 200, 1, 40));
     push(canBuildShaft(world, 'service', 200, 1, 40));
-    // one of a kind: a second one is refused
+    // one of a kind: a second one is refused (the metro; recycling centers allow eight since 2026-10-01)
     const other = makeWorld(20_000_000, 6);
     lobby(other, 0, 200);
-    expect(build(other, 'recycling', -2, 0)).toEqual(OK);
-    push(canBuild(other, 'recycling', -2, 100));
+    expect(build(other, 'metro', -3, 0)).toEqual(OK);
+    push(canBuild(other, 'metro', -3, 100));
     // the cash refusals, with nothing in hand
     world.cash = 0;
     for (const kind of Object.keys(ROOMS) as RoomKind[]) {

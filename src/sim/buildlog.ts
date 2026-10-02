@@ -232,6 +232,13 @@ export function applyAndRecord(world: World, cmd: Command): CommandResult {
   return result;
 }
 
+/**
+ * How many checkpoints a log keeps, the most recent (decision 2026-10-01). They only locate
+ * where a replay drifted, so the newest are enough; the entries are what a replay needs and are
+ * never trimmed. A save holding more still loads and is trimmed at its next checkpoint.
+ */
+export const MAX_CHECKPOINTS = 256;
+
 /** Note the world hash at this moment. A second note at the same point replaces the first. */
 export function recordCheckpoint(world: World, hash: string): void {
   const log = buildLogOf(world);
@@ -239,6 +246,7 @@ export function recordCheckpoint(world: World, hash: string): void {
   const last = log.checks[log.checks.length - 1];
   if (last && last.t === check.t && last.n === check.n) log.checks[log.checks.length - 1] = check;
   else log.checks.push(check);
+  if (log.checks.length > MAX_CHECKPOINTS) log.checks.splice(0, log.checks.length - MAX_CHECKPOINTS);
 }
 
 // ---------------------------------------------------------------------------------------------
