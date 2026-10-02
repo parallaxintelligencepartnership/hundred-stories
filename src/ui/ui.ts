@@ -4,7 +4,7 @@
 
 import './ui.css';
 
-import { createSound } from '../audio/audio';
+import { createSound, writeSoundSettings } from '../audio/audio';
 import type { GameApi, LeaveResult, Placement, Speed, Tool } from '../game/api';
 import { LEAVE_NOT_SAVED } from '../game/game';
 import { showLeaveCard } from './leave-card';
@@ -84,6 +84,8 @@ import { createSoundToggle } from './sound-toggle';
 import { createSaveAction, createSaveButton, SAVE_TIP, SAVE_WORD, type SaveAction, type SaveQuestion } from './save-button';
 import { createPauseMenu, NEW_TOWER_NO, NEW_TOWER_QUESTION, NEW_TOWER_YES, type PauseEntry, type PausePage } from './pause-menu';
 import { UPDATE_TEXT, type Notifier } from './notify';
+import { clipsBody, clipsOpenOutside, CLIPS_TITLE, openClipsOutside, type ClipsBody } from './clips';
+import { createExitScreen, type ExitScreen } from './exit-screen';
 
 export interface Ui {
   destroy(): void;
@@ -211,6 +213,12 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   let mountedKey = '';
   let lastLogTotal = 0;
   let destroyed = false;
+  // Save and exit (saveAndExit): the exited screen while it is up, whether Sound was on when it
+  // went up (it comes back on with Continue tower), and a leave in flight from the menu entry.
+  let exitScreen: ExitScreen | null = null;
+  let exitSoundWasOn = false;
+  let exitInFlight = false;
+  let exitEntry: { setBusy(busy: boolean): void } | null = null;
   /** The band the chrome covers, so the chip and the bar stay out from under it. */
   let chromeBand = { top: 0, bottom: 0 };
   /** The band the camera frames the tower in: only the top bar, the tower is full bleed. */
@@ -830,7 +838,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
       : null;
   // A controller, where the browser has the Gamepad API. It polls only while one is connected.
   const padDeps = pageGamepadDeps();
-  const pad: GamepadInput | null = padDeps ? createGamepadInput(watchedPad(padHandlers()), padDeps) : null;
+  const pad: GamepadInput | null = padDeps ? createGamepadInput(exitPad(watchedPad(padHandlers())), padDeps) : null;
 
   lastLogTotal = game.world.logTotal;
   // The menu holds the game still while it is open: a saved file opened from its Settings page
@@ -1577,7 +1585,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   function refreshPanel(): void {
     // What the Settings page opened over the game (Send feedback, the intro) has closed: the menu
     // comes back on that page, not the game.
-    if (panelKind === 'none' && pauseMenu.isOpen() && !pauseMenu.isShown()) pauseMenu.show();
+    // The exited screen keeps the menu out of sight under it.
+    if (panelKind === 'none' && pauseMenu.isOpen() && !pauseMenu.isShown() && !exitScreen) pauseMenu.show();
     // A page in the pause menu (Settings, Stories) keeps its live parts current, as a panel does.
     pauseMenu.refresh();
     const selection = game.getSelection();
@@ -1913,24 +1922,27 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
         label: NEW_TOWER_YES,
         icon: 'structure',
         close: true,
-        run() {
-          const saved = game.newGame(freshStart());
-          notice('New game started.');
-          void saved.then((res) => {
-            if (!res.ok) notice(res.reason);
-          });
-        },
+        run: () => startNewTower(),
       },
       no: { label: NEW_TOWER_NO, icon: 'home', close: false },
+    });
+  }
+
+  /** Start over in My tower, once the player said so (the menu's question, or the exited screen's). */
+  function startNewTower(): void {
+    const saved = game.newGame(freshStart());
+    notice('New game started.');
+    void saved.then((res) => {
+      if (!res.ok) notice(res.reason);
     });
   }
 
   /**
    * The menu's entries, in order: Resume, Save, New tower in My tower (it asks first: it replaces
    * My tower) or My tower anywhere else (a new game only ever replaces My tower), Today's tower
-   * (inside it too), Stories, on a phone Views and Share, Settings, How to play. A new tower always gets
-   * a fresh random start; the starting number is only in the page address (?seed=, read in
-   * main.ts) for testing, never here.
+   * (inside it too), Stories, Clips, on a phone Views and Share, Settings, How to play, and last
+   * Save and exit. A new tower always gets a fresh random start; the starting number is only in
+   * the page address (?seed=, read in main.ts) for testing, never here.
    */
   function pauseEntries(): PauseEntry[] {
     const slot = game.getSlot?.() ?? 'mine';
@@ -1969,6 +1981,13 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
       title: 'What needs you, the people you follow and the latest from around the tower',
       run: () => showStories(storiesPage(), undefined),
     });
+    // The site's four videos, a page in the card; in the desktop shell, whose content policy
+    // refuses remote media, the site's Clips page in the system browser, as How to play does.
+    entries.push(
+      clipsOpenOutside()
+        ? { id: 'clips', label: CLIPS_TITLE, icon: 'views', kind: 'stay', title: 'The trailer and short clips, in your browser', run: () => openClipsOutside() }
+        : { id: 'clips', label: CLIPS_TITLE, icon: 'views', kind: 'page', title: 'The trailer and short clips', run: () => pauseMenu.pushPage(clipsPage()) },
+    );
     // A phone's top bar is the pill alone (ui.css), so Views and Share live here instead.
     if (inSheetLayout()) {
       entries.push(
@@ -1992,8 +2011,136 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
             rel: 'noopener',
             title: 'The full guide, in a new tab',
           },
+      // Saves the tower in hand, then the exited screen; busy while the save runs, as Save is.
+      {
+        id: 'exit',
+        label: 'Save and exit',
+        icon: 'close',
+        kind: 'stay',
+        bind(item) {
+          exitEntry = item;
+          item.setBusy(exitInFlight);
+        },
+        run: () => void saveAndExit(),
+      },
     );
     return entries;
+  }
+
+  /** Clips, a page in the card: pausing and letting the files go when it goes (clips.ts). */
+  function clipsPage(): PausePage {
+    let body: ClipsBody | null = null;
+    return {
+      id: 'clips',
+      title: CLIPS_TITLE,
+      build() {
+        body?.dispose();
+        body = clipsBody();
+        return body.node;
+      },
+      dispose() {
+        body?.dispose();
+        body = null;
+      },
+    };
+  }
+
+  /**
+   * Save and exit: save the tower in hand (GameApi.leave), then the exited screen. Written, or
+   * nothing had moved: the screen at once. Anything else keeps the tower and shows the leave card:
+   * Try again leaves again, Leave without saving goes to the screen, which then says the tower was
+   * not saved, Save anyway (a held My tower) saves first, Open the newer tower (another window's
+   * save) loads the page again, and Keep playing gives the tower back.
+   */
+  async function saveAndExit(): Promise<void> {
+    if (destroyed || exitInFlight || exitScreen) return;
+    exitInFlight = true;
+    exitEntry?.setBusy(true);
+    let last: LeaveResult = { ok: false, reason: LEAVE_NOT_SAVED };
+    let savedAnyway = false;
+    const leave = async (): Promise<LeaveResult> => {
+      last = await game.leave('exit').catch((): LeaveResult => ({ ok: false, reason: LEAVE_NOT_SAVED }));
+      return last;
+    };
+    const first = await leave();
+    exitInFlight = false;
+    exitEntry?.setBusy(false);
+    if (destroyed) return;
+    if (first.ok && !first.unsaved) {
+      showExitScreen(true);
+      return;
+    }
+    showLeaveCard({
+      menu: pauseMenu,
+      result: first,
+      retry: leave,
+      proceed: () => {
+        // A conflict's way on is Open the newer tower: this page loads again on it.
+        const res = last as LeaveResult;
+        if (!res.ok) {
+          reload();
+          return;
+        }
+        showExitScreen(savedAnyway || !res.unsaved);
+      },
+      stay: () => game.resumeAfterLeave(),
+      saveFile: (text) => exportSave(text, pageCtx),
+      game: {
+        exportSave: () => game.exportSave(),
+        getKeptCopy: () => game.getKeptCopy(),
+        save: async () => {
+          const res = await game.save();
+          if (res.ok) savedAnyway = true;
+          return res;
+        },
+      },
+    });
+  }
+
+  /**
+   * The exited screen (exit-screen.ts) over everything. The leave's hold stays (the clock stopped,
+   * nothing to build, so nothing to save in the background); the menu stays open out of sight so
+   * Continue tower gives back the speed from before it opened; the score goes quiet, its saved
+   * setting left on so a game closed from here opens with Sound as the player had it.
+   */
+  function showExitScreen(saved: boolean): void {
+    if (destroyed || exitScreen) return;
+    exitSoundWasOn = sound.settings.on;
+    if (exitSoundWasOn) {
+      sound.setEnabled(false);
+      writeSoundSettings({ ...sound.settings, on: true });
+    }
+    if (!pauseMenu.isOpen()) openPauseMenu();
+    if (panelKind !== 'none') setPanel('none');
+    const inMine = (game.getSlot?.() ?? 'mine') === 'mine';
+    exitScreen = createExitScreen({
+      host: shell,
+      saved,
+      third: inMine ? 'newTower' : 'myTower',
+      onContinue: () => endExit(),
+      onThird: () => {
+        endExit();
+        if (inMine) startNewTower();
+        else openMyTower();
+      },
+    });
+    shell.classList.add('is-exited');
+    pauseMenu.stepAside(() => {});
+    update();
+  }
+
+  /** Off the exited screen and back to the tower: the hold let go, the speed and Sound given back. */
+  function endExit(): void {
+    const screen = exitScreen;
+    if (!screen) return;
+    exitScreen = null;
+    screen.destroy();
+    shell.classList.remove('is-exited');
+    game.resumeAfterLeave();
+    pauseMenu.close();
+    if (exitSoundWasOn) sound.setEnabled(true);
+    exitSoundWasOn = false;
+    update();
   }
 
   // ------------------------------------------------ the pause menu's pages
@@ -2078,7 +2225,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
    * open on another page Stories goes over it, and on Stories itself the page turns to the target.
    */
   function openStories(target?: StoriesTarget): void {
-    if (destroyed) return;
+    if (destroyed || exitScreen) return;
     // A card a page opened over the menu (Send feedback, the intro) gives way to it.
     if (pauseMenu.isOpen() && !pauseMenu.isShown()) {
       setPanel('none');
@@ -2206,6 +2353,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
 
   /** Something that holds focus for the d-pad: an open panel, the Views list, the build sheet. */
   function padMenu(): HTMLElement | null {
+    if (exitScreen) return exitScreen.node;
     if (pauseMenu.isShown()) return pauseMenu.card;
     if (view.isOpen()) return view.menu;
     if (mountedPanel) return (mountedPanel.sheet?.node as HTMLElement | undefined) ?? mountedPanel;
@@ -2327,6 +2475,33 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     };
   }
 
+  /**
+   * While the exited screen is up the controller moves and presses inside it (A and the d-pad,
+   * through padMenu), B steps back from its clips or question, and nothing reaches the tower:
+   * no pan, zoom, speed or Start.
+   */
+  function exitPad(handlers: ReturnType<typeof padHandlers>): ReturnType<typeof padHandlers> {
+    return {
+      ...handlers,
+      pan(dx, dy) {
+        if (!exitScreen) handlers.pan(dx, dy);
+      },
+      zoom(factor) {
+        if (!exitScreen) handlers.zoom(factor);
+      },
+      b() {
+        if (exitScreen) exitScreen.back();
+        else handlers.b();
+      },
+      speed(step) {
+        if (!exitScreen) handlers.speed(step);
+      },
+      start() {
+        if (!exitScreen) handlers.start();
+      },
+    };
+  }
+
   /** B: close the nearest thing open, else put the tool down. */
   function padBack(): void {
     if (pauseMenu.isShown()) {
@@ -2400,6 +2575,19 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
 
   function onKeyDown(event: KeyboardEvent): void {
     if (event.defaultPrevented) return;
+    // The exited screen: every key is its own (Tab stays inside, Escape does nothing), and no
+    // game key reaches the tower.
+    if (exitScreen) {
+      exitScreen.handleKey(event);
+      event.stopImmediatePropagation?.();
+      return;
+    }
+    // A clip with focus on the Clips page keeps the player's own keys: Space and Enter play or
+    // pause, Left and Right seek. Up, Down, Tab and Escape stay the menu's.
+    if (pauseMenu.isShown() && pauseMenu.page()?.id === 'clips' && videoKey(event)) {
+      event.stopImmediatePropagation?.();
+      return;
+    }
     // The pause menu is modal: its keys are its own, and nothing reaches the tower behind it.
     if (pauseMenu.isShown()) {
       pauseMenu.handleKey(event);
@@ -2500,6 +2688,12 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   }
 
   async function reloadWhenSaved(): Promise<void> {
+    // From the exited screen the tower is already saved, or the player chose to leave it: the
+    // hold stands, nothing changed since, so the page goes without asking again.
+    if (exitScreen) {
+      reload();
+      return;
+    }
     const leave = (): Promise<LeaveResult> =>
       game.leave('reload').catch((): LeaveResult => ({ ok: false, reason: LEAVE_NOT_SAVED }));
     const left = await leave();
@@ -2525,7 +2719,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   // A save refused because another window saved this tower after this page opened it
   // (GameApi.takeSaveConflict): the leave card's conflict answers, with no leave to hold or resume.
   game.subscribe(() => {
-    const owed = destroyed ? null : (game.takeSaveConflict?.() ?? null);
+    // Not over the exited screen: one still owed is said once the player is back at the tower.
+    const owed = destroyed || exitScreen ? null : (game.takeSaveConflict?.() ?? null);
     if (!owed || pauseMenu.page()?.id === 'leave') return; // a leave card up already answers it
     showLeaveCard({ menu: pauseMenu, result: owed, retry: async () => owed, proceed: () => reload(), stay: () => {}, saveFile: (text) => exportSave(text, pageCtx), game });
   });
@@ -2535,6 +2730,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     updateReady,
     destroy() {
       destroyed = true;
+      exitScreen?.destroy();
+      exitScreen = null;
       cardSizeWatch?.disconnect();
       watch.destroy();
       quietLabels.destroy();
@@ -2576,6 +2773,12 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
 }
 
 // ------------------------------------------------------------------ parts
+
+/** A key a focused clip plays with (the Clips page): Space, Enter, Left and Right on a video. */
+function videoKey(event: { key: string; target?: unknown }): boolean {
+  const tag = ((event.target as { tagName?: string } | null | undefined)?.tagName ?? '').toUpperCase();
+  return tag === 'VIDEO' && [' ', 'Enter', 'ArrowLeft', 'ArrowRight'].includes(event.key);
+}
 
 function sumCounts(counts: Readonly<Record<string, number>>): number {
   let total = 0;

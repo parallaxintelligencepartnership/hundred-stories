@@ -4944,3 +4944,176 @@ button.hs-news-toast {
   flex-direction: column;
   gap: 8px;
 }
+
+/* Clips (src/ui/clips.ts): the site's four videos, a page in the pause card and a view in the
+   exited screen. Each title over a 16:9 player with its poster; a player that cannot play is one
+   line and Try again in the same 16:9 box, so nothing below it moves. */
+.hs-clips {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.hs-clip {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+}
+
+.hs-clip-title {
+  margin: 0;
+  font-size: var(--size-16);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.hs-clip-frame {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: var(--radius-12);
+  background: #000;
+}
+
+.hs-clip-video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+.hs-clip-frame.is-failed {
+  background: var(--steel-2);
+}
+
+.hs-clip-failed {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  height: 100%;
+  padding: 12px;
+  box-sizing: border-box;
+  text-align: center;
+}
+
+.hs-clip-line {
+  margin: 0;
+  font-size: var(--size-16);
+  color: var(--ink);
+}
+
+.hs-ui .hs-clip-retry {
+  justify-content: center;
+}
+
+.hs-ui .hs-clip-retry .hs-face-word {
+  flex: none;
+}
+
+/* The exited screen (src/ui/exit-screen.ts): the whole view, over the pause card and the toasts,
+   the frozen tower behind a dark scrim. A card in the pause menu's look: the wordmark, one line,
+   a quieter line, then the faces in one column, so Larger text and a 390 px phone fit as they
+   are; a short screen scrolls the card. No entrance or exit, with or without reduced motion. */
+.hs-exit {
+  position: absolute;
+  inset: 0;
+  z-index: 35;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(var(--edge) + var(--safe-top)) calc(var(--edge) + var(--safe-right)) calc(var(--edge) + var(--safe-bottom))
+    calc(var(--edge) + var(--safe-left));
+  box-sizing: border-box;
+  background: rgba(8, 12, 18, 0.78);
+  pointer-events: auto;
+}
+
+.hs-exit-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-sizing: border-box;
+  width: min(400px, 100%);
+  max-height: 100%;
+  padding: 24px 16px 16px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-radius: var(--radius-20);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  text-align: center;
+}
+
+.hs-exit[data-view='clips'] .hs-exit-card {
+  width: min(480px, 100%);
+  text-align: left;
+}
+
+.hs-exit-logo {
+  display: block;
+  width: min(280px, 100%);
+  height: auto;
+  margin: 0 auto 4px;
+}
+
+.hs-exit-line {
+  margin: 0;
+  font-size: var(--size-20);
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--ink);
+}
+
+.hs-exit-note {
+  margin: 0;
+  font-size: var(--size-16);
+  line-height: 1.4;
+  color: var(--ink-dim);
+}
+
+.hs-exit-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.hs-ui .hs-exit-face {
+  justify-content: center;
+}
+
+.hs-ui .hs-exit-face .hs-face-word {
+  flex: none;
+}
+
+.hs-exit-plate {
+  position: relative;
+  flex: none;
+  min-height: var(--touch);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 calc(var(--touch) + 8px);
+}
+
+.hs-exit-clips {
+  min-height: 0;
+}
+
+/* While exited the toasts stay out of sight, all but the new version notice, whose Reload still
+   works: it stands over the exited screen. */
+.hs-ui.is-exited .hs-toasts {
+  z-index: 36;
+}
+
+.hs-ui.is-exited .hs-toasts > :not(.hs-alerts),
+.hs-ui.is-exited .hs-alerts > :not(.is-update),
+.hs-ui.is-exited .hs-news {
+  display: none;
+}

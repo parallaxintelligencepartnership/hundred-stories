@@ -145,24 +145,24 @@ describe('the pause menu card', () => {
   it('lists Resume, Save, New tower, Today\'s tower, Stories, Settings, How to play in My tower, each with an icon', () => {
     const ui = mount();
     ui.open();
-    expect(ui.words()).toEqual(['Resume', 'Save', 'New tower', "Today's tower", 'Stories', 'Settings', 'How to play']);
+    expect(ui.words()).toEqual(['Resume', 'Save', 'New tower', "Today's tower", 'Stories', 'Clips', 'Settings', 'How to play', 'Save and exit']);
     for (const item of ui.items()) expect(item.descendants().some((n) => n.tagName === 'USE')).toBe(true);
   });
 
   it('reads My tower outside My tower, and keeps Today\'s tower inside Today\'s tower (its page holds the Share and the kept copy)', () => {
     const daily = mount({ slot: 'daily' });
     daily.open();
-    expect(daily.words()).toEqual(['Resume', 'Save', 'My tower', "Today's tower", 'Stories', 'Settings', 'How to play']);
+    expect(daily.words()).toEqual(['Resume', 'Save', 'My tower', "Today's tower", 'Stories', 'Clips', 'Settings', 'How to play', 'Save and exit']);
     const friend = mount({ slot: 'friend' });
     friend.open();
-    expect(friend.words()).toEqual(['Resume', 'Save', 'My tower', "Today's tower", 'Stories', 'Settings', 'How to play']);
+    expect(friend.words()).toEqual(['Resume', 'Save', 'My tower', "Today's tower", 'Stories', 'Clips', 'Settings', 'How to play', 'Save and exit']);
   });
 
   it('puts Views and Share after Stories on a phone only', () => {
     (globalThis as unknown as { window: Record<string, unknown> }).window['innerWidth'] = 390;
     const ui = mount();
     ui.open();
-    expect(ui.words()).toEqual(['Resume', 'Save', 'New tower', "Today's tower", 'Stories', 'Views', 'Share', 'Settings', 'How to play']);
+    expect(ui.words()).toEqual(['Resume', 'Save', 'New tower', "Today's tower", 'Stories', 'Clips', 'Views', 'Share', 'Settings', 'How to play', 'Save and exit']);
   });
 
   it('links How to play the way Settings always did: the guide page, in a new tab', () => {
@@ -245,11 +245,11 @@ describe('keys', () => {
     expect(dom.activeElement).toBe(ui.items()[1]);
     key('ArrowUp');
     key('ArrowUp');
-    expect(ui.selected()).toBe('How to play'); // wrapped from the top to the bottom
+    expect(ui.selected()).toBe('Save and exit'); // wrapped from the top to the bottom
     key('ArrowDown');
     expect(ui.selected()).toBe('Resume'); // and back round
     key('End');
-    expect(ui.selected()).toBe('How to play');
+    expect(ui.selected()).toBe('Save and exit');
     key('Home');
     expect(ui.selected()).toBe('Resume');
     // Tab stays in the card, the same as Down.
@@ -270,7 +270,7 @@ describe('keys', () => {
     expect(ui.selected()).toBe('Stories');
     expect(dom.activeElement).toBe(stories);
     key('ArrowDown');
-    expect(ui.selected()).toBe('Settings');
+    expect(ui.selected()).toBe('Clips');
   });
 
   it('Enter or Space chooses the selected entry', () => {

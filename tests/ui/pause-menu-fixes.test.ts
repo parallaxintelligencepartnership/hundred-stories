@@ -234,14 +234,14 @@ describe('I2: a phone held sideways, 844 by 390', () => {
     win['innerHeight'] = 390;
     const ui = mount();
     ui.open();
-    expect(ui.words()).toEqual(['Resume', 'Save', 'New tower', "Today's tower", 'Stories', 'Settings', 'How to play']);
+    expect(ui.words()).toEqual(['Resume', 'Save', 'New tower', "Today's tower", 'Stories', 'Clips', 'Settings', 'How to play', 'Save and exit']);
     // The layout at 844 by 390, from ui.css: 12 px edges, the card's 20 and 16 px padding, the
     // plate (69 px), the 16 px gap; the column gets what is left and scrolls. Entries are 48 px
     // with 8 px between.
     const list = ui.card()!.descendants().find((n) => has(n, 'hs-pause-list'))! as FakeElement & { scrollTop: number };
     const columnTop = 12 + 20 + 69 + 16;
     const columnBottom = 390 - 12 - 16;
-    expect(columnBottom - columnTop).toBeLessThan(7 * 48 + 6 * 8); // it does not fit
+    expect(columnBottom - columnTop).toBeLessThan(9 * 48 + 8 * 8); // it does not fit
     list.getBoundingClientRect = () => ({ top: columnTop, bottom: columnBottom, left: 0, right: 328, width: 328, height: columnBottom - columnTop });
     ui.items().forEach((item, i) => {
       item.getBoundingClientRect = () => {
@@ -255,20 +255,20 @@ describe('I2: a phone held sideways, 844 by 390', () => {
       return r.top >= columnTop && r.bottom <= columnBottom;
     };
     key('End');
-    expect(ui.selected()).toBe('How to play');
+    expect(ui.selected()).toBe('Save and exit');
     expect(inside()).toBe(true);
     key('Home');
     expect(ui.selected()).toBe('Resume');
     expect(inside()).toBe(true);
-    for (let i = 0; i < 6; i += 1) {
+    for (let i = 0; i < 8; i += 1) {
       key('ArrowDown');
       expect(inside()).toBe(true);
     }
-    expect(ui.selected()).toBe('How to play');
+    expect(ui.selected()).toBe('Save and exit');
     // A focus from elsewhere (the controller's d-pad focuses the entry) scrolls it in too.
     key('Home');
-    ui.items()[5]!.focus();
-    for (const f of ui.items()[5]!.listeners.get('focus') ?? []) f({});
+    ui.items()[6]!.focus();
+    for (const f of ui.items()[6]!.listeners.get('focus') ?? []) f({});
     expect(ui.selected()).toBe('Settings');
     expect(inside()).toBe(true);
     // The pointer does not scroll the column under itself.
