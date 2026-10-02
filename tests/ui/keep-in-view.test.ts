@@ -1,44 +1,53 @@
-// The selection stays in view beside its card (design pass 2026-09-25, D-23): at 900 css px and
-// wider a query card opens on the right, and the view eases so the ring sits left of it with
-// 24 px clear. The rule on its own, then in the shell on the fake DOM with a stub renderer.
+// The selection stays in sight beside its card. Since the owner ruling of 2026-10-01 a room,
+// person or elevator card at 900 css px and wider stands beside the selection's ring and follows
+// it, so the view never eases away from a fixed card (the D-23 ease is gone). The rule's own
+// cases are in card-anchor.test.ts; here it runs in the shell on the fake DOM with a stub
+// renderer, the chrome laid out as on a 1200 by 800 desktop.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createCamera } from '../../src/render/camera';
 import { ROOMS } from '../../src/sim/rules';
 import type { Room, World } from '../../src/sim/types';
 import { addRoom, allocId, createWorld } from '../../src/sim/world';
-import { cardLeft, createUi, SELECTION_CLEAR_PX, selectionClearX } from '../../src/ui/ui';
-import { FakeDom } from './fake-dom';
+import { cardLeft, createUi } from '../../src/ui/ui';
+import { FakeDom, FakeElement } from './fake-dom';
+
+type Rect = { left: number; top: number; width: number; height: number };
+/** Where the desktop chrome stands at 1200 by 800: the bar, the round-button row, the folded dock, the alerts' corner. */
+const LAYOUT: [string, Rect][] = [
+  ['hs-ui', { left: 0, top: 0, width: 1200, height: 800 }],
+  ['hs-top', { left: 12, top: 12, width: 1176, height: 52 }],
+  ['hs-save-btn', { left: 900, top: 72, width: 52, height: 52 }],
+  ['hs-palette', { left: 12, top: 72, width: 56, height: 388 }],
+  ['hs-toasts', { left: 848, top: 788, width: 340, height: 0 }],
+  ['hs-sheet', { left: 828, top: 132, width: 360, height: 500 }],
+];
 
 let dom: FakeDom;
 let uninstall: () => void;
+const original = FakeElement.prototype.getBoundingClientRect;
 beforeEach(() => {
   dom = new FakeDom();
   uninstall = dom.install();
+  FakeElement.prototype.getBoundingClientRect = function (this: FakeElement) {
+    const classes = this.className.split(/\s+/);
+    const hit = LAYOUT.find(([c]) => classes.includes(c));
+    const r = hit ? hit[1] : { left: 0, top: 0, width: 0, height: 0 };
+    return { ...r, right: r.left + r.width, bottom: r.top + r.height };
+  };
 });
-afterEach(() => uninstall());
+afterEach(() => {
+  FakeElement.prototype.getBoundingClientRect = original;
+  uninstall();
+});
 
 describe('cardLeft', () => {
-  it('puts the card open on the right two edges in: the shell less the card and 2 x 12', () => {
+  it('puts a panel that is not about the tower two edges in from the right: the shell less the card and 2 x 12', () => {
     expect(cardLeft(1000, 120)).toBe(856);
     expect(cardLeft(1440, 360)).toBe(1056);
   });
 });
 
-describe('selectionClearX', () => {
-  it('moves the view by the overlap past the clear line, in world px at the zoom', () => {
-    expect(SELECTION_CLEAR_PX).toBe(24);
-    // Card at 600: the ring must end by 576. It ends at 590, 14 css px over; at zoom 2 that is 7.
-    expect(selectionClearX({ x: 560, w: 30 }, 600, { x: 1000, zoom: 2 })).toBe(1007);
-    expect(selectionClearX({ x: 560, w: 30 }, 600, { x: 1000, zoom: 1 })).toBe(1014);
-  });
-
-  it('leaves the view alone when the ring already sits clear, or exactly on the line', () => {
-    expect(selectionClearX({ x: 500, w: 30 }, 600, { x: 1000, zoom: 1 })).toBeNull();
-    expect(selectionClearX({ x: 546, w: 30 }, 600, { x: 1000, zoom: 1 })).toBeNull();
-  });
-});
-
-describe('in the shell', () => {
+describe('a card beside its selection, in the shell', () => {
   function office(world: World): Room {
     const rule = ROOMS.office;
     const room: Room = {
@@ -55,7 +64,6 @@ describe('in the shell', () => {
     const world = createWorld(3);
     const room = office(world);
     const eased: number[] = [];
-    // A real camera for the minimap, at x 500 and zoom 2, with its ease recorded.
     const camera = createCamera();
     camera.x = 500;
     camera.zoom = 2;
@@ -85,51 +93,70 @@ describe('in the shell', () => {
     const root = dom.createElement('div');
     const ui = createUi(root as never, api, renderer as never);
     ui.update();
-    return { renderer, eased, ui };
+    const card = (): FakeElement => root.descendants().find((n) => n.className.split(/\s+/).includes('hs-sheet'))!;
+    return { renderer, eased, ui, card, win };
   }
 
-  // The fake shell is 1000 wide and the card 120: cardLeft = 1000 - (120 + 2 * 12) = 856, so the
-  // ring must end by 832.
-  it('eases the view once the ring is drawn, so it sits 24 px clear of the card', () => {
-    const { renderer, eased } = mount(1200, null);
-    expect(eased).toEqual([]); // nothing until a frame
-    dom.runFrame(); // the renderer has not drawn the new ring yet: look again next frame
-    expect(eased).toEqual([]);
-    renderer.box = { x: 800, y: 200, w: 60, h: 40 }; // ends at 860, 28 over
+  it('stands right of the ring once it is drawn, below the round buttons, and never eases the view', () => {
+    const { renderer, eased, card } = mount(1200, null);
+    expect(card().classList.contains('is-anchored')).toBe(false); // the fixed spot until a ring is drawn
     dom.runFrame();
-    expect(eased).toEqual([500 + 28 / 2]);
+    expect(card().classList.contains('is-anchored')).toBe(false);
+    renderer.box = { x: 300, y: 200, w: 60, h: 40 };
     dom.runFrame();
-    expect(eased).toHaveLength(1); // once per card
-  });
-
-  it('leaves the view alone when the ring is already clear of the card', () => {
-    const { eased } = mount(1200, { x: 700, y: 200, w: 60, h: 40 });
-    dom.runFrame();
-    dom.runFrame();
+    expect(card().classList.contains('is-anchored')).toBe(true);
+    expect(card().style['--card-left']).toBe(`${300 + 60 + 12}px`);
+    expect(card().style['--card-top']).toBe('200px');
+    // Room from below the round buttons (124 + 8) to the alerts' corner (788).
+    expect(card().style['--card-max-h']).toBe(`${788 - 132}px`);
+    expect(card().getAttribute('data-side')).toBe('right');
     expect(eased).toEqual([]);
   });
 
-  it('does nothing under 900 css px, where the card is a bottom sheet', () => {
-    const { eased } = mount(899, { x: 800, y: 200, w: 60, h: 40 });
+  it('follows the selection as the camera pans, on the frames it already runs, and flips near the right edge', () => {
+    const { renderer, eased, card } = mount(1200, { x: 300, y: 200, w: 60, h: 40 });
     dom.runFrame();
+    renderer.box = { x: 340, y: 260, w: 60, h: 40 };
+    dom.runFrame();
+    expect([card().style['--card-left'], card().style['--card-top']]).toEqual(['412px', '260px']);
+    renderer.box = { x: 1000, y: 260, w: 60, h: 40 };
+    dom.runFrame();
+    expect(card().style['--card-left']).toBe(`${1000 - 12 - 360}px`);
+    expect(card().getAttribute('data-side')).toBe('left');
     expect(eased).toEqual([]);
   });
 
-  it('still looks on the third frame: a ring first drawn then eases the view', () => {
-    const { renderer, eased } = mount(1200, null);
+  it('stays where it was, on screen, while the selection is off screen', () => {
+    const { renderer, card } = mount(1200, { x: 300, y: 200, w: 60, h: 40 });
     dom.runFrame();
+    renderer.box = { x: -900, y: 200, w: 60, h: 40 };
     dom.runFrame();
-    expect(eased).toEqual([]);
-    renderer.box = { x: 800, y: 200, w: 60, h: 40 };
-    dom.runFrame();
-    expect(eased).toEqual([500 + 28 / 2]);
+    expect([card().style['--card-left'], card().style['--card-top']]).toEqual(['372px', '200px']);
+    expect(card().getAttribute('data-side')).toBe('kept');
   });
 
-  it('gives up after a few frames when no ring is ever drawn', () => {
-    const { renderer, eased } = mount(1200, null);
-    for (let i = 0; i < 3; i++) dom.runFrame();
-    renderer.box = { x: 800, y: 200, w: 60, h: 40 };
+  it('lets go under 900 css px, where the card is a bottom sheet, and takes it up again on a resize back', () => {
+    const { renderer, card, win } = mount(1200, { x: 300, y: 200, w: 60, h: 40 });
     dom.runFrame();
+    expect(card().classList.contains('is-anchored')).toBe(true);
+    win.innerWidth = 800;
+    dom.fireWindow('resize');
+    dom.runFrame();
+    expect(card().classList.contains('is-anchored')).toBe(false);
+    win.innerWidth = 1200;
+    renderer.box = { x: 500, y: 300, w: 60, h: 40 };
+    dom.fireWindow('resize');
+    dom.runFrame();
+    expect(card().classList.contains('is-anchored')).toBe(true);
+    expect(card().style['--card-left']).toBe('572px');
+  });
+
+  it('does nothing under 900 css px', () => {
+    const { eased, card } = mount(899, { x: 800, y: 200, w: 60, h: 40 });
+    dom.runFrame();
+    dom.runFrame();
+    expect(card().classList.contains('is-anchored')).toBe(false);
+    expect(card().style['--card-left']).toBeUndefined();
     expect(eased).toEqual([]);
   });
 });

@@ -1,8 +1,10 @@
 // The one sheet and card every panel sits in.
 //
-// At 900 px wide and up it is a floating card on the right, over the tower. Below that it is a
+// At 900 px wide and up it is a floating card over the tower (ui.ts places a card about a thing
+// on the tower beside it). Below that it is a
 // bottom sheet: a grab handle, a half and a full height, a drag or swipe down to close, and a
-// backdrop that closes it on a tap. Either way it is a dialog titled by its own heading, Escape
+// backdrop that closes it on a tap. It follows the screen across 900 px while open, without
+// rebuilding. Either way it is a dialog titled by its own heading, Escape
 // closes it, Tab stays inside it while focus is in it, and focus goes back where it came from
 // when it closes. Motion lives in ui.css: a spring-like slide and fade, only a fade under
 // reduced motion.
@@ -179,6 +181,23 @@ function currentMode(): SheetMode {
   }
 }
 
+/** Something that says when the screen crosses SHEET_CARD_MIN_WIDTH. Returns the undo. */
+function watchBreakpoint(onChange: () => void): () => void {
+  if (typeof window === 'undefined') return () => {};
+  try {
+    const query = window.matchMedia?.(`(min-width: ${SHEET_CARD_MIN_WIDTH}px)`);
+    if (query && typeof query.addEventListener === 'function') {
+      query.addEventListener('change', onChange);
+      return () => query.removeEventListener('change', onChange);
+    }
+  } catch {
+    // no media queries: the resize below does it
+  }
+  if (typeof window.addEventListener !== 'function') return () => {};
+  window.addEventListener('resize', onChange);
+  return () => window.removeEventListener('resize', onChange);
+}
+
 let sheetIds = 0;
 
 export function createSheet(options: SheetOptions): Sheet {
@@ -329,18 +348,53 @@ export function createSheet(options: SheetOptions): Sheet {
   close.addEventListener('click', () => requestClose());
   handle.addEventListener('click', onHandleClick);
 
-  function mount(host: SheetHost, mountOptions: SheetMountOptions = {}): void {
-    if (open) unmount({ restoreFocus: false });
-    mode = currentMode();
-    open = true;
-    returnTo = mountOptions.returnFocus !== undefined ? mountOptions.returnFocus : (activeElement() as FocusTarget | null);
+  /** The host it is mounted in, for the backdrop a change of layout brings or takes away. */
+  let mountedHost: SheetHost | null = null;
+  let unwatch: (() => void) | null = null;
+
+  /** Write the layout: data-mode and aria-modal. True when it is the modal bottom sheet. */
+  function paintMode(): boolean {
     node.setAttribute('data-mode', mode);
     const modal = mode === 'sheet' && !options.watchable;
     if (modal) node.setAttribute('aria-modal', 'true');
     else node.removeAttribute('aria-modal');
+    return modal;
+  }
+
+  /**
+   * The screen crossed SHEET_CARD_MIN_WIDTH while open (an iPad turned, a window resized): take
+   * the new layout in place, as the css already has. The body, focus and anything typed stay;
+   * the backdrop comes or goes before the dialog, and a drag in progress is dropped.
+   */
+  function followLayout(): void {
+    if (!open) return;
+    const next = currentMode();
+    if (next === mode) return;
+    mode = next;
+    drag = null;
+    node.classList.remove('is-dragging');
+    node.style.setProperty('--sheet-drag', '0px');
+    const modal = paintMode();
+    if (!modal) {
+      backdrop.remove();
+      return;
+    }
+    const parent = (node as { parentNode?: { insertBefore?: (a: unknown, b: unknown) => void } | null }).parentNode;
+    if (parent && typeof parent.insertBefore === 'function') parent.insertBefore(backdrop, node);
+    else mountedHost?.append(backdrop); // the backdrop's z-index keeps it under the dialog either way
+  }
+
+  function mount(host: SheetHost, mountOptions: SheetMountOptions = {}): void {
+    if (open) unmount({ restoreFocus: false });
+    mode = currentMode();
+    open = true;
+    mountedHost = host;
+    returnTo = mountOptions.returnFocus !== undefined ? mountOptions.returnFocus : (activeElement() as FocusTarget | null);
+    const modal = paintMode();
     setSnap('half');
     if (modal) host.append(backdrop);
     host.append(node);
+    unwatch = watchBreakpoint(followLayout);
     node.addEventListener('keydown', onKeyDown);
     backdrop.addEventListener('click', onBackdrop);
     for (const grip of [handle, head]) {
@@ -358,6 +412,9 @@ export function createSheet(options: SheetOptions): Sheet {
     if (!open) return;
     open = false;
     drag = null;
+    unwatch?.();
+    unwatch = null;
+    mountedHost = null;
     node.removeEventListener('keydown', onKeyDown);
     backdrop.removeEventListener('click', onBackdrop);
     for (const grip of [handle, head]) {

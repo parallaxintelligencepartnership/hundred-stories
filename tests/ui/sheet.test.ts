@@ -221,6 +221,134 @@ describe('the card on a wide screen', () => {
   });
 });
 
+describe('crossing 900 px while open (an iPad turned, a window resized)', () => {
+  /** A media query the test flips, as the browser does when the screen crosses the breakpoint. */
+  function breakpoint(width: number) {
+    const win = (globalThis as unknown as { window: Record<string, unknown> }).window;
+    const listeners = new Set<() => void>();
+    const query = {
+      get matches() {
+        return (win['innerWidth'] as number) >= SHEET_CARD_MIN_WIDTH;
+      },
+      addEventListener: (_type: string, fn: () => void) => void listeners.add(fn),
+      removeEventListener: (_type: string, fn: () => void) => void listeners.delete(fn),
+    };
+    const asked: string[] = [];
+    win['innerWidth'] = width;
+    win['matchMedia'] = (q: string) => {
+      asked.push(q);
+      return query;
+    };
+    return {
+      listeners,
+      asked,
+      resize(to: number) {
+        win['innerWidth'] = to;
+        for (const fn of [...listeners]) fn();
+      },
+    };
+  }
+
+  /** The feedback card's shape: a text box with words typed in it, focus in it. */
+  function openWithTyping() {
+    const host = dom.createElement('div');
+    const opener = dom.createElement('button');
+    opener.focus();
+    const sheet = createSheet({ title: 'Send feedback' });
+    const field = dom.createElement('textarea') as FakeElement & { value?: string };
+    const send = dom.createElement('button');
+    (sheet.body as unknown as FakeElement).append(field, send);
+    sheet.mount(host as never);
+    field.focus();
+    field.value = 'The lobby elevator is slow';
+    return { sheet, host, opener, field, send };
+  }
+
+  const handleOf = (s: Sheet): FakeElement => byClass(el(s), 'hs-sheet-handle')[0]!;
+  const press = (handle: FakeElement): void => fire(handle, 'pointerdown', { clientY: 400, timeStamp: 1, pointerId: 9 });
+
+  it('card to sheet: becomes modal with its backdrop, takes Escape from anywhere, and its handle drags; the body, the words and focus stay', () => {
+    const media = breakpoint(1440);
+    const { sheet, host, opener, field, send } = openWithTyping();
+    const node = el(sheet);
+    expect(media.asked).toEqual(['(min-width: 900px)']);
+    expect([sheet.mode, node.getAttribute('aria-modal'), host.children.length]).toEqual(['card', null, 1]);
+    press(handleOf(sheet));
+    expect(node.classList.contains('is-dragging')).toBe(false); // a card has no drag
+
+    media.resize(800);
+    expect(sheet.mode).toBe('sheet');
+    expect(node.getAttribute('data-mode')).toBe('sheet');
+    expect(node.getAttribute('aria-modal')).toBe('true');
+    expect(host.children).toContain(sheet.backdrop as unknown as FakeElement);
+    expect(host.children).toContain(node);
+    expect(node.style['--sheet-drag']).toBe('0px');
+    // Nothing rebuilt, nothing typed lost, focus where the player had it.
+    expect((sheet.body as unknown as FakeElement).children).toEqual([field, send]);
+    expect(field.value).toBe('The lobby elevator is slow');
+    expect(dom.activeElement).toBe(field);
+    // The handle drags now.
+    press(handleOf(sheet));
+    expect(node.classList.contains('is-dragging')).toBe(true);
+    // A modal sheet's Escape is its own wherever focus is.
+    fire(handleOf(sheet), 'pointercancel', { clientY: 400, timeStamp: 2, pointerId: 9 });
+    opener.focus();
+    expect(sheet.handleKey({ key: 'Escape', preventDefault() {} })).toBe(true);
+    expect(sheet.isOpen).toBe(false);
+  });
+
+  it('sheet to card: drops the backdrop and aria-modal, leaves Escape to the tower while focus is outside, and the handle stops dragging', () => {
+    const media = breakpoint(800);
+    const { sheet, host, opener, field } = openWithTyping();
+    const node = el(sheet);
+    expect([sheet.mode, node.getAttribute('aria-modal')]).toEqual(['sheet', 'true']);
+    expect(host.children[0]).toBe(sheet.backdrop as unknown as FakeElement);
+    press(handleOf(sheet)); // a drag in progress when the screen turns is dropped
+    expect(node.classList.contains('is-dragging')).toBe(true);
+
+    media.resize(1440);
+    expect(sheet.mode).toBe('card');
+    expect(node.getAttribute('data-mode')).toBe('card');
+    expect(node.getAttribute('aria-modal')).toBe(null);
+    expect(host.children).toEqual([node]);
+    expect(node.classList.contains('is-dragging')).toBe(false);
+    expect(node.style['--sheet-drag']).toBe('0px');
+    expect(field.value).toBe('The lobby elevator is slow');
+    expect(dom.activeElement).toBe(field);
+    press(handleOf(sheet));
+    expect(node.classList.contains('is-dragging')).toBe(false);
+    opener.focus();
+    expect(sheet.handleKey({ key: 'Escape', preventDefault() {} })).toBe(false);
+    expect(sheet.isOpen).toBe(true);
+    // And back again.
+    media.resize(800);
+    expect([sheet.mode, node.getAttribute('aria-modal'), host.children.length]).toEqual(['sheet', 'true', 2]);
+  });
+
+  it('a watchable sheet (the elevator card) never gets a backdrop on the way', () => {
+    const media = breakpoint(1440);
+    const host = dom.createElement('div');
+    const sheet = createSheet({ title: 'Elevator', watchable: true });
+    sheet.mount(host as never);
+    media.resize(800);
+    expect([sheet.mode, el(sheet).getAttribute('aria-modal'), host.children]).toEqual(['sheet', null, [el(sheet)]]);
+  });
+
+  it('stops listening when it is taken down, and a resize after that changes nothing', () => {
+    const media = breakpoint(1440);
+    const { sheet } = openWithTyping();
+    expect(media.listeners.size).toBe(1);
+    sheet.unmount();
+    expect(media.listeners.size).toBe(0);
+    media.resize(800);
+    expect(el(sheet).getAttribute('data-mode')).toBe('card');
+    // Mounted again, it listens once, not twice.
+    sheet.mount(dom.createElement('div') as never);
+    sheet.mount(dom.createElement('div') as never);
+    expect(media.listeners.size).toBe(1);
+  });
+});
+
 describe('reduced motion', () => {
   const css = readFileSync(new URL('../../src/ui/ui.css', import.meta.url), 'utf8');
   const block = (head: string): string => {

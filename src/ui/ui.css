@@ -1433,15 +1433,27 @@ button.hs-readout:hover {
   transition: none;
 }
 
+/* Only the pause menu opens from Menu (owner ruling 2026-10-01). A card stands below the row of
+   round buttons, never 8 px under Menu where the Views dropdown hangs: a panel that is not about
+   a thing on the tower stays there on the right; a room, person or elevator card stands beside
+   its selection (ui.ts placeAnchoredCard, card-anchor.ts) once the ring is drawn, and moves with
+   it, with no slide. */
 @media (min-width: 900px) {
   .hs-sheet {
-    top: calc(var(--top-actual, calc(var(--top-h) + var(--safe-top))) + var(--gap-float));
+    top: calc(var(--top-actual, calc(var(--top-h) + var(--safe-top))) + 2 * var(--gap-float) + var(--touch) + 8px);
     right: calc(var(--edge) + var(--safe-right));
     width: var(--panel-w);
-    max-height: calc(100% - var(--top-actual, var(--top-h)) - 2 * var(--edge) - var(--safe-bottom));
+    max-height: calc(100% - var(--top-actual, var(--top-h)) - 2 * var(--gap-float) - var(--touch) - 8px - var(--edge) - var(--safe-bottom));
     border-radius: var(--radius-20);
     box-shadow: var(--shadow-2);
     transform: none;
+  }
+
+  .hs-sheet.is-anchored {
+    top: var(--card-top);
+    left: var(--card-left);
+    right: auto;
+    max-height: var(--card-max-h);
   }
 
   .hs-sheet-handle,
@@ -4165,9 +4177,27 @@ button.hs-news-toast {
   color: var(--ink);
 }
 
+/* An entry's icon and word are one group, centered in the face (the question's answers too).
+   The word takes only its own width here, not the free space (.hs-face-word). The settings,
+   level and switch rows are faces but not entries, and keep their own layout. */
 .hs-ui .hs-pause-item {
   width: 100%;
-  text-align: left;
+  justify-content: center;
+}
+
+.hs-ui .hs-pause-item .hs-face-word {
+  flex: 0 1 auto;
+}
+
+/* Save keeps the room of its wider word, so its icon stays put between "Save" and "Saved":
+   an unseen, zero-height line of "Saved" (save-button.ts SAVED_WORD) sets the word's width. */
+.hs-ui .hs-pause-item[data-entry='save'] .hs-face-word::after {
+  content: 'Saved';
+  display: block;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  white-space: nowrap;
 }
 
 /* Larger text on a 390 by 844 phone in the app: nine 60 px entries, the plate and the card's

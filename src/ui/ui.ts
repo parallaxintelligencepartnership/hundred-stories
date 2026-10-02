@@ -41,6 +41,7 @@ import { createIconSheet, icon, type IconName } from './icons';
 import { chromeInsets, createViewChipRow, isSheetLayout, placementBoxes, viewChipMeets, viewInsets } from './layout';
 import { createToasts } from './toast';
 import type { Box } from './layout';
+import { anchorCard, cardMaxHeight, type CardBounds } from './card-anchor';
 import {
   applyGlassClear,
   button,
@@ -117,6 +118,8 @@ interface ChromeWatch {
 
 /** ui.css --edge: how far a card open on the right sits from the edge. */
 const CARD_EDGE = 12;
+/** A card beside a selection keeps this far from the dock and from the round buttons' row (ui.css --gap-float). */
+const CARD_GAP = 8;
 /** ui.css --gap-float: the least room kept between the view's chip and a round button. */
 const VIEW_CHIP_GAP = 8;
 
@@ -185,31 +188,14 @@ export function nextHintSeen(stored: string | null): { show: boolean; seen: numb
   return { show: seen < HINT_LOADS, seen: Math.min(seen + 1, HINT_LOADS) };
 }
 
-/** D-23: how much clear space the selection keeps from the left edge of the card open beside it. */
-export const SELECTION_CLEAR_PX = 24;
-/** Frames a new selection's check waits for the renderer to draw its ring, at most. */
-const SELECTION_CLEAR_FRAMES = 3;
-
 /**
- * The left edge of the card open on the right, in the shell's css px (D-23): the shell's width
- * less the card and two edges. The one rule for it: the hover card keeps out from under this
- * edge (openCardLeft) and the selection keeps SELECTION_CLEAR_PX clear of it.
+ * The left edge of a card open on the right, in the shell's css px: the shell's width less the
+ * card and two edges. Only panels that are not about a thing on the tower stand there now (a
+ * room, person or elevator card stands beside its selection, card-anchor.ts); the hover card
+ * keeps out from under this edge (openCardLeft).
  */
 export function cardLeft(shellWidth: number, panelWidth: number): number {
   return shellWidth - (panelWidth + 2 * CARD_EDGE);
-}
-
-/**
- * Where the view's center must go so the selection (`rect`, CSS px) sits left of a card whose
- * left edge is `cardLeft` with SELECTION_CLEAR_PX clear, or null when it already does (D-23).
- */
-export function selectionClearX(
-  rect: { x: number; w: number },
-  cardLeft: number,
-  camera: { x: number; zoom: number },
-): number | null {
-  const over = rect.x + rect.w - (cardLeft - SELECTION_CLEAR_PX);
-  return over > 0 ? camera.x + over / camera.zoom : null;
 }
 
 export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, options: UiOptions = {}): Ui {
@@ -245,8 +231,23 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   let placedKey = '';
   /** The open card's left edge for the hover card, measured once per card (openCardLeft). */
   let cardEdge: number | null = null;
-  /** The frame that looks at a new selection beside its card (keepSelectionClearSoon). */
-  let selectionRaf = 0;
+  /**
+   * A room, person or elevator card at SHEET_CARD_MIN_WIDTH and wider stands beside its selection
+   * (anchorCard) and follows it on the placement loop's frames. The area it may use and its size
+   * are measured once and kept until something can change them (a resize, the chrome or the dock
+   * moving, the card's own size); where it last stood is kept for a selection off screen.
+   */
+  let cardBounds: CardBounds | null = null;
+  let cardBox: Box | null = null;
+  let cardDock: 'left' | 'right' = 'left';
+  let cardPlace: { left: number; top: number } | null = null;
+  let cardPlacedKey = '';
+  const cardSizeWatch =
+    typeof ResizeObserver === 'undefined'
+      ? null
+      : new ResizeObserver(() => {
+          cardBox = null;
+        });
   const timers = new Set<ReturnType<typeof setTimeout>>();
 
   // First run: the intro, the guided first tower, then the goals, and the tips once each.
@@ -804,6 +805,9 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   }, (shellRect) => {
     placeGoalsPill(shellRect);
     placeWatchButton();
+    // The bar, its round buttons or the dock moved: the card beside a selection measures its room again.
+    cardBounds = null;
+    if (anchoredCard()) startPlacementLoop();
   });
   // Larger text and color-blind friendly views, now and whenever Settings changes them.
   const display = watchDisplayPrefs({
@@ -1273,7 +1277,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     if (toggleClass(chip, 'is-hidden', placement === null)) chipSize = null;
     if (toggleClass(bar, 'is-hidden', placement?.pending !== true)) barSize = null;
     if (!placement) {
-      stopPlacementLoop();
+      if (!anchoredCard()) stopPlacementLoop(); // a card beside a selection still follows it
       return;
     }
 
@@ -1350,6 +1354,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     const node = mountedPanel?.sheet?.node as HTMLElement | undefined;
     const width = viewportWidth();
     if (!mountedPanel || !node || width === undefined || width < SHEET_CARD_MIN_WIDTH) return null;
+    // A card beside its selection is not on the right edge; the preview keeps only to the view.
+    if (mountedKey.startsWith('query:')) return null;
     if (cardEdge === null) {
       const view = viewSize ?? sizeOf(shell);
       cardEdge = cardLeft(view.width, sizeOf(node).width);
@@ -1454,11 +1460,15 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     viewSize = null;
     chipSize = null;
     barSize = null;
+    cardBounds = null;
+    cardBox = null;
     refreshPlacement();
+    if (anchoredCard()) startPlacementLoop();
   }
 
-  // A pan or a pinch moves the ghost without telling anyone, so the chip and the bar follow
-  // it on their own frames, and only for as long as there is a ghost on the tower.
+  // A pan or a pinch moves the ghost and the selection without telling anyone, so the chip, the
+  // bar and a card beside a selection follow them on these frames, and only for as long as there
+  // is a ghost on the tower or such a card open.
   function startPlacementLoop(): void {
     if (placementRaf || destroyed) return;
     placementRaf = requestAnimationFrame(onPlacementFrame);
@@ -1467,13 +1477,95 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   function onPlacementFrame(): void {
     placementRaf = 0;
     if (destroyed) return;
-    if (!game.getPlacement()) {
+    const ghost = !!game.getPlacement();
+    if (ghost) positionPlacement();
+    else {
       chip.classList.add('is-hidden');
       bar.classList.add('is-hidden');
-      return;
     }
-    positionPlacement();
-    startPlacementLoop();
+    const following = placeAnchoredCard();
+    if (ghost || following) startPlacementLoop();
+  }
+
+  /** The open room, person or elevator card's dialog, while there is one. */
+  function anchoredCard(): HTMLElement | null {
+    if (!mountedKey.startsWith('query:')) return null;
+    return (mountedPanel?.sheet?.node as HTMLElement | undefined) ?? null;
+  }
+
+  /**
+   * The room a card beside a selection may use, in the shell's css px: clear of the dock (on the
+   * left at these widths), below the top bar and its row of round buttons, and inside the edges
+   * and the safe area. The sides are read off the top bar, which stands an edge and the safe area
+   * in on both; the bottom off the alerts' corner, an edge and the safe area up from the bottom.
+   * Null while nothing is laid out.
+   */
+  function measureCardBounds(): CardBounds | null {
+    const shellBox = shell.getBoundingClientRect();
+    if (!(shellBox.width > 0 && shellBox.height > 0)) return null;
+    const laidOut = (r: { width: number; height: number }): boolean => r.width > 0 && r.height > 0;
+    const bar = top.getBoundingClientRect();
+    const rows = [bar, ...[saveButton.button, soundToggle.button, watchToggle.button, view.button, shareButton, menuButton].map((n) => n.getBoundingClientRect())].filter(laidOut);
+    const rowBottom = rows.reduce((at, r) => Math.max(at, r.bottom - shellBox.top), 0);
+    const barShown = laidOut(bar);
+    let left = barShown ? Math.max(0, bar.left - shellBox.left) : CARD_EDGE;
+    let right = barShown ? Math.min(shellBox.width, bar.right - shellBox.left) : shellBox.width - CARD_EDGE;
+    const corner = toasts.getBoundingClientRect();
+    const bottom = corner.bottom > shellBox.top && corner.bottom <= shellBox.bottom ? corner.bottom - shellBox.top : shellBox.height - CARD_EDGE;
+    const dock = palette.getBoundingClientRect();
+    const dockShown = laidOut(dock);
+    cardDock = dockShown && dock.left + dock.width / 2 - shellBox.left > shellBox.width / 2 ? 'right' : 'left';
+    if (dockShown && cardDock === 'left') left = Math.max(left, dock.right - shellBox.left + CARD_GAP);
+    if (dockShown && cardDock === 'right') right = Math.min(right, dock.left - shellBox.left - CARD_GAP);
+    return { left: Math.round(left), top: Math.round(rowBottom + CARD_GAP), right: Math.round(right), bottom: Math.round(bottom) };
+  }
+
+  /**
+   * Stand the open room, person or elevator card beside its selection (anchorCard): written as
+   * --card-left, --card-top and --card-max-h on the dialog with ui.css .is-anchored, and only
+   * when they change. True while there is such a card to keep following. Under
+   * SHEET_CARD_MIN_WIDTH it is a bottom sheet and nothing is written; a resize back starts again.
+   */
+  function placeAnchoredCard(): boolean {
+    const node = anchoredCard();
+    if (!node) return false;
+    const width = viewportWidth();
+    if (width === undefined || width < SHEET_CARD_MIN_WIDTH) {
+      if (node.classList.contains('is-anchored')) node.classList.remove('is-anchored');
+      cardPlace = null;
+      cardPlacedKey = '';
+      return false;
+    }
+    if (!cardBounds) {
+      cardBounds = measureCardBounds();
+      if (!cardBounds) return true; // not laid out yet: next frame
+      node.style.setProperty('--card-max-h', `${cardMaxHeight(cardBounds)}px`);
+      cardPlacedKey = '';
+    }
+    if (!cardBox) {
+      const box = sizeOf(node);
+      if (!(box.width > 0)) return true;
+      cardBox = box;
+    }
+    const selection = typeof renderer.selectionScreenRect === 'function' ? renderer.selectionScreenRect() : null;
+    const at = anchorCard({
+      selection,
+      card: cardBox,
+      bounds: cardBounds,
+      view: viewSize ?? (viewSize = sizeOf(shell)),
+      dock: cardDock,
+      previous: cardPlace,
+    });
+    if (!at) return true; // no ring drawn yet (or never, for a person the frame leaves out): the fixed spot
+    const key = `${at.left},${at.top},${at.side}`;
+    if (key === cardPlacedKey) return true;
+    cardPlacedKey = key;
+    cardPlace = { left: at.left, top: at.top };
+    node.style.setProperty('--card-left', `${at.left}px`);
+    node.style.setProperty('--card-top', `${at.top}px`);
+    node.setAttribute('data-side', at.side);
+    if (!node.classList.contains('is-anchored')) node.classList.add('is-anchored');
+    return true;
   }
 
   function stopPlacementLoop(): void {
@@ -1506,6 +1598,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     }
     mountedKey = key;
     cardEdge = null;
+    cardSizeWatch?.disconnect();
+    if (key.startsWith('panel:')) cardPlace = null;
     // Closing: the controls an open panel hides on a phone (ui.css) come back before it goes,
     // so focus can return to the button that opened it (Menu, now bottom left).
     if (key === '') shell.classList.remove('is-panel-open');
@@ -1562,39 +1656,39 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     // A card with its own first control (the feedback card's text box) takes focus there; Menu
     // stays the place focus goes back to when it closes.
     panel.initialFocus?.focus?.();
-    if (key.startsWith('query:')) keepSelectionClearSoon();
+    if (key.startsWith('query:')) keepSelectionClear(panel.sheet?.node as HTMLElement | undefined);
   }
 
   /**
-   * D-23: the thing clicked stays on screen beside its card. The renderer draws the new ring on
-   * its next frame, so the check waits for it: a frame at a time, SELECTION_CLEAR_FRAMES at most
-   * (a person the frame does not draw has no ring to keep clear).
+   * The thing clicked stays in sight beside its card (owner ruling 2026-10-01, which replaced the
+   * D-23 camera ease): at SHEET_CARD_MIN_WIDTH and wider the card stands beside the selection's
+   * ring and follows it on the placement loop's frames (placeAnchoredCard), so the view never
+   * has to move. The renderer draws the new ring on its next frame; until then the card keeps
+   * its fixed spot under the round buttons. A phone's bottom sheet needs none of it.
    */
-  function keepSelectionClearSoon(): void {
-    if (selectionRaf) cancelAnimationFrame(selectionRaf);
-    let frames = SELECTION_CLEAR_FRAMES;
-    const look = (): void => {
-      selectionRaf = 0;
-      if (destroyed || !mountedKey.startsWith('query:')) return;
-      frames -= 1;
-      if (!keepSelectionClear() && frames > 0) selectionRaf = requestAnimationFrame(look);
-    };
-    selectionRaf = requestAnimationFrame(look);
-  }
-
-  /**
-   * At SHEET_CARD_MIN_WIDTH and wider the query card stands on the right: ease the view so the
-   * selection's ring sits left of it with SELECTION_CLEAR_PX clear. False while no ring is drawn.
-   */
-  function keepSelectionClear(): boolean {
-    const edge = openCardLeft(); // null under SHEET_CARD_MIN_WIDTH, where the card is a bottom sheet
-    if (edge === null) return true;
-    if (typeof renderer.selectionScreenRect !== 'function' || !renderer.camera) return true;
-    const rect = renderer.selectionScreenRect();
-    if (!rect) return false;
-    const x = selectionClearX(rect, edge, renderer.camera);
-    if (x !== null) renderer.camera.easeToX(x);
-    return true;
+  function keepSelectionClear(node: HTMLElement | undefined): void {
+    const carried = cardPlace;
+    cardBox = null;
+    cardPlace = null;
+    cardPlacedKey = '';
+    cardSizeWatch?.disconnect();
+    if (!node) return;
+    cardSizeWatch?.observe(node);
+    // Another selection while a card stood beside the last one: the new card starts where that
+    // one stood and moves to its own selection once the ring is drawn, rather than from the corner.
+    const width = viewportWidth();
+    if (carried && cardBounds && width !== undefined && width >= SHEET_CARD_MIN_WIDTH) {
+      node.style.setProperty('--card-max-h', `${cardMaxHeight(cardBounds)}px`);
+      node.style.setProperty('--card-left', `${carried.left}px`);
+      node.style.setProperty('--card-top', `${carried.top}px`);
+      node.classList.add('is-anchored');
+      cardPlace = carried;
+      cardPlacedKey = `${carried.left},${carried.top},kept`;
+      node.setAttribute('data-side', 'kept');
+    } else if (cardBounds) {
+      node.style.setProperty('--card-max-h', `${cardMaxHeight(cardBounds)}px`);
+    }
+    startPlacementLoop();
   }
 
   /** A demolished room or a sim that went home rebuilds the panel instead of showing stale numbers. */
@@ -2441,7 +2535,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     updateReady,
     destroy() {
       destroyed = true;
-      if (selectionRaf) cancelAnimationFrame(selectionRaf);
+      cardSizeWatch?.disconnect();
       watch.destroy();
       quietLabels.destroy();
       stopLabelFrames();
