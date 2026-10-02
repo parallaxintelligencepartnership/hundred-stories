@@ -49,7 +49,7 @@ const click = (node: FakeElement | undefined): void => {
 
 /** A real world behind just enough GameApi, with a speed the menu can hold; apply runs the sim's event commands. */
 function mount(world: World, speed = 2) {
-  const state = { speed };
+  const state = { speed, selection: null as unknown };
   const subscribers = new Set<() => void>();
   const applied: Command[] = [];
   const notify = (): void => subscribers.forEach((cb) => cb());
@@ -76,8 +76,11 @@ function mount(world: World, speed = 2) {
     setTool: () => {},
     getPlacement: () => null,
     getPlacementRect: () => null,
-    getSelection: () => null,
-    select: () => {},
+    getSelection: () => state.selection,
+    select(sel: unknown) {
+      state.selection = sel;
+      notify();
+    },
     setChrome: () => {},
     setReducedMotion: () => {},
     getSlot: () => 'mine',
@@ -237,6 +240,29 @@ describe('the fold and the chip', () => {
     expect(h.state.speed).toBe(2);
   });
 
+  it('on a phone, Show on the tower leaves closed the card that was open before Stories, so its sheet covers nothing (P3a A10)', () => {
+    const win = (globalThis as unknown as { window: Record<string, unknown> }).window;
+    for (const [width, kept] of [
+      [390, false],
+      [1280, true],
+    ] as const) {
+      win['innerWidth'] = width;
+      const h = mount(fireTower());
+      h.at(ROLL_MINUTE);
+      const office = [...h.world.rooms.values()].find((r) => r.kind === 'office')!;
+      h.state.selection = { roomId: office.id };
+      for (let i = 1; i <= 3; i += 1) log(h.world, `Alert number ${i}.`, 'alert');
+      h.notify();
+      click(h.chip('fire'));
+      expect(focused()?.textContent).toBe('Show on the tower');
+      click(focused()!);
+      expect(h.card()).toBeUndefined();
+      expect(h.state.selection !== null).toBe(kept);
+      resetEventTestHooks();
+      EVENT_TEST_HOOKS.chance = { fire: 0, bomb: 0, vip: 0 };
+    }
+  });
+
   it('"and N more" is a button that opens Stories', () => {
     const h = mount(createWorld(7));
     for (let i = 1; i <= 5; i += 1) log(h.world, `Alert number ${i}.`, 'alert');
@@ -287,6 +313,30 @@ describe('a news toast opens Stories', () => {
     expect(h.state.speed).toBe(0);
     click(h.back());
     expect(h.page()).toBe('settings');
+  });
+
+  it('over Send feedback holding typed words: the card and the words stay and Stories does not open (P3a A7)', () => {
+    const h = mount(createWorld(7));
+    click(h.menu());
+    choosePauseEntry(h.root, 'settings');
+    click(h.root.descendants().find((n) => n.tagName === 'BUTTON' && n.textContent === 'Send feedback'));
+    const feedback = (): FakeElement | undefined => h.root.descendants().find((n) => has(n, 'hs-feedback'));
+    const text = h.root.descendants().find((n) => n.id === 'hs-feedback-text') as FakeElement & { value: string };
+    text.value = 'The elevator is stuck';
+    (text.listeners.get('input') ?? []).forEach((f) => f({ target: text }));
+    wedding(h.world);
+    h.notify();
+    click(newsToast(h.root));
+    expect(feedback()).toBeDefined();
+    expect(text.value).toBe('The elevator is stuck');
+    expect(h.page()).toBeNull(); // the menu stays aside under the card
+    // Emptied, the card holds nothing, and the next tap opens Stories over it as before.
+    text.value = '';
+    (text.listeners.get('input') ?? []).forEach((f) => f({ target: text }));
+    log(h.world, 'A wedding has started in the cathedral on floor 2.', 'info', { notable: true });
+    h.notify();
+    click(newsToast(h.root));
+    expect(h.page()).toBe('stories');
   });
 
   it('no element or string on the way says News', () => {

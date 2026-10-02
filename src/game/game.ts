@@ -1461,11 +1461,15 @@ export function createGame(seed: number, clock: Partial<GameClock> = {}): Game {
     getKeptCopy: () => readUnreadable() ?? unreadableText,
     getKeptDailyCopy: () => readDailyCopy(),
     importSave(text) {
+      // A leave holds the tower (or already wrote it and the page is going): no file opens over it.
+      if (inputHeld()) return Promise.resolve({ ok: false, reason: LEAVING_REASON });
       const res = openSaveText(text);
       if (!res.ok) return Promise.resolve(res);
       const opened = res.world;
       // In line with the switches, so no switch lands between the save below and the swap.
       return switching(async (): Promise<CommandResult> => {
+        // Queued behind a leave that kept its hold: still refused.
+        if (inputHeld()) return { ok: false, reason: LEAVING_REASON };
         // My tower could not be read: an opened file would be saved over it, so not yet.
         if (unread.has('mine')) return { ok: false, reason: READ_FAILED_NOTICE };
         if (slot !== 'mine') {

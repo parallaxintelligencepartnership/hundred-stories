@@ -6,7 +6,7 @@ import { hourWords, nextSettleWords } from '../sim/economy';
 import { ECONOMY } from '../sim/rules';
 import { inWasteBacklog } from '../sim/recycling';
 import type { LogEntry, Room, World } from '../sim/types';
-import { commandsRefused, fireHeadline, roachHeadline, SECURITY_RESPONDING, SECURITY_SEARCHING, theftHeadline } from './alerts';
+import { commandsRefused, fireHeadline, roachHeadline, roomFloors, SECURITY_RESPONDING, SECURITY_SEARCHING, theftHeadline } from './alerts';
 import { formatFloor, formatMoney } from './format';
 import { floorList, housekeepingReaches } from './problems';
 
@@ -74,7 +74,7 @@ export function needsYou(world: World): NeedLine[] {
   const fire = events.find((e) => e.kind === 'fire');
   if (fire && fire.kind === 'fire') {
     const rooms = fire.roomIds.map((id) => world.rooms.get(id)).filter((r): r is Room => r !== undefined);
-    const floors = rooms.map((r) => r.floor);
+    const floors = rooms.flatMap(roomFloors); // every floor, as the fire card names them
     const headline = fireHeadline(floors, rooms.length);
     const text = over
       ? `${headline}.`
@@ -109,7 +109,7 @@ export function needsYou(world: World): NeedLine[] {
   // Not yet treated: still infested. A housekeeper's clean is the treatment and clears the flag.
   const infested = [...world.rooms.values()].filter((r) => r.infested).sort((a, b) => a.id - b.id);
   if (infested.length > 0) {
-    const floors = infested.map((r) => r.floor);
+    const floors = infested.flatMap(roomFloors);
     out.push({ kind: 'roaches', text: `${roachHeadline(floors, infested.length)}. ${roachHelp(world, infested)}`, at: middleOf(infested[0] as Room) });
   }
 

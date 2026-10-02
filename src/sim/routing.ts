@@ -216,6 +216,15 @@ function cacheOf(world: World): RoutingCache {
   return caches.get(world) as RoutingCache;
 }
 
+/**
+ * The routing graph's identity: a new object each time the cache is thrown away (routingDirty).
+ * A caller keeps an answer that turns on the graph alone (whether a route exists) for as long as
+ * this stays the same object.
+ */
+export function routingStamp(world: World): object {
+  return cacheOf(world);
+}
+
 function graphOf(world: World, key: GraphKey): RoutingGraph {
   const cache = cacheOf(world);
   let graph = cache.graphs.get(key);

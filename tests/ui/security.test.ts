@@ -131,7 +131,12 @@ describe('the theft card', () => {
     expect(theftLineOf(line('A caller planted a bomb in the shop on floor 7.'))).toBeNull();
     expect(theftLineOf({ ...line('Theft on floor 7, a guard is on the way.'), level: 'info' })).toBeNull();
     expect(theftHeadline(7, true)).toBe('Theft on floor 7, a guard is on the way');
-    expect(theftHeadline(-2, false)).toBe('Theft on floor B2, no guard can reach it');
+    // Below ground in the words every other card and Stories row uses (P3a A11).
+    expect(theftHeadline(-2, false)).toBe('Theft on basement 2, no guard can reach it');
+    expect(theftLineOf(line('Theft on floor B2, a guard is on the way. Leah Novak is heading to the shop.'))?.headline).toBe(
+      'Theft on basement 2, a guard is on the way',
+    );
+    expect(theftLineOf(line('Thief caught on floor B12. Leah Novak stopped them and nothing was lost.'))?.headline).toBe('Thief caught on basement 12');
   });
 });
 

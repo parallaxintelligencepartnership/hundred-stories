@@ -68,11 +68,11 @@ describe('a card beside its selection, in the shell', () => {
     const world = createWorld(3);
     const room = office(world);
     const picked = { selection: (pick ? pick(room) : { roomId: room.id }) as Sel };
-    const eased: number[] = [];
     const camera = createCamera();
     camera.x = 500;
     camera.zoom = 2;
-    camera.easeToX = (x: number) => void eased.push(x);
+    // The card never moves the view: any x the camera went to, else nothing.
+    const eased = (): number[] => (camera.x === 500 ? [] : [camera.x]);
     const renderer = {
       box: rect,
       selectionScreenRect(): { x: number; y: number; w: number; h: number } | null {
@@ -179,7 +179,7 @@ describe('a card beside its selection, in the shell', () => {
     // Room from below the round buttons (124 + 8) to the alerts' corner (788).
     expect(card().style['--card-max-h']).toBe(`${788 - 132}px`);
     expect(card().getAttribute('data-side')).toBe('right');
-    expect(eased).toEqual([]);
+    expect(eased()).toEqual([]);
   });
 
   it('follows the selection as the camera pans, on the frames it already runs, and flips near the right edge', () => {
@@ -192,7 +192,7 @@ describe('a card beside its selection, in the shell', () => {
     dom.runFrame();
     expect(card().style['--card-left']).toBe(`${1000 - 12 - 360}px`);
     expect(card().getAttribute('data-side')).toBe('left');
-    expect(eased).toEqual([]);
+    expect(eased()).toEqual([]);
   });
 
   it('stays where it was, on screen, while the selection is off screen', () => {
@@ -226,6 +226,6 @@ describe('a card beside its selection, in the shell', () => {
     dom.runFrame();
     expect(card().classList.contains('is-anchored')).toBe(false);
     expect(card().style['--card-left']).toBeUndefined();
-    expect(eased).toEqual([]);
+    expect(eased()).toEqual([]);
   });
 });

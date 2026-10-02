@@ -2,7 +2,7 @@
 // DOM, over the real game and the real storage module on fake browser stores. Reload happens only
 // once the tower is written or nothing had moved; anything else keeps the tower and asks.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createGame } from '../../src/game/game';
+import { createGame, LEAVE_NOT_SAVED, NEW_TOWER_NOT_SAVED, STILL_HERE } from '../../src/game/game';
 import { SAVE_PRESENT_KEY } from '../../src/game/storage';
 import { createUi } from '../../src/ui/ui';
 import { createPauseMenu } from '../../src/ui/pause-menu';
@@ -21,7 +21,7 @@ import {
   TRY_AGAIN,
 } from '../../src/ui/leave-card';
 import { HELD_SAVE_NO, HELD_SAVE_QUESTION, HELD_SAVE_YES } from '../../src/ui/save-button';
-import { FakeDom, type FakeElement } from './fake-dom';
+import { FakeDom, choosePauseEntry, type FakeElement } from './fake-dom';
 import { fakeIdb, fakeLocalStorage, handClock, savedTower, settle } from '../game/leave-stores';
 
 const MINE_LS = 'hundred-stories:autosave';
@@ -333,6 +333,141 @@ describe("a save another window overtook shows the conflict card, with no leave 
     docListeners.get('visibilitychange')?.();
     expect(plateTitle(root)).toBe(LEAVE_CONFLICT_TITLE);
     game.stop();
+    ui.destroy();
+  });
+});
+
+describe('the leave card, review round (P1a A1, A4, A5; P3a A6)', () => {
+  const buttonNamed = (root: FakeElement, text: string): FakeElement | undefined =>
+    root.descendants().find((n) => n.tagName === 'BUTTON' && n.textContent === text);
+  const menuButton = (root: FakeElement): FakeElement =>
+    root.descendants().find((n) => n.tagName === 'BUTTON' && n.getAttribute('aria-label') === 'Menu')!;
+  const pausePage = (root: FakeElement): string | null =>
+    root.descendants().find((n) => hasClass(n, 'hs-pause-card'))?.getAttribute('data-page') ?? null;
+  const notices = (root: FakeElement, text: string): FakeElement[] =>
+    root.descendants().filter((n) => hasClass(n, 'is-notice') && !hasClass(n, 'is-leaving') && n.textContent.includes(text));
+
+  /** The ui over a real game, with a notification tap to open Stories from outside the menu. */
+  function mountWithTap(game: ReturnType<typeof createGame>) {
+    const order: string[] = [];
+    let tap: ((kind: string) => void) | null = null;
+    const notifier = { alert: () => {}, updateReady: () => {}, onTap: (fn: (kind: string) => void) => (tap = fn) };
+    const root = dom.createElement('div');
+    const ui = createUi(root as never, game, {} as never, { reload: () => order.push('reload'), notifier: notifier as never });
+    ui.updateReady();
+    return { order, root, ui, openStories: () => tap?.('alerts') };
+  }
+
+  it('A1: a double tap on Reload starts one leave and one card; Keep playing puts back one toast', async () => {
+    const ls = fakeLocalStorage();
+    vi.stubGlobal('localStorage', ls.store);
+    const { game } = gameOn();
+    game.apply({ kind: 'build', room: 'lobby', floor: 1, x: 150 });
+    ls.ctl.refuse = true;
+    const leave = vi.spyOn(game, 'leave');
+    const { root, ui } = mount(game);
+    const toast = updateToasts(root)[0]!;
+    click(toast);
+    click(toast); // the toast is still fading out under the finger
+    await settle();
+    expect(leave).toHaveBeenCalledTimes(1);
+    expect(leaveBody(root)?.dataset['leave']).toBe('failed');
+    click(answer(root, 'stay'));
+    await settle();
+    expect(leaveBody(root)).toBeUndefined();
+    expect(updateToasts(root)).toHaveLength(1);
+    ui.destroy();
+  });
+
+  it('A4: a refused tower switch says why every time, and a New tower that did not save says so', async () => {
+    const ls = fakeLocalStorage();
+    vi.stubGlobal('localStorage', ls.store);
+    const { game } = gameOn();
+    expect(await game.openFriend(4242)).toEqual({ ok: true });
+    const { root, ui } = mount(game);
+    game.apply({ kind: 'build', room: 'lobby', floor: 1, x: 150 });
+    ls.ctl.refuse = true;
+    const refused = `${LEAVE_NOT_SAVED} ${STILL_HERE}`;
+    const myTower = root.descendants().find((n) => hasClass(n, 'hs-my-tower'))!;
+    click(myTower);
+    await settle();
+    expect(notices(root, refused)).toHaveLength(1);
+    click(myTower);
+    await settle();
+    expect(notices(root, refused)).toHaveLength(2);
+    expect(game.getSlot()).toBe('friend');
+    ui.destroy();
+
+    // New tower in My tower, with the store refusing: the notice says the new tower did not save.
+    const mine = gameOn(12).game;
+    mine.apply({ kind: 'build', room: 'lobby', floor: 1, x: 150 });
+    const again = mount(mine);
+    click(menuButton(again.root));
+    choosePauseEntry(again.root, 'newTower');
+    choosePauseEntry(again.root, 'yes');
+    await settle();
+    expect(notices(again.root, NEW_TOWER_NOT_SAVED)).toHaveLength(1);
+    again.ui.destroy();
+  });
+
+  it('A5: a card owed while Send feedback covers the menu waits for it, without holding the tower, then shows', async () => {
+    const ls = fakeLocalStorage();
+    ls.data.set(MINE_LS, '{"version": 2, "rooms": "not a tower"');
+    vi.stubGlobal('localStorage', ls.store);
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { game } = gameOn();
+    await game.load();
+    game.apply({ kind: 'build', room: 'lobby', floor: 1, x: 150 });
+    const { order, root, ui, tapReload } = mount(game);
+    click(menuButton(root));
+    choosePauseEntry(root, 'settings');
+    click(buttonNamed(root, 'Send feedback')!);
+    const feedback = (): FakeElement | undefined => root.descendants().find((n) => hasClass(n, 'hs-feedback'));
+    expect(feedback()).toBeDefined();
+    tapReload();
+    await settle();
+    // Nothing goes into the hidden menu, the feedback card stays, and the tower is not held.
+    expect(leaveBody(root)).toBeUndefined();
+    expect(feedback()).toBeDefined();
+    expect(game.apply({ kind: 'build', room: 'lobby', floor: 1, x: 140 }).ok).toBe(true);
+    click(buttonNamed(feedback()!, 'Cancel')!);
+    await settle();
+    expect(feedback()).toBeUndefined();
+    expect(leaveBody(root)?.dataset['leave']).toBe('held');
+    expect(dom.activeElement?.dataset['answer']).toBe('stay');
+    click(answer(root, 'leave'));
+    expect(order).toEqual(['reload']);
+    ui.destroy();
+  });
+
+  it('P3a A6: Try again, Stories opened over the card, and the retry fails: the new card replaces both, and Back leaves the card', async () => {
+    const ls = fakeLocalStorage();
+    const idb = fakeIdb();
+    vi.stubGlobal('localStorage', ls.store);
+    vi.stubGlobal('indexedDB', idb.factory);
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { game } = gameOn();
+    game.apply({ kind: 'build', room: 'lobby', floor: 1, x: 150 });
+    idb.ctl.failPuts = true;
+    ls.ctl.refuse = true;
+    const { order, root, ui, openStories } = mountWithTap(game);
+    click(updateToasts(root)[0]!);
+    await settle();
+    expect(leaveBody(root)?.dataset['leave']).toBe('failed');
+    const open = idb.hold();
+    click(answer(root, 'retry'));
+    await settle();
+    openStories();
+    expect(pausePage(root)).toBe('stories');
+    open(); // the retry fails too
+    await settle();
+    expect(pausePage(root)).toBe('leave');
+    expect(leaveBody(root)?.dataset['leave']).toBe('failed');
+    click(root.descendants().find((n) => hasClass(n, 'hs-pause-back'))!);
+    expect(pausePage(root)).toBeNull(); // no Stories and no dead card left under it
+    expect(leaveBody(root)).toBeUndefined();
+    expect(order).toEqual([]);
+    expect(updateToasts(root)).toHaveLength(1);
     ui.destroy();
   });
 });

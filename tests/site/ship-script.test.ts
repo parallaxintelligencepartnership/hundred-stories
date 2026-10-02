@@ -3,7 +3,7 @@
 // must leave the release commit local, with no tag and nothing pushed, and must print the exact
 // tag and push commands; a good deploy tags and pushes both remotes (audit 2026-09-28 lane H).
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -79,6 +79,9 @@ function scratch() {
   writeFileSync(join(work, 'scripts', 'ship.sh'), readFileSync(join(repo, 'scripts', 'ship.sh'), 'utf8').replaceAll('/tmp/hundred-stories-deploy.log', log));
   git(work, 'add', '-A');
   git(work, 'commit', '-q', '-m', 'init');
+  // What scripts/verify.sh leaves when the tests pass on this tree.
+  const stamp = (tree = git(work, 'rev-parse', 'HEAD^{tree}')) => writeFileSync(join(work, '.git', 'hs-verified'), `${tree}\n`);
+  stamp();
   git(work, 'remote', 'add', 'origin', '../origin.git');
   git(work, 'remote', 'add', 'github', '../github.git');
   const ship = (version: string, tag: string, deployFail: number, cargoFail = 0) =>
@@ -88,7 +91,7 @@ function scratch() {
       encoding: 'utf8',
     });
   const refs = (bare: string) => spawnSync('git', ['for-each-ref', '--format=%(refname)'], { cwd: join(root, bare), env, encoding: 'utf8' }).stdout.trim();
-  return { root, work, git, ship, refs };
+  return { root, work, git, ship, refs, stamp };
 }
 
 const next = (): string => {
@@ -135,6 +138,52 @@ describe.skipIf(!runnable)('scripts/ship.sh in a scratch repo', () => {
     expect(s.refs('origin.git')).toBe('');
     expect(s.refs('github.git')).toBe('');
     expect(run.stderr).toContain('cargo metadata --locked --offline failed');
+  }, 60_000);
+});
+
+describe('scripts/ship.sh needs proof the tests passed on what it ships (handoff R6)', () => {
+  const ship = readFileSync(join(repo, 'scripts', 'ship.sh'), 'utf8');
+  const verify = readFileSync(join(repo, 'scripts', 'verify.sh'), 'utf8');
+
+  it('checks the stamp against the tree before it bumps anything, and says to run verify.sh', () => {
+    const check = ship.indexOf('[ "$(cat "$STAMP")" != "$TREE" ]');
+    expect(check).toBeGreaterThan(-1);
+    expect(ship).toContain('STAMP="$(git rev-parse --git-dir)/hs-verified"');
+    expect(ship).toContain("TREE=$(git rev-parse 'HEAD^{tree}')");
+    expect(check).toBeLessThan(ship.indexOf('echo "bumping'));
+    expect(check).toBeLessThan(ship.indexOf('sed -i'));
+    expect(ship).toContain('run sh scripts/verify.sh first');
+  });
+
+  it('verify.sh refuses a dirty tree and writes the stamp only after the typecheck and the suite pass', () => {
+    const clean = verify.indexOf('git status --porcelain');
+    const typecheck = verify.indexOf('npm run typecheck');
+    const suite = verify.indexOf('npx vitest run');
+    const write = verify.indexOf('> "$STAMP"');
+    expect(clean).toBeGreaterThan(-1);
+    expect(clean).toBeLessThan(typecheck);
+    expect(typecheck).toBeLessThan(suite);
+    expect(suite).toBeLessThan(write);
+    expect(verify).toContain('set -eu');
+    expect(verify).toContain('STAMP="$(git rev-parse --git-dir)/hs-verified"');
+  });
+});
+
+describe.skipIf(!runnable)('scripts/ship.sh without a matching stamp', () => {
+  it('no stamp, or a stamp for another tree: exits 1 before the bump, with nothing committed', () => {
+    const s = scratch();
+    const before = s.git(s.work, 'rev-parse', 'HEAD');
+    const pkg = readFileSync(join(s.work, 'package.json'), 'utf8');
+    for (const setUp of [() => rmSync(join(s.work, '.git', 'hs-verified')), () => s.stamp('0'.repeat(40))]) {
+      setUp();
+      const run = s.ship(next(), 'ship-test-d', 0);
+      expect(run.status).toBe(1);
+      expect(run.stderr).toContain('run sh scripts/verify.sh first');
+      expect(run.stdout).not.toContain('bumping');
+      expect(readFileSync(join(s.work, 'package.json'), 'utf8')).toBe(pkg);
+      expect(s.git(s.work, 'rev-parse', 'HEAD')).toBe(before);
+      expect(s.git(s.work, 'tag', '--list')).toBe('');
+    }
   }, 60_000);
 });
 

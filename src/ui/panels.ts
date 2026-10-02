@@ -34,7 +34,7 @@ import {
   unfollowSim,
 } from '../sim/story';
 import { milestoneRecap, NO_STORIES_YET } from '../sim/chronicle';
-import { centerSummary, producesWaste, recyclingCenters, wasteDayStart } from '../sim/recycling';
+import { centerSummary, floorsCollectorsCannotReach, producesWaste, recyclingCenters, wasteDayStart } from '../sim/recycling';
 import { coverageText } from '../sim/security';
 import { dirtyHotelRooms, HOUSEKEEPING_END_MINUTE } from '../sim/people';
 import { carRangeOf, clockOf, spanTop } from '../sim/types';
@@ -539,7 +539,8 @@ export function collectionLines(world: World, center: Room): [string, string][] 
   const sum = centerSummary(world, center);
   const unitText = (n: number): string => (n === 1 ? '1 unit' : `${formatCount(n)} units`);
   const collected = sum.centers > 1 && sum.collectedToday > 0 ?`${unitText(sum.collectedToday)}, ${formatCount(sum.collectedHere)} of them here` : unitText(sum.collectedToday);
-  const floors = sum.unreachableFloors;
+  // Live, as the Tower problems row reads it, not the workers' record of the day.
+  const floors = floorsCollectorsCannotReach(world);
   return [
     ['Workers', `${formatCount(sum.workers)} (grows with the tower)`],
     ['Waste made today', unitText(sum.madeToday)],

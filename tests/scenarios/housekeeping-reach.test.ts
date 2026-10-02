@@ -5,7 +5,20 @@
 // F6: the six keepers standing in their own office counted as "People are inside." and blocked
 // its demolition almost all day. Now the room's own staff go with it; tenants and guests still block.
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+// Every route people.ts asks for, passed through to the real search (review of P2, A1).
+const asked = vi.hoisted(() => ({ routes: [] as { from: number; to: number; staff: boolean }[] }));
+vi.mock('../../src/sim/routing', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../../src/sim/routing')>();
+  return {
+    ...real,
+    findRoute: (...args: Parameters<typeof real.findRoute>) => {
+      asked.routes.push({ from: args[1].floor, to: args[2].floor, staff: args[3]?.staff === true });
+      return real.findRoute(...args);
+    },
+  };
+});
 
 import { applyCommand } from '../../src/sim/build';
 import { hotelRoomsHousekeepingCannotReach } from '../../src/sim/people';
@@ -114,6 +127,27 @@ describe('housekeeping takes the rooms it can reach (F5)', () => {
     }
     expect(aCleaned).toBe(true);
     expect(warnLinesSince(world, total1)).toEqual([]);
+  });
+
+  it('a room with no route is asked about once while the routes stand, not every minute of the shift (review A1)', () => {
+    const { world, a, b, shaft } = hotelTower();
+    atOnDay(world, 1, 10, 5); // past the start of the shift's warn line, which asks once a day
+    for (const room of [a, b]) {
+      room.tenants = [];
+      room.occupancy = 0;
+    }
+    a.dirty = true;
+    b.dirty = false;
+    expect(applyCommand(world, { kind: 'shaft.setStop', shaftId: shaft.id, floor: 3, stops: false }).ok).toBe(true);
+    const fromOffice = (): number => asked.routes.filter((r) => r.staff && r.from === 2 && r.to === 3).length;
+    asked.routes.length = 0;
+    for (let i = 0; i < 60; i++) tick(world);
+    expect(a.dirty).toBe(true);
+    expect(fromOffice()).toBe(1);
+    // A changed route throws the answer away: the stop comes back and the room is cleaned.
+    expect(applyCommand(world, { kind: 'shaft.setStop', shaftId: shaft.id, floor: 3, stops: true }).ok).toBe(true);
+    for (let i = 0; i < 120 && a.dirty; i++) tick(world);
+    expect(a.dirty).toBe(false);
   });
 
   it('lists nothing with no housekeeping office, and nothing while every dirty room is reachable', () => {

@@ -24,7 +24,7 @@
 
 import { FIRE_BURN_OUT_TEXT, FIRE_OUT_EMPTY_TEXT, helicopterCost } from '../sim/events';
 import { EVENTS } from '../sim/rules';
-import type { ActiveEvent, Command, CommandResult, Id, LogEntry, World } from '../sim/types';
+import type { ActiveEvent, Command, CommandResult, Id, LogEntry, Room, World } from '../sim/types';
 import { formatMoney } from './format';
 import type { IconName } from './icons';
 import { button, el } from './panels';
@@ -246,6 +246,13 @@ function placeName(floor: number): string {
   return floor < 0 ? `basement ${Math.abs(floor)}` : `floor ${floor}`;
 }
 
+/** Every floor a room stands on, bottom to top: the one source of the floors a card, chip or Stories row names. */
+export function roomFloors(room: Pick<Room, 'floor' | 'height'>): number[] {
+  const floors: number[] = [];
+  for (let f = room.floor; f < room.floor + room.height; f += 1) floors.push(f);
+  return floors;
+}
+
 /** "Fire on floor 12", "Fire on floor 12, 2 rooms burning", "Fire on floors 12 to 14, 3 rooms burning". */
 export function fireHeadline(floors: readonly number[], rooms: number): string {
   let where: string;
@@ -277,7 +284,8 @@ type TheftLine = 'start' | 'end';
 export function theftLineOf(entry: LogEntry): { kind: TheftLine; headline: string } | null {
   if (entry.level !== 'alert') return null;
   const text = entry.text;
-  const headline = text.replace(/\.(\s.*)?$/, '');
+  // The sim says "floor B2"; the cards and Stories say "basement 2".
+  const headline = text.replace(/\.(\s.*)?$/, '').replace(/\bfloor B(\d+)/, 'basement $1');
   if (text.startsWith('Theft on floor ')) return { kind: 'start', headline };
   if (text.startsWith('Thief caught on ') || text.startsWith('Thief escaped, ')) return { kind: 'end', headline };
   return null;
@@ -285,7 +293,7 @@ export function theftLineOf(entry: LogEntry): { kind: TheftLine; headline: strin
 
 /** A theft under way, for a card opened on a loaded save. Never shown for anything else. */
 export function theftHeadline(floor: number, guardComing: boolean): string {
-  const where = floor < 0 ? `floor B${-floor}` : `floor ${floor}`;
+  const where = placeName(floor);
   return guardComing ? `Theft on ${where}, a guard is on the way` : `Theft on ${where}, no guard can reach it`;
 }
 export const BOMB_OVER = 'The bomb threat is over.';
@@ -443,7 +451,7 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
         ? fireHeadline(
             fireEvent.roomIds.flatMap((id) => {
               const room = world.rooms?.get(id);
-              return room ? [room.floor] : [];
+              return room ? roomFloors(room) : [];
             }),
             1,
           )
@@ -592,7 +600,7 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
     if (roomId !== undefined) fire.rooms.add(roomId);
     const room = roomId !== undefined ? deps.getWorld().rooms.get(roomId) : undefined;
     if (room) {
-      for (let f = room.floor; f < room.floor + room.height; f += 1) fire.floors.add(f);
+      for (const f of roomFloors(room)) fire.floors.add(f);
       return;
     }
     const match = /on floor (-?\d+)\.?$/.exec(text.replace(/\. Call a helicopter.*$/, '.'));
@@ -801,7 +809,7 @@ export function createAlertStack(deps: AlertStackDeps): AlertStack {
     for (const room of world.rooms?.values() ?? []) {
       if (!room.infested) continue;
       count += 1;
-      for (let f = room.floor; f < room.floor + room.height; f += 1) floors.push(f);
+      floors.push(...roomFloors(room));
     }
     if (count > 0 && (!roaches || roaches.closed)) {
       // A new infestation opens a card; one already on screen when a save loads is not news.

@@ -259,11 +259,8 @@ describe('opening framing (D-1, BB-1)', () => {
     expect({ x: renderer.camera.x, y: renderer.camera.y, zoom: renderer.camera.zoom }).toEqual(at);
   });
 
-  it('a build ensureFloorVisible and a selection easeToX also make the view the player\'s', async () => {
-    for (const move of [
-      (r: Renderer) => r.camera.ensureFloorVisible(19),
-      (r: Renderer) => r.camera.easeToX(40 * TILE_PX),
-    ]) {
+  it('a build ensureFloorVisible also makes the view the player\'s', async () => {
+    for (const move of [(r: Renderer) => r.camera.ensureFloorVisible(19)]) {
       const { renderer } = await mount(tower(20), {}, { width: 390, height: 844 });
       renderer.setChrome(120, 0);
       const opening = renderer.camera.zoom;

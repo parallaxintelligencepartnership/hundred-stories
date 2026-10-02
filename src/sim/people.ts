@@ -8,7 +8,7 @@
 
 import { callClassFor, hallCallPending, letOffAtNextStop, requestHallCallFor } from './elevators';
 import { recordCondoSale, recordHotelNight, recordPartyEvent, recordVisit } from './economy';
-import { ensureRouting, entrances, findRoute, isReachableFromLobby } from './routing';
+import { ensureRouting, entrances, findRoute, isReachableFromLobby, routingStamp } from './routing';
 import { ECONOMY, ROOMS, SCHEDULES, STORY, STRESS } from './rules';
 import { collectorLostRoute, inWasteBacklog, runCollectors } from './recycling';
 import { guardLostRoute, runGuards } from './security';
@@ -933,14 +933,12 @@ function runHousekeeping(world: World, clock: Clock): void {
   const wanted = Math.ceil(dirty.length / SCHEDULES.housekeeping.roomsPerKeeper);
   let sent = 0;
   for (const office of offices) {
-    // Every keeper sent from here starts in this office, so a room with no route for one has
-    // none for the rest this tick: it is asked once, not once per keeper.
-    const noRoute = new Set<Id>();
     for (const id of office.tenants) {
       if (sent >= wanted) return;
       const keeper = world.sims.get(id);
       if (!keeper || keeper.kind !== 'staff') continue;
       if (keeper.state !== 'inRoom' || keeper.inRoomId !== office.id) continue;
+      const noRoute = roomsWithNoRouteFrom(world, keeper.pos.floor);
       // The first unclaimed room this keeper can get to: one it cannot reach never holds up the rest.
       let took = false;
       for (const room of dirty) {
@@ -957,6 +955,24 @@ function runHousekeeping(world: World, clock: Clock): void {
       if (!took) break; // nothing left this office can reach; another office may
     }
   }
+}
+
+/**
+ * The rooms a keeper starting on a floor has no route to, kept for as long as the routing graph
+ * stands (routingStamp): whether a route exists turns on the graph and the two floors alone, so
+ * a room asked once is not asked again every minute of the shift. Only a cache: no answer changes.
+ */
+const noRouteMemo = new WeakMap<World, { stamp: object; byFloor: Map<number, Set<Id>> }>();
+function roomsWithNoRouteFrom(world: World, floor: number): Set<Id> {
+  const stamp = routingStamp(world);
+  let memo = noRouteMemo.get(world);
+  if (!memo || memo.stamp !== stamp) {
+    memo = { stamp, byFloor: new Map() };
+    noRouteMemo.set(world, memo);
+  }
+  let rooms = memo.byFloor.get(floor);
+  if (!rooms) memo.byFloor.set(floor, (rooms = new Set()));
+  return rooms;
 }
 
 /**

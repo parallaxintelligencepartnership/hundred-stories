@@ -36,6 +36,14 @@ if [ -n "$(git status --porcelain)" ]; then
   echo "working tree is not clean; commit or stash first" >&2
   exit 1
 fi
+# Proof the tests passed on this exact tree: scripts/verify.sh writes the stamp only when the
+# typecheck and the whole suite pass. Checked before anything is bumped.
+STAMP="$(git rev-parse --git-dir)/hs-verified"
+TREE=$(git rev-parse 'HEAD^{tree}')
+if [ ! -f "$STAMP" ] || [ "$(cat "$STAMP")" != "$TREE" ]; then
+  echo "the tests have not passed on this commit; run sh scripts/verify.sh first, then ship again" >&2
+  exit 1
+fi
 
 OLD_RE=$(printf '%s' "$OLD" | sed 's/\./\\./g')
 

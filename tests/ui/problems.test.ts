@@ -8,6 +8,7 @@ import { tickMany } from '../../src/sim/tick';
 import type { Command, Room, Sim, World } from '../../src/sim/types';
 import { ROOMS } from '../../src/sim/rules';
 import { addRoom, addSim, allocId, createWorld, log, LONG_WAIT_MINUTES } from '../../src/sim/world';
+import { collectionLines } from '../../src/ui/panels';
 import { OPEN_CENTER, OPEN_ELEVATOR, SHOW_FLOOR, SHOW_ROOM, timeLeftWords, towerProblems, type TowerProblem } from '../../src/ui/problems';
 import { atOnDay, buildRow, buildTower, lobbyRun, onlyShaft, roomsMatching } from '../scenarios/helpers';
 
@@ -258,6 +259,24 @@ describe('tower problems: waste', () => {
     atOnDay(world, 5, 7, 0);
     expect(ofKind(world, 'wasteBehind')).toEqual([]);
     expect(towerProblems(world)).toEqual([]);
+  });
+
+  it("the center card's Cannot reach row agrees with the problem row, live (P3b review)", () => {
+    const world = tower();
+    const shaftId = onlyShaft(world).id;
+    const cannotReach = (): string | undefined => new Map(collectionLines(world, center(world))).get('Cannot reach');
+    atOnDay(world, 1, 7, 0);
+    expect(cannotReach()).toBe('None');
+    // Cut before the shift: no worker has tried a trip yet, and the card says so at once.
+    expect(applyCommand(world, { kind: 'shaft.setStop', shaftId, floor: -2, stops: false }).ok).toBe(true);
+    expect(cannotReach()).toBe('Floors 2, 3, 4, 5, 6');
+    atOnDay(world, 1, 12, 0);
+    expect(cannotReach()).toBe('Floors 2, 3, 4, 5, 6');
+    // Fixed after the shift: gone at once, with the problem row.
+    atOnDay(world, 1, 17, 30);
+    expect(applyCommand(world, { kind: 'shaft.setStop', shaftId, floor: -2, stops: true }).ok).toBe(true);
+    expect(cannotReach()).toBe('None');
+    expect(ofKind(world, 'wasteReach')).toEqual([]);
   });
 
   it('is true now: a stop fixed after the shift clears the row at once, and a stop cut after the shift raises it at once', () => {

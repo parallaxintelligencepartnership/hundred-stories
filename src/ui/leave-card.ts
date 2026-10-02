@@ -103,6 +103,8 @@ export function showLeaveCard(options: LeaveCardOptions): void {
   // A page is being swapped for the next one (an answer's result): its going is not a Back.
   let swapping = false;
   let busy = false;
+  // Our page in the menu, while it stands.
+  let shownPage: PausePage | null = null;
 
   const go = (): void => {
     settled = true;
@@ -256,11 +258,17 @@ export function showLeaveCard(options: LeaveCardOptions): void {
         if (!swapping) stay();
       },
     };
+    // A page opened over ours while an answer ran (Stories, from a chip or toast) goes first, so
+    // the new screen replaces ours and no stale leave page waits under it.
+    if (shownPage !== null) {
+      while (menu.page() !== null && menu.page() !== shownPage) menu.popPage();
+    }
     if (menu.page()?.id === 'leave') {
       swapping = true;
       menu.popPage();
       swapping = false;
     }
+    shownPage = page;
     menu.pushPage(page);
     // The safe answer has focus, never one that leaves or replaces anything.
     (safe as HTMLButtonElement | null)?.focus?.({ preventScroll: true });

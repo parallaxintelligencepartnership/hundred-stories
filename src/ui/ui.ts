@@ -217,6 +217,10 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   // menu entry (its entry busy and saying so for the whole save).
   let exitScreen: ExitScreen | null = null;
   let exitInFlight = false;
+  // The update toast's Reload, from the tap until the player keeps playing: a second tap starts nothing.
+  let reloading = false;
+  // A leave card owed while Send feedback or the intro covers the menu: shown once the menu is back.
+  let leaveCardOwed: (() => void) | null = null;
   let exitEntry: { setBusy(busy: boolean): void; setWord(text: string): void } | null = null;
   /** The band the chrome covers, so the chip and the bar stay out from under it. */
   let chromeBand = { top: 0, bottom: 0 };
@@ -1659,6 +1663,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     // comes back on that page, not the game.
     // The exited screen keeps the menu out of sight under it.
     if (panelKind === 'none' && pauseMenu.isOpen() && !pauseMenu.isShown() && !exitScreen) pauseMenu.show();
+    showOwedLeaveCard();
     // A page in the pause menu (Settings, Stories) keeps its live parts current, as a panel does.
     pauseMenu.refresh();
     const selection = game.getSelection();
@@ -1845,6 +1850,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
         const at = performance.now();
         if (at - giveUpShownAt < GIVE_UP_TOAST_GAP_MS) return;
         giveUpShownAt = at;
+        // A snapshot: the count is taken now, and the page counts again when the toast is tapped.
         const problems = towerProblems(world);
         const only = problems.length === 1 ? problems[0] : undefined;
         if (problems.length === 0) {
@@ -2250,7 +2256,14 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   const pageCtx: PanelContext = Object.assign(Object.create(ctx) as PanelContext, {
     close: () => void pauseMenu.popPage(),
     // Stories' Show on the tower: out of the menu, so the place is in sight.
-    centerOn: (floor: number, x: number) => leaveMenu(() => ctx.centerOn?.(floor, x)),
+    // On a phone or portrait tablet the card open before Stories is a bottom sheet over half the
+    // view: it stays closed, so the place stays in sight (as the old News did).
+    centerOn: (floor: number, x: number) =>
+      leaveMenu(() => {
+        const width = viewportWidth();
+        if ((width === undefined || width < SHEET_CARD_MIN_WIDTH) && game.getSelection()) game.select(null);
+        ctx.centerOn?.(floor, x);
+      }),
     select: (sel: Parameters<NonNullable<PanelContext['select']>>[0]) => leaveMenu(() => ctx.select?.(sel)),
     openIntro: () => pauseMenu.stepAside(() => ctx.openIntro?.()),
     openFeedback: () => pauseMenu.stepAside(() => ctx.openFeedback?.()),
@@ -2316,6 +2329,9 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
    */
   function openStories(target?: StoriesTarget): void {
     if (destroyed || exitScreen) return;
+    // A card holding the player's work (unsent feedback, a share image being made) is never thrown
+    // away for it: the card stays and Stories does not open (as Watch, Matt 2026-09-28).
+    if (panelKind !== 'none' && mountedPanel?.holdsWork?.()) return;
     // A card a page opened over the menu (Send feedback, the intro) gives way to it.
     if (pauseMenu.isOpen() && !pauseMenu.isShown()) {
       setPanel('none');
@@ -2788,6 +2804,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
       reload();
       return;
     }
+    if (reloading) return; // a double tap: the first tap's leave answers for both
+    reloading = true;
     const leave = (): Promise<LeaveResult> =>
       game.leave('reload').catch((): LeaveResult => ({ ok: false, reason: LEAVE_NOT_SAVED }));
     const left = await leave();
@@ -2796,18 +2814,37 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
       reload();
       return;
     }
-    showLeaveCard({
-      menu: pauseMenu,
-      result: left,
-      retry: leave,
-      proceed: () => reload(),
-      stay: () => {
-        game.resumeAfterLeave();
-        if (!destroyed) putUpdateToast();
-      },
-      saveFile: (text) => exportSave(text, pageCtx),
-      game,
-    });
+    const card = (): void =>
+      showLeaveCard({
+        menu: pauseMenu,
+        result: left,
+        retry: leave,
+        proceed: () => reload(),
+        stay: () => {
+          reloading = false;
+          game.resumeAfterLeave();
+          if (!destroyed) putUpdateToast();
+        },
+        saveFile: (text) => exportSave(text, pageCtx),
+        game,
+      });
+    if (pauseMenu.isOpen() && !pauseMenu.isShown()) {
+      // Send feedback or the intro covers the menu, and closing it for the card could lose typed
+      // words: the card waits until the menu is back (refreshPanel), and the tower is not held meanwhile.
+      game.resumeAfterLeave();
+      leaveCardOwed = card;
+      return;
+    }
+    card();
+  }
+
+  /** The owed leave card, once nothing covers the menu (or the menu has closed). */
+  function showOwedLeaveCard(): void {
+    if (!leaveCardOwed || destroyed || exitScreen) return;
+    if (pauseMenu.isOpen() && !pauseMenu.isShown()) return;
+    const card = leaveCardOwed;
+    leaveCardOwed = null;
+    card();
   }
 
   // A save refused because another window saved this tower after this page opened it

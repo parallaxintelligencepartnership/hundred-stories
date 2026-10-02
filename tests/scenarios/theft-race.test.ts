@@ -63,10 +63,14 @@ interface Outcome {
   result: 'caught' | 'escaped' | 'called off';
   raced: boolean;
   problems: string[];
+  /** The caught thief's stop still on its car's call list with nobody else aboard bound there (review of P2, A3). */
+  leftCalls: string[];
+  /** Catches checked for that: the thief caught aboard with nobody else bound to its floor. */
+  checked: number;
 }
 
 /** One theft from `enter` (minute of day) to its end, noting whether the guard sent met the thief at the car door. */
-function runTheft(base: World, enter: number): Outcome {
+function runTheft(base: World, enter: number, alone = false): Outcome {
   const loaded = deserialize(serialize(base));
   if (!loaded.ok) throw new Error(loaded.reason);
   const w = loaded.world;
@@ -74,18 +78,47 @@ function runTheft(base: World, enter: number): Outcome {
   const t0 = w.logTotal;
   let raced = false;
   const problems: string[] = [];
+  const leftCalls: string[] = [];
+  let checked = 0;
   for (let i = 0; i < 1440 && theftOf(w); i++) {
     const ev = theftOf(w) as Theft;
     const thief = ev.simId === null ? undefined : w.sims.get(ev.simId);
     const guard = ev.guardId === null ? undefined : w.sims.get(ev.guardId);
     // The race: the thief has just boarded on the theft floor, the guard sent stands on that floor by the car.
     if (thief && guard && ev.phase === 'leaving' && thief.state === 'riding' && guard.state !== 'riding' && guard.pos.floor === ev.floor && Math.abs(guard.pos.x - thief.pos.x) <= 1) raced = true;
+    const leg = thief?.state === 'riding' ? thief.route[0] : undefined;
+    const ride = thief && leg?.kind === 'ride' && thief.inCarId !== null ? { carId: thief.inCarId, toFloor: leg.toFloor } : null;
+    const carOf = (id: number) => [...w.shafts.values()].flatMap((sh) => sh.cars).find((c) => c.id === id);
+    if (alone && raced && ride) {
+      // Everyone else aboard bound to the thief's floor leaves the tower, so the thief's call is its own.
+      const car = carOf(ride.carId);
+      for (const id of [...(car?.passengers ?? [])]) {
+        const next = w.sims.get(id)?.route[0];
+        if (id === thief?.id || next?.kind !== 'ride' || next.toFloor !== ride.toFloor) continue;
+        if (car) car.passengers = car.passengers.filter((p) => p !== id);
+        w.sims.delete(id);
+      }
+    }
+    const caughtBefore = w.logTotal;
     tick(w);
     problems.push(...seatProblems(w));
+    const caughtNow = w.log.slice(Math.max(0, w.log.length - (w.logTotal - caughtBefore))).some((l) => l.text.startsWith('Thief caught'));
+    if (ride && caughtNow) {
+      const car = carOf(ride.carId);
+      const wanted = car?.passengers.some((id) => {
+        if (id === thief?.id) return false;
+        const next = w.sims.get(id)?.route[0];
+        return next?.kind === 'ride' && next.toFloor === ride.toFloor;
+      });
+      if (car && !wanted) {
+        checked += 1;
+        if (car.calls.has(ride.toFloor)) leftCalls.push(`car ${car.id} still stops at ${ride.toFloor}`);
+      }
+    }
   }
   const lines = w.log.slice(Math.max(0, w.log.length - (w.logTotal - t0))).map((l) => l.text);
   const result = lines.some((t) => t.startsWith('Thief caught')) ? 'caught' : lines.some((t) => t.startsWith('Thief escaped')) ? 'escaped' : 'called off';
-  return { result, raced, problems };
+  return { result, raced, problems, leftCalls, checked };
 }
 
 describe('the guard and the thief at the car door', () => {
@@ -100,8 +133,22 @@ describe('the guard and the thief at the car door', () => {
       if (out.raced) {
         races += 1;
         expect(out.result).toBe('caught');
+        expect(out.leftCalls).toEqual([]);
       }
     }
     expect(races).toBeGreaterThan(0);
+  });
+
+  it('the caught thief takes its car call with it when nobody else aboard is bound there (review of P2, A3)', () => {
+    const base = securityTower();
+    atOnDay(base, 0, 6, 1);
+    let checked = 0;
+    for (let k = 0; k < 20; k++) {
+      const out = runTheft(base, 10 * 60 + ((k * 47) % 600), true);
+      expect(out.problems).toEqual([]);
+      expect(out.leftCalls).toEqual([]);
+      checked += out.checked;
+    }
+    expect(checked).toBeGreaterThan(0);
   });
 });

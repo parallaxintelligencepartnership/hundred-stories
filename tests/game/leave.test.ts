@@ -13,6 +13,7 @@ import {
   STILL_HERE,
 } from '../../src/game/game';
 import { SAVE_PRESENT_KEY } from '../../src/game/storage';
+import type { Renderer } from '../../src/render/renderer';
 import { fakeIdb, fakeLocalStorage, handClock, savedTower, settle } from './leave-stores';
 
 const MINE_LS = 'hundred-stories:autosave';
@@ -259,5 +260,132 @@ describe('a stand-in is reported unsaved and never written by a leave (protectio
     expect(await game.leave('exit')).toEqual({ ok: true, wrote: false, unsaved: 'unread' });
     expect(ls.data.has(MINE_LS)).toBe(false);
     expect(idb.data.has('autosave')).toBe(false);
+  });
+});
+
+describe('Open a saved file is refused while a leave holds the tower (review A6)', () => {
+  it('refused with the saving reason, during the write and after an ok leave; opens once the tower is given back', async () => {
+    const idb = fakeIdb();
+    vi.stubGlobal('localStorage', fakeLocalStorage().store);
+    vi.stubGlobal('indexedDB', idb.factory);
+    const { game } = gameOn();
+    game.apply({ kind: 'build', room: 'lobby', floor: 1, x: 150 });
+    const other = createGame(9);
+    other.apply({ kind: 'build', room: 'lobby', floor: 1, x: 120 });
+    const file = other.exportSave();
+    const world = game.world;
+    const open = idb.hold();
+    const leaving = game.leave('reload');
+    await settle();
+    expect(await game.importSave(file)).toEqual({ ok: false, reason: LEAVING_REASON });
+    open();
+    expect(await leaving).toEqual({ ok: true, wrote: true });
+    expect(await game.importSave(file)).toEqual({ ok: false, reason: LEAVING_REASON });
+    expect(game.world).toBe(world);
+    game.resumeAfterLeave();
+    expect(await game.importSave(file)).toEqual({ ok: true });
+    expect(game.world.seed).toBe(9);
+  });
+});
+
+// Review of P1a, A3: the guards the mutations M1 to M3 removed without a test noticing.
+describe('the pointer, the autosave and the write queue during a leave (review A3)', () => {
+  type Handler = (event: unknown) => void;
+  function attachFakes(game: ReturnType<typeof createGame>): (type: string, x: number) => void {
+    const handlers = new Map<string, Handler[]>();
+    const el = {
+      addEventListener(type: string, fn: Handler) {
+        handlers.set(type, [...(handlers.get(type) ?? []), fn]);
+      },
+    } as unknown as HTMLElement;
+    const renderer = {
+      render: () => {},
+      camera: { centerOn: () => {}, ensureFloorVisible: () => {}, setGroundLine: () => {}, setObstruction: () => {}, reset: () => {} },
+      screenToTile: (sx: number) => ({ floor: 1, x: Math.floor(sx / 8) }),
+      setGhost: () => {},
+      ghostScreenRect: () => null,
+      setSelection: () => {},
+      onPick: () => {},
+      setPanEnabled: () => {},
+      setToolOwnsDrag: () => {},
+      setReducedMotion: () => {},
+      setChrome: () => {},
+      resetMotion: () => {},
+      destroy: () => {},
+    } as unknown as Renderer;
+    game.attach(renderer, el);
+    return (type, x) => {
+      const event = { button: 0, offsetX: x, offsetY: 50, clientX: x, clientY: 50, pointerId: 1, pointerType: 'mouse', timeStamp: 0 };
+      for (const fn of handlers.get(type) ?? []) fn(event);
+    };
+  }
+  const lobbyTiles = (game: ReturnType<typeof createGame>): number =>
+    [...game.world.rooms.values()].filter((r) => r.kind === 'lobby').length;
+
+  it('a pointer drag during a slow leave builds nothing; the same drag builds once the tower is given back', async () => {
+    const idb = fakeIdb();
+    vi.stubGlobal('localStorage', fakeLocalStorage().store);
+    vi.stubGlobal('indexedDB', idb.factory);
+    const { game } = gameOn();
+    const fire = attachFakes(game);
+    game.apply({ kind: 'build', room: 'lobby', floor: 1, x: 150 });
+    game.setTool({ kind: 'room', room: 'lobby' });
+    const tiles = lobbyTiles(game);
+    const open = idb.hold();
+    const leaving = game.leave('reload');
+    await settle();
+    fire('pointerdown', 8 * 100);
+    fire('pointermove', 8 * 120);
+    fire('pointerup', 8 * 120);
+    expect(lobbyTiles(game)).toBe(tiles);
+    open();
+    expect(await leaving).toEqual({ ok: true, wrote: true });
+    expect(savedTower(idb.data.get('autosave'))?.lobbies).toEqual([150]);
+    game.resumeAfterLeave();
+    fire('pointerdown', 8 * 100);
+    fire('pointermove', 8 * 120);
+    fire('pointerup', 8 * 120);
+    expect(lobbyTiles(game)).toBeGreaterThan(tiles);
+  });
+
+  it('an autosave held mid-write, then an edit and a leave: the stored tower is the leave one', async () => {
+    const idb = fakeIdb();
+    vi.stubGlobal('localStorage', fakeLocalStorage().store);
+    vi.stubGlobal('indexedDB', idb.factory);
+    const { game, second } = gameOn();
+    game.apply({ kind: 'build', room: 'lobby', floor: 1, x: 150 });
+    const open = idb.hold();
+    game.world.time.minute = 360 + 1440 - 1; // the next second crosses an autosave boundary
+    second();
+    await settle(); // the autosave's put is waiting on the slow disk
+    idb.ctl.gate = null; // later puts would land at once, ahead of it, were they not queued
+    game.apply({ kind: 'build', room: 'lobby', floor: 1, x: 140 });
+    let result: unknown = null;
+    const leaving = game.leave('reload').then((r) => (result = r));
+    await settle();
+    expect(result).toBeNull(); // the leave waits for the autosave on its way
+    open();
+    await leaving;
+    expect(result).toEqual({ ok: true, wrote: true });
+    expect(savedTower(idb.data.get('autosave'))?.lobbies).toEqual([140, 150]);
+  });
+
+  it('two writes to one slot land in the order they were asked for', async () => {
+    const idb = fakeIdb();
+    vi.stubGlobal('localStorage', fakeLocalStorage().store);
+    vi.stubGlobal('indexedDB', idb.factory);
+    const { game } = gameOn();
+    game.apply({ kind: 'build', room: 'lobby', floor: 1, x: 150 });
+    const open = idb.hold();
+    const first = game.save();
+    await settle(); // the first put is waiting on the slow disk
+    idb.ctl.gate = null;
+    game.apply({ kind: 'build', room: 'lobby', floor: 1, x: 140 });
+    const next = game.save();
+    await settle();
+    open();
+    expect(await first).toEqual({ ok: true });
+    expect(await next).toEqual({ ok: true });
+    expect(savedTower(idb.data.get('autosave'))?.lobbies).toEqual([140, 150]);
   });
 });

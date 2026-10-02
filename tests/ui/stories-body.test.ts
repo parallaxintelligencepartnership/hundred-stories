@@ -10,6 +10,7 @@ import { recordBeat } from '../../src/sim/story';
 import { EVENTS, ROOMS } from '../../src/sim/rules';
 import type { ActiveEvent, Command, Room, RoomKind, VipVisitRecord, World } from '../../src/sim/types';
 import { addRoom, allocId, createWorld, log } from '../../src/sim/world';
+import { fireHeadline, roomFloors } from '../../src/ui/alerts';
 import type { PanelContext } from '../../src/ui/panels';
 import { OPEN_ELEVATOR, SHOW_FLOOR, towerProblems } from '../../src/ui/problems';
 import { applyCommand } from '../../src/sim/build';
@@ -175,6 +176,16 @@ describe('Stories: Needs you now', () => {
     expect(s.lines('Needs you now')).toEqual(['Fire on floor 12, no security. Call a helicopter or let it burn out.']);
     tap(s.buttonIn(s.rowOf('fire'), showOnTower));
     expect(s.centered).toEqual([{ floor: 12, x: 104 }]);
+  });
+
+  it('a fire in a room two floors tall names both floors, as the fire card does (P3a A9)', () => {
+    const world = createWorld(1);
+    world.cash = 1_000_000;
+    const hall = room(world, 'partyHall', 12, 100, { onFire: true });
+    world.events.push({ kind: 'fire', roomIds: [hall.id], startedAt: 0, spreadAt: 30 });
+    const s = mount(world);
+    expect(s.lines('Needs you now')).toEqual(['Fire on floors 12 to 13, no security. Call a helicopter or let it burn out.']);
+    expect(fireHeadline(roomFloors(hall), 1)).toBe('Fire on floors 12 to 13');
   });
 
   it('points at the new room when the fire moves on the same floor (the line text does not change)', () => {

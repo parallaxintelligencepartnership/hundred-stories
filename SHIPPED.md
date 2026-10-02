@@ -31,6 +31,8 @@ Since the feedback card, the site is a Worker with static assets (`src/worker/in
 npm run deploy    # npm run build && node scripts/predeploy-check.mjs && npx wrangler deploy (wrangler 4.144.0, pinned)
 ```
 
+A release goes through `scripts/ship.sh`, and since the 2026-10-01 readiness run it refuses to bump the version unless `sh scripts/verify.sh` has passed on the exact commit being shipped: verify.sh runs `npm run typecheck` and `npx vitest run` on a clean working tree and only then writes the tree id (`git rev-parse HEAD^{tree}`) to `hs-verified` inside the git folder, never committed. Any change after that, even one commit, needs verify.sh again before ship.sh will go on.
+
 `scripts/predeploy-check.mjs` (since 0.5.0) refuses to deploy a build whose `dist/_headers` policy would allow eval, whose play page is missing, or whose bundles lack the PixiJS unsafe-eval shim (`_unsafeEvalCheck(){}`); that is the static form of the check that would have caught the first live defect. Before a deploy that touches the renderer, the CSP or PixiJS, also load `/play/` from the nginx container in headless Chrome and check the console for `Refused` or `unsafe-eval`. Verify after: `curl -sI https://hundredstories.xyz/` shows the five headers, `/nope` is 404, `http://` redirects to https, and `/play/` mounts a canvas.
 
 Fallback, pi3 (`deploy/README.md`): copy `deploy/.env.example` to `deploy/.env`, set `SITE_HOST`, run `deploy/deploy.sh`. The fallback nginx now serves `404.html` for missing paths, like the primary.
