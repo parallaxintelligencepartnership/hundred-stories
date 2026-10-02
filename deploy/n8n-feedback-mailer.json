@@ -30,7 +30,7 @@
           "parameters": [
             {
               "name": "limit",
-              "value": "100"
+              "value": "1000"
             }
           ]
         },
@@ -167,6 +167,19 @@
           "name": "Cloudflare n8n-feedback-kv"
         }
       }
+    },
+    {
+      "parameters": {
+        "errorMessage": "Hundred Stories feedback mail could not be sent. The messages are still stored and will be tried again next hour."
+      },
+      "id": "mail-failed-stop",
+      "name": "Mail failed",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        1320,
+        180
+      ]
     }
   ],
   "connections": {
@@ -234,12 +247,19 @@
             "index": 0
           }
         ],
-        []
+        [
+          {
+            "node": "Mail failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     }
   },
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "errorWorkflow": "GAqcaSygWIaIZg9u"
   },
   "meta": {
     "note": "Imported into n8n on 2026-09-27 as workflow Hundred Stories feedback mailer. Header credential: Cloudflare n8n-feedback-kv (token in the Mac keychain as cloudflare-n8n-feedback-kv, Workers KV Storage:Edit). Mail: the MATTHEW @ AI SMTP credential (Spacemail), from matthew@parallaxintelligence.ai to requests@hundredstories.xyz, Reply-To the player when given. Matt wants the sender to be a hundredstories.xyz address: that needs an n8n SMTP credential for the Microsoft 365 mailbox (smtp.office365.com, port 587, STARTTLS, user requests@hundredstories.xyz, its password or an app password, with authenticated SMTP enabled for that mailbox in Exchange admin); until then the sender is named Hundred Stories feedback on the .ai address."

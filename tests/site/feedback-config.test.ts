@@ -31,7 +31,17 @@ describe('the n8n mailer workflow', () => {
     expect(cond).toContain('$json.error');
     expect(cond).toContain('"notExists"');
     expect(next('Email sent', 0)).toEqual(['Delete the key']);
-    expect(next('Email sent', 1)).toEqual([]);
+    expect(next('Email sent', 1)).toEqual(['Mail failed']);
+  });
+
+  it('a failed send is not silent: the false branch stops with an error and the failure workflow hears of it', () => {
+    expect(node('Mail failed').type).toBe('n8n-nodes-base.stopAndError');
+    expect(String(node('Mail failed').parameters['errorMessage'])).toContain('could not be sent');
+    expect(((wf as unknown as { settings: Record<string, string> }).settings)['errorWorkflow']).toBe('GAqcaSygWIaIZg9u');
+  });
+
+  it('reads up to 1,000 waiting messages a run, the most one key listing returns', () => {
+    expect(JSON.stringify(node('List feedback keys').parameters)).toContain('"name":"limit","value":"1000"');
   });
 
   it("replies go to the player's address when they gave one, and it still runs hourly", () => {

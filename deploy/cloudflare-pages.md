@@ -29,6 +29,8 @@ remains the fallback, for the static site only.
 npm run deploy
 ```
 
+A release is `sh scripts/verify.sh` (typecheck and the whole suite on a clean tree; it stamps the tree id inside the git folder) and then `sh scripts/ship.sh <version>`, both run on main after main is fast-forwarded to the verified commit; ship.sh refuses any branch but main and any tree without a matching stamp. `npm run deploy` by itself builds and deploys without the test gate and is for emergencies only.
+
 This runs `npm run build`, then `scripts/predeploy-check.mjs`, then `npx wrangler deploy`,
 which uploads `dist/` as static assets and attaches the custom domains from `wrangler.jsonc`.
 The predeploy check gates on the built `dist/` output plus `src-tauri/Cargo.lock`: it fails
