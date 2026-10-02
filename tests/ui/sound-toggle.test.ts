@@ -304,7 +304,8 @@ describe('a phone at 390 px: the alerts band stops short of Sound and Save', () 
     // The round buttons' row: one gap under the bar, a round button (touch plus 8 px) tall.
     const bar = 56; // any bar bottom: both sides of the comparison carry it
     const rowBottom = bar + vars['--gap-float']! + px('calc(var(--touch) + 8px)');
-    const alertsBlock = css.slice(css.lastIndexOf('@media (max-width: 720px) {'));
+    // The phone block that holds the band's rule, not just the last phone block (see alerts.test.ts).
+    const alertsBlock = css.slice(css.lastIndexOf('@media (max-width: 720px) {', css.lastIndexOf('\n  .hs-toasts {')));
     const top = declIn(alertsBlock, '  .hs-toasts', 'top')
       .replace('var(--top-actual, calc(var(--top-h) * 2 + var(--safe-top)))', String(bar))
       .replace('max(var(--chip-h, 0px), ', 'M(0, ');

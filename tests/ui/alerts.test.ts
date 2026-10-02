@@ -469,7 +469,9 @@ describe('the alert stack', () => {
 
   it('keeps alerts to the top quarter of a phone screen', () => {
     const css = readFileSync(new URL('../../src/ui/ui.css', import.meta.url), 'utf8');
-    const phone = css.slice(css.lastIndexOf('@media (max-width: 720px) {'));
+    // The phone block that holds the band's rule, not just the last phone block: another one
+    // (the cards stepping aside under the pause menu, 0cf86d5) may follow it.
+    const phone = css.slice(css.lastIndexOf('@media (max-width: 720px) {', css.lastIndexOf('\n  .hs-toasts {')));
     const rule = /\n {2}\.hs-toasts \{([^}]*)\}/.exec(phone)?.[1] ?? '';
     expect(rule).toContain('bottom: auto;');
     expect(rule).toContain('max-height: calc(25vh + 2 * var(--toast-bleed));');

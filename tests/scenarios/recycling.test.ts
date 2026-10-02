@@ -177,7 +177,10 @@ describe('collection workers', () => {
     atOnDay(world, 1, 11, 0);
     expect(officeOn(world, 4).waste).toBe(5);
     expect(logCount(world, 'The waste collectors could not reach floor 4.')).toBe(1);
-    expect(collectionLines(world, c)[4]).toEqual(['Cannot reach', 'Floor 4']);
+    // The card's row is live (b62be4f): with no stop on B2 no office floor can be reached, not
+    // only the one a worker tried; the day's record still names just the floor that had waste.
+    expect(collectionLines(world, c)[4]).toEqual(['Cannot reach', 'Floors 2, 3, 4, 5, 6']);
+    expect(centerSummary(world, c).unreachableFloors).toEqual([4]);
     for (const sim of collectors(world)) expect(sim.inRoomId).toBe(c.id);
 
     // The player adds the stop: the next look finds the way.
@@ -186,6 +189,7 @@ describe('collection workers', () => {
     expect(officeOn(world, 4).waste).toBe(0);
     expect(centerSummary(world, c).collectedToday).toBe(5);
     expect(centerSummary(world, c).unreachableFloors).toEqual([]);
+    expect(collectionLines(world, c)[4]).toEqual(['Cannot reach', 'None']);
     expect(logCount(world, 'The waste collectors could not reach floor 4.')).toBe(1);
   });
 });

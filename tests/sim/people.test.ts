@@ -24,6 +24,10 @@ vi.mock('../../src/sim/routing', () => ({
   findRoute: mocks.findRoute,
   isReachableFromLobby: mocks.isReachableFromLobby,
   entrances: mocks.entrances,
+  // findRoute is a mock a test may change mid-run, so the graph never "stands": a fresh stamp
+  // every call keeps housekeeping from holding a no-route answer across ticks here. The real
+  // stamp's invalidation is covered in tests/scenarios/housekeeping-reach.test.ts.
+  routingStamp: () => ({}),
 }));
 
 vi.mock('../../src/sim/elevators', async (importOriginal) => {

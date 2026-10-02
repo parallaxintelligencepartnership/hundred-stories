@@ -862,9 +862,11 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   lastLogTotal = game.world.logTotal;
   // The menu holds the game still while it is open: a saved file opened from its Settings page
   // starts the tower's clock, and the menu takes that speed as the one to give back on close.
+  // One subscription for the whole UI, let go on destroy; the save-conflict card rides on it.
   const unsubscribe = game.subscribe(() => {
     if (pauseMenu.isOpen()) pauseMenu.hold();
     update();
+    answerSaveConflict();
   });
   // Capture, so a card with a text field open can hold the camera's keys back as well.
   window.addEventListener('keydown', onKeyDown, { capture: true });
@@ -2849,12 +2851,13 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
 
   // A save refused because another window saved this tower after this page opened it
   // (GameApi.takeSaveConflict): the leave card's conflict answers, with no leave to hold or resume.
-  game.subscribe(() => {
+  // Asked on every game notify, from the UI's one subscription above.
+  function answerSaveConflict(): void {
     // Not over the exited screen: one still owed is said once the player is back at the tower.
     const owed = destroyed || exitScreen ? null : (game.takeSaveConflict?.() ?? null);
     if (!owed || pauseMenu.page()?.id === 'leave') return; // a leave card up already answers it
     showLeaveCard({ menu: pauseMenu, result: owed, retry: async () => owed, proceed: () => reload(), stay: () => {}, saveFile: (text) => exportSave(text, pageCtx), game });
-  });
+  }
 
   return {
     update,

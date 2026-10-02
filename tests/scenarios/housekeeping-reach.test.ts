@@ -150,6 +150,71 @@ describe('housekeeping takes the rooms it can reach (F5)', () => {
     expect(a.dirty).toBe(false);
   });
 
+  // The no-route answer is kept per starting floor until the routing graph changes. Every kind
+  // of change that can open a way must throw it away, or a keeper would go on treating a room
+  // as unreachable after the player fixed the route. (Release run 2026-10-01, routingStamp.)
+  type Fix = { name: string; shaftTop: number; cut(w: World, s: Shaft): void; open(w: World, s: Shaft): void };
+  const ok = (world: World, command: Parameters<typeof applyCommand>[1]): void => expect(applyCommand(world, command)).toEqual({ ok: true });
+  const fixes: Fix[] = [
+    {
+      name: 'a stop switched back on',
+      shaftTop: 4,
+      cut: (w, s) => ok(w, { kind: 'shaft.setStop', shaftId: s.id, floor: 3, stops: false }),
+      open: (w, s) => ok(w, { kind: 'shaft.setStop', shaftId: s.id, floor: 3, stops: true }),
+    },
+    {
+      name: "the car's floor range widened",
+      shaftTop: 4,
+      cut: (w, s) => ok(w, { kind: 'shaft.setCarRange', shaftId: s.id, carId: (s.cars[0] as Shaft['cars'][number]).id, range: { lo: 1, hi: 2 } }),
+      open: (w, s) => ok(w, { kind: 'shaft.setCarRange', shaftId: s.id, carId: (s.cars[0] as Shaft['cars'][number]).id, range: null }),
+    },
+    {
+      name: 'the shaft extended',
+      shaftTop: 2,
+      cut: () => {},
+      open: (w, s) => ok(w, { kind: 'shaft.extend', shaftId: s.id, floorMin: 1, floorMax: 4 }),
+    },
+    {
+      name: 'stairs built',
+      shaftTop: 2,
+      cut: () => {},
+      open: (w) => ok(w, { kind: 'build', room: 'stairs', floor: 2, x: 160 }),
+    },
+    {
+      name: 'a second shaft built',
+      shaftTop: 2,
+      cut: () => {},
+      open: (w) => ok(w, { kind: 'shaft.build', shaft: 'standard', x: 170, floorMin: 2, floorMax: 4 }),
+    },
+  ];
+  for (const fix of fixes) {
+    it(`a room with no route is cleaned once the way opens: ${fix.name}`, () => {
+      const world = createWorld(5);
+      world.cash = 50_000_000;
+      world.stars = 2;
+      buildTower(world, [
+        ...lobbyRun(90, 200),
+        { kind: 'shaft.build', shaft: 'standard', x: 190, floorMin: 1, floorMax: fix.shaftTop },
+        { kind: 'build', room: 'housekeeping', floor: 2, x: 100 },
+        { kind: 'build', room: 'hotelSingle', floor: 3, x: 100 },
+      ]);
+      const a = roomsMatching(world, 'hotelSingle', { floor: 3 })[0] as Room;
+      const shaft = onlyShaft(world);
+      fix.cut(world, shaft);
+      atOnDay(world, 1, 10, 5);
+      a.tenants = [];
+      a.occupancy = 0;
+      a.dirty = true;
+      asked.routes.length = 0;
+      for (let i = 0; i < 60; i++) tick(world);
+      expect(a.dirty).toBe(true);
+      expect(asked.routes.filter((r) => r.staff && r.from === 2 && r.to === 3).length).toBe(1); // kept, not asked every minute
+      fix.open(world, shaft);
+      for (let i = 0; i < 120 && a.dirty; i++) tick(world);
+      expect(a.dirty).toBe(false);
+    });
+  }
+
   it('lists nothing with no housekeeping office, and nothing while every dirty room is reachable', () => {
     const { world, a, b } = hotelTower();
     a.dirty = true; // seeded: the list reads the flag only

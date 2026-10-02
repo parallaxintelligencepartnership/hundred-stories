@@ -518,13 +518,14 @@ describe('top bar at phone width', () => {
     expect(hiddenWhenFocused).toBe(false);
   });
 
-  it('moves Views and Share into the pause menu on a phone, after Stories: Views opens the list, Share its page', () => {
+  it('moves Views and Share into the pause menu on a phone, after Stories and Clips: Views opens the list, Share its page', () => {
     returning();
     setWidth(390);
     const root = mount(9 * 60);
     click(named(root, 'Menu'));
     const words = root.descendants().filter((n) => has(n, 'hs-pause-item')).map((n) => n.textContent);
-    expect(words.slice(words.indexOf('Stories'), words.indexOf('Stories') + 3)).toEqual(['Stories', 'Views', 'Share']);
+    // The decided order (2026-10-01, Clips after Stories): Views and Share follow Clips, before Settings.
+    expect(words.slice(words.indexOf('Stories'), words.indexOf('Stories') + 5)).toEqual(['Stories', 'Clips', 'Views', 'Share', 'Settings']);
     choosePauseEntry(root, 'share');
     expect(find(find(root, 'hs-pause-card'), 'hs-plate-title').textContent).toBe('Share');
     expect(root.descendants().some((n) => has(n, 'hs-sheet'))).toBe(false);
