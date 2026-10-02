@@ -5,9 +5,11 @@ import { storiesBody } from '../../src/ui/stories';
 import { createFinancesPanel, createQueryPanel, el, settingsBody, financeLists, nextSettleMinute, nextSettleTitle, type PanelContext } from '../../src/ui/panels';
 import { onQuarterStart, quarterForecast } from '../../src/sim/economy';
 import type { Sound } from '../../src/audio/audio';
-import { RENT } from '../../src/sim/rules';
+import { RENT, SCHEDULES } from '../../src/sim/rules';
+import { hourWords } from '../../src/sim/economy';
+import { HOUSEKEEPING_END_MINUTE } from '../../src/sim/people';
 import { applyCommand } from '../../src/sim/build';
-import type { LogEntry, World } from '../../src/sim/types';
+import type { Command, LogEntry, World } from '../../src/sim/types';
 import { createWorld } from '../../src/sim/world';
 import { FakeDom, type FakeElement } from './fake-dom';
 
@@ -571,5 +573,63 @@ describe('next settle', () => {
     expect(nextSettleTitle(2 * 1440 + 22 * 60)).toBe('Next settle, 5 AM tomorrow');
     expect(nextSettleTitle(1440 + 600)).toBe('Next settle, 5 AM in 2 days');
     expect(nextSettleTitle(301)).toBe('Next settle, 5 AM in 3 days');
+  });
+});
+
+// P3b: staff cards that say what the staff do. Housekeeping: rooms waiting, rooms out of reach
+// with their floors, and the cleaning hours from the rules. Security: what guards are for.
+describe('staff cards', () => {
+  const ctx = (): PanelContext => ({ apply: () => ({ ok: true }), notice: () => {}, close: () => {}, reducedMotion: false, setReducedMotion: () => {} });
+  const rowValue = (panel: FakeElement, label: string): string | undefined =>
+    panel.descendants().find((n) => n.className === 'hs-row' && n.children[0]?.textContent === label)?.children[1]?.textContent;
+  const build = (world: World, cmds: Command[]): void => {
+    for (const cmd of cmds) expect(applyCommand(world, cmd).ok).toBe(true);
+  };
+  /** Lobby, a guest shaft 1 to 4, housekeeping on basement 1 (no shaft there yet), singles on 2 to 4. */
+  function hotel(): World {
+    const world = createWorld(21);
+    world.cash = 50_000_000;
+    world.stars = 3;
+    const cmds: Command[] = [];
+    for (let x = 90; x <= 200; x++) cmds.push({ kind: 'build', room: 'lobby', floor: 1, x });
+    cmds.push({ kind: 'shaft.build', shaft: 'standard', x: 190, floorMin: 1, floorMax: 4 });
+    for (const floor of [2, 3, 4]) cmds.push({ kind: 'build', room: 'hotelSingle', floor, x: 100 });
+    cmds.push({ kind: 'build', room: 'housekeeping', floor: -1, x: 100 });
+    build(world, cmds);
+    return world;
+  }
+
+  it('the housekeeping card counts the rooms to clean, names the floors it cannot reach, and says when it cleans', () => {
+    const world = hotel();
+    const office = [...world.rooms.values()].find((r) => r.kind === 'housekeeping')!;
+    const panel = createQueryPanel({ world } as never, { roomId: office.id }, ctx()) as unknown as FakeElement & { refresh?: () => void };
+    const titles = panel.descendants().filter((n) => n.className === 'hs-section-title').map((n) => n.textContent);
+    expect(titles).toContain('Housekeepers');
+    expect(rowValue(panel, 'Rooms to clean')).toBe('0');
+    expect(rowValue(panel, 'Cannot reach')).toBe('None');
+    expect(rowValue(panel, 'Cleaning hours')).toBe(`${hourWords(SCHEDULES.housekeeping.start)} to ${hourWords(HOUSEKEEPING_END_MINUTE)}`);
+    expect(rowValue(panel, 'Cleaning hours')).toBe('10 AM to 8 PM');
+    for (const r of world.rooms.values()) if (r.kind === 'hotelSingle' && r.floor >= 3) r.dirty = true;
+    panel.refresh?.();
+    expect(rowValue(panel, 'Rooms to clean')).toBe('2');
+    expect(rowValue(panel, 'Cannot reach')).toBe('Floors 3, 4');
+    // A service elevator to basement 1: every room in reach.
+    build(world, [{ kind: 'shaft.build', shaft: 'service', x: 60, floorMin: -1, floorMax: 4 }]);
+    panel.refresh?.();
+    expect(rowValue(panel, 'Cannot reach')).toBe('None');
+    expect(rowValue(panel, 'Rooms to clean')).toBe('2');
+  });
+
+  it('the security card says what guards do, true to the rules', () => {
+    const world = hotel();
+    build(world, [{ kind: 'build', room: 'security', floor: 2, x: 120 }]);
+    const office = [...world.rooms.values()].find((r) => r.kind === 'security')!;
+    const panel = createQueryPanel({ world } as never, { roomId: office.id }, ctx()) as unknown as FakeElement;
+    expect(panel.textContent).toContain(
+      'Guards go to a theft when one is reported. Fires and bomb threats are dealt with from this office, even when no guard can get there.',
+    );
+    // Only on the security card.
+    const keeping = [...world.rooms.values()].find((r) => r.kind === 'housekeeping')!;
+    expect((createQueryPanel({ world } as never, { roomId: keeping.id }, ctx()) as unknown as FakeElement).textContent).not.toContain('Guards go to a theft');
   });
 });

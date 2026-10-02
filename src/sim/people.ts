@@ -54,7 +54,7 @@ export const HALL_CALL_RETRY_MINUTES = 6;
 /** After this many silent retries the sim stops trusting the shaft and asks routing again. */
 export const RETRIES_BEFORE_REROUTE = 3;
 /** Housekeepers stop taking new rooms after this minute of day. */
-const HOUSEKEEPING_END_MINUTE = 20 * 60;
+export const HOUSEKEEPING_END_MINUTE = 20 * 60;
 /** Share of a commerce room's seats that the crowd aims to fill, tuned to ROOMS[kind].incomePerQuarter. */
 const VISITOR_FILL: Partial<Record<RoomKind, number>> = { shop: 0.2, fastFood: 0.8, restaurant: 0.45 };
 /** A show pulls between this share of the seats and a full house. */
@@ -993,7 +993,7 @@ function staffUpOffice(world: World, office: Room): void {
   }
 }
 
-function dirtyHotelRooms(world: World): Room[] {
+export function dirtyHotelRooms(world: World): Room[] {
   const out: Room[] = [];
   for (const room of world.rooms.values()) {
     // A room held dirty by uncollected waste waits for the collectors, not housekeeping.

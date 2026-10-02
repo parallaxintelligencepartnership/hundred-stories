@@ -1,7 +1,8 @@
 // The Stories body (src/ui/stories.ts; Matt, 2026-10-01: Stories and News are one feature, one
-// page in the pause card). Sections in order, each left out while empty except Needs you now:
-// Needs you now with the helicopter and ransom, Tower problems (a slot), VIP visit, Following,
-// Around the tower, Today with Show older, and one Milestones section. Formerly news-panel.test.ts.
+// page in the pause card). Sections in order, each left out while empty except Needs you now and
+// Following (which says how to follow someone): Needs you now with the helicopter and ransom,
+// Tower problems, VIP visit, Following, Around the tower, Today with Show older, and one
+// Milestones section. Formerly news-panel.test.ts.
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { handleEventCommand } from '../../src/sim/events';
@@ -10,7 +11,10 @@ import { EVENTS, ROOMS } from '../../src/sim/rules';
 import type { ActiveEvent, Command, Room, RoomKind, World } from '../../src/sim/types';
 import { addRoom, allocId, createWorld, log } from '../../src/sim/world';
 import type { PanelContext } from '../../src/ui/panels';
-import { SHOW_ON_TOWER, storiesBody } from '../../src/ui/stories';
+import { OPEN_ELEVATOR, SHOW_FLOOR, towerProblems } from '../../src/ui/problems';
+import { applyCommand } from '../../src/sim/build';
+import { lobbyRun } from '../scenarios/helpers';
+import { FOLLOW_HINT, SHOW_ON_TOWER, storiesBody } from '../../src/ui/stories';
 import { FakeDom, type FakeElement } from './fake-dom';
 
 let dom: FakeDom;
@@ -104,10 +108,12 @@ const ransom = (b: FakeElement): boolean => b.dataset['command'] === 'bomb.pay';
 const showOnTower = (b: FakeElement): boolean => b.textContent === SHOW_ON_TOWER;
 
 describe('Stories: sections', () => {
-  it('on a new tower shows only Needs you now, which says nothing needs you', () => {
+  it('on a new tower shows Needs you now, which says nothing needs you, and Following, which says how to follow', () => {
     const s = mount(createWorld(1));
-    expect(s.shownTitles()).toEqual(['Needs you now']);
+    expect(s.shownTitles()).toEqual(['Needs you now', 'Following']);
     expect(s.lines('Needs you now')).toEqual(['Nothing needs you right now.']);
+    expect(s.sectionOf('Following').textContent).toBe(`Following${FOLLOW_HINT}`);
+    expect(FOLLOW_HINT).toBe('Nobody yet. Open a person and choose Follow.');
   });
 
   it('lists every section in order once each has something, with one Milestones section', () => {
@@ -121,7 +127,8 @@ describe('Stories: sections', () => {
     log(world, 'Built an office on floor 3.');
     world.milestones.push({ kind: 'star:3', minute: 100, text: 'The tower reached 3 stars.' });
     const s = mount(world);
-    expect(s.shownTitles()).toEqual(['Needs you now', 'VIP visit', 'Following', 'Around the tower', 'Today', 'Milestones']);
+    // The office on floor 3 has no lobby to come in by: a tower problem.
+    expect(s.shownTitles()).toEqual(['Needs you now', 'Tower problems', 'VIP visit', 'Following', 'Around the tower', 'Today', 'Milestones']);
     // The saved firsts and the two ways back into them share one section.
     const milestones = s.sectionOf('Milestones');
     expect(s.lines('Milestones')).toEqual(['The tower reached 3 stars.']);
@@ -266,7 +273,7 @@ describe('Stories: Needs you now', () => {
     world.time.minute = DAY + 600; // day 1, 10 AM: the next settle is 5 AM in 2 days
     const s = mount(world);
     expect(s.lines('Needs you now')).toEqual([
-      'Cockroaches on floor 7. Build housekeeping to clean them out.',
+      'Cockroaches on floor 7. There is no housekeeping. Build a housekeeping office to clean them out.',
       `The bank gives you until 5 AM in 2 days. Get to -$500,000 or better, or it takes the tower.`,
     ]);
     // The bank line has no place, so no Show on the tower.
@@ -397,5 +404,150 @@ describe('hs-face hidden', () => {
     const hidden = css.search(/\.hs-ui \.hs-face\[hidden\]\s*\{\s*display:\s*none;?\s*\}/);
     expect(face).toBeGreaterThan(-1);
     expect(hidden).toBeGreaterThan(face);
+  });
+});
+
+// P3b: the Tower problems section, the cockroach row's truth, and focus after a spend (P3a A1).
+describe('Stories: Tower problems', () => {
+  /** A lobby with one shaft to floor 4, and offices on 2 and 3; the shaft stops nowhere above 1 but 2. */
+  function cutTower(): { world: World; shaftId: number } {
+    const world = createWorld(11);
+    world.cash = 50_000_000;
+    for (const cmd of [...lobbyRun(90, 200), { kind: 'shaft.build', shaft: 'standard', x: 150, floorMin: 1, floorMax: 4 } as Command]) applyCommand(world, cmd);
+    for (const f of [2, 3, 4]) applyCommand(world, { kind: 'build', room: 'office', floor: f, x: 100 });
+    const shaftId = [...world.shafts.keys()][0] as number;
+    applyCommand(world, { kind: 'shaft.setStop', shaftId, floor: 3, stops: false });
+    applyCommand(world, { kind: 'shaft.setStop', shaftId, floor: 4, stops: false });
+    return { world, shaftId };
+  }
+
+  it('is left out with nothing wrong, and lists one row per problem, right after Needs you now', () => {
+    expect(mount(createWorld(1)).shownTitles()).not.toContain('Tower problems');
+    const { world } = cutTower();
+    const s = mount(world);
+    expect(s.shownTitles().slice(0, 2)).toEqual(['Needs you now', 'Tower problems']);
+    const rows = s.sectionOf('Tower problems').descendants().filter((n) => has(n, 'hs-problem'));
+    expect(rows.map((r) => r.children[0]?.textContent)).toEqual(towerProblems(world).map((p) => p.text));
+    expect(rows.map((r) => r.children[0]?.textContent)).toEqual([
+      'Floor 3: 1 room with no way in from the lobby. Give the floor an elevator stop or stairs.',
+      'Floor 4: 1 room with no way in from the lobby. Give the floor an elevator stop or stairs.',
+    ]);
+  });
+
+  it('a row disappears when it stops being true, and the others keep their nodes and focus', () => {
+    const { world, shaftId } = cutTower();
+    const s = mount(world);
+    const rowFor = (floor: number) => s.root.descendants().find((n) => n.dataset['problem'] === `noWayIn:${floor}`);
+    const four = rowFor(4)!;
+    const show = s.buttonIn(four, (b) => b.textContent === SHOW_FLOOR)!;
+    show.focus();
+    applyCommand(world, { kind: 'shaft.setStop', shaftId, floor: 3, stops: true });
+    s.body.refresh();
+    expect(rowFor(3)).toBeUndefined();
+    expect(rowFor(4)).toBe(four);
+    expect(dom.activeElement).toBe(show);
+    applyCommand(world, { kind: 'shaft.setStop', shaftId, floor: 4, stops: true });
+    s.body.refresh();
+    expect(s.shownTitles()).not.toContain('Tower problems');
+  });
+
+  it('Show the floor centers the camera there; the elevator action centers on the shaft and opens its card', () => {
+    const { world, shaftId } = cutTower();
+    const selected: unknown[] = [];
+    const s = mount(world, { select: (sel) => selected.push(sel) });
+    tap(s.buttonIn(s.root.descendants().find((n) => n.dataset['problem'] === 'noWayIn:3'), (b) => b.textContent === SHOW_FLOOR));
+    expect(s.centered).toEqual([{ floor: 3, x: 100 + Math.floor(ROOMS.office.width / 2) }]);
+    expect(selected).toEqual([]);
+    // Nine people waiting on floor 2 for seven minutes.
+    const office = [...world.rooms.values()].find((r) => r.kind === 'office' && r.floor === 2)!;
+    for (let i = 0; i < 9; i++) {
+      world.sims.set(9000 + i, {
+        id: 9000 + i, kind: 'shopper', homeRoomId: null, pos: { floor: 2, x: 150 }, inCarId: null, inRoomId: null,
+        route: [{ kind: 'ride', shaftId, fromFloor: 2, toFloor: 1 }], state: 'waiting', stress: 0, waitStart: world.time.minute - 7,
+        schedule: [{ minuteOfDay: 0, days: ['weekday'], goal: { kind: 'room', roomId: office.id }, stayMinutes: 1 }],
+        nextScheduleIndex: 1, stayUntil: null, wallet: 0, leaveReason: null,
+      } as never);
+    }
+    s.body.refresh();
+    const wait = s.root.descendants().find((n) => n.dataset['problem'] === 'wait:2')!;
+    expect(wait.children[0]?.textContent).toBe('Floor 2: 9 people waiting for an elevator, the longest for 7 minutes.');
+    tap(s.buttonIn(wait, (b) => b.textContent === OPEN_ELEVATOR));
+    expect(s.centered.at(-1)).toEqual({ floor: 2, x: 150 });
+    expect(selected).toEqual([{ shaftId }]);
+  });
+
+  it("is a place Stories opens at: aim('problems') lands on the first row's first button", () => {
+    const { world } = cutTower();
+    const s = mount(world);
+    expect(s.body.aim('problems')?.textContent).toBe(SHOW_FLOOR);
+    expect(mount(createWorld(1)).body.aim('problems')).toBeNull();
+  });
+});
+
+describe('Stories: the cockroach row says what will really happen', () => {
+  /** Infested singles on 3 and 4 (lobby, shaft 1 to 4), with or without housekeeping on basement 1. */
+  function roaches(office: 'none' | 'cut' | 'reach'): World {
+    const world = createWorld(12);
+    world.cash = 50_000_000;
+    world.stars = 3;
+    const script: Command[] = [...lobbyRun(90, 200), { kind: 'shaft.build', shaft: 'standard', x: 190, floorMin: 1, floorMax: 4 }];
+    for (const f of [2, 3, 4]) script.push({ kind: 'build', room: 'hotelSingle', floor: f, x: 100 });
+    if (office !== 'none') script.push({ kind: 'build', room: 'housekeeping', floor: -1, x: 100 });
+    if (office === 'reach') script.push({ kind: 'shaft.build', shaft: 'service', x: 60, floorMin: -1, floorMax: 4 });
+    for (const cmd of script) expect(applyCommand(world, cmd).ok).toBe(true);
+    for (const r of world.rooms.values()) if (r.kind === 'hotelSingle' && r.floor >= 3) r.infested = true;
+    return world;
+  }
+
+  it('no housekeeping office: build one', () => {
+    expect(mount(roaches('none')).lines('Needs you now')).toEqual(['Cockroaches on floors 3 to 4, 2 rooms. There is no housekeeping. Build a housekeeping office to clean them out.']);
+  });
+
+  it('housekeeping that cannot get there: which floors', () => {
+    expect(mount(roaches('cut')).lines('Needs you now')).toEqual(['Cockroaches on floors 3 to 4, 2 rooms. Housekeeping cannot get to floors 3 and 4. Give it an elevator there to clean them out.']);
+  });
+
+  it('housekeeping that can get there: it will clean them out', () => {
+    expect(mount(roaches('reach')).lines('Needs you now')).toEqual(['Cockroaches on floors 3 to 4, 2 rooms. Housekeeping will clean them out.']);
+  });
+});
+
+describe('Stories: focus after a spend (P3a A1)', () => {
+  it('after Call a helicopter ends the fire, focus goes to the next row, never out of the page and never to a spend', () => {
+    const world = createWorld(1);
+    world.cash = 1_000_000;
+    const office = room(world, 'office', 12, 100, { onFire: true });
+    world.events.push({ kind: 'fire', roomIds: [office.id], startedAt: 0, spreadAt: 30 });
+    room(world, 'hotelSingle', 7, 60, { infested: true });
+    const settled: (FakeElement | null)[] = [];
+    const s = mount(world, { rowsChanged: (node) => settled.push(node as unknown as FakeElement | null) });
+    tap(s.buttonIn(s.rowOf('fire'), helicopter));
+    expect(s.rowOf('fire')).toBeUndefined();
+    expect(settled).toHaveLength(1);
+    // The cockroach row took the fire's place: its Show on the tower.
+    expect(settled[0]).toBe(s.buttonIn(s.rowOf('roaches'), showOnTower));
+  });
+
+  it('with no row left, focus goes to the first safe control in the page; a refused press leaves focus alone', () => {
+    const world = createWorld(1);
+    world.cash = 1_000_000;
+    const shop = room(world, 'shop', 5, 40);
+    world.events.push({ kind: 'bomb', roomId: shop.id, ransom: 300_000, detonateAt: 13 * 60, found: false });
+    const settled: (FakeElement | null)[] = [];
+    const s = mount(world, { rowsChanged: (node) => settled.push(node as unknown as FakeElement | null) });
+    tap(s.buttonIn(s.rowOf('bomb'), ransom));
+    expect(s.rowOf('bomb')).toBeUndefined();
+    // The shop has no lobby: Tower problems is the page's first place with a button.
+    expect(settled).toHaveLength(1);
+    expect(settled[0]?.textContent).toBe('Show the room');
+    expect(settled[0]?.dataset['spend']).not.toBe('true');
+
+    // Refused (short of cash): the row stays, and focus is left where it is.
+    world.cash = 0;
+    world.events.push({ kind: 'bomb', roomId: shop.id, ransom: 300_000, detonateAt: 13 * 60, found: false });
+    s.body.refresh();
+    tap(s.buttonIn(s.rowOf('bomb'), ransom));
+    expect(s.rowOf('bomb')).toBeDefined();
+    expect(settled).toHaveLength(1);
   });
 });

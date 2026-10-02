@@ -1,6 +1,6 @@
 // Loaded into the game's service worker (vite.config.ts workbox importScripts). A tap on one of
 // the game's notifications (src/ui/notify.ts) brings the game's tab forward and tells it which
-// kind was tapped, so an alert can open the news; with no game tab open it opens the game.
+// kind was tapped, so an alert can open Stories; with no game tab open it opens the game.
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const kind = event.notification.data && event.notification.data.kind;

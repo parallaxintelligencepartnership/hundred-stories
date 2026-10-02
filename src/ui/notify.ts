@@ -190,7 +190,7 @@ export interface Notifier {
   alert(text: string): void;
   /** A new version is ready. */
   updateReady(): void;
-  /** What a tap on a notification does beyond bringing the game forward (alerts open the news). */
+  /** What a tap on a notification does beyond bringing the game forward (an alert opens Stories). */
   onTap(handler: (kind: NotifyKind) => void): void;
   destroy(): void;
 }

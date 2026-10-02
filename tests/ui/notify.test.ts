@@ -527,7 +527,7 @@ describe('the new version notice', () => {
     ui.destroy();
   });
 
-  it('hands each new alert line to the notifier, and a tapped alert opens the news', () => {
+  it('hands each new alert line to the notifier, and a tapped alert opens the pause card', () => {
     const texts: string[] = [];
     let tap: (kind: NotifyKind) => void = () => {};
     const notifier = {

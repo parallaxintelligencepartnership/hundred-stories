@@ -125,36 +125,39 @@ describe('news toasts', () => {
     expect(cards).toEqual(alerts.map((l: LogEntry) => l.text));
   });
 
-  it('warn lines still fold into one toast per 20 s', () => {
+  it('warn lines still fold into one toast per 20 s, which speaks for what is wrong now', () => {
     const { world, notify, root } = mountWorld();
     log(world, 'Gave up waiting for an elevator on floor 4.', 'warn');
     log(world, 'Gave up waiting for an elevator on floor 6.', 'warn');
     notify();
-    expect(toasts(root)).toEqual(['2 people gave up waiting for an elevator.']);
+    // One problem now (give-ups in the last hour): the toast is its row's own words.
+    expect(toasts(root)).toEqual(['2 people gave up waiting for an elevator in the last hour, on floors 4 and 6. More cars or another elevator would help.']);
     now += 1000;
     log(world, 'A tenant moved out of the office on floor 2.', 'warn');
     notify();
-    expect(toasts(root)).toEqual(['2 people gave up waiting for an elevator.']);
+    expect(toasts(root)).toEqual(['2 people gave up waiting for an elevator in the last hour, on floors 4 and 6. More cars or another elevator would help.']);
     now += GIVE_UP_TOAST_GAP_MS;
     log(world, 'Gave up waiting for an elevator on floor 5.', 'warn');
     notify();
-    expect(toasts(root)).toEqual(['2 problems in the tower. Tap to open Stories.']);
+    // The move-out is history (Today), not a problem: still one problem, now three people.
+    expect(toasts(root)).toEqual(['3 people gave up waiting for an elevator in the last hour, on floors 4, 5 and 6. More cars or another elevator would help.']);
   });
 
-  it('warnings logged while Watch hides the chrome do not swell the first toast after (audit 2026-09-28, E1 S6)', () => {
+  it('warnings logged while Watch hides the chrome make no toast; the first one after says what is wrong now (audit 2026-09-28, E1 S6)', () => {
     const { world, notify, root } = mountWorld();
     const shell = root.children[0] as FakeElement;
     notify();
     shell.classList.add('is-watching');
-    log(world, 'Gave up waiting for an elevator on floor 4.', 'warn');
+    log(world, 'A tenant moved out of the office on floor 2.', 'warn');
     notify();
-    log(world, 'Gave up waiting for an elevator on floor 6.', 'warn');
+    log(world, 'A tenant moved out of the office on floor 3.', 'warn');
     notify();
     expect(toasts(root)).toEqual([]);
     shell.classList.remove('is-watching');
     now += GIVE_UP_TOAST_GAP_MS;
     log(world, 'Gave up waiting for an elevator on floor 5.', 'warn');
     notify();
-    expect(toasts(root)).toEqual(['Gave up waiting for an elevator on floor 5.']);
+    // Not a count of the lines Watch held back: the one problem true now.
+    expect(toasts(root)).toEqual(['1 person gave up waiting for an elevator in the last hour, on floor 5. More cars or another elevator would help.']);
   });
 });

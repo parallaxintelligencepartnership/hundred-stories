@@ -299,3 +299,85 @@ describe('a news toast opens Stories', () => {
     expect(said).toEqual([]);
   });
 });
+
+// P3b: the folded warning toast counts what is wrong right now, as Tower problems lists it.
+describe('the folded warning toast and Tower problems', () => {
+  const newsToast = (root: FakeElement): FakeElement | undefined => root.descendants().find((n) => has(n, 'hs-news-toast'));
+  /** Rows of Tower problems on show in the page. */
+  const problemRows = (card: FakeElement): FakeElement[] =>
+    card.descendants().filter((n) => {
+      if (!has(n, 'hs-problem')) return false;
+      for (let at: FakeElement | null = n; at && at !== card; at = at.parentNode) if (at.hidden) return false;
+      return true;
+    });
+
+  /** A lobby and offices on `floors` with no elevator: each floor a row of no way in. */
+  function cutOff(floors: number[]): World {
+    const world = createWorld(31);
+    for (let x = 90; x <= 130; x++) place(world, 'lobby', 1, x);
+    for (const f of floors) place(world, 'office', f, 100);
+    return world;
+  }
+
+  it('says the number of problems the page lists, and its tap opens Stories on them', () => {
+    const h = mount(cutOff([2, 3]));
+    h.notify();
+    log(h.world, 'A tenant moved out of the office on floor 2.', 'warn');
+    h.notify();
+    const toast = newsToast(h.root)!;
+    expect(toast.textContent).toContain('2 problems in the tower. Tap to open Stories.');
+    click(toast);
+    expect(h.page()).toBe('stories');
+    expect(problemRows(h.card()!)).toHaveLength(2);
+    // Opened at Tower problems: focus on its first row's button.
+    expect(focused()?.textContent).toBe('Show the floor');
+    expect(focused()?.parentNode?.parentNode?.dataset['problem']).toBe('noWayIn:2');
+  });
+
+  it('with one problem the toast is that row in its own words, and opens Stories on it', () => {
+    const h = mount(cutOff([4]));
+    h.notify();
+    log(h.world, 'A tenant moved out of the office on floor 2.', 'warn');
+    h.notify();
+    const toast = newsToast(h.root)!;
+    const words = 'Floor 4: 1 room with no way in from the lobby. Give the floor an elevator stop or stairs.';
+    expect(toast.textContent).toContain(words);
+    click(toast);
+    expect(problemRows(h.card()!).map((n) => n.children[0]?.textContent)).toEqual([words]);
+    expect(focused()?.textContent).toBe('Show the floor');
+  });
+
+  it('with nothing wrong now the toast is the warning line itself, and opens Today', () => {
+    const h = mount(createWorld(32));
+    h.notify();
+    // Enough lines today that Today has Show older: where focus lands when Stories opens there.
+    for (let i = 0; i < 12; i++) log(h.world, `Built an office on floor ${i + 2}.`);
+    log(h.world, 'Nobody cleaned the office on floor 2.', 'warn');
+    h.notify();
+    const toast = newsToast(h.root)!;
+    expect(toast.textContent).toContain('Nobody cleaned the office on floor 2.');
+    click(toast);
+    expect(h.page()).toBe('stories');
+    expect(problemRows(h.card()!)).toHaveLength(0);
+    expect(focused()?.textContent).toBe('Show older');
+  });
+
+  it('after Call a helicopter ends the fire, focus stays in the page on a control that spends nothing (P3a A1)', () => {
+    const world = fireTower();
+    place(world, 'office', 3, 100);
+    const h = mount(world);
+    h.at(ROLL_MINUTE);
+    click(h.closeOf(h.fireCards()[0]!));
+    h.notify();
+    click(h.menu());
+    choosePauseEntry(h.root, 'stories');
+    click(h.inPage(helicopter)!);
+    expect(h.world.events.some((e) => e.kind === 'fire')).toBe(false);
+    const now = focused();
+    expect(now).not.toBe(h.back());
+    expect(now?.dataset['spend']).not.toBe('true');
+    expect(h.card()!.descendants()).toContain(now);
+    // The office on floor 3 has no elevator: Tower problems' first button.
+    expect(now?.textContent).toBe('Show the floor');
+  });
+});

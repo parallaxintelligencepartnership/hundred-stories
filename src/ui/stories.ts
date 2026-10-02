@@ -1,14 +1,16 @@
 // Stories: the one place for what is going on in the tower (Matt, 2026-10-01: Stories and News
 // are one feature, finished under the name Stories, one page inside the pause card). One body,
-// built here, in this order, each section left out while it has nothing to show except the first:
+// built here, in this order, each section left out while it has nothing to show except the first
+// and Following:
 //
 // 1. Needs you now: one row per live incident, read from the world on every refresh (a fire, a
 //    bomb threat, a theft under way, cockroaches, money). A fire carries Call a helicopter and a
 //    bomb Pay ransom, built by the same functions as the alert cards (alerts.ts), so they follow
 //    one rule. Every row with a place has Show on the tower, before any button that spends.
-// 2. Tower problems: a slot (stories-problems.ts), filled by a later package.
+// 2. Tower problems: what is wrong right now, where, and what to do (stories-problems.ts).
 // 3. VIP visit: the card the News panel drew, during and between visits (stories-vip.ts).
-// 4. Following, then Around the tower: the people followed and the latest beats.
+// 4. Following, then Around the tower: the people followed and the latest beats. Following is
+//    shown with nobody in it too, with how to follow someone: nothing else in the game says.
 // 5. Today: the log lines of the current game day, newest first; Show older adds fifty at a time
 //    and reveals Yesterday and Earlier.
 // 6. Milestones: the tower's firsts, newest first, with Last milestone and Tower chronicle.
@@ -19,7 +21,7 @@
 
 import type { GameApi } from '../game/api';
 import { describeBeat, goalLine, storyName, unfollowSim, type StoryBeat } from '../sim/story';
-import type { LogEntry, Milestone, World } from '../sim/types';
+import type { Command, CommandResult, LogEntry, Milestone, World } from '../sim/types';
 import { helicopterControl, ransomControl, type SpendControl } from './alerts';
 import { needsYou, NEEDS_EMPTY, newsDays, TODAY_EMPTY, type NeedKind } from './news';
 import { button, el, section, setLines, type PanelBody, type PanelContext } from './panels';
@@ -28,7 +30,7 @@ import { problemsSection } from './stories-problems';
 import { vipSection } from './stories-vip';
 
 /** Where Stories can open: a section, or the row of a live incident. */
-export type StoriesTarget = 'needs' | 'vip' | 'following' | 'today' | 'milestones' | NeedKind;
+export type StoriesTarget = 'needs' | 'problems' | 'vip' | 'following' | 'today' | 'milestones' | NeedKind;
 
 /** How many tower beats Around the tower lists. */
 export const STORIES_TOWER_LINES = 12;
@@ -38,6 +40,8 @@ export const TODAY_LINES = 10;
 export const TODAY_OLDER_STEP = 50;
 /** The word on each row with a place: it leaves the menu and centers the tower view there. */
 export const SHOW_ON_TOWER = 'Show on the tower';
+/** Following with nobody in it: the one place that says how to follow someone. */
+export const FOLLOW_HINT = 'Nobody yet. Open a person and choose Follow.';
 
 /**
  * When a line happened, in words, from the game clock: "just now", "an hour ago", "5 hours ago",
@@ -120,8 +124,14 @@ export function storiesBody(game: GameApi, ctx: PanelContext): StoriesBody {
     });
     actions.append(row.go);
     item.append(text, actions);
-    if (kind === 'fire') row.spend = helicopterControl((cmd) => ctx.apply(cmd));
-    if (kind === 'bomb') row.spend = ransomControl((cmd) => ctx.apply(cmd));
+    // A press that ends the incident takes its row away: focus goes on in the page (A1).
+    const spend = (cmd: Command): CommandResult => {
+      const result = ctx.apply(cmd);
+      afterSpend(row);
+      return result;
+    };
+    if (kind === 'fire') row.spend = helicopterControl(spend);
+    if (kind === 'bomb') row.spend = ransomControl(spend);
     if (row.spend) item.append(...row.spend.nodes);
     return row;
   };
@@ -147,6 +157,25 @@ export function storiesBody(game: GameApi, ctx: PanelContext): StoriesBody {
     if (order.length === 0) order.push(needsEmpty);
     // Put back in order only when out of it: moving a row would drop the focus it holds.
     if (order.length !== needList.children.length || order.some((n, i) => needList.children[i] !== n)) needList.replaceChildren(...order);
+  };
+
+  /**
+   * After Call a helicopter or Pay ransom: the page catches up at once. A row still open (the press
+   * was refused) keeps its focus; a row that went gives it to the next row's first safe control,
+   * else the one before, else the page's first safe control, else Back. Never a spend button.
+   */
+  const afterSpend = (row: NeedRow): void => {
+    const before = Array.from(needList.children);
+    const index = before.indexOf(row.node);
+    refresh();
+    if (row.node.parentNode === needList) return;
+    const at = (i: number): HTMLElement | null => {
+      const other = needList.children[i] as HTMLElement | undefined;
+      return other && other !== needsEmpty ? firstSafe(other) : null;
+    };
+    const next = at(index) ?? at(index - 1) ?? firstSafe(node);
+    if (ctx.rowsChanged) ctx.rowsChanged(next);
+    else next?.focus?.();
   };
 
   // ------------------------------------------------------------ the slots
@@ -185,7 +214,10 @@ export function storiesBody(game: GameApi, ctx: PanelContext): StoriesBody {
     const key = people.map((r) => `${r.id}:${r.line}:${r.here ? 1 : 0}`).join('|');
     if (key === followKey) return;
     followKey = key;
-    following.hidden = people.length === 0;
+    if (people.length === 0) {
+      followList.replaceChildren(el('p', 'hs-note hs-follow-hint', FOLLOW_HINT));
+      return;
+    }
     followList.replaceChildren(
       ...people.map((r, index) => {
         const item = button('', 'hs-occupant', () => {
@@ -243,7 +275,7 @@ export function storiesBody(game: GameApi, ctx: PanelContext): StoriesBody {
   const milestoneActions = el('div', 'hs-actions');
   milestones.append(milestoneList, milestoneActions);
 
-  node.append(needs, ...(problems ? [problems.node] : []), vip.node, following, tower, today, milestones);
+  node.append(needs, problems.node, vip.node, following, tower, today, milestones);
 
   /** The time words of each line on show, with the minute each stands for, so they move with the clock. */
   let logStamps: { node: HTMLElement; minute: number }[] = [];
@@ -309,7 +341,7 @@ export function storiesBody(game: GameApi, ctx: PanelContext): StoriesBody {
     const world = game.world;
     const now = world.time?.minute ?? 0;
     refreshNeeds(world);
-    problems?.refresh?.();
+    problems.refresh?.();
     vip.refresh?.();
     refreshFollowing(world);
     refreshTower(world);
@@ -327,7 +359,7 @@ export function storiesBody(game: GameApi, ctx: PanelContext): StoriesBody {
   const aim = (target?: StoriesTarget): HTMLElement | null => {
     if (!target) return null;
     refresh();
-    const places: Partial<Record<StoriesTarget, HTMLElement>> = { needs, vip: vip.node, following, today, milestones };
+    const places: Partial<Record<StoriesTarget, HTMLElement>> = { needs, problems: problems.node, vip: vip.node, following, today, milestones };
     const place = places[target] ?? rows.get(target as NeedKind)?.node ?? needs;
     // A section with nothing to show (the incident just ended, no VIP yet) opens at the top.
     const shown = place.hidden ? needs : place;
@@ -340,6 +372,6 @@ export function storiesBody(game: GameApi, ctx: PanelContext): StoriesBody {
     node,
     refresh,
     aim,
-    dispose: () => problems?.dispose?.(),
+    dispose: () => problems.dispose?.(),
   };
 }

@@ -1931,14 +1931,6 @@ button.hs-readout:hover {
   display: none;
 }
 
-/* On a phone the News sheet opens tall enough for the VIP card and the ten newest lines. */
-@media (max-width: 899px) {
-  .hs-sheet.hs-news-panel[data-snap='half'] {
-    --sheet-h: 75vh;
-    --sheet-h: 75dvh;
-  }
-}
-
 .hs-log-item.is-warn .hs-log-text {
   color: var(--amber-text);
 }
@@ -1947,8 +1939,8 @@ button.hs-readout:hover {
   color: var(--alert);
 }
 
-/* News sections: a quiet empty line, the day headings under Show older, and the Needs you now
-   lines, which are a whole-line button when they have a place to show on the tower. */
+/* Stories sections: a quiet empty line, the day headings under Show older, and the colors of
+   the Needs you now rows. */
 .hs-log-item.is-empty {
   color: var(--ink-dim);
 }
@@ -1960,8 +1952,7 @@ button.hs-readout:hover {
   color: var(--ink-dim);
 }
 
-.hs-news-day[hidden],
-.hs-needs .hs-log-list[hidden] {
+.hs-news-day[hidden] {
   display: none;
 }
 
@@ -1973,25 +1964,6 @@ button.hs-readout:hover {
 .hs-need.is-roaches,
 .hs-need.is-money {
   color: var(--amber-text);
-}
-
-.hs-need-go {
-  display: block;
-  width: 100%;
-  min-height: var(--touch);
-  padding: 0;
-  background: transparent;
-  border: 0;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  cursor: pointer;
-}
-
-.hs-needs .hs-vip {
-  margin: 8px 0 0;
 }
 
 /* Stories: the person card, room occupants and the stories list ---------- */

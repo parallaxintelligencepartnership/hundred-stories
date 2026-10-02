@@ -76,5 +76,6 @@ it('a refusal does not swell the next warning toast into a count (audit 2026-09-
   log(game.world, sentence, 'warn');
   game.setSpeed(game.getSpeed());
   const toasts = root.descendants().filter((n) => has(n, 'hs-news-toast')).map((n) => n.textContent);
-  expect(toasts).toEqual([sentence]);
+  // Since P3b the toast speaks for the problems true now: the one give-up, not a count with the refusal.
+  expect(toasts).toEqual(['1 person gave up waiting for an elevator in the last hour, on floor 2. More cars or another elevator would help.']);
 });

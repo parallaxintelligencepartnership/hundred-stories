@@ -7,6 +7,7 @@ import { ECONOMY } from '../sim/rules';
 import type { LogEntry, Room, World } from '../sim/types';
 import { fireHeadline, roachHeadline, SECURITY_RESPONDING, SECURITY_SEARCHING, theftHeadline } from './alerts';
 import { formatFloor, formatMoney } from './format';
+import { floorList, housekeepingReaches } from './problems';
 
 /** The kinds of open matter, in the order they are listed. */
 export type NeedKind = 'fire' | 'bomb' | 'theft' | 'roaches' | 'money';
@@ -34,6 +35,17 @@ function middleOf(room: Room): { floor: number; x: number } {
 function hasRoom(world: World, kind: Room['kind'], usable = false): boolean {
   for (const room of world.rooms.values()) if (room.kind === kind && !(usable && room.onFire)) return true;
   return false;
+}
+
+/**
+ * What happens to the cockroaches, as it is: housekeeping cleans them out only when it can get to
+ * the rooms. No office: build one. Some rooms out of its reach: which floors.
+ */
+export function roachHelp(world: World, infested: readonly Room[]): string {
+  if (!hasRoom(world, 'housekeeping')) return 'There is no housekeeping. Build a housekeeping office to clean them out.';
+  const cut = [...new Set(infested.filter((room) => !housekeepingReaches(world, room)).map((room) => room.floor))].sort((a, b) => a - b);
+  if (cut.length === 0) return 'Housekeeping will clean them out.';
+  return `Housekeeping cannot get to ${floorList(cut)}. Give it an elevator there to clean them out.`;
 }
 
 /**
@@ -81,8 +93,7 @@ export function needsYou(world: World): NeedLine[] {
   const infested = [...world.rooms.values()].filter((r) => r.infested).sort((a, b) => a.id - b.id);
   if (infested.length > 0) {
     const floors = infested.map((r) => r.floor);
-    const help = hasRoom(world, 'housekeeping') ? 'Housekeeping will clean them out.' : 'Build housekeeping to clean them out.';
-    out.push({ kind: 'roaches', text: `${roachHeadline(floors, infested.length)}. ${help}`, at: middleOf(infested[0] as Room) });
+    out.push({ kind: 'roaches', text: `${roachHeadline(floors, infested.length)}. ${roachHelp(world, infested)}`, at: middleOf(infested[0] as Room) });
   }
 
   // The bank's quarter first: it is the one with a deadline. The game over card speaks after that.
@@ -98,11 +109,6 @@ export function needsYou(world: World): NeedLine[] {
     }
   }
   return out;
-}
-
-/** A key that changes whenever the lines or their places do, so the panel rebuilds only then. */
-export function needsKey(lines: readonly NeedLine[]): string {
-  return lines.map((l) => `${l.kind}|${l.text}|${l.at ? `${l.at.floor},${l.at.x}` : ''}`).join('#');
 }
 
 export interface NewsDays {

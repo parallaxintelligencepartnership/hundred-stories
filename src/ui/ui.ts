@@ -60,6 +60,7 @@ import {
   settingsBody,
   shareBody,
 } from './panels';
+import { towerProblems } from './problems';
 import { storiesBody, type StoriesBody, type StoriesTarget } from './stories';
 import type { PanelBody, PanelContext, PanelElement } from './panels';
 import { GROUPS, applyRowState, buildPalette, paintThumbnail, sameTool, toolRowState } from './palette';
@@ -107,7 +108,6 @@ export const STORY_TOAST_GAP_MS = 30_000;
 export const STORIES_TAP_LABEL = 'Open Stories';
 /** Give-up lines ("Gave up waiting for an elevator...") fold into one toast at most this often. */
 export const GIVE_UP_TOAST_GAP_MS = 20_000;
-const GIVE_UP_PREFIX = 'Gave up waiting for an elevator';
 
 /** The live measurement of the chrome: stop it, or ask it to measure again. */
 interface ChromeWatch {
@@ -275,8 +275,6 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
   let newsStorySeq = 0;
   let newsShowsAlert = false;
   let storyShownAt = Number.NEGATIVE_INFINITY;
-  let giveUps = 0;
-  let warns = 0;
   let giveUpShownAt = Number.NEGATIVE_INFINITY;
   /** The last refusal shown as a notice, so its log line does not show a second time. */
   let lastNoticeText = '';
@@ -1049,8 +1047,6 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     populationWatch = { population: world.population, since: world.time.minute };
     newsStorySeq = world.story?.seq ?? 0; // beats already recorded are history, not news
     newsLogSeen = -1; // and so are its log lines
-    warns = 0; // and the old tower's warnings are not counted in the new one's toast
-    giveUps = 0;
     starStorySeq = world.story?.seq ?? 0;
     starToast?.remove();
     starToast = null;
@@ -1628,8 +1624,8 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
     let newestNoticed = false;
     for (const line of log.slice(log.length - fresh)) {
       if (line.level !== 'warn') continue;
-      // The player's own refused command is said as a notice, never folded into the next
-      // warning toast's count: logged while acting, or seen a frame later as the notice's words.
+      // The player's own refused command is said as a notice, never as the next warning toast:
+      // logged while acting, or seen a frame later as the notice's words.
       if ((acting && line === newest) || line.text === lastNoticeText) continue;
       // A refused demolish from a tap on the tower is the player's own too: a notice with what to
       // do, where the warning toast's gap, its count and Watch mode cannot swallow it.
@@ -1642,8 +1638,6 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
         if (line === newest) newestNoticed = true;
         continue;
       }
-      warns += 1;
-      if (line.text.startsWith(GIVE_UP_PREFIX)) giveUps += 1;
     }
     const beat = newFollowedBeat(world);
     if (logMoved && newest) {
@@ -1651,12 +1645,7 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
       // The first look is the tower as loaded: its old lines are history, not news.
       if (first) return;
       // Watching: Stories keeps the line; no toast rises over the tower (alerts still do).
-      if (shell.classList.contains(WATCH_CLASS)) {
-        // Nor do they pile up for the first toast after the chrome comes back.
-        warns = 0;
-        giveUps = 0;
-        return;
-      }
+      if (shell.classList.contains(WATCH_CLASS)) return;
       if (newsShowsAlert) {
         // An alert is its card. A notable line in the same batch still toasts beside it: the
         // quarter settle line is logged just before the debt warnings it explains.
@@ -1666,22 +1655,22 @@ export function createUi(root: HTMLElement, game: GameApi, renderer: Renderer, o
       }
       if (newestNoticed) return;
       // A full tower logs warnings in bursts (give-ups, move-outs, people with no way out): one
-      // folded toast now and then, not one each. Stories keeps every line.
+      // folded toast now and then, not one each. It speaks for what is wrong right now, as the
+      // page's Tower problems lists it, so its number is the page's number of rows: one problem
+      // in its own words, several as a count. With nothing wrong now, the newest warning is
+      // history (a move-out, say) and the toast is that line, kept in Today.
       if (newest.level === 'warn' && !acting) {
         const at = performance.now();
         if (at - giveUpShownAt < GIVE_UP_TOAST_GAP_MS) return;
         giveUpShownAt = at;
-        const count = warns;
-        const onlyGiveUps = giveUps === count;
-        warns = 0;
-        giveUps = 0;
-        const text =
-          count <= 1
-            ? newest.text
-            : onlyGiveUps
-              ? `${count} people gave up waiting for an elevator.`
-              : `${count} problems in the tower. Tap to open Stories.`;
-        toastLayer.show(text, { onTap: () => openStories('today'), tapLabel: STORIES_TAP_LABEL });
+        const problems = towerProblems(world);
+        const only = problems.length === 1 ? problems[0] : undefined;
+        if (problems.length === 0) {
+          toastLayer.show(newest.text, { onTap: () => openStories('today'), tapLabel: STORIES_TAP_LABEL });
+        } else {
+          const text = only ? only.text : `${problems.length} problems in the tower. Tap to open Stories.`;
+          toastLayer.show(text, { onTap: () => openStories('problems'), tapLabel: STORIES_TAP_LABEL });
+        }
         return;
       }
       // A refusal of the player's own command is said as a notice where they acted.

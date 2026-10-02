@@ -1,5 +1,6 @@
-// Warnings counted in one tower are not folded into the first warning toast of the next one
-// (the reset in ui.ts onWorld; audit 2026-09-28 review F6: removing it passed every ui test).
+// Warnings of one tower are not folded into the first warning toast of the next one (audit
+// 2026-09-28 review F6). Since P3b the folded toast speaks for the problems true now in the tower
+// on show (problems.ts), so the old tower's lines cannot reach it.
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { createWorld, log } from '../../src/sim/world';
 import { createUi, GIVE_UP_TOAST_GAP_MS } from '../../src/ui/ui';
@@ -66,7 +67,7 @@ it("a tower switch drops the old tower's counted warnings from the new tower's f
   notify();
   log(game.world, 'A tenant moved out of the office on floor 2.', 'warn');
   notify();
-  expect(toasts(root)).toEqual(['Gave up waiting for an elevator on floor 4.']);
+  expect(toasts(root)).toEqual(['1 person gave up waiting for an elevator in the last hour, on floor 4. More cars or another elevator would help.']);
 
   // Another tower loads (a new game, a friend's tower, the daily).
   game.world = createWorld(9);
@@ -74,6 +75,6 @@ it("a tower switch drops the old tower's counted warnings from the new tower's f
   now += GIVE_UP_TOAST_GAP_MS;
   log(game.world, 'Gave up waiting for an elevator on floor 3.', 'warn');
   notify();
-  expect(toasts(root)).toContain('Gave up waiting for an elevator on floor 3.');
-  expect(toasts(root).some((t) => /problems in the tower|people gave up/.test(t))).toBe(false);
+  expect(toasts(root)).toContain('1 person gave up waiting for an elevator in the last hour, on floor 3. More cars or another elevator would help.');
+  expect(toasts(root).some((t) => /problems in the tower|people gave up|floors? [46]\b/.test(t))).toBe(false);
 });
