@@ -1,6 +1,6 @@
 [package]
 name = "hundred-stories"
-version = "0.6.12"
+version = "0.6.13"
 description = "Hundred Stories, the desktop shell (Steam)"
 authors = ["Parallax Intelligence Partnership"]
 license-file = "../LICENSE"
