@@ -623,16 +623,19 @@ export function createStorage(deps: StorageDeps = {}, slot: SlotName = 'mine'): 
 
 /**
  * The slice of @capacitor/filesystem the file slot uses, so a test can hand in a stub. Every call
- * rejects with the plugin's `{ code, message }` error; a missing file is code OS-PLUG-FILE-0008
- * ("'<method>' failed because file at '<path>' does not exist.") on iOS and Android alike: readFile,
- * stat, deleteFile and rename (for a missing source) all say it that way (FilesystemError.swift,
- * FilesystemErrors.kt in node_modules/@capacitor/filesystem). Any other code is a real failure.
+ * rejects with the plugin's `{ code, message }` error. On iOS (read from the plugin's source) a
+ * missing file is code OS-PLUG-FILE-0008, "'<method>' failed because file at '<path>' does not
+ * exist."; on Android that holds at the plugin layer, but the library under it has not been read
+ * or run. So the slot never learns that a file is missing from an error: it lists the directory.
  */
 export interface FileSlotFs {
   writeFile(options: { path: string; data: string; directory: string; encoding: string }): Promise<unknown>;
   readFile(options: { path: string; directory: string; encoding: string }): Promise<{ data: string | Blob }>;
-  /** Resolves when the file exists; rejects with the missing code when it does not. */
-  stat(options: { path: string; directory: string }): Promise<unknown>;
+  /**
+   * Lists a directory (path '' is the directory itself): `{ files: [{ name, type, ... }] }` in
+   * plugin 8.x. Optional: a slot without it, or whose listing fails, saves and reads the old way.
+   */
+  readdir?(options: { path: string; directory: string }): Promise<{ files: readonly unknown[] }>;
   /** Moves `from` to `to` in the same directory. Never called with an existing `to` (see createFileStorage). */
   rename(options: { from: string; to: string; directory: string; toDirectory: string }): Promise<unknown>;
   deleteFile(options: { path: string; directory: string }): Promise<unknown>;
@@ -647,12 +650,21 @@ const DEVICE_REFUSED_REASON = 'This device would not let the game save.';
 
 const BACKUP_SUFFIX = '.bak';
 
-/** Runs a file step where a missing file is fine (nothing to delete or move); anything else throws. */
+/** Runs a file step where a missing file is fine (a race with the listing); anything else throws. */
 async function unlessMissing(step: () => Promise<unknown>): Promise<void> {
   try {
     await step();
   } catch (e) {
     if (!isMissingFile(e)) throw e;
+  }
+}
+
+/** Runs a clean-up step whose failure changes nothing that matters (see the table below). */
+async function bestEffort(step: () => Promise<unknown>): Promise<void> {
+  try {
+    await step();
+  } catch {
+    // left as it is: never read ahead of a whole X, and written over by the next save
   }
 }
 
@@ -668,23 +680,80 @@ function isWhole(text: string): boolean {
 }
 
 /**
+ * The names in the app data directory, or null when the plugin has no listing or it fails or
+ * comes back in a shape not understood (then the caller goes the old way). An entry is taken by
+ * its last path part, so a listing of paths reads the same as one of names.
+ */
+async function listData(f: FileSlotFs): Promise<Set<string> | null> {
+  if (typeof f.readdir !== 'function') return null;
+  try {
+    const res = await f.readdir({ path: '', directory: DATA_DIRECTORY });
+    const entries = (res as { files?: unknown } | null | undefined)?.files;
+    if (!Array.isArray(entries)) return null;
+    const names = new Set<string>();
+    for (const entry of entries) {
+      const name = typeof entry === 'string' ? entry : (entry as { name?: unknown } | null)?.name;
+      if (typeof name !== 'string') return null;
+      names.add(name.slice(name.lastIndexOf('/') + 1));
+    }
+    return names;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The native save slot: one file per slot in the app data directory (X = autosave.json,
- * daily.json or friend.json), the same interface as the browser slot. `fs` may be a promise so the
- * plugin can be loaded lazily on first use. The phone shells are one process each (one WebView,
- * one JS context), so the browser slot's guard against another window is not needed here and the
- * write options are ignored.
+ * daily.json or friend.json, T = X.tmp, B = X.bak), the same interface as the browser slot. `fs`
+ * may be a promise so the plugin can be loaded lazily on first use. The phone shells are one
+ * process each (one WebView, one JS context), so the browser slot's guard against another window
+ * is not needed here and the write options are ignored.
  *
  * The plugin's writeFile is not atomic on iOS (a killed app or a full disk leaves a cut-off file)
  * and its rename deletes an existing destination before moving, so a save never writes or renames
- * onto the live file:
- *   1. If X is missing but X.tmp is there (a save killed between its two renames), X.tmp is moved
- *      to X first, so the newest copy is not overwritten by this save's step 2.
- *   2. Write the new text to X.tmp.
- *   3. Delete X.bak if there is one, 4. rename X to X.bak if X exists, 5. rename X.tmp to X.
- * A failure at any step rejects the save. Until step 2 has finished, X (or X.bak) is untouched; from
- * then on X.tmp is a whole copy until it becomes X, so there is always a whole copy on disk. A
- * successful save leaves exactly X and X.bak (the save before it): leftovers are taken up here,
- * never by a read. An install that only has X (from before this) saves the same way.
+ * onto the live file. Each save and each read runs in this slot's queue, one after another, and
+ * starts with ONE listing of the data directory; only listed files are deleted or moved.
+ *
+ * A save (the protocol):
+ *   a. X not listed but T is (a save killed between its renames): rename T to X, so this save's
+ *      write to T cannot cut the tower the last read loaded.
+ *   b. writeFile T.  c. deleteFile B, if listed.  d. rename X to B, if X is there.  e. rename T to X.
+ * A save ends as {X, B}. T exists only during a save; B is the only extra file kept.
+ *
+ * The fallback (0.6.12's save): when the listing fails or is unavailable, or any of a to e
+ * rejects (a "missing" error from a listed file in c or d is a race and is passed over), the text
+ * is written straight onto X with writeFile. The save resolves if that write does; then a
+ * leftover T is deleted when possible. If this save had reached b, T is deleted before the
+ * direct write (it holds only this save, and the space may be what the write needs). The save
+ * rejects only when the direct write fails too. So on any device the worst case is the old save.
+ *
+ * A read: X, then T, then B, the first listed one that is not empty and parses. X is the
+ * authority; T is read only when X is missing or not whole, B only when neither is. A read of X
+ * that fails (not "missing") is a SaveReadError, as it was in 0.6.12: X may hold the tower, so no
+ * older copy is taken in its place. A failed read of T or B is passed over. When none is whole,
+ * the first non-empty text (X first) is returned, cut as it is, so the game's damaged-save path
+ * runs as it did; else a failed read of T or B is a SaveReadError; else (nothing there, or all
+ * there are empty) no save. A listing that shows none of the three is checked with one read of
+ * X, the old read, so a listing that leaves a file out never reads as an empty slot.
+ *
+ * Kill points and failed calls, from a steady {X=n, B=n-1}, for save n+1. "Fails" is a rejected
+ * call; the fallback then runs (T deleted if this save reached b, X written directly).
+ *   step               | killed there: disk / next read  | fails: disk if the direct write works / if it fails too
+ *   listing            | {X=n, B} / n                    | {X=n+1, B} resolved / {X=n or cut, B} rejected
+ *   a (no X, a T)      | not in a steady state           | {X=n+1, B} resolved / {T, B} rejected, read T (the tower last loaded)
+ *   b writeFile T      | {T cut, X=n, B} / n             | {X=n+1, B} resolved / {X=n or cut, B} rejected
+ *   c deleteFile B     | {T=n+1, X=n, B} / n             | {X=n+1, B} resolved / {X=n or cut, B} rejected
+ *   d rename X to B    | {T=n+1, X=n} / n                | {X=n+1} resolved / {X=n or cut} rejected
+ *   e rename T to X    | {T=n+1, B=n} / n+1 (from T)     | {X=n+1, B=n} resolved / {X cut or none, B=n} rejected
+ *   fallback delete T  | as the step before, T gone      | ignored, the direct write goes on
+ *   fallback write X   | X cut or n, T gone / X, else B  | (the rejected column above)
+ *   delete leftover T  | {X=n+1, T, B} / n+1             | resolved, T left; the next save's b writes over it
+ * Next save, in every row: normal. A leftover T is written over at b; with no X it is first moved
+ * to X at a. A rejected save never leaves T behind (it is deleted before the direct write), so
+ * the next read is X when X is whole, else B: never the save the player was told did not land.
+ * The one exception needs three failures in a row (that delete of T, then the direct write, at e).
+ * A disk where X is cut and no B is there reads X's text: the damaged-save path, as in 0.6.12.
+ * A first save (nothing there) killed in b leaves {T cut}: the same, from T.
  */
 export function createFileStorage(fs: FileSlotFs | Promise<FileSlotFs>, slot: SlotName = 'mine'): SaveStorage {
   const file = SLOT_FILES[slot];
@@ -692,68 +761,111 @@ export function createFileStorage(fs: FileSlotFs | Promise<FileSlotFs>, slot: Sl
   const backup = file + BACKUP_SUFFIX;
   const at = (path: string) => ({ path, directory: DATA_DIRECTORY });
   const move = (from: string, to: string) => ({ from, to, directory: DATA_DIRECTORY, toDirectory: DATA_DIRECTORY });
-  // Writes of this slot run one after another, in call order: two at once (an autosave and Save
-  // now) would share the one .tmp file.
-  let queue: Promise<void> = Promise.resolve();
+  // Saves and reads of this slot run one after another, in call order: two saves at once (an
+  // autosave and Save now) would share the one T, and a read beside a save could find every file
+  // between two of its steps.
+  let queue: Promise<unknown> = Promise.resolve();
+  function inLine<T>(run: () => Promise<T>): Promise<T> {
+    const next = queue.then(run);
+    queue = next.catch(() => {});
+    return next;
+  }
 
   function writeSave(text: string): Promise<void> {
-    const run = queue.then(() => writeNow(text));
-    queue = run.catch(() => {});
-    return run;
+    return inLine(() => writeNow(text));
   }
 
   async function writeNow(text: string): Promise<void> {
+    let f: FileSlotFs;
     try {
-      const f = await fs;
-      let liveMissing = false;
-      try {
-        await f.stat(at(file));
-      } catch (e) {
-        if (!isMissingFile(e)) throw e;
-        liveMissing = true;
-      }
-      if (liveMissing) await unlessMissing(() => f.rename(move(temp, file)));
-      await f.writeFile({ ...at(temp), encoding: UTF8, data: text });
-      await unlessMissing(() => f.deleteFile(at(backup)));
-      await unlessMissing(() => f.rename(move(file, backup)));
-      await f.rename(move(temp, file));
+      f = await fs;
     } catch {
       throw new Error(DEVICE_REFUSED_REASON);
     }
+    const names = await listData(f);
+    const reached = { temp: false };
+    if (names) {
+      try {
+        await viaTemp(f, names, text, reached);
+        return;
+      } catch {
+        // not understood: the old save below
+      }
+    }
+    if (reached.temp) await bestEffort(() => f.deleteFile(at(temp)));
+    try {
+      await f.writeFile({ ...at(file), encoding: UTF8, data: text });
+    } catch {
+      throw new Error(DEVICE_REFUSED_REASON);
+    }
+    if (!reached.temp && (names === null || names.has(temp))) await bestEffort(() => f.deleteFile(at(temp)));
   }
 
-  // Read order: X.tmp, then X, then X.bak, the first that is whole. Why X.tmp first:
-  // - killed while writing X.tmp: X.tmp is cut off (does not parse), X is the newest whole save;
-  // - killed after deleting X.bak, or between the renames, or inside the last rename: X.tmp is a
-  //   whole copy newer than X (X may be gone), so it must win;
-  // - a whole X.tmp is never older than X: every save that finishes renames it away.
-  // X.bak is the save before X, read only when X.tmp and X are both missing or cut off.
-  const ORDER = [temp, file, backup];
+  async function viaTemp(f: FileSlotFs, names: Set<string>, text: string, reached: { temp: boolean }): Promise<void> {
+    let live = names.has(file);
+    if (!live && names.has(temp)) {
+      await f.rename(move(temp, file));
+      live = true;
+    }
+    reached.temp = true; // from here T may hold part or all of this save
+    await f.writeFile({ ...at(temp), encoding: UTF8, data: text });
+    if (names.has(backup)) await unlessMissing(() => f.deleteFile(at(backup)));
+    if (live) await unlessMissing(() => f.rename(move(file, backup)));
+    await f.rename(move(temp, file));
+  }
 
-  async function readSave(): Promise<string | null> {
+  function readSave(): Promise<string | null> {
+    return inLine(readNow);
+  }
+
+  async function readText(f: FileSlotFs, path: string): Promise<string> {
+    const { data } = await f.readFile({ ...at(path), encoding: UTF8 });
+    // With an encoding the plugin always returns a string; a Blob only comes back without one.
+    return typeof data === 'string' ? data : data.text();
+  }
+
+  async function readNow(): Promise<string | null> {
     const f = await Promise.resolve(fs).catch((e: unknown) => {
       throw new SaveReadError(e);
     });
-    let found: unknown = null;
-    for (const path of ORDER) {
+    const names = await listData(f);
+    let order = [file, temp, backup];
+    if (names) {
+      order = order.filter((name) => names.has(name));
+      if (order.length === 0) {
+        // The listing says the slot is empty. One read of X, the old read, confirms it: a listing
+        // that left out a file that is there must never start a tower over it.
+        let text: string;
+        try {
+          text = await readText(f, file);
+        } catch {
+          return null;
+        }
+        if (isWhole(text)) return text;
+        order = [file, temp, backup]; // the listing is not to be trusted: read them all
+      }
+    }
+    let firstText: string | null = null;
+    let failure: { e: unknown } | null = null;
+    for (const path of order) {
       let text: string;
       try {
-        const { data } = await f.readFile({ ...at(path), encoding: UTF8 });
-        // With an encoding the plugin always returns a string; a Blob only comes back without one.
-        text = typeof data === 'string' ? data : await data.text();
+        text = await readText(f, path);
       } catch (e) {
-        if (isMissingFile(e)) continue;
-        // Not "missing" and not read: this file may hold the newest tower, so an older copy is
-        // not taken in its place. A read failure, never "no save".
-        throw new SaveReadError(e);
+        if (isMissingFile(e)) continue; // gone since the listing, or no listing
+        // X could not be read: it may hold the tower, so no older copy is taken in its place
+        // (the slot is then held, as 0.6.12 held it). T or B that will not read is passed over.
+        if (path === file) throw new SaveReadError(e);
+        failure ??= { e };
+        continue;
       }
       if (isWhole(text)) return text;
-      found ??= new Error(`${path} is ${text ? 'cut off' : 'empty'}`);
+      if (text && firstText === null) firstText = text;
     }
-    // None there at all: a first launch or a slot never used, same as an empty browser slot.
-    // Files there but none whole: the slot holds a tower this read could not get at.
-    if (found === null) return null;
-    throw new SaveReadError(found);
+    // Cut off, as an interrupted 0.6.12 save left X: the game keeps it and holds the slot.
+    if (firstText !== null) return firstText;
+    if (failure) throw new SaveReadError(failure.e);
+    return null;
   }
 
   return { writeSave, readSave };
@@ -792,7 +904,7 @@ async function loadCapacitorFs(): Promise<FileSlotFs> {
   return {
     writeFile: (options) => Filesystem.writeFile(options as Parameters<typeof Filesystem.writeFile>[0]),
     readFile: (options) => Filesystem.readFile(options as Parameters<typeof Filesystem.readFile>[0]),
-    stat: (options) => Filesystem.stat(options as Parameters<typeof Filesystem.stat>[0]),
+    readdir: (options) => Filesystem.readdir(options as Parameters<typeof Filesystem.readdir>[0]),
     rename: (options) => Filesystem.rename(options as Parameters<typeof Filesystem.rename>[0]),
     deleteFile: (options) => Filesystem.deleteFile(options as Parameters<typeof Filesystem.deleteFile>[0]),
   };

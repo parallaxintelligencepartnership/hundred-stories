@@ -48,9 +48,8 @@ function fakeFiles(): FileSlotFs & { files: Map<string, string> } {
       if (data === undefined) throw missing();
       return { data };
     },
-    async stat({ path }) {
-      if (!files.has(path)) throw missing();
-      return {};
+    async readdir() {
+      return { files: [...files.keys()].map((name) => ({ name, type: 'file' })) };
     },
     async rename({ from, to }) {
       const data = files.get(from);

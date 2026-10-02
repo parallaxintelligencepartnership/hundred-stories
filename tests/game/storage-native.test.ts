@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { createFileStorage, isNativePlatform, selectStorage, shareSave, FILE_SLOT_NAME, EXPORT_FILE_NAME, type FileSlotFs } from '../../src/game/storage';
 
 interface Call {
-  op: 'write' | 'read' | 'stat' | 'rename' | 'delete';
+  op: 'write' | 'read' | 'list' | 'rename' | 'delete';
   path: string;
   directory: string;
   encoding?: string;
@@ -25,10 +25,10 @@ function stubFs(): StubFs {
   const files = new Map<string, string>();
   const calls: Call[] = [];
   return {
-    async stat({ path, directory }) {
-      calls.push({ op: 'stat', path, directory });
-      if (!files.has(`${directory}/${path}`)) throw missing(path);
-      return {};
+    async readdir({ path, directory }) {
+      calls.push({ op: 'list', path, directory });
+      const prefix = `${directory}/${path}`;
+      return { files: [...files.keys()].filter((k) => k.startsWith(prefix)).map((k) => ({ name: k.slice(prefix.length), type: 'file' })) };
     },
     async rename({ from, to, directory, toDirectory }) {
       calls.push({ op: 'rename', path: `${from} -> ${to}`, directory });
@@ -107,13 +107,10 @@ describe('the Filesystem slot', () => {
     expect(await slot.readSave()).toBe(text);
     expect(fs.files.size).toBe(1);
     expect(fs.calls.map((c) => [c.op, c.path, c.directory, c.encoding])).toEqual([
-      ['stat', 'autosave.json', 'DATA', undefined],
-      ['rename', 'autosave.json.tmp -> autosave.json', 'DATA', undefined],
+      ['list', '', 'DATA', undefined],
       ['write', 'autosave.json.tmp', 'DATA', 'utf8'],
-      ['delete', 'autosave.json.bak', 'DATA', undefined],
-      ['rename', 'autosave.json -> autosave.json.bak', 'DATA', undefined],
       ['rename', 'autosave.json.tmp -> autosave.json', 'DATA', undefined],
-      ['read', 'autosave.json.tmp', 'DATA', 'utf8'],
+      ['list', '', 'DATA', undefined],
       ['read', 'autosave.json', 'DATA', 'utf8'],
     ]);
   });

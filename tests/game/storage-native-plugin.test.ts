@@ -19,9 +19,9 @@ vi.mock('@capacitor/filesystem', () => {
       if (data === undefined) throw missing();
       return { data };
     },
-    stat: async ({ path, directory }) => {
-      if (!files.has(`${directory}/${path}`)) throw missing();
-      return {};
+    readdir: async ({ path, directory }) => {
+      const prefix = `${directory}/${path}`;
+      return { files: [...files.keys()].filter((k) => k.startsWith(prefix)).map((k) => ({ name: k.slice(prefix.length), type: 'file' })) };
     },
     rename: async (o) => {
       const { from, to, directory } = o as unknown as { from: string; to: string; directory: string };

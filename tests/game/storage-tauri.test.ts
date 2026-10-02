@@ -62,10 +62,6 @@ function capacitorFs(): FileSlotFs & { used: boolean } {
       fs.used = true;
       return { data: '"capacitor"' };
     },
-    async stat() {
-      fs.used = true;
-      return {};
-    },
     async rename() {
       fs.used = true;
     },
